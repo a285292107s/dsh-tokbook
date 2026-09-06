@@ -1,0 +1,10 @@
+# Example mount row for $DSH_HOME/profiles/web/cordis.patch.yml.
+# dsh-tokbook is a plain external plugin (not a dsh.bundle layer), so the profile
+# must reference it by package name once installed.
+#
+#   dsh plugin --profile web add <path|npm|git specifier>
+#
+# Then append:
+- insert:
+    - id: tokbook
+      name: 'dsh-tokbook'

@@ -1,0 +1,56 @@
+/**
+ * Small shared view store for the trigger button and the overlay window.
+ *
+ * The button and the overlay are two sibling root-scoped slot entries, so they
+ * share state through one handle created in `apply` and passed to both via
+ * their register `inject` factories. The store is a minimal
+ * subscribe/getSnapshot object the components bind with `useSyncExternalStore`.
+ *
+ * @module dsh-tokbook/client/store
+ */
+
+import type { TokBookOverview } from '../types.ts'
+
+export interface TokBookViewSnapshot {
+  readonly open: boolean
+  readonly overview: TokBookOverview | null
+  readonly error: string | null
+}
+
+export interface TokBookViewStore {
+  subscribe(listener: () => void): () => void
+  getSnapshot(): TokBookViewSnapshot
+  setOpen(open: boolean): void
+  setOverview(overview: TokBookOverview | null): void
+  setError(error: string | null): void
+}
+
+/** Create a fresh root-scoped view store (one per plugin activation). */
+export function createTokBookViewStore(): TokBookViewStore {
+  const listeners = new Set<() => void>()
+  let snapshot: TokBookViewSnapshot = { open: false, overview: null, error: null }
+  const emit = (): void => {
+    for (const listener of [...listeners]) listener()
+  }
+  return {
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    getSnapshot() {
+      return snapshot
+    },
+    setOpen(open) {
+      snapshot = { ...snapshot, open }
+      emit()
+    },
+    setOverview(overview) {
+      snapshot = { ...snapshot, overview, error: null }
+      emit()
+    },
+    setError(error) {
+      snapshot = { ...snapshot, error }
+      emit()
+    },
+  }
+}
