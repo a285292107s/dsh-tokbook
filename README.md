@@ -7,7 +7,11 @@ failed attempts) — as a durable per-day JSONL ledger, then serves an
 aggregated, **costed** overview. The browser half shows it via a **sidebar
 footer button** (route A: `sidebar.footer.action`) that opens a **floating
 window** (`shell.overlay`) with summary cards (tokens **and cost**), a daily
-token trend chart, and a per-model breakdown with cost.
+token trend chart, a per-model breakdown with cost — a per-provider tab
+(one card per provider route, its models' tokens/cost inside a selectable
+今日 / 昨天 / 近7天 / 近30天 window) — and a 订阅额度 tab that shows each
+configured subscription's **official account usage** (Command Code / OpenCode
+Go), fetched from the provider's own API with your key.
 
 Design rationale, tech selection, and the two sidebar approaches are documented
 in [`docs/DESIGN.zh.md`](docs/DESIGN.zh.md). The data model follows the
@@ -28,17 +32,23 @@ src/
   sync-state.ts       first-run marker
   stats.ts            aggregation (totals/byDay/byHour/byModel/recent) + rollup + cache
   pricing.ts          price table (cloud mirror + manual), resolveRate chain, costOf
-  routes.ts           host exact-Fetch route  /tokbook/overview
+  by-provider.ts      pure provider-card aggregation (Provider-usage tab)
+  quota.ts            official-quota normalization + built-in plan identity
+  quota-official.ts   key resolution + per-provider official usage fetchers
+  routes.ts           host exact-Fetch routes  /tokbook/overview, /tokbook/rescan,
+                      /tokbook/usage?range=…, /tokbook/quota
   client/
     index.ts          client: apply(ctx), registers the two slots
     contract.ts       minimal client ctx/slots types
     store.ts          shared button↔overlay view store
     styles.ts         injected stylesheet (DSH tokens)
     FooterButton.tsx  sidebar.footer.action trigger
-    LedgerOverlay.tsx shell.overlay floating window (costed summary + trend + per-model)
+    QuotaPanel.tsx    订阅额度 tab (official usage cards)
+    LedgerOverlay.tsx shell.overlay floating window (costed summary + trend +
+                      per-model + per-provider + quota tabs)
 scripts/
   build-client.mjs    builds lib/index.js + lib/client.js (lazy-CJS)
-  smoke.ts            pure-logic smoke test of aggregation + pricing
+  smoke.ts            pure-logic smoke test of aggregation + pricing + quota
 ```
 
 ## Build
@@ -130,10 +140,13 @@ missed an event, at almost no cost when nothing changed; the live hook is the
 fast path that keeps the ledger current between opens. One unreadable session
 log is skipped and counted, never fatal.
 
-The floating window also shows a **data-status strip** (record count, day-file
-count, latest record time, data directory, and re-sync state), so when a figure
-is 0 the cause is visible — i.e. whether records are being captured at all —
-instead of guessing.
+The floating window splits its data-status facts by reader: the pinned window
+footer always shows the **freshness state** (re-sync state · newest-record
+time), visible at any scroll position and also when the ledger is empty; the
+**plumbing diagnostics** (record count, day-file count, data directory) live in
+the 统计口径 tab's 数据文件状态 section — so when a figure is 0 the cause is
+visible (whether records are being captured at all), without pipe facts
+cluttering the scroll of usage content.
 
 ## Cost
 
@@ -163,7 +176,50 @@ plugins:
     pricingRegion: overseas      # default: domestic (gitee mirror)
     pricingUrl: https://...      # optional explicit feed URL; wins over region
     recordCompaction: true       # default: true — record compaction calls
+    # Quota plans keyed by provider route. opencode-go and commandcode are
+    # built in: the tab fetches each subscription's OFFICIAL account usage
+    # (never a local estimate — a subscription key is shared across tools).
+    # A plan is attempted unless enabled:false. The API key is resolved from
+    # the DSH credentials service under the provider's reference name
+    # (OPENCODE_GO_API_KEY / COMMANDCODE_API_KEY — the same reference the
+    # provider's Models/settings page writes when you store the key there),
+    # or from an explicit literal below. No key found → "unconfigured" card.
+    plans:
+      opencode-go:
+        # apiKey: user_...               # literal key (wins; optional)
+        enabled: false                   # disable this built-in plan
+      commandcode:
+        # apiKeyEnv: COMMANDCODE_API_KEY # credential ref (provider default)
+        # enabled: false                  # disable this built-in plan
 ```
+
+### Official account usage (订阅额度 tab)
+
+A fourth floating-window tab shows **account-level subscription usage fetched
+from each provider's own account API** with your key — so it reflects *all*
+tools/devices sharing the subscription, which a local token ledger cannot.
+
+- **Command Code** — queries the account endpoints the official `cmd` CLI uses
+  (`/alpha/whoami`, `/alpha/usage/summary`, `/alpha/billing/credits`,
+  `/alpha/billing/subscriptions`): window `used/cap/exceeded/resetAt` in USD,
+  monthly credit pool, plan + usage summary.
+- **OpenCode Go** — queries the official usage endpoint
+  (`GET https://opencode.ai/zen/go/v1/usage`): 5h/weekly/monthly windows as
+  percent + reset (the endpoint reports no dollar amounts, so that card is
+  percent-only).
+
+No key → `unconfigured` card with a hint; fetch failure → `error` card with the
+reason; neither falls back to a local estimate. The browser first fetches the
+enabled-provider list (`GET /tokbook/quota` — fast, no network), then loads
+each provider's card independently via `GET /tokbook/quota?provider=<key>`:
+**a card renders the moment its own data arrives**, so one slow/failing
+provider never blocks the others. The tab opens on a **stale-while-revalidate**
+flow: the host serves the provider's durable *last-known* card instantly (a
+per-provider JSON snapshot in the data dir, refreshed after every successful
+fetch), and only refreshes from the provider API when that data is older than
+a freshness budget — the refresh then updates the numbers in place, never
+behind a blank skeleton. The in-memory card is additionally cached for 30s and
+the browser never holds the key.
 
 ## Status / WIRE notes
 
@@ -178,7 +234,15 @@ Implemented in this scaffold (see `docs/DESIGN.zh.md`):
   resolution, per-request cost, per-model cost, unpriced-model surfacing.
 - **Browser half**: sidebar footer button + shell overlay floating window with
   summary cards (tokens + cost), a 4-bucket split, a daily trend chart, a
-  per-model breakdown with cost, and the recent records.
+  per-model breakdown with cost, the recent records, and a **per-provider tab**:
+  one card per provider route with its models' tokens/cost, switchable over
+  今日 / 昨天 / 近7天 / 近30天 (a dedicated exact route
+  `GET /tokbook/usage?range=…` reads only the window's day files).
+- **订阅额度 (quota) tab**: per-plan **official account usage** fetched
+  host-side from each provider's own endpoints (`GET /tokbook/quota`) — Command
+  Code via its CLI account endpoints (windows + credits + plan), OpenCode Go
+  via `/zen/go/v1/usage` (percent + reset). No local estimation; no key → an
+  `unconfigured` hint card.
 
 Remaining gaps / planned upgrades:
 
@@ -192,3 +256,9 @@ Remaining gaps / planned upgrades:
 - The overview is a snapshot per open; live SSE push is a follow-up.
 - The cloud pricing sync fires on startup (best-effort); exposure of the
   pricing mirror as a settings card is not yet wired.
+- Quota is an official fetch served stale-while-revalidate: a 30s in-memory
+  TTL plus a durable per-provider last-known snapshot, refreshed in place when
+  the client sees data older than its freshness budget. No multi-account
+  rotation (one key per plan) yet. A persistent "urgency" indicator on the
+  sidebar trigger (color dot by the tightest window) needs event-driven
+  updates.

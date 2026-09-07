@@ -3,11 +3,14 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds } from '../src/stats.ts'
+import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
 import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing } from '../src/pricing.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
+import { providerCards, splitByProvider, providerKeyOf } from '../src/by-provider.ts'
+import { windowFromCreditsBlock, windowFromUsagePercent, resetEpoch, planInfoFromSubscriptions, unconfiguredCard, errorCard, hasQuotaContent, isBuiltinQuotaPlan, BUILTIN_PLAN_TITLES } from '../src/quota.ts'
+import { resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage } from '../src/quota-official.ts'
 import type { UsageRecord } from '../src/types.ts'
 
 let failed = 0
@@ -61,14 +64,46 @@ console.log('summarize / totals')
 }
 
 console.log('pricing rule chain + cost')
-{
-  const table = { 'deepseek-chat': { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5, cacheWritePerMillion: 1 } }
+{  const table = { 'deepseek-chat': { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5, cacheWritePerMillion: 1 } }
   const r = resolveRate({ base: table['deepseek-chat']!, contextTiers: [], dailySlots: [], timeRules: [] }, dayMillis('2026-01-01', 10), 0)
   check('base rate identity', r.key.tier === 0 && r.key.slot === -1)
   const cost = costOf({ requests: 1, inputTokens: 1_000_000, outputTokens: 500_000, cacheReadTokens: 200_000, cacheWriteTokens: 100_000, compactions: 0, failures: 0 }, r.prices)
   check('costOf math', Math.abs(cost - (2 + 4 + 0.1 + 0.1)) < 1e-9, `got ${cost}`)
   const priced = coercePricingTable(table)
   check('coercePricingTable', priced['deepseek-chat']?.inputPerMillion === 2)
+}
+
+console.log('costRecentEntries (recent-window per-row cost)')
+{
+  const table = {
+    'deepseek-chat': { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5, cacheWritePerMillion: 1 },
+  }
+  const pricing = tableOf(table)
+  const resolve = (r: UsageRecord) => {
+    const rules = pricing[r.model]
+    if (rules === undefined) return { ruleStart: 0, ruleEnd: 0, tier: 0, slot: -1 }
+    const usage = r.usage
+    const ctx = usage === undefined ? 0 : usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+    return resolveRate(rules, r.time, ctx).key
+  }
+  const t = dayMillis('2026-01-01', 10)
+  const recs: UsageRecord[] = [
+    { requestId: 'paid', time: t, sessionId: 's1', model: 'deepseek-chat', usage: { inputTokens: 1_000_000, outputTokens: 500_000, cacheReadTokens: 200_000, cacheWriteTokens: 100_000 } },
+    { requestId: 'unpriced', time: t, sessionId: 's2', model: 'no-such-model', usage: { inputTokens: 10, outputTokens: 10 } },
+    { requestId: 'nousage', time: t, sessionId: 's1', model: 'deepseek-chat' },
+    { requestId: 'fail', time: t, sessionId: 's1', model: 'deepseek-chat', kind: 'failure', failureCode: 'RATE_LIMIT' },
+    { requestId: 'compact', time: t, sessionId: 's1', model: 'deepseek-chat', kind: 'compaction', usage: { inputTokens: 100_000, outputTokens: 50_000 } },
+  ]
+  const costed = costRecentEntries(recs, pricing, resolve)
+  check('entries keep request ids + order', costed.map(e => e.requestId).join(',') === 'paid,unpriced,nousage,fail,compact')
+  // 2 + 4 + 0.1 + 0.1 = 6.2 (the smoke costOf baseline), compaction 0.2 + 0.4 = 0.6
+  const paid = costed.find(e => e.requestId === 'paid')
+  check('per-row cost of a full-bucket request', paid !== undefined && Math.abs(paid.cost - 6.2) < 1e-9, `got ${paid?.cost}`)
+  const compact = costed.find(e => e.requestId === 'compact')
+  check('compaction priced like a request', compact !== undefined && Math.abs(compact.cost - 0.6) < 1e-9, `got ${compact?.cost}`)
+  check('unpriced model bills ¥0', costed.find(e => e.requestId === 'unpriced')?.cost === 0)
+  check('request without usage bills ¥0', costed.find(e => e.requestId === 'nousage')?.cost === 0)
+  check('failure row bills ¥0', costed.find(e => e.requestId === 'fail')?.cost === 0)
 }
 
 console.log('day file naming')
@@ -235,6 +270,222 @@ console.log('syncHistory over a real-shaped sessionPersistence')
   }
 }
 
+console.log('provider cards (per-provider tab math)')
+{
+  // The same model id billed by two providers must NOT merge: the card is
+  // per provider, so a (provider, model) pair is unique inside its partition.
+  const records: UsageRecord[] = [
+    { requestId: 'r1', time: dayMillis('2026-03-01', 9), sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-v4-flash', usage: { inputTokens: 1000, outputTokens: 200 } },
+    { requestId: 'r2', time: dayMillis('2026-03-01', 9), sessionId: 's2', provider: 'opencode-go', model: 'deepseek-v4-flash', usage: { inputTokens: 500, outputTokens: 50 } },
+    { requestId: 'r3', time: dayMillis('2026-03-01', 10), sessionId: 's2', provider: 'opencode-go', model: 'glm-5.3-flash', usage: { inputTokens: 300, outputTokens: 40, cacheReadTokens: 200 } },
+    { requestId: 'r4', time: dayMillis('2026-03-01', 10), sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-v4-flash', kind: 'failure', failureCode: 'QUOTA' },
+  ]
+  const pricing = tableOf({
+    'deepseek-v4-flash': { inputPerMillion: 2, outputPerMillion: 8 },
+    'glm-5.3-flash': { inputPerMillion: 3, outputPerMillion: 10, cacheReadPerMillion: 1 },
+  })
+  const resolve = (r: UsageRecord) => {
+    const rules = pricing[r.model]
+    if (rules === undefined) return { ruleStart: 0, ruleEnd: 0, tier: 0, slot: -1 }
+    const usage = r.usage
+    const ctx = usage === undefined ? 0 : usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+    return resolveRate(rules, r.time, ctx).key
+  }
+  const cards = providerCards(records, pricing, resolve)
+  check('two provider cards (no merge)', cards.length === 2, `got ${cards.length}`)
+  const deepseek = cards.find(c => c.provider === 'deepseek-official')
+  const opencode = cards.find(c => c.provider === 'opencode-go')
+  check('provider keys kept', deepseek !== undefined && opencode !== undefined)
+  check('requests exclude failures', deepseek?.requests === 1 && opencode?.requests === 2, `deepseek=${deepseek?.requests} opencode=${opencode?.requests}`)
+  check('deepseek card tokens = 1200', deepseek?.tokens === 1200, `got ${deepseek?.tokens}`)
+  check('opencode card tokens = 1090', opencode?.tokens === 1090, `got ${opencode?.tokens}`)
+  check('opencode card cost', opencode !== undefined && Math.abs(opencode.cost - 0.0029) < 1e-12, `got ${opencode?.cost}`)
+  check('unpriced none', deepseek?.unpricedModels.length === 0)
+  check('same model in both cards', deepseek?.models.length === 1 && opencode?.models.length === 2)
+  check('sort: tokens desc', cards[0]?.provider === 'deepseek-official' && cards[1]?.provider === 'opencode-go')
+
+  // Unpriced model surfaces in the card and costs ¥0.
+  const unpriced = providerCards([{ requestId: 'r5', time: dayMillis('2026-03-01', 11), sessionId: 's3', provider: 'mystery', model: 'brand-new-x', usage: { inputTokens: 10, outputTokens: 10 } }], pricing, resolve)
+  check('unpriced model flagged', unpriced[0]?.unpricedModels.join() === 'brand-new-x' && unpriced[0]?.cost === 0 && unpriced[0]?.models[0]?.cost === 0)
+}
+
+console.log('range day window')
+{
+  const now = () => new Date('2026-03-05T15:30:00')
+  const today = rangeDayWindow('today', now)
+  check('today = [2026-03-05, 2026-03-05]', today.fromDay === '2026-03-05' && today.toDay === '2026-03-05', JSON.stringify(today))
+  const yesterday = rangeDayWindow('yesterday', now)
+  check('yesterday = [2026-03-04, 2026-03-04]', yesterday.fromDay === '2026-03-04' && yesterday.toDay === '2026-03-04', JSON.stringify(yesterday))
+  const week = rangeDayWindow('last7', now)
+  check('last7 = 7 calendar days ending today', week.fromDay === '2026-02-27' && week.toDay === '2026-03-05', JSON.stringify(week))
+  const month = rangeDayWindow('last30', now)
+  check('last30 spans 30 days', month.fromDay === '2026-02-04' && month.toDay === '2026-03-05', JSON.stringify(month))
+}
+
+console.log('readRecordsByDayRange (windowed day-file reads)')
+{
+  const dir = await mkdtemp(join(tmpdir(), 'tokbook-range-'))
+  try {
+    const log = new UsageLog(dir, { error: () => {} })
+    // Three day files: 2026-03-01, 2026-03-04, 2026-03-05 (a hole at 02/03).
+    const rec = (requestId: string, day: string, hour: number): UsageRecord => ({
+      requestId, time: dayMillis(day, hour), sessionId: 's1', model: 'm', provider: 'p', usage: { inputTokens: 1, outputTokens: 1 },
+    })
+    for (const [id, day, hour] of [['a1', '2026-03-01', 9], ['a2', '2026-03-04', 9], ['a3', '2026-03-05', 9]] as const) {
+      await log.record(rec(id, day, hour))
+    }
+    await log.flush()
+    const within = await readRecordsByDayRange(dir, '2026-03-04', '2026-03-05', () => new Date('2026-03-05T10:00:00'), { error: () => {} })
+    check('window returns only in-range rows', within.length === 2 && within.every(r => r.requestId !== 'a1'), `got ${within.map(r => r.requestId).join(',')}`)
+    const single = await readRecordsByDayRange(dir, '2026-03-05', '2026-03-05', () => new Date('2026-03-05T10:00:00'), { error: () => {} })
+    check('single-day window', single.length === 1 && single[0]!.requestId === 'a3')
+    const empty = await readRecordsByDayRange(dir, '2026-03-02', '2026-03-03', () => new Date('2026-03-05T10:00:00'), { error: () => {} })
+    check('hole reads nothing, not crash', empty.length === 0)
+    const inverted = await readRecordsByDayRange(dir, '2026-03-06', '2026-03-05', () => new Date('2026-03-05T10:00:00'), { error: () => {} })
+    check('inverted window reads nothing', inverted.length === 0)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+console.log('quota: window normalization (Command Code credits block)')
+{
+  const now = new Date(2026, 2, 10, 15, 0, 0).getTime()
+  const w = windowFromCreditsBlock('fiveHour', '5 小时',
+    { used: 8.4, cap: 14, exceeded: false, resetAt: now + 3 * 3_600_000 }, now)
+  check('cc window keeps used/cap', w.usedUsd === 8.4 && w.capUsd === 14, JSON.stringify(w))
+  check('cc window percent = used/cap', Math.abs(w.usagePercent - 60) < 1e-9, `got ${w.usagePercent}`)
+  check('cc window exceeded false', w.exceeded === false)
+  check('cc window resetAt kept as ms', w.resetAt === now + 3 * 3_600_000)
+  const over = windowFromCreditsBlock('weekly', '本周',
+    { used: 40, cap: 35, exceeded: true, resetAt: now + 86_400_000 }, now)
+  check('cc over-cap flags exceeded + 100%', over.exceeded === true && over.usagePercent === 100)
+  const missing = windowFromCreditsBlock('fiveHour', '5 小时', undefined, now)
+  check('cc missing block yields empty ok row', missing.usedUsd === undefined && missing.capUsd === undefined && missing.exceeded === false && missing.resetAt === null)
+  const zero = windowFromCreditsBlock('weekly', '本周', { used: 0, cap: 35, exceeded: false, resetAt: now }, now)
+  check('cc zero used percent 0', zero.usagePercent === 0 && zero.exceeded === false)
+}
+
+console.log('quota: window normalization (OpenCode Go usage-percent)')
+{
+  const now = Date.now()
+  const w = windowFromUsagePercent('rolling5h', '5 小时', { status: 'ok', resetInSec: 1500, usagePercent: 25 }, now)
+  check('go window percent kept', w.usagePercent === 25)
+  check('go resetInSec becomes epoch ms', w.resetAt === now + 1500 * 1000, `got ${w.resetAt} (now ${now})`)
+  check('go not exceeded', w.exceeded === false)
+  check('go has no amounts', w.usedUsd === undefined && w.capUsd === undefined)
+  const limited = windowFromUsagePercent('monthly', '本月', { status: 'rate-limited', resetInSec: 100, usagePercent: 60 }, now)
+  check('go rate-limited → exceeded + 100%', limited.exceeded === true && limited.usagePercent === 100)
+  const missing = windowFromUsagePercent('weekly', '本周', undefined, now)
+  check('go missing block yields empty ok row', missing.usagePercent === 0 && missing.resetAt === null && missing.exceeded === false)
+}
+
+console.log('quota: resetEpoch heuristics')
+{
+  const now = 1_800_000_000_000
+  // Seconds-until-reset countdown (small, far from now-as-ms).
+  const countdown = resetEpoch(5000, now)
+  check('small number = seconds until reset', countdown === now + 5_000_000, `got ${countdown}`)
+  // An absolute epoch-ms timestamp close to now is left as-is.
+  const abs = resetEpoch(now + 10_000, now)
+  check('large near-now number = epoch ms', abs === now + 10_000)
+  // An ISO date string parses.
+  const iso = resetEpoch('2026-03-11T00:00:00Z', now)
+  check('ISO string parses to ms', typeof iso === 'number' && Number.isFinite(iso))
+  // Garbage → null.
+  check('garbage reset → null', resetEpoch('nonsense', now) === null && resetEpoch(undefined, now) === null)
+}
+
+console.log('quota: plan normalization helpers')
+{
+  const info = planInfoFromSubscriptions({ planId: 'individual-goat', status: 'active', currentPeriodEnd: 1_800_000_000_000 })
+  check('plan info keeps id/status/period', info?.planId === 'individual-goat' && info?.status === 'active' && info?.periodEnd === 1_800_000_000_000)
+  check('plan info omits empties', planInfoFromSubscriptions({}) === undefined)
+  const u = unconfiguredCard('opencode-go')
+  check('unconfigured card shape', u.state === 'unconfigured' && u.windows.length === 0 && u.message !== undefined)
+  const e = errorCard('commandcode', 'boom')
+  check('error card shape', e.state === 'error' && e.message === 'boom')
+  check('hasQuotaContent negative on empty ok card', hasQuotaContent({ plan: 'x', title: 'x', state: 'ok', windows: [] }) === false)
+}
+
+console.log('quota: builtin plan identity')
+{
+  check('opencode-go is builtin', isBuiltinQuotaPlan('opencode-go') && isBuiltinQuotaPlan('commandcode'))
+  check('unknown is not builtin', isBuiltinQuotaPlan('zen') === false)
+  check('titles', BUILTIN_PLAN_TITLES['opencode-go'] === 'OpenCode Go' && BUILTIN_PLAN_TITLES['commandcode'] === 'Command Code')
+}
+
+console.log('quota: official key resolution (env + config, no network)')
+{
+  // A fake credentials seam, mapping ref → key.
+  const seam = (map: Record<string, string>) => ({ resolve: async (ref: string) => map[ref] })
+  // No key anywhere → undefined.
+  const none = await resolvePlanApiKey('opencode-go', undefined, seam({}))
+  check('no key resolves to undefined', none === undefined)
+  // The seam supplies the provider's default ref.
+  const viaSeam = await resolvePlanApiKey('opencode-go', undefined, seam({ OPENCODE_GO_API_KEY: 'seam-go' }))
+  check('seam default ref key', viaSeam === 'seam-go')
+  // config literal wins over the seam.
+  const cfg = await resolvePlanApiKey('opencode-go', { apiKey: 'cfg-key' }, seam({ OPENCODE_GO_API_KEY: 'seam-go' }))
+  check('config apiKey wins', cfg === 'cfg-key')
+  // custom ref via apiKeyEnv.
+  const custom = await resolvePlanApiKey('commandcode', { apiKeyEnv: 'MY_CC_KEY' }, seam({ MY_CC_KEY: 'custom-key' }))
+  check('apiKeyEnv custom ref', custom === 'custom-key')
+  // commandcode default ref name.
+  const cc = await resolvePlanApiKey('commandcode', undefined, seam({ COMMANDCODE_API_KEY: 'cc-key' }))
+  check('commandcode default ref', cc === 'cc-key')
+  // A throwing seam degrades to unconfigured (no throw).
+  const broken = await resolvePlanApiKey('opencode-go', undefined, { resolve: async () => { throw new Error('boom') } })
+  check('throwing seam → undefined', broken === undefined)
+}
+
+console.log('quota: fetcher failure/unconfigured shapes (no live network)')
+{
+  // A provider with no key in the seam must return an unconfigured card
+  // without attempting a network call.
+  const card = await fetchOpenCodeGoQuota({ credentials: { resolve: async () => undefined } })
+  check('go no-key → unconfigured card', card.state === 'unconfigured' && card.windows.length === 0)
+  const cc = await fetchCommandCodeQuota({ credentials: { resolve: async () => undefined } })
+  check('commandcode no-key → unconfigured card', cc.state === 'unconfigured' && cc.windows.length === 0)
+  const unknown = await fetchOfficialQuota('not-a-provider', {})
+  check('unknown provider → error card', unknown.state === 'error')
+}
+
+console.log('quota: opencode-go real endpoint parse (usage.rolling/percent/resetsAt)')
+{
+  // The live shape (verified via cc-switch #6433 and dsh-opencode-go-usage).
+  const now = Date.parse('2026-08-14T07:00:00Z')
+  const body = {
+    usage: {
+      rolling: { status: 'ok', percent: 9, resetsAt: '2026-08-14T07:20:04.810Z' },
+      weekly: { status: 'ok', percent: 12, resetsAt: '2026-08-17T00:00:00.810Z' },
+      monthly: { status: 'ok', percent: 6, resetsAt: '2026-09-09T00:41:03.810Z' },
+    },
+  }
+  const card = parseOpenCodeGoUsage(body as never, now)
+  check('go parse: 3 windows in order', card.windows.map((w) => w.id).join(',') === 'rolling5h,weekly,monthly', card.windows.map((w) => w.id).join(','))
+  const rolling = card.windows[0]!
+  check('go parse: percent kept', rolling.usagePercent === 9)
+  check('go parse: ok not exceeded', rolling.exceeded === false)
+  check('go parse: resetsAt ISO → epoch', rolling.resetAt === Date.parse('2026-08-14T07:20:04.810Z'), `got ${rolling.resetAt}`)
+  check('go parse: no amounts', rolling.usedUsd === undefined && rolling.capUsd === undefined)
+  check('go parse: card ok', card.state === 'ok' && card.plan === 'opencode-go')
+
+  // Throttled window: status 'rate-limited' (or any non-ok) → exceeded + 100%.
+  const limited = parseOpenCodeGoUsage({
+    usage: {
+      rolling: { status: 'rate-limited', percent: 60, resetsAt: '2026-08-14T07:20:00Z' },
+      weekly: { status: 'ok', percent: 40, resetsAt: '2026-08-17T00:00:00Z' },
+    },
+  } as never, now)
+  check('go parse: rate-limited → exceeded + 100%', limited.windows[0]!.exceeded === true && limited.windows[0]!.usagePercent === 100)
+  check('go parse: partial windows (2)', limited.windows.length === 2)
+
+  // Empty body → windows 0 (the fetcher turns this into an error card).
+  const empty = parseOpenCodeGoUsage({ usage: {} } as never, now)
+  check('go parse: empty usage yields no windows', empty.windows.length === 0)
+}
+
 if (failed > 0) {
   console.error(`\n${failed} check(s) failed`)
   process.exit(1)
@@ -245,4 +496,14 @@ if (failed > 0) {
 function dayMillis(day: string, hour: number): number {
   const [y, m, d] = day.split('-').map(Number)
   return new Date(y!, m! - 1, d!, hour, 0, 0).getTime()
+}
+
+/** Wrap flat ModelPricing entries into the ModelRates shape readPricingTable
+ * returns (base + empty rule lists), the shape providerCards expects. */
+function tableOf(pricing: Record<string, Record<string, number>>): Record<string, { base: Record<string, number>; contextTiers: unknown[]; dailySlots: unknown[]; timeRules: unknown[] }> {
+  const table: Record<string, { base: Record<string, number>; contextTiers: unknown[]; dailySlots: unknown[]; timeRules: unknown[] }> = {}
+  for (const [model, base] of Object.entries(coercePricingTable(pricing))) {
+    table[model] = { base, contextTiers: [], dailySlots: [], timeRules: [] }
+  }
+  return table
 }

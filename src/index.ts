@@ -34,7 +34,7 @@ import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  PricingTable, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
+  PlanConfig, PricingTable, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
 } from './types.ts'
 import { currencyOfRegion, UNPRICED_KEY, totalsTokens } from './types.ts'
 import { defaultDataDir } from './ledger.ts'
@@ -43,15 +43,25 @@ import { modelOfEvent, providerOfEvent, recordOfEvent, type SessionEventLike } f
 import { autoSyncIfNeeded, listPersistenceSnapshots, syncHistory, type SyncPersistence } from './sync.ts'
 import { readSyncProgress, writeSyncProgress } from './sync-state.ts'
 import {
-  attachCosts, buildSummary, clearRecordCache, listDayFiles, readCachedRecords, snapshotBaseline,
-  staleSessionIds, warmRecordCache,
+  attachCosts, buildSummary, clearRecordCache, costRecentEntries, listDayFiles, rangeDayWindow, readCachedRecords,
+  readRecordsByDayRange, snapshotBaseline, staleSessionIds, warmRecordCache,
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import {
   readPricingTable, readUsdExchangeRate, resolvePricingUrl, resolveRate as resolveRateFor, syncCloudPricing,
   type PricingSourceInput, type PricingRegion,
 } from './pricing.ts'
-import { registerTokBookRoutes, type WebServerLike } from './routes.ts'
+import { providerCards } from './by-provider.ts'
+import { registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
+import { isBuiltinQuotaPlan, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
+import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
+import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
+
+/** Built-in providers with an official quota fetch, in display order. */
+const BUILTIN_PLAN_KEYS: readonly string[] = [OPENCODE_GO_PROVIDER, COMMAND_CODE_PROVIDER]
+
+/** How long a quota snapshot is reused before the providers are re-polled. */
+const QUOTA_TTL_MS = 30_000
 
 /** Minimal face of the durable session-event stream. */
 interface SessionLike { readonly id: string }
@@ -70,7 +80,7 @@ export const name = 'dsh-tokbook'
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: TokBookConfig): void {
   const unknown = Object.keys(config).find(key =>
-    key !== 'path' && key !== 'pricingUrl' && key !== 'pricingRegion' && key !== 'recordCompaction')
+    key !== 'path' && key !== 'pricingUrl' && key !== 'pricingRegion' && key !== 'recordCompaction' && key !== 'plans')
   if (unknown !== undefined) {
     throw new Error(`TokBookConfig: unknown key "${unknown}"`)
   }
@@ -86,6 +96,34 @@ export function validateConfig(config: TokBookConfig): void {
   if (config.recordCompaction !== undefined && typeof config.recordCompaction !== 'boolean') {
     throw new Error('TokBookConfig: "recordCompaction" must be a boolean')
   }
+  if (config.plans !== undefined && (typeof config.plans !== 'object' || config.plans === null || Array.isArray(config.plans))) {
+    throw new Error('TokBookConfig: "plans" must be a record keyed by provider route')
+  }
+}
+
+/** Coerce a user-supplied plan override into a valid PlanConfig (drop unknown
+ * keys and malformed fields instead of throwing — a config typo must not take
+ * down the plugin). */
+export function coercePlanConfig(value: unknown): PlanConfig | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  const out: PlanConfig = {}
+  if (typeof raw.enabled === 'boolean') out.enabled = raw.enabled
+  if (typeof raw.apiKey === 'string' && raw.apiKey !== '') out.apiKey = raw.apiKey
+  if (typeof raw.apiKeyEnv === 'string' && raw.apiKeyEnv !== '') out.apiKeyEnv = raw.apiKeyEnv
+  return out
+}
+
+/** Coerce the whole `plans` config record. Malformed entries are dropped. */
+export function coercePlansConfig(value: unknown): Record<string, PlanConfig> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const out: Record<string, PlanConfig> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === '') continue
+    const coerced = coercePlanConfig(entry)
+    if (coerced !== undefined) out[key] = coerced
+  }
+  return out
 }
 
 function resolveLogger(ctx: Context): LoggerLike {
@@ -105,6 +143,17 @@ export class TokenUsageBook extends Service {
   private readonly log: UsageLog
   private readonly recordCompaction: boolean
   private readonly pricing: PricingSourceInput
+  /** User-configured quota-plan overrides keyed by provider route (coerced). */
+  private readonly planConfig: Record<string, PlanConfig>
+  /** In-process official quota card cache (see {@link QUOTA_TTL_MS}), so a
+   * `?provider=` request does not re-hit the provider API on every open. This
+   * is a thin freshness layer only: 'ok' cards are also mirrored to a durable
+   * snapshot (see {@link readQuotaSnapshot}) that survives restarts, which is
+   * what lets the tab render last-known data with zero latency. */
+  private quotaCardCache = new Map<string, { at: number; card: QuotaCard }>()
+  /** The DSH credentials seam (`ctx.credentials`), wired when present. The
+   * quota fetchers resolve provider keys through it. */
+  private credentials: CredentialResolver | undefined
   private lastModel = new Map<string, string>()
   private persistence: SyncPersistence | undefined
   private syncing = false
@@ -136,6 +185,7 @@ export class TokenUsageBook extends Service {
       pricingUrl: config.pricingUrl,
       pricingRegion: config.pricingRegion as PricingRegion | undefined,
     }
+    this.planConfig = coercePlansConfig(config.plans)
 
     // Inherit the previous process's sync baseline (which session logs were
     // folded through which revision), so a restart does not re-walk every
@@ -220,14 +270,37 @@ export class TokenUsageBook extends Service {
     })
 
     // Refresh the cloud pricing mirror at the resolved feed URL (best-effort;
-    // a failed fetch keeps the previous mirror). Then the route.
+    // a failed fetch keeps the previous mirror). Then the routes.
     this.syncPricing()
+    // The quota tab resolves provider keys through the DSH credentials seam
+    // (`ctx.credentials`), the same place the Models/settings page stores a
+    // provider's API key. Wire it when the host mounts the service; without
+    // it the quota fetch finds no key and shows an `unconfigured` card.
+    ctx.inject(['credentials'], (credentialsCtx: Context) => {
+      const service = credentialsCtx.get('credentials') as { resolve(ref: string): Promise<{ value: string } | undefined> } | undefined
+      if (service === undefined) return
+      this.credentials = {
+        resolve: async (ref) => {
+          const hit = await service.resolve(ref)
+          return hit?.value !== undefined && hit.value !== '' ? hit.value : undefined
+        },
+      }
+    })
     ctx.inject(['webServer'], (injectedCtx: Context) => {
       const webServer = injectedCtx.get('webServer') as WebServerLike | undefined
       ctx.effect(() => registerTokBookRoutes(
         webServer,
         () => this.overview(),
         () => this.rescan(),
+      ))
+      ctx.effect(() => registerTokBookUsageRoute(
+        webServer,
+        (range) => this.usageByRange(range),
+      ))
+      ctx.effect(() => registerTokBookQuotaRoute(
+        webServer,
+        () => this.quota(),
+        (provider) => this.quotaCardOf(provider),
       ))
     })
   }
@@ -343,14 +416,20 @@ export class TokenUsageBook extends Service {
     }
     const region = this.pricing.pricingRegion ?? 'domestic'
     const rate = await readUsdExchangeRate(this.dir, this.logger)
+    // The recent window is billed at the same rate chain as the totals, so a
+    // single row's ¥ in the 最近记录 list is exactly the amount the aggregates
+    // folded in. Read-time + additive: no ledger/rollup change, and a price
+    // table update re-prices the list on the next overview read.
+    const recent = costRecentEntries(costed.recent, pricing, resolve)
     // Slim wire payload: the pricing table / rateRows / byHour rows are host-
     // side concerns the floating window never renders, and a cloud mirror can
     // be large — the cost layer has already been folded into the cost fields.
-    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, ...slim } = costed
-    void _pricing; void _rateRows; void _byHour
+    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, recent: _recent, ...slim } = costed
+    void _pricing; void _rateRows; void _byHour; void _recent
     return {
       ...slim,
       sessions,
+      recent,
       totalTokens: totalsTokens(costed.total),
       currency: currencyOfRegion(region),
       usdExchangeRate: rate,
@@ -362,6 +441,123 @@ export class TokenUsageBook extends Service {
       syncStatus: this.syncStatus,
       syncError: this.syncError,
     }
+  }
+
+  /** Per-provider view of one look-back window, the payload of the
+   * Provider-usage tab. Reuses the overview's authoritative freshness gate
+   * and pricing; only the window's day files are read. */
+  async usageByRange(range: ProviderRange): Promise<ProviderUsageView> {
+    await this.ensureFresh()
+    const pricing = await readPricingTable(this.dir, this.logger)
+    const resolve: RateResolver = (record) => this.resolveRate(record, pricing)
+    const { fromDay, toDay } = rangeDayWindow(range)
+    const records = await readRecordsByDayRange(this.dir, fromDay, toDay, () => new Date(), this.logger)
+    const cards = providerCards(records, pricing, resolve)
+    const region = this.pricing.pricingRegion ?? 'domestic'
+    const rate = await readUsdExchangeRate(this.dir, this.logger)
+    return {
+      range,
+      fromDay,
+      toDay,
+      currency: currencyOfRegion(region),
+      usdExchangeRate: rate,
+      updatedAt: Date.now(),
+      providers: cards,
+    }
+  }
+
+  /**
+   * Quota snapshot for the 订阅额度 tab: fetch each built-in provider's
+   * *official* account usage (never a local estimate — a subscription key is
+   * shared across tools/devices, so the local ledger cannot know the true
+   * account spend). Providers without a usable key yield an `unconfigured`
+   * card; a failed fetch yields an `error` card. Results are cached for a
+   * short TTL so repeated opens do not hammer the provider APIs.
+   */
+  async quota(): Promise<QuotaView> {
+    // Fast, non-network: the list of enabled built-in providers in display
+    // order. The client fetches each provider's card via `?provider=` so a
+    // slow/failing provider never blocks the others from rendering.
+    const providers = BUILTIN_PLAN_KEYS.filter((key) => this.planConfig[key]?.enabled !== false)
+    return { providers }
+  }
+
+  /** Official quota card for one built-in provider, stale-while-revalidate:
+   *
+   *  - `force` (client refresh button / auto-refresh timer) always polls the
+   *    provider and re-persists the result.
+   *  - A non-forced read first reuses the fresh in-memory card (TTL), then
+   *    falls back to the provider's *durable last-known 'ok' card* (disk
+   *    snapshot, instant — no provider round trip), and only hits the
+   *    provider API when nothing is known yet (first-ever open of the tab).
+   *
+   * The tab therefore renders content immediately on open (the last known
+   * numbers) and the client follows up with a forced refresh when those
+   * numbers are old, updating the card in place — the provider latency is
+   * never in the way of first paint.
+   *
+   * A provider disabled in config yields an error card; an enabled provider
+   * without a usable key yields an `unconfigured` card. Never throws. */
+  async quotaCardOf(provider: string, force = false): Promise<QuotaCard> {
+    const now = Date.now()
+    const config = this.planConfig[provider]
+    const enabled = config === undefined || config.enabled !== false
+    // A disabled/unknown provider is terminal: never serve a stale snapshot
+    // or refresh it. (Cached like any card so repeated opens are consistent.)
+    if (!enabled || !isBuiltinQuotaPlan(provider)) {
+      const card: QuotaCard = {
+        plan: provider,
+        title: provider,
+        state: 'error',
+        message: '该 provider 已禁用或没有内置的官方额度查询。',
+        windows: [],
+      }
+      this.quotaCardCache.set(provider, { at: now, card })
+      return card
+    }
+
+    if (!force) {
+      const cached = this.quotaCardCache.get(provider)
+      if (cached !== undefined && now - cached.at < QUOTA_TTL_MS) return cached.card
+      // No fresh in-memory card: serve the durable last-known 'ok' card
+      // instantly (never block an open on the provider round trip). It is
+      // mirrored into the TTL cache so repeated opens within the TTL do not
+      // even re-read disk; its own fetchedAt still tells the client it is
+      // stale and a refresh is due.
+      const snapshot = await readQuotaSnapshot(this.dir, provider)
+      if (snapshot !== null) {
+        this.quotaCardCache.set(provider, { at: now, card: snapshot })
+        return snapshot
+      }
+    }
+
+    let card: QuotaCard
+    try {
+      card = await fetchOfficialQuota(provider, {
+        plan: config,
+        logger: this.logger,
+        credentials: this.credentials,
+      })
+    } catch (error) {
+      this.logger.error(`[tokbook] official quota fetch for ${provider} threw:`, error)
+      card = {
+        plan: provider,
+        title: provider,
+        state: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        windows: [],
+      }
+    }
+    this.quotaCardCache.set(provider, { at: now, card })
+    // Only 'ok' cards become durable last-known snapshots; a fetch failure or
+    // missing key is cheap to re-derive and must not mask a later recovery.
+    if (card.state === 'ok') {
+      void writeQuotaSnapshot(this.dir, provider, card)
+        .catch((error: unknown) => {
+          this.logger.warn?.(`[tokbook] cannot persist quota snapshot for ${provider}:`, error)
+        })
+    }
+    return card
   }
 
   /** Force an authoritative re-sync of every session (bypassing the freshness

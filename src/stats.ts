@@ -15,11 +15,11 @@ import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/prom
 import { join } from 'node:path'
 import { coerceRecord, parseRecord } from './usage-record.ts'
 import {
-  type CostedSummary, type CostedModelRow, type PricingTable, type RateKey, type TokenSummary,
+  type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type TokenSummary,
   type UsageDayRow, type UsageHourRow, type UsageModelRow, type UsageRateRow, type UsageRecord,
   type UsageTotals, UNPRICED_KEY, totalsTokens,
 } from './types.ts'
-import { costOf, ratesForKey } from './pricing.ts'
+import { costOf, ratesForKey, resolveRate } from './pricing.ts'
 
 /** Bounded recent window length: only the newest records cross the wire. */
 export const RECENT_LIMIT = 20
@@ -136,6 +136,23 @@ function dayStart(day: string): number {
   return new Date(year!, month! - 1, date!).getTime()
 }
 
+/** Local date key of an epoch offset (n days back from a reference key). */
+function dayKeyOffset(day: string, back: number): string {
+  const [year, month, date] = day.split('-').map(Number)
+  return dayKey(new Date(year!, month! - 1, date! - back).getTime())
+}
+
+/** The inclusive local-day bounds of a Provider-usage window: the first and
+ * last day key covered, given the local date of "now". `today` covers the
+ * running day only; `yesterday` the previous day; `last7`/`last30` count back
+ * whole calendar days including today (so a day with no records is skipped by
+ * the file reader, never miscounted). */
+export function rangeDayWindow(range: ProviderRange, now: () => Date = () => new Date()): { fromDay: string; toDay: string } {
+  const to = dayKey(now().getTime())
+  const back = range === 'yesterday' ? 2 : range === 'last7' ? 7 : range === 'last30' ? 30 : 1
+  return { fromDay: dayKeyOffset(to, back - 1), toDay: range === 'yesterday' ? dayKeyOffset(to, 1) : to }
+}
+
 // ---------------------------------------------------------------------------
 // Record cache (process-memory parse of day files)
 // ---------------------------------------------------------------------------
@@ -202,6 +219,26 @@ async function fileStamp(dir: string, name: string): Promise<{ size: number; mti
   }
 }
 
+/** Load one day file through the directory cache: frozen (pre-today) files are
+ * append-only history, so their first parse is the last; today's file is
+ * re-read when its size/mtime changed since the cached parse. Returns the
+ * cached records when the cache is warm and current, else a fresh parse. */
+async function loadFileCached(cache: DirCache, dir: string, name: string, hot: boolean, logger: StatsLogger): Promise<UsageRecord[]> {
+  const cached = cache.files.get(name)
+  if (!hot && cached !== undefined) return cached.records
+  const stamp = await fileStamp(dir, name)
+  if (stamp === null) {
+    cache.files.delete(name)
+    return []
+  }
+  if (cached !== undefined && cached.size === stamp.size && cached.mtimeMs === stamp.mtimeMs) {
+    return cached.records
+  }
+  const records = await readDayFile(dir, name, logger)
+  cache.files.set(name, { records, size: stamp.size, mtimeMs: stamp.mtimeMs })
+  return records
+}
+
 async function loadDir(dir: string, cache: DirCache, now: () => Date, logger: StatsLogger): Promise<UsageRecord[]> {
   const today = dayKey(now().getTime())
   const names = await listDayFiles(dir)
@@ -213,24 +250,7 @@ async function loadDir(dir: string, cache: DirCache, now: () => Date, logger: St
   for (const name of names) {
     const day = fileDay(name)!
     const hot = day >= today
-    const cached = cache.files.get(name)
-    // Frozen files are append-only history: once parsed they never change.
-    if (!hot && cached !== undefined) {
-      out.push(...cached.records)
-      continue
-    }
-    const stamp = await fileStamp(dir, name)
-    if (stamp === null) {
-      cache.files.delete(name)
-      continue
-    }
-    if (cached !== undefined && cached.size === stamp.size && cached.mtimeMs === stamp.mtimeMs) {
-      out.push(...cached.records)
-      continue
-    }
-    const records = await readDayFile(dir, name, logger)
-    cache.files.set(name, { records, size: stamp.size, mtimeMs: stamp.mtimeMs })
-    out.push(...records)
+    out.push(...await loadFileCached(cache, dir, name, hot, logger))
   }
   return out
 }
@@ -245,6 +265,36 @@ export async function readCachedRecords(dir: string, now: () => Date = () => new
   })
   cache.inflight = pending
   return pending
+}
+
+/**
+ * Read the records of one inclusive local-day window `[fromDay, toDay]`, the
+ * reader behind the Provider-usage tab. Only day files inside the window are
+ * touched (frozen ones served from the shared parse cache), so a 7/30-day
+ * window never costs a full-history decode. A data directory without the
+ * window's files yields an empty list; `fromDay > toDay` also reads nothing.
+ */
+export async function readRecordsByDayRange(
+  dir: string,
+  fromDay: string,
+  toDay: string,
+  now: () => Date = () => new Date(),
+  logger: StatsLogger = consoleLogger,
+): Promise<UsageRecord[]> {
+  if (fromDay > toDay) return []
+  const cache = stateOf(dir)
+  const today = dayKey(now().getTime())
+  const names: string[] = []
+  for (const name of await listDayFiles(dir)) {
+    const day = fileDay(name)!
+    if (day >= fromDay && day <= toDay) names.push(name)
+  }
+  const out: UsageRecord[] = []
+  for (const name of names) {
+    const hot = fileDay(name)! >= today
+    out.push(...await loadFileCached(cache, dir, name, hot, logger))
+  }
+  return out
 }
 
 /** Populate the cache for one directory so the first stats poll is a memory hit. */
@@ -563,6 +613,45 @@ export function attachCosts(summary: TokenSummary & { dataDir: string }, pricing
     rateRows: summary.rateRows,
     recent: summary.recent,
   }
+}
+
+/**
+ * Price the recent-window ledger rows for the floating window's 最近记录
+ * list: each request is billed at the rate its own timestamp and context
+ * resolved to (the same `resolveRate → costOf` chain the overview's totals
+ * use), so a single row's ¥ is exactly the amount the totals folded in.
+ * Deliberately read-time and additive: nothing is persisted, and a price
+ * table change re-prices the list on the next read. Rows that bill nothing
+ * carry 0 — a failed attempt (no tokens ever billed), a request with no
+ * provider-reported usage, or a model absent from the price table.
+ */
+export function costRecentEntries(
+  recent: readonly UsageRecord[],
+  pricing: PricingTable,
+  resolve: RateResolver = () => UNPRICED_KEY,
+): RecentLedgerEntry[] {
+  return recent.map((record) => {
+    const rules = pricing[record.model]
+    if (rules === undefined) return { ...record, cost: 0 }
+    const usage = record.usage
+    if (usage === undefined) return { ...record, cost: 0 }
+    const contextTokens = usage.inputTokens
+      + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+    const { key } = resolveRate(rules, record.time, contextTokens)
+    const prices = ratesForKey(rules, key)
+    // Cost the four buckets as the totals layer would (absent cache buckets
+    // read as 0, never NaN).
+    return {
+      ...record,
+      cost: costOf({
+        requests: 0,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens ?? 0,
+        cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+      }, prices),
+    }
+  })
 }
 
 /** Build the full stats payload for one data directory: the rollup over every

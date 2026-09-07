@@ -67,8 +67,8 @@ export function RefreshGlyph({ className }: { className?: string }) {
       aria-hidden="true"
       focusable="false"
     >
-      <path d="M20 11a8 8 0 1 0 2 5.3" />
-      <path d="M20 4v4h-4" />
+      <path d="M18 9a8 8 0 1 0 2 5.3" />
+      <path d="M18 2v4h-4" />
     </svg>
   )
 }

@@ -156,6 +156,19 @@ export const UNPRICED_KEY: RateKey = { ruleStart: 0, ruleEnd: 0, tier: 0, slot: 
 /** The merged pricing table: model id → full rule set. */
 export type PricingTable = Record<string, ModelRates>
 
+/**
+ * One ledger row of the overview's 最近记录 slice: a {@link UsageRecord}
+ * with the billed cost (¥) of that single request folded in. The cost is a
+ * server-derived read-time field — it re-prices whenever the price table
+ * changes and never touches the ledger/rollup format. Failure rows and
+ * unpriced rows carry 0.
+ */
+export interface RecentLedgerEntry extends UsageRecord {
+  /** Billed ¥ of this request under the current price table (0 = unpriced,
+   * no usage reported, or a failed attempt that billed no tokens). */
+  cost: number
+}
+
 /** One per-day × per-model × per-rate aggregation row. */
 export interface UsageRateRow {
   day: string
@@ -200,6 +213,67 @@ export interface CostedSummary extends TokenSummary {
   byModel: CostedModelRow[]
 }
 
+/** A selectable look-back window of the Provider-usage tab, named after the
+ * local calendar days it covers (same day-partition the ledger files use). */
+export type ProviderRange = 'today' | 'yesterday' | 'last7' | 'last30'
+
+/** Every valid {@link ProviderRange} id; route validation reuses this. */
+export const PROVIDER_RANGES: readonly ProviderRange[] = ['today', 'yesterday', 'last7', 'last30']
+
+/** One provider-billed model row inside a provider card (tokens already
+ * summed over the four buckets; cost is the ¥ billed under the price table). */
+export interface ProviderModelUsage {
+  /** Provider model id as recorded. */
+  model: string
+  /** Per-bucket counts of this model inside the window. */
+  totals: UsageTotals
+  /** Sum of the four provider buckets. */
+  tokens: number
+  /** Billed ¥ over the window; 0 when the model is unpriced. */
+  cost: number
+}
+
+/** One provider card of the Provider-usage tab: every model the provider
+ * billed inside the selected window, aggregated under the provider key. */
+export interface ProviderUsageCard {
+  /** Provider route key as recorded; rows that never saw a header group
+   * under `'(未知)'`. */
+  provider: string
+  /** Sum of the four buckets over the whole card. */
+  tokens: number
+  /** Billed ¥ over the whole card; unpriced models count 0. */
+  cost: number
+  /** Models whose usage has no entry in the pricing table (costed as ¥0). */
+  unpricedModels: string[]
+  /** Models of this provider, largest token total first. */
+  models: ProviderModelUsage[]
+  /** Recorded requests of this card (plain requests plus compaction
+   * summarize calls; failed attempts never join this count). */
+  requests: number
+  /** Compaction summarize requests inside the card. */
+  compactions: number
+}
+
+/** The wire payload of the Provider-usage route. Slim and read-only: only the
+ * aggregated cards for one window cross the wire. */
+export interface ProviderUsageView {
+  /** The window this view was computed for. */
+  range: ProviderRange
+  /** Local date key of the window's first day (inclusive), e.g. `2026-09-01`. */
+  fromDay: string
+  /** Local date key of the window's last day (inclusive). */
+  toDay: string
+  /** The display currency the page converts cost figures into. */
+  currency: DisplayCurrency
+  /** Effective RMB-per-USD rate (feed value, else a built-in default). */
+  usdExchangeRate: number
+  /** When the snapshot was computed, epoch ms. */
+  updatedAt: number
+  /** One card per provider with recorded usage inside the window, largest
+   * token total first; empty when the window holds no records. */
+  providers: ProviderUsageCard[]
+}
+
 /**
  * The aggregated snapshot the browser floating window reads. Deliberately
  * slimmed from {@link CostedSummary}: the pricing table (a cloud mirror can be
@@ -207,7 +281,7 @@ export interface CostedSummary extends TokenSummary {
  * floating window renders none of them, and the cost layer has already been
  * folded into `totalCost` / `byModel[].cost`.
  */
-export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour'> {
+export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour' | 'recent'> {
   /** Distinct sessions that contributed records. */
   sessions: number
   /** Sum of the four provider buckets (input + cacheRead + cacheWrite + output). */
@@ -218,6 +292,8 @@ export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRo
   usdExchangeRate: number
   /** When the snapshot was computed, epoch ms. */
   updatedAt: number
+  /** Newest ledger rows (newest first), each carrying its own billed ¥. */
+  recent: RecentLedgerEntry[]
   /** Total records read from the ledger (diagnostics). */
   records: number
   /** Number of day files the ledger holds (diagnostics). */
@@ -243,7 +319,128 @@ export interface TokBookConfig {
   pricingRegion?: 'domestic' | 'overseas'
   /** Whether compaction summarize requests are recorded and billed (default true). */
   recordCompaction?: boolean
+  /** Quota plans keyed by provider route (`opencode-go`, `commandcode`). A
+   * plan turns on automatically once a usable API key is found (config, env,
+   * or the provider's auth file) unless `enabled:false`. The official usage
+   * is fetched from each provider's own account endpoints — the tab never
+   * falls back to a local estimate. See `src/quota.ts` / `src/quota-official.ts`. */
+  plans?: Record<string, PlanConfig>
 }
+
+/** A user-configured quota plan override (see `src/quota.ts`). */
+export interface PlanConfig {
+  /** Force the plan on even before a key is found (best-effort fetch). */
+  enabled?: boolean
+  /** Explicit API key literal; wins over the credentials service. Intended
+   * for tests / non-DSH hosts — a key stored in the dsh Models page lives in
+   * the credentials service and is found without this field. */
+  apiKey?: string
+  /** Credential reference name to resolve through `ctx.credentials`; defaults
+   * to the provider's reference (`OPENCODE_GO_API_KEY`, `COMMANDCODE_API_KEY`),
+   * i.e. the name the provider adapter's own `apiKeyEnv` declares. */
+  apiKeyEnv?: string
+}
+
+/** One window of an official quota card. Amounts are optional because some
+ * providers (OpenCode Go) expose only a used percent + reset, while others
+ * (Command Code) expose used/cap in dollars. */
+export interface QuotaWindowView {
+  /** Stable window id (`rolling5h`, `weekly`, `monthly`, `fiveHour`…). */
+  id: string
+  /** Display label (5 小时 / 本周 / 本月 …). */
+  label: string
+  /** 0–100 percent the server reports (or derived from used/cap). */
+  usagePercent: number
+  /** Whether the server reports this window exceeded/rate-limited. */
+  exceeded: boolean
+  /** Epoch ms when capacity returns; null when not reported. */
+  resetAt: number | null
+  /** Used amount in the window (Command Code). Absent → percent-only display. */
+  usedUsd?: number
+  /** Window cap in USD (Command Code). Absent → percent-only display. */
+  capUsd?: number
+}
+
+/** Optional subscription/account context of an official quota card. */
+export interface QuotaAccountInfo {
+  /** Account display name (userName/name) when the provider reports one. */
+  name?: string
+}
+
+/** Optional plan identity of an official quota card. */
+export interface QuotaPlanInfo {
+  /** Raw plan id (`individual-goat`, …); empty when unreported. */
+  planId?: string
+  /** Display plan name (GOAT / Pro …). */
+  name?: string
+  /** Raw subscription status (`active`, `trialing`, `past_due`…). */
+  status?: string
+  /** Billing period end, epoch ms; null when unreported. */
+  periodEnd?: number | null
+}
+
+/** Optional usage summary of an official quota card (Command Code reports it;
+ * OpenCode Go does not). */
+export interface QuotaUsageSummary {
+  /** Completed (successful) request count. */
+  completed?: number
+  /** Failed request count. */
+  failed?: number
+  /** Success rate 0–100. */
+  successRate?: number
+  /** Total cost in USD of the period, when reported. */
+  costUsd?: number
+  /** Input tokens in the period. */
+  tokensIn?: number
+  /** Output tokens in the period. */
+  tokensOut?: number
+}
+
+/** Optional credit-pool state of an official quota card (Command Code). */
+export interface QuotaCreditPool {
+  /** Remaining subscription monthly credits (USD), when reported. */
+  monthlyUsd?: number
+  /** Purchased (top-up, roll-over) credits (USD). */
+  purchasedUsd?: number
+  /** Free/promo credits (USD). */
+  freeUsd?: number
+}
+
+/** The availability of one official quota card. */
+export type QuotaCardState = 'ok' | 'unconfigured' | 'error'
+
+/** One official quota card: one provider's account usage fetched from the
+ * provider's own endpoints. Never a local estimate. */
+export interface QuotaCard {
+  /** Provider route key the plan attaches to. */
+  plan: string
+  /** Display title (OpenCode Go / Command Code GOAT …). */
+  title: string
+  state: QuotaCardState
+  /** Short hint shown when `unconfigured` (no key) or `error` (fetch failed). */
+  message?: string
+  /** Account identity when reported. */
+  account?: QuotaAccountInfo
+  /** Subscription plan identity when reported. */
+  planInfo?: QuotaPlanInfo
+  /** Period usage summary when reported. */
+  usage?: QuotaUsageSummary
+  /** Credit-pool state when reported. */
+  credits?: QuotaCreditPool
+  /** Limit windows in display order. */
+  windows: QuotaWindowView[]
+  /** When the official data was fetched, epoch ms. */
+  fetchedAt?: number
+}
+
+/** The wire payload of the quota route (订阅额度 tab) when no `provider` is
+ * given: a fast, non-network list of the enabled provider routes, so the
+ * client can then fetch each provider's card independently (`?provider=`). */
+export interface QuotaView {
+  /** Enabled built-in provider routes in display order (no network fetch). */
+  providers: string[]
+}
+
 
 /** Sum the four buckets of an aggregated totals row. */
 export function totalsTokens(totals: UsageTotals): number {

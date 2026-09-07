@@ -3,7 +3,11 @@
  * webserver, registered through `ctx.webServer.register({ kind:'exact', ... })`.
  * The overview (costed summary + per-day trend + per-model + recent) is served
  * as a plain JSON route the browser floating window `fetch`es from; a second
- * route lets the scan button force an authoritative re-sync.
+ * route lets the scan button force an authoritative re-sync; a third route
+ * serves the Provider-usage tab's per-provider cards for one selectable
+ * look-back window (`?range=…` — exact routes match on pathname, so the query
+ * is read inside the handler); a fourth serves the 订阅额度 tab's per-plan
+ * official account usage (fetched host-side from each provider's own API).
  *
  * Both handlers guard method + same-origin (the reference plugin's hardening:
  * browsers send `Sec-Fetch-Site`; non-browser clients without the header pass)
@@ -14,7 +18,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { TokBookOverview } from './types.ts'
+import { PROVIDER_RANGES, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type TokBookOverview } from './types.ts'
 
 /** The subset of the host webserver this plugin uses. */
 export interface WebServerLike {
@@ -92,4 +96,90 @@ export function registerTokBookRoutes(
     disposeOverview()
     disposeRescan()
   }
+}
+
+/** Parse the `range` query of a Provider-usage request. A missing or unknown
+ * value answers null; the caller refuses the request (no silent default, so a
+ * stale client cannot mislabel a window). */
+export function parseProviderRange(req: IncomingMessage): ProviderRange | null {
+  const raw = new URL(req.url ?? '/', 'http://tokbook.local').searchParams.get('range')
+  if (raw === null) return null
+  return (PROVIDER_RANGES as readonly string[]).includes(raw) ? raw as ProviderRange : null
+}
+
+/** Bind the Provider-usage route to a ranged view provider. Returns the
+ * disposer. */
+export function registerTokBookUsageRoute(
+  webServer: WebServerLike | undefined,
+  usageView: (range: ProviderRange) => ProviderUsageView | Promise<ProviderUsageView>,
+): () => void {
+  if (webServer === undefined) return () => {}
+
+  const handleUsage = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (req.method !== 'GET') return refuse(res, 405, 'method not allowed')
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    const range = parseProviderRange(req)
+    if (range === null) {
+      res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({
+        error: 'unknown or missing "range"; expected one of ' + PROVIDER_RANGES.join(', '),
+      }))
+      return
+    }
+    try {
+      const snapshot = await usageView(range)
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(snapshot))
+    } catch (error) {
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  return webServer.register({
+    kind: 'exact',
+    path: '/tokbook/usage',
+    handler: handleUsage,
+  })
+}
+
+/** Bind the quota route (订阅额度 tab) to a snapshot provider. Returns the
+ * disposer. An optional `?provider=` query fetches that single provider's
+ * card only, so the client can render each card as soon as it is ready
+ * instead of waiting for every provider. An optional `&refresh=1` bypasses
+ * the per-card TTL cache (explicit or timed refresh must re-hit the API). */
+export function registerTokBookQuotaRoute(
+  webServer: WebServerLike | undefined,
+  quotaView: () => QuotaView | Promise<QuotaView>,
+  quotaCardOf: (provider: string, force?: boolean) => Promise<QuotaCard>,
+): () => void {
+  if (webServer === undefined) return () => {}
+
+  const handleQuota = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (req.method !== 'GET') return refuse(res, 405, 'method not allowed')
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    try {
+      const params = new URL(req.url ?? '/', 'http://tokbook.local').searchParams
+      const provider = params.get('provider')
+      if (provider !== null && provider !== '') {
+        const force = params.get('refresh') === '1'
+        const card = await quotaCardOf(provider, force)
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(card))
+        return
+      }
+      const snapshot = await quotaView()
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(snapshot))
+    } catch (error) {
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  return webServer.register({
+    kind: 'exact',
+    path: '/tokbook/quota',
+    handler: handleQuota,
+  })
 }
