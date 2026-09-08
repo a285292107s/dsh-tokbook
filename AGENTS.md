@@ -10,6 +10,36 @@ These notes keep agent behavior aligned with how this repo actually works. More
 specific instructions win; when a task enters one of the areas below, read the
 linked file before changing code.
 
+## Working with the maintainer (standing preferences)
+
+This repo has exactly one maintainer — me — developing with AI assistance. The
+three rules below are defaults for every task unless I say otherwise:
+
+1. **Clarify intent before acting — don't guess.** When I give you a task,
+   first analyze my intent: the outcome I want and the constraints that apply.
+   If anything material is unclear — scope, target, tradeoffs, what "done"
+   looks like — ask me directly and make sure we share the same picture before
+   you change anything. Only mechanical, unambiguous work proceeds without
+   asking.
+
+2. **Reason from first principles.** Start from the underlying goal and what
+   is actually true in this repo (code, data, constraints), not from familiar
+   recipes or habits. State your assumptions; question inherited choices —
+   including earlier AI decisions and docs — when they no longer earn their
+   keep, and say so instead of silently following them.
+
+3. **One maintainer, AI-assisted — no over-defensive design.** Prefer the
+   simplest design that meets the need. Do not add speculative structure:
+   abstractions for futures that may not come, defensive code for scenarios
+   that have not happened, unrequested config knobs, or extra tests/checks
+   beyond what is needed. Protections that exist for observed reasons (the
+   ledger's single-writer and dedupe invariants) stay; do not add new ones
+   nobody asked for. When a simpler option trades away only a speculative
+   safeguard, take the simpler option.
+
+> 原话(维护者):① 先分析意图;不清晰时**不要猜测,向我提问**,确保认知同步;
+> ② **从第一性原理出发**思考;③ 单人维护 + AI 辅助开发,**不做过度防御性设计**。
+
 ## Package manager & commands
 
 This is a single pnpm package (`pnpm-workspace.yaml` only pins the esbuild
