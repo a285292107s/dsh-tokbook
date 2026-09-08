@@ -19,7 +19,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { PROVIDER_RANGES, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type TokBookOverview } from './types.ts'
-import type { ManualPricingParse } from './pricing.ts'
+import type { ManualPricingParse, ManualProviderPricingParse } from './pricing.ts'
 
 /** The subset of the host webserver this plugin uses. */
 export interface WebServerLike {
@@ -272,6 +272,59 @@ export function registerTokBookPricingRoutes(
   return webServer.register({
     kind: 'exact',
     path: '/tokbook/pricing',
+    handler: handle,
+  })
+}
+
+/** Bind the provider-overlay pricing routes (价格表 tab's provider dimension):
+ * GET answers the read-only provider-overlay view (merged mirror + hand rows);
+ * PUT accepts the COMPLETE desired manual overlay
+ * `{ "<provider>": { "<model>": { inheritBase | segments, billing?, note } } }`,
+ * persists `provider-pricing.json`, and returns the parse verdict plus the
+ * fresh model-level + provider views. */
+export function registerTokBookProviderPricingRoutes(
+  webServer: WebServerLike | undefined,
+  pricingView: () => PricingView | Promise<PricingView>,
+  saveProviderPricing: (table: unknown) => Promise<ManualProviderPricingParse & { view: PricingView }>,
+): () => void {
+  if (webServer === undefined) return () => {}
+
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    if (req.method === 'GET') {
+      try {
+        const snapshot = await pricingView()
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ providerRows: snapshot.providerRows ?? [], dataDir: snapshot.dataDir }))
+      } catch (error) {
+        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+      }
+      return
+    }
+    if (req.method === 'PUT') {
+      const body = await readJsonBody(req)
+      try {
+        const result = await saveProviderPricing(body)
+        if (!result.ok) {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: result.error, view: result.view }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ ok: true, view: result.view }))
+      } catch (error) {
+        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+      }
+      return
+    }
+    return refuse(res, 405, 'method not allowed')
+  }
+
+  return webServer.register({
+    kind: 'exact',
+    path: '/tokbook/provider-pricing',
     handler: handle,
   })
 }

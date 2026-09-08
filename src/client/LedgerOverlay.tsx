@@ -343,7 +343,14 @@ function LedgerView({ overview }: {
             <div className="dtpl-hero-main">
               <span className="dtpl-total-k">累计词元</span>
               <span className="dtpl-total-num">{formatTokens(overview.totalTokens)}</span>
-              <span className="dtpl-hero-cost">{money(overview.totalCost)}</span>
+              <span className="dtpl-hero-money">
+                <span className="dtpl-hero-cost">{money(overview.spend)}<em className="dtpl-hero-cost-k">实际支出</em></span>
+                {overview.subscriptionValue > 0 && (
+                  <span className="dtpl-hero-value" title="订阅通道按官方价折算的价值——非实际扣款，不加入上方支出">
+                    <b>{money(overview.subscriptionValue)}</b> 订阅价值
+                  </span>
+                )}
+              </span>
             </div>
             <div className="dtpl-hero-meta">
               <span className="dtpl-meta"><b className="dtpl-meta-n">{overview.sessions}</b> 会话</span>
@@ -511,7 +518,12 @@ function ProviderCard({ card, money }: { card: ProviderUsageCard; money: (value:
         </div>
         <div className="dtpl-provider-nums">
           <span className="dtpl-provider-tokens">{formatTokens(cardTokens)}</span>
-          <span className="dtpl-provider-cost">{money(card.cost)}</span>
+          <span className="dtpl-provider-cost">
+            <span className="dtpl-provider-spend">{money(card.spend)}</span>
+            {card.subscriptionValue > 0 && (
+              <span className="dtpl-provider-value" title="订阅通道价值（非实际扣款）">{money(card.subscriptionValue)} 订阅价值</span>
+            )}
+          </span>
         </div>
       </header>
       <div className="dtpl-provider-models">
@@ -525,7 +537,12 @@ function ProviderCard({ card, money }: { card: ProviderUsageCard; money: (value:
             </div>
             <div className="dtpl-model-nums">
               <span className="dtpl-val">{formatTokens(m.tokens)}</span>
-              <span className="dtpl-provider-model-sub">{m.totals.requests} 请求 · {money(m.cost)}</span>
+              <span className="dtpl-provider-model-sub">
+                {m.totals.requests} 请求 ·{' '}
+                {m.spend > 0
+                  ? money(m.spend)
+                  : <><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-sub-k">订阅价值</em></>}
+              </span>
             </div>
           </div>
         ))}
@@ -619,6 +636,12 @@ function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <p className="dtpl-doc-sub">
           金额 = 按每模型价格表（每百万词元多少元）逐条计价后累加。价格表存在本机、
           可能跟不上厂商最新费率——所以<b>金额是近似值</b>，词元数不受影响。
+        </p>
+        <p className="dtpl-doc-sub">
+          计价按 <b>(Provider, 模型)</b> 双维解析：同一个模型串在官方 API 与订阅通道里的
+          计费性质不同，价格也可按记录时间的不同调价段变化。金额分成两个桶——
+          <b>实际支出</b>（按量通道真金白银的花费）与 <b>订阅价值</b>（订阅通道按官方价折算
+          的“省了多少”，<b>不是现金</b>，也不会混入上方支出数字）。
         </p>
       </section>
 
@@ -814,7 +837,11 @@ function ModelBreakdown({ byModel, totalTokens, money }: {
             </div>
             <div className="dtpl-model-nums">
               <span className="dtpl-val">{formatTokens(totalsOf(m.totals))}</span>
-              <span className="dtpl-cost">{money(m.cost)}</span>
+              <span className="dtpl-cost">
+                {m.spend > 0
+                  ? money(m.spend)
+                  : <><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-sub-k">订阅价值</em></>}
+              </span>
             </div>
           </div>
         ))}
@@ -834,12 +861,16 @@ function RecentList({ records, unpricedModels, money }: {
   if (records.length === 0) return null
   const rows = records.slice(0, RECENT_VISIBLE)
   const unpriced = new Set(unpricedModels)
-  const sumCost = rows.reduce((acc, r) => acc + r.cost, 0)
+  const sumSpend = rows.reduce((acc, r) => acc + r.spend, 0)
+  const sumValue = rows.reduce((acc, r) => acc + r.subscriptionValue, 0)
   return (
     <section className="dtpl-recent-sec">
       <header className="dtpl-recent-head">
         <h2 className="dtpl-sec-title">最近记录</h2>
-        <span className="dtpl-recent-head-sum">近 {rows.length} 条 · 合计 {money(sumCost)}</span>
+        <span className="dtpl-recent-head-sum">
+          近 {rows.length} 条 · 实际 {money(sumSpend)}
+          {sumValue > 0 ? ` · 订阅价值 ${money(sumValue)}` : ''}
+        </span>
       </header>
       <ul className="dtpl-recent">
         {rows.map((r) => (
@@ -890,7 +921,9 @@ function RecentRow({ record, unpriced, money }: {
         className="dtpl-recent-cost"
         title={costTitle}
       >
-        {failed ? '—' : money(record.cost)}
+        {failed ? '—' : record.subscriptionValue > 0 && record.spend === 0
+          ? <><b className="dtpl-sub-amt">{money(record.subscriptionValue)}</b><em className="dtpl-sub-k">订阅价值</em></>
+          : money(record.cost)}
       </span>
     </li>
   )

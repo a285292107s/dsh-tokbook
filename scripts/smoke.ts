@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
-import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE } from '../src/pricing.ts'
+import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, coerceProviderPricing, readProviderPricing, resolvePriced, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE } from '../src/pricing.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
@@ -227,7 +227,16 @@ console.log('end-to-end: real-shaped DSH events -> JSONL ledger -> aggregate -> 
     check('totals: failures = 2 (retry + turnEnd)', summary.total.failures === 2, `got ${summary.total.failures}`)
     check('cost is non-zero', costed.totalCost > 0, `got ${costed.totalCost}`)
     check('byDay populated', summary.byDay.length === 1 && totalsTokens(summary.byDay[0]!.totals) === 3780, `got ${totalsTokens(summary.byDay[0]!.totals)}`)
-    check('byModel populated', summary.byModel.length === 2)
+    // Aggregation identity is (provider, model): the two deepseek rows group
+    // under their provider, and the two unattributed failure rows (retry +
+    // turnEnd carry the last-known model but no provider header) form a third
+    // row under the '' provider — never silently merged into the billed rows.
+    check('byModel split by (provider, model)',
+      summary.byModel.length === 3
+        && summary.byModel.some(r => r.provider === 'deepseek' && r.model === 'deepseek-chat' && r.totals.requests === 2)
+        && summary.byModel.some(r => r.provider === 'deepseek' && r.model === 'deepseek-reasoner' && r.totals.requests === 1)
+        && summary.byModel.some(r => r.provider === '' && r.model === 'deepseek-reasoner' && r.totals.failures === 2),
+      `got ${summary.byModel.map(r => `${r.provider}|${r.model}|r${String(r.totals.requests)}f${String(r.totals.failures)}`).join(',')}`)
     check('recent has rows', summary.recent.length === 5)
     check('totalTokens matches buckets', totalsTokens(costed.total) === 3780, `got ${totalsTokens(costed.total)}`)
   } finally {
@@ -549,6 +558,158 @@ console.log('quota: opencode-go real endpoint parse (usage.rolling/percent/reset
   // Empty body → windows 0 (the fetcher turns this into an error card).
   const empty = parseOpenCodeGoUsage({ usage: {} } as never, now)
   check('go parse: empty usage yields no windows', empty.windows.length === 0)
+}
+
+console.log('dual-dimension pricing: provider overlay resolution')
+{
+  // Base table: deepseek-v4-flash carries an official time-rule history
+  // (old price until 2026-08-16, new peak price after).
+  const base: Record<string, { base: Record<string, number>; contextTiers: unknown[]; dailySlots: unknown[]; timeRules: unknown[] }> = {}
+  const dsBase = { inputPerMillion: 2, outputPerMillion: 8 }
+  const dsOld = dayMillis('2026-08-16', 0) / 1000
+  const dsEnd = dayMillis('2026-08-20', 0) / 1000
+  base['deepseek-v4-flash'] = {
+    base: dsBase,
+    contextTiers: [],
+    dailySlots: [],
+    timeRules: [{ startTime: dsOld, endTime: dsEnd - 1, rates: { inputPerMillion: 1, outputPerMillion: 4 } }],
+  }
+  // Provider overlay mirrors the real dsh-model-pricing shape: a metered
+  // official channel, a subscription channel with the SAME base model string,
+  // a prefixed subscription string (inheritBase), and a ¥0 placeholder entry
+  // for a relay whose real price is unknown (segments).
+  const overlay = coerceProviderPricing({
+    currency: 'RMB',
+    providers: [
+      {
+        provider: 'deepseek-official',
+        entries: [{ model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash' }],
+      },
+      {
+        provider: 'opencode-go',
+        entries: [{ model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }],
+      },
+      {
+        provider: 'commandcode',
+        entries: [{ model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }],
+      },
+      {
+        provider: 'relay',
+        entries: [{ model: 'unknown-relay-model', billing: 'metered', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }] }],
+      },
+    ],
+  })
+  check('provider overlay coerces', overlay !== null && overlay!['commandcode']!['deepseek/deepseek-v4-flash']?.billing === 'subscription')
+  if (overlay === null) throw new Error('overlay coerce failed')
+  const baseTable = base as never as Record<string, { base: Record<string, number>; contextTiers: unknown[]; dailySlots: unknown[]; timeRules: unknown[] }>
+
+  // inheritBase follows the base model's full rule set (time rules included).
+  const officialBefore = resolvePriced(baseTable, overlay, 'deepseek-official', 'deepseek-v4-flash', dayMillis('2026-08-15', 9), 0)
+  const officialAfter = resolvePriced(baseTable, overlay, 'deepseek-official', 'deepseek-v4-flash', dayMillis('2026-08-17', 9), 0)
+  check('inheritBase: old price before the time-rule window', officialBefore.prices.inputPerMillion === 2 && officialBefore.source === 'inheritBase', JSON.stringify(officialBefore.prices))
+  check('inheritBase: rule price inside the time-rule window', officialAfter.prices.inputPerMillion === 1 && officialAfter.key.ruleStart === dsOld, JSON.stringify(officialAfter.prices))
+
+  // Same model string, two providers → different billing natures.
+  const opencode = resolvePriced(baseTable, overlay, 'opencode-go', 'deepseek-v4-flash', dayMillis('2026-08-17', 9), 0)
+  check('same model on subscription provider is billed subscription', opencode.billing === 'subscription' && officialAfter.billing === 'metered')
+
+  // Prefixed model string hits the provider entry via inheritBase.
+  const cc = resolvePriced(baseTable, overlay, 'commandcode', 'deepseek/deepseek-v4-flash', dayMillis('2026-08-17', 9), 0)
+  check('prefixed string resolves through its provider entry', cc.source === 'inheritBase' && cc.billing === 'subscription' && cc.prices.inputPerMillion === 1, JSON.stringify(cc))
+
+  // Segments: ¥0 placeholder; a record with no provider overlay and no base
+  // row stays unpriced.
+  const relay = resolvePriced(baseTable, overlay, 'relay', 'unknown-relay-model', dayMillis('2026-08-17', 9), 0)
+  check('segments entry resolves to its flat ¥0', relay.source === 'segments' && relay.prices.inputPerMillion === 0 && relay.billing === 'metered', JSON.stringify(relay))
+  const ghost = resolvePriced(baseTable, overlay, 'mystery', 'ghost-model', dayMillis('2026-08-17', 9), 0)
+  check('unknown provider + unknown model stays unpriced', ghost.source === 'unpriced' && ghost.prices.inputPerMillion === 0)
+}
+
+console.log('dual-bucket cost: spend vs subscriptionValue')
+{
+  const dir = await mkdtemp(join(tmpdir(), 'tokbook-dualbucket-'))
+  try {
+    // Reuse the pricing overlay from the previous block, but compact: base
+    // table has deepseek-v4-flash; the official channel bills metered, the
+    // opencode-go channel bills subscription for the SAME model string.
+    const base: Record<string, { base: Record<string, number>; contextTiers: unknown[]; dailySlots: unknown[]; timeRules: unknown[] }> = {
+      'deepseek-v4-flash': { base: { inputPerMillion: 2, outputPerMillion: 8 }, contextTiers: [], dailySlots: [], timeRules: [] },
+    }
+    const overlay = coerceProviderPricing({
+      currency: 'RMB',
+      providers: [
+        { provider: 'deepseek-official', entries: [{ model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash' }] },
+        { provider: 'opencode-go', entries: [{ model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }] },
+        { provider: 'commandcode', entries: [{ model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }] },
+      ],
+    })
+    if (overlay === null) throw new Error('overlay coerce failed')
+    const resolve: (r: UsageRecord) => { ruleStart: number; ruleEnd: number; tier: number; slot: number } = (r) => {
+      const usage = r.usage
+      const ctx = usage === undefined ? 0 : usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+      return resolvePriced(base, overlay, r.provider, r.model, r.time, ctx).key
+    }
+    const t = dayMillis('2026-08-17', 9)
+    const recs: UsageRecord[] = [
+      // metered official channel, 1M input → ¥2 (spend)
+      { requestId: 'official-1', time: t, sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-v4-flash', usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+      // subscription channel, same model string, 1M input → ¥2 (value)
+      { requestId: 'opencode-1', time: t, sessionId: 's2', provider: 'opencode-go', model: 'deepseek-v4-flash', usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+      // prefixed string under commandcode subscription → value, priced via inheritBase
+      { requestId: 'cc-1', time: t, sessionId: 's3', provider: 'commandcode', model: 'deepseek/deepseek-v4-flash', usage: { inputTokens: 500_000, outputTokens: 0 } },
+      // unattributed model with base price → metered (spend)
+      { requestId: 'direct-1', time: t, sessionId: 's4', model: 'deepseek-v4-flash', usage: { inputTokens: 500_000, outputTokens: 0 } },
+    ]
+    const summary = summarizeRecords(recs, resolve)
+    const costed = attachCosts({ dataDir: dir, ...summary }, base, overlay)
+    check('totalCost = 2 + 2 + 1 + 1 = ¥6', Math.abs(costed.totalCost - 6) < 1e-9, `got ${costed.totalCost}`)
+    check('spend = official 2 + direct 1 = ¥3', Math.abs(costed.spend - 3) < 1e-9, `got ${costed.spend}`)
+    check('subscriptionValue = opencode 2 + commandcode 1 = ¥3', Math.abs(costed.subscriptionValue - 3) < 1e-9, `got ${costed.subscriptionValue}`)
+    // Three distinct (provider, model) rows — the same model string must not
+    // merge across providers; the prefixed string is its own row too.
+    check('byModel split by provider: 4 rows', costed.byModel.length === 4, `got ${costed.byModel.length}`)
+    const official = costed.byModel.find(r => r.provider === 'deepseek-official' && r.model === 'deepseek-v4-flash')
+    const opencode = costed.byModel.find(r => r.provider === 'opencode-go' && r.model === 'deepseek-v4-flash')
+    check('official row: spend only', official !== undefined && Math.abs(official!.cost - 2) < 1e-9 && Math.abs(official!.spend - 2) < 1e-9 && official!.subscriptionValue === 0)
+    check('opencode row: value only', opencode !== undefined && Math.abs(opencode!.cost - 2) < 1e-9 && Math.abs(opencode!.subscriptionValue - 2) < 1e-9 && opencode!.spend === 0)
+    // recent entries split too
+    const recent = costRecentEntries(recs, base, overlay)
+    const officialRecent = recent.find(r => r.requestId === 'official-1')
+    const opencodeRecent = recent.find(r => r.requestId === 'opencode-1')
+    check('recent official: spend', officialRecent?.cost === 2 && officialRecent?.spend === 2 && officialRecent?.subscriptionValue === 0)
+    check('recent opencode: value', opencodeRecent?.cost === 2 && opencodeRecent?.subscriptionValue === 2 && opencodeRecent?.spend === 0)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+console.log('provider overlay file round-trip')
+{
+  const dir = await mkdtemp(join(tmpdir(), 'tokbook-provider-'))
+  try {
+    const feed = {
+      version: 3,
+      updatedAt: 1788810809,
+      currency: 'RMB',
+      providers: [
+        {
+          provider: 'commandcode',
+          entries: [{ model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', note: '订阅价值' }],
+        },
+        { provider: 'dots-ai', entries: [{ model: 'dots3-note-prev', billing: 'metered', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }] }] },
+      ],
+    }
+    const synced = join(dir, PROVIDER_PRICING_CCSA_FILE)
+    await writeFile(synced, JSON.stringify(feed), 'utf8')
+    const table = await readProviderPricing(dir, { error: () => {} })
+    check('readProviderPricing loads the mirror', table['commandcode']?.['deepseek/deepseek-v4-flash']?.billing === 'subscription' && table['dots-ai']?.['dots3-note-prev']?.segments?.[0]?.rate.inputPerMillion === 0)
+    check('unknown provider absent', table['nope'] === undefined)
+    // A provider entry with neither inheritBase nor segments is dropped.
+    const junk = coerceProviderPricing({ currency: 'RMB', providers: [{ provider: 'p', entries: [{ model: 'm', note: 'nothing' }] }] })
+    check('bare provider entry rejected', junk !== null && junk['p'] === undefined)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 }
 
 if (failed > 0) {

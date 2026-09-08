@@ -6,11 +6,21 @@
  * replace a model's cloud rules wholesale. Absent files mean no pricing; a
  * malformed file reads as empty, so a broken table never blocks the route.
  *
+ * A second mirror — the **provider overlay** (`<data dir>/provider-pricing.ccsa.json`)
+ * — maps exact ledger model strings per provider route to a billing nature
+ * (`metered` vs `subscription`) and a price source: follow another base model's
+ * full rule set (`inheritBase`), or an explicit user timeline of flat segment
+ * prices (`segments`). Resolution is therefore dual-dimensional: the effective
+ * price of one record comes from `(provider, model)` — never `model` alone —
+ * resolved at the record's own timestamp, and the resulting amount lands in
+ * either the real-spend bucket or the subscription-value bucket.
+ *
  * Every record is priced individually through the rule chain — time-rule
  * container first, then context tier, then peak slot — and the aggregation
- * keeps rows per (day, model, rate identity), so re-pricing under an updated
- * table needs no rebuild. The context size for tier matching is approximated
- * by the request's input-side tokens (input + cacheRead + cacheWrite).
+ * keeps rows per (day, model, provider, rate identity), so re-pricing under an
+ * updated table needs no rebuild. The context size for tier matching is
+ * approximated by the request's input-side tokens (input + cacheRead +
+ * cacheWrite).
  *
  * @module dsh-tokbook/pricing
  */
@@ -18,7 +28,7 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
-  ContextTier, DailySlot, ModelPricing, ModelRates, PricingTable, PricingViewRow, RateKey, TimeRule, UsageTotals,
+  BillingNature, ContextTier, DailySlot, ModelPricing, ModelRates, PricingSegment, PricingTable, PricingViewRow, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, TimeRule, UsageTotals,
 } from './types.ts'
 
 /** The hand-maintained pricing file inside the data directory. */
@@ -27,11 +37,20 @@ export const PRICING_FILE = 'pricing.json'
 /** The cloud-feed mirror written on startup. */
 export const PRICING_CCSA_FILE = 'pricing.ccsa.json'
 
+/** The provider-overlay mirror written on startup. */
+export const PROVIDER_PRICING_CCSA_FILE = 'provider-pricing.ccsa.json'
+
+/** The hand-maintained provider-overlay file (user edits win over the mirror). */
+export const PROVIDER_PRICING_FILE = 'provider-pricing.json'
+
 /** Default domestic (China) cloud pricing feed (¥ per million tokens, RMB). */
 export const DEFAULT_PRICING_URL_DOMESTIC = 'https://gitee.com/oyw125/model-price-table/raw/master/model_pricing.json'
 
 /** Default overseas cloud pricing feed (same table mirrored to GitHub). */
 export const DEFAULT_PRICING_URL_OVERSEAS = 'https://raw.githubusercontent.com/LaoYueHanNi/model-price-table/master/model_pricing.json'
+
+/** Default provider-overlay pricing feed (dsh-model-pricing mirror). */
+export const DEFAULT_PROVIDER_PRICING_URL = 'https://raw.githubusercontent.com/a285292107s/dsh-model-pricing/master/provider_pricing.json'
 
 /** Stand-in RMB-per-USD rate until the feed carries a usable one. */
 export const DEFAULT_USD_EXCHANGE_RATE = 7
@@ -42,6 +61,7 @@ export interface PricingSourceInput {
   pricingUrl?: string
   pricingUrlDomestic?: string
   pricingUrlOverseas?: string
+  pricingProviderUrl?: string
   pricingRegion?: PricingRegion
 }
 
@@ -53,6 +73,13 @@ export function resolvePricingUrl(input: PricingSourceInput = {}): string {
     return input.pricingUrlOverseas ?? DEFAULT_PRICING_URL_OVERSEAS
   }
   return input.pricingUrlDomestic ?? DEFAULT_PRICING_URL_DOMESTIC
+}
+
+/** Resolve the provider-overlay feed URL: an explicit `pricingProviderUrl`
+ * wins; otherwise the mirror default (which is provider-agnostic — the same
+ * repo holds both layers, so the region split does not apply here). */
+export function resolveProviderPricingUrl(input: PricingSourceInput = {}): string {
+  return input.pricingProviderUrl ?? DEFAULT_PROVIDER_PRICING_URL
 }
 
 function isRate(value: unknown): value is number {
@@ -276,6 +303,304 @@ export function cloudToTable(feed: CloudPricingData): PricingTable {
 }
 
 // ---------------------------------------------------------------------------
+// Provider overlay feed (dsh-model-pricing `provider_pricing.json`) → table
+// ---------------------------------------------------------------------------
+
+interface CloudProviderSegment {
+  from?: unknown
+  to?: unknown
+  rate?: unknown
+  note?: unknown
+}
+
+interface CloudProviderEntry {
+  model?: unknown
+  billing?: unknown
+  inheritBase?: unknown
+  segments?: unknown
+  placeholder?: unknown
+  note?: unknown
+}
+
+interface CloudProviderGroup {
+  provider?: unknown
+  entries?: unknown
+}
+
+interface CloudProviderData {
+  currency?: unknown
+  providers?: unknown
+}
+
+function isBillingNature(value: unknown): value is BillingNature {
+  return value === 'metered' || value === 'subscription'
+}
+
+function coerceSegment(value: unknown): PricingSegment | null {
+  if (typeof value !== 'object' || value === null) return null
+  const seg = value as CloudProviderSegment
+  if (typeof seg.rate !== 'object' || seg.rate === null || !isModelPricing(seg.rate)) return null
+  return {
+    ...(seg.from !== undefined && typeof seg.from === 'number' && Number.isFinite(seg.from) ? { from: seg.from } : {}),
+    ...(seg.to !== undefined && typeof seg.to === 'number' && Number.isFinite(seg.to) ? { to: seg.to } : {}),
+    rate: seg.rate,
+    ...(typeof seg.note === 'string' ? { note: seg.note } : {}),
+  }
+}
+
+function coerceProviderEntry(value: unknown): ProviderPricingEntry | null {
+  if (typeof value !== 'object' || value === null) return null
+  const raw = value as CloudProviderEntry
+  const out: ProviderPricingEntry = {}
+  if (raw.billing !== undefined) {
+    if (!isBillingNature(raw.billing)) return null
+    out.billing = raw.billing
+  }
+  const inheritBase = typeof raw.inheritBase === 'string' && raw.inheritBase !== '' ? raw.inheritBase : undefined
+  const segments = Array.isArray(raw.segments)
+    ? (raw.segments as unknown[]).map(coerceSegment).filter((seg): seg is PricingSegment => seg !== null)
+    : []
+  if (inheritBase !== undefined) out.inheritBase = inheritBase
+  if (segments.length > 0) out.segments = segments
+  // A bare entry with neither source is a useless override: reject it (keeps
+  // the table honest instead of silently pricing everything to ¥0).
+  if (inheritBase === undefined && segments.length === 0) return null
+  if (raw.placeholder === true) out.placeholder = true
+  if (typeof raw.note === 'string') out.note = raw.note
+  return out
+}
+
+function coerceProviderGroup(value: unknown): { provider: string; entries: Record<string, ProviderPricingEntry> } | null {
+  if (typeof value !== 'object' || value === null) return null
+  const group = value as CloudProviderGroup
+  if (typeof group.provider !== 'string' || group.provider === '' || !Array.isArray(group.entries)) return null
+  const entries: Record<string, ProviderPricingEntry> = {}
+  for (const raw of group.entries as unknown[]) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const model = (raw as CloudProviderEntry).model
+    if (typeof model !== 'string' || model === '') continue
+    const entry = coerceProviderEntry(raw)
+    if (entry !== null) entries[model] = entry
+  }
+  if (Object.keys(entries).length === 0) return null
+  return { provider: group.provider, entries }
+}
+
+/** Coerce the provider-overlay feed into the two-level table. Null when the
+ *  feed is not the expected shape. */
+export function coerceProviderPricing(value: unknown): ProviderPricingTable | null {
+  if (typeof value !== 'object' || value === null) return null
+  const feed = value as CloudProviderData
+  if (!Array.isArray(feed.providers)) return null
+  if (typeof feed.currency !== 'string' || feed.currency !== 'RMB') return null
+  const table: ProviderPricingTable = {}
+  for (const raw of feed.providers as unknown[]) {
+    const group = coerceProviderGroup(raw)
+    if (group === null) continue
+    table[group.provider] = group.entries
+  }
+  return table
+}
+
+/** Coerce a hand-edited provider-overlay body (the `Record<provider, Record<
+ *  model, entry>>` shape of `provider-pricing.json`) into the two-level table,
+ *  dropping malformed entries — never fatal, like the model-level manual file.
+ */
+export function coerceManualProviderPricing(value: unknown): ProviderPricingTable {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const table: ProviderPricingTable = {}
+  for (const [provider, models] of Object.entries(value)) {
+    if (provider === '' || typeof models !== 'object' || models === null || Array.isArray(models)) continue
+    const entries: Record<string, ProviderPricingEntry> = {}
+    for (const [model, raw] of Object.entries(models)) {
+      if (model === '' || typeof raw !== 'object' || raw === null) continue
+      const entry = coerceProviderEntry(raw)
+      if (entry !== null) entries[model] = entry
+    }
+    if (Object.keys(entries).length > 0) table[provider] = entries
+  }
+  return table
+}
+
+/** Read the hand-edited `provider-pricing.json` into the two-level table. */
+export async function readManualProviderPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ProviderPricingTable> {
+  return coerceManualProviderPricing(await readJsonFile(dir, PROVIDER_PRICING_FILE, logger))
+}
+
+/** Read the EFFECTIVE provider overlay: the synced cloud mirror as the base,
+ * the hand-edited `provider-pricing.json` layered on top — a manual entry
+ * wins wholesale for that exact (provider, model). Absent files read as empty,
+ * so a broken table never blocks the route. */
+export async function readProviderPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ProviderPricingTable> {
+  const merged: ProviderPricingTable = { ...await readSyncedProviderPricing(dir, logger) }
+  const manual = await readManualProviderPricing(dir, logger)
+  for (const [provider, entries] of Object.entries(manual)) {
+    merged[provider] = { ...merged[provider], ...entries }
+  }
+  return merged
+}
+
+async function readSyncedProviderPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ProviderPricingTable> {
+  const raw = await readJsonFile(dir, PROVIDER_PRICING_CCSA_FILE, logger)
+  if (raw === null) return {}
+  const coerced = coerceProviderPricing(raw)
+  if (coerced === null) {
+    logger.error(`[tokbook] ${PROVIDER_PRICING_CCSA_FILE} is not a valid RMB provider overlay; treating as absent`)
+    return {}
+  }
+  return coerced
+}
+
+/** Build the provider-overlay rows the 价格表 tab renders for its provider
+ *  dimension: every (provider, model) of the hand-edited layer first (they are
+ *  the ones the user maintains, and a hand row wins over a mirror row of the
+ *  same pair), then every mirror (provider, model) not shadowed. Groups are
+ *  alphabetical by provider, hand rows before mirror rows within one provider. */
+export async function readProviderPricingView(
+  dir: string,
+  logger: { error(...args: unknown[]): void } = console,
+): Promise<{ rows: ProviderPricingViewRow[]; dataDir: string }> {
+  const rows: ProviderPricingViewRow[] = []
+  const seen = new Set<string>()
+  const toRow = (provider: string, model: string, entry: ProviderPricingEntry, manual: boolean): ProviderPricingViewRow => ({
+    provider,
+    model,
+    manual,
+    ...(entry.billing !== undefined ? { billing: entry.billing } : {}),
+    ...(entry.inheritBase !== undefined ? { inheritBase: entry.inheritBase } : {}),
+    ...(entry.segments !== undefined ? { segments: entry.segments } : {}),
+    ...(entry.placeholder === true ? { placeholder: true } : {}),
+    ...(entry.note !== undefined ? { note: entry.note } : {}),
+  })
+  const manual = await readManualProviderPricing(dir, logger)
+  for (const [provider, entries] of Object.entries(manual)) {
+    for (const [model, entry] of Object.entries(entries)) {
+      rows.push(toRow(provider, model, entry, true))
+      seen.add(`${provider}\n${model}`)
+    }
+  }
+  const synced = await readSyncedProviderPricing(dir, logger)
+  for (const [provider, entries] of Object.entries(synced)) {
+    for (const [model, entry] of Object.entries(entries)) {
+      if (seen.has(`${provider}\n${model}`)) continue // hand row shadows the mirror row
+      rows.push(toRow(provider, model, entry, false))
+    }
+  }
+  rows.sort((a, b) =>
+    a.provider < b.provider ? -1 : a.provider > b.provider ? 1
+      : a.model < b.model ? -1 : a.model > b.model ? 1 : 0)
+  return { rows, dataDir: dir }
+}
+
+/** Outcome of validating a client-submitted manual provider-overlay body. */
+export type ManualProviderPricingParse =
+  | { ok: true; table: ProviderPricingTable }
+  | { ok: false; error: string }
+
+/** Validate a manual provider-overlay body (as sent by the 价格表 tab) into
+ *  the two-level table. The body is the COMPLETE desired manual overlay
+ *  (`provider` → `model` → entry), whole-table semantics like the model-level
+ *  manual file: an omitted (provider, model) drops its override. A malformed
+ *  body is REJECTED with a reason — this is the write path, where a typo must
+ *  surface. The empty object is valid: it removes every manual override. */
+export function parseManualProviderPricingInput(value: unknown): ManualProviderPricingParse {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: '手工 provider 覆盖必须是 JSON 对象（provider → model → 条目）' }
+  }
+  const table: ProviderPricingTable = {}
+  for (const [provider, models] of Object.entries(value)) {
+    if (provider === '') return { ok: false, error: '存在空 provider 名' }
+    if (provider.length > 128) return { ok: false, error: `provider 名过长：${provider.slice(0, 40)}…` }
+    if (typeof models !== 'object' || models === null || Array.isArray(models)) {
+      return { ok: false, error: `「${provider}」的覆盖必须是对象（model → 条目）` }
+    }
+    const entries: Record<string, ProviderPricingEntry> = {}
+    for (const [model, raw] of Object.entries(models)) {
+      if (model === '') return { ok: false, error: `「${provider}」下存在空模型名` }
+      if (model.length > 256) return { ok: false, error: `模型名过长：${model.slice(0, 40)}…` }
+      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+        return { ok: false, error: `「${provider}/${model}」的条目必须是对象` }
+      }
+      const entry = raw as Record<string, unknown>
+      if (entry.billing !== undefined && !isBillingNature(entry.billing)) {
+        return { ok: false, error: `「${provider}/${model}」的 billing 必须是 "metered" 或 "subscription"` }
+      }
+      const out: ProviderPricingEntry = {}
+      if (entry.billing !== undefined) out.billing = entry.billing
+      const inheritBase = entry.inheritBase
+      const segments = Array.isArray(entry.segments) ? entry.segments as unknown[] : undefined
+      if (inheritBase !== undefined && (typeof inheritBase !== 'string' || inheritBase === '')) {
+        return { ok: false, error: `「${provider}/${model}」的 inheritBase 必须是非空模型名` }
+      }
+      if (segments !== undefined) {
+        const parsed: PricingSegment[] = []
+        for (const rawSegment of segments) {
+          const segment = parseProviderSegment(rawSegment)
+          if (segment === null) {
+            return { ok: false, error: `「${provider}/${model}」的 segments 含非法段（需要 rate.inputPerMillion / outputPerMillion）` }
+          }
+          parsed.push(segment)
+        }
+        if (parsed.length === 0) return { ok: false, error: `「${provider}/${model}」的 segments 不能为空` }
+        out.segments = parsed
+      }
+      // inheritBase and segments are alternative price sources; an entry that
+      // names both is ambiguous (resolution would silently prefer one) — reject.
+      if (inheritBase !== undefined && segments !== undefined) {
+        return { ok: false, error: `「${provider}/${model}」不能同时给出 inheritBase 与 segments` }
+      }
+      if (inheritBase !== undefined) out.inheritBase = inheritBase
+      // A row must override something: an inheritBase or at least one segment.
+      if (out.inheritBase === undefined && out.segments === undefined) {
+        return { ok: false, error: `「${provider}/${model}」必须给出 inheritBase 或 segments（否则删除覆盖即可，不必保留空条目）` }
+      }
+      if (entry.placeholder === true) out.placeholder = true
+      if (typeof entry.note === 'string' && entry.note !== '') out.note = entry.note
+      entries[model] = out
+    }
+    if (Object.keys(entries).length > 0) table[provider] = entries
+  }
+  return { ok: true, table }
+}
+
+function parseProviderSegment(value: unknown): PricingSegment | null {
+  if (typeof value !== 'object' || value === null) return null
+  const seg = value as CloudProviderSegment
+  if (typeof seg.rate !== 'object' || seg.rate === null || !isModelPricing(seg.rate)) return null
+  const out: PricingSegment = { rate: seg.rate }
+  if (seg.from !== undefined) {
+    if (typeof seg.from !== 'number' || !Number.isFinite(seg.from)) return null
+    out.from = seg.from
+  }
+  if (seg.to !== undefined) {
+    if (typeof seg.to !== 'number' || !Number.isFinite(seg.to)) return null
+    out.to = seg.to
+  }
+  if (typeof seg.note === 'string' && seg.note !== '') out.note = seg.note
+  return out
+}
+
+/** Persist the hand-edited `provider-pricing.json` atomically (temp file +
+ *  rename; the same recipe the other writers use). Replaces the whole file. */
+export async function writeManualProviderPricing(
+  dir: string,
+  table: ProviderPricingTable,
+  logger: { error(...args: unknown[]): void } = console,
+): Promise<void> {
+  const target = join(dir, PROVIDER_PRICING_FILE)
+  const tmp = join(dir, `${PROVIDER_PRICING_FILE}.tmp`)
+  try {
+    await mkdir(dirname(target), { recursive: true })
+    await writeFile(tmp, `${JSON.stringify(table, null, 2)}\n`, 'utf8')
+    await unlink(target).catch(() => undefined)
+    await rename(tmp, target)
+  } catch (error) {
+    logger.error(`[tokbook] cannot write ${PROVIDER_PRICING_FILE}:`, error)
+    throw error
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Per-record rate resolution (the analyzer's rule chain)
 // ---------------------------------------------------------------------------
 
@@ -365,6 +690,118 @@ export function ratesForKey(rates: ModelRates, key: RateKey): ModelPricing {
       ? { rates: rule.rates, slots: rule.dailySlots ?? [] }
       : { rates: rates.base, slots: rates.dailySlots }
   return key.slot >= 0 ? node.slots[key.slot]?.rates ?? node.rates : node.rates
+}
+
+/** The largest epoch-second boundary an open-ended provider segment maps to
+ * (Year ~292M; JSON-safe, comfortably beyond any real timestamp). */
+const OPEN_SEGMENT_END = Number.MAX_SAFE_INTEGER
+
+/** How one (provider, model) resolved: which source won and what it meant. */
+export type PricedSource = 'inheritBase' | 'segments' | 'base' | 'unpriced'
+
+/** The outcome of resolving one (provider, model) record's price. */
+export interface PricedResolution {
+  /** The price applied at this record's timestamp. */
+  prices: ModelPricing
+  /** Rate identity under the effective rule container. */
+  key: RateKey
+  /** Billing nature of the channel; undefined = no provider entry (the cost
+   * layer then treats priced rows as metered by default). */
+  billing: BillingNature | undefined
+  /** Which resolution branch won. */
+  source: PricedSource
+  /** The effective `ModelRates` the resolution ran against (for callers that
+   * want to re-derive prices for a stored key later). */
+  effective: ModelRates
+}
+
+/** The effective rule container one (provider, model) record resolves against:
+ *  - a provider entry with `inheritBase` → that base model's FULL rules;
+ *  - a provider entry with `segments` → a flat container whose time rules are
+ *    the segment windows (outside any window the model's flat base applies, if
+ *    the model has one, else ¥0);
+ *  - otherwise → the model's own rules.
+ * Returns null when nothing can price the string (no entry AND no base row). */
+export function effectiveRatesOf(
+  base: PricingTable,
+  providers: ProviderPricingTable,
+  provider: string | undefined,
+  model: string,
+): ModelRates | null {
+  const entry = provider !== undefined && provider !== '' ? providers[provider]?.[model] : undefined
+  if (entry?.inheritBase !== undefined) {
+    const inherited = base[entry.inheritBase]
+    if (inherited !== undefined) return inherited
+    // Fall through: an inheritBase naming a model the base table lacks is a
+    // stale override — behave as if the entry were absent.
+  }
+  if (entry?.segments !== undefined && entry.segments.length > 0) {
+    const fallback = base[model]?.base ?? { inputPerMillion: 0, outputPerMillion: 0 }
+    const timeRules: TimeRule[] = entry.segments.map((segment) => ({
+      startTime: segment.from ?? 0,
+      endTime: segment.to === undefined ? OPEN_SEGMENT_END : Math.max(segment.to - 1, segment.from ?? 0),
+      rates: segment.rate,
+    }))
+    return { base: fallback, contextTiers: [], dailySlots: [], timeRules }
+  }
+  return base[model] ?? null
+}
+
+/** The billing nature of one (provider, model): the provider entry's explicit
+ * value, else 'metered' (rows the overlay does not cover are treated as real
+ * spend — the conservative default the plan's table assigns to 未知串 too). */
+export function billingOf(providers: ProviderPricingTable, provider: string | undefined, model: string): BillingNature {
+  const entry = provider !== undefined && provider !== '' ? providers[provider]?.[model] : undefined
+  return entry?.billing ?? 'metered'
+}
+
+/** Resolve the price one (provider, model) record was billed at — the dual
+ *  entry point that replaces the model-only `resolveRate` chain in the host:
+ *  a provider-overlay entry for the record's EXACT string wins (following
+ *  `inheritBase` into the base table's full rules, or `segments` by time),
+ *  then the base table's model row, else unpriced. Segments are half-open
+ *  `[from, to)` in epoch seconds; an entry outside every segment falls back to
+ *  the model's flat base price when the model has one, else ¥0. */
+export function resolvePriced(
+  base: PricingTable,
+  providers: ProviderPricingTable,
+  provider: string | undefined,
+  model: string,
+  timeMs: number,
+  contextTokens: number,
+  tzOffsetHours: number = -new Date().getTimezoneOffset() / 60,
+): PricedResolution {
+  const entry = provider !== undefined && provider !== '' ? providers[provider]?.[model] : undefined
+  // inheritBase: follow the full base rule set of the named modelId.
+  if (entry?.inheritBase !== undefined) {
+    const inherited = base[entry.inheritBase]
+    if (inherited !== undefined) {
+      const { prices, key } = resolveRate(inherited, timeMs, contextTokens, tzOffsetHours)
+      return { prices, key, billing: entry.billing, source: 'inheritBase', effective: inherited }
+    }
+  }
+  // segments: a flat price timeline owned by the provider entry.
+  if (entry?.segments !== undefined && entry.segments.length > 0) {
+    const effective = effectiveRatesOf(base, providers, provider, model)!
+    const { prices, key } = resolveRate(effective, timeMs, contextTokens, tzOffsetHours)
+    const seconds = Math.floor(timeMs / 1000)
+    const covered = entry.segments.some(segment =>
+      (segment.from ?? 0) <= seconds && (segment.to === undefined || seconds < segment.to))
+    const source: PricedSource = covered ? 'segments' : 'base'
+    return { prices, key, billing: entry.billing, source, effective }
+  }
+  const rules = base[model]
+  if (rules === undefined) {
+    return {
+      prices: { inputPerMillion: 0, outputPerMillion: 0 },
+      key: { ruleStart: 0, ruleEnd: 0, tier: 0, slot: -1 },
+      billing: undefined,
+      source: 'unpriced',
+      effective: { base: { inputPerMillion: 0, outputPerMillion: 0 }, contextTiers: [], dailySlots: [], timeRules: [] },
+    }
+  }
+  const { prices, key } = resolveRate(rules, timeMs, contextTokens, tzOffsetHours)
+  return { prices, key, billing: undefined, source: 'base', effective: rules }
 }
 
 /** Billed cost of one totals row at a resolved price: each bucket billed at
@@ -577,6 +1014,47 @@ export interface CloudSyncResult {
   models: number
   aliases: number
   usdExchangeRate: number
+}
+
+export interface ProviderSyncResult {
+  version: number
+  updatedAt: number
+  providers: number
+  entries: number
+}
+
+/** Fetch the provider-overlay pricing feed and mirror it verbatim into
+ * `<data dir>/provider-pricing.ccsa.json` (atomically: temp file + rename).
+ * The same 1MB / RMB guardrail as the base feed. */
+export async function syncProviderPricing(dir: string, url: string): Promise<ProviderSyncResult> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(5_000) })
+  if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
+  const text = await response.text()
+  if (text.length > 1_048_576) throw new Error('feed exceeds the 1MB limit')
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    throw new Error('feed is not valid JSON')
+  }
+  const table = coerceProviderPricing(value)
+  if (table === null) throw new Error('feed is not a valid RMB provider overlay')
+  const raw = value as { version?: unknown; updatedAt?: unknown }
+  const version = typeof raw.version === 'number' ? raw.version : 0
+  const updatedAt = typeof raw.updatedAt === 'number' ? raw.updatedAt : 0
+  const target = join(dir, PROVIDER_PRICING_CCSA_FILE)
+  const tmp = join(dir, `${PROVIDER_PRICING_CCSA_FILE}.tmp`)
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(tmp, text.endsWith('\n') ? text : `${text}\n`, 'utf8')
+  // Unlink before rename: Windows rename-over-existing fails intermittently.
+  await unlink(target).catch(() => undefined)
+  await rename(tmp, target)
+  return {
+    version,
+    updatedAt,
+    providers: Object.keys(table).length,
+    entries: Object.values(table).reduce((sum, models) => sum + Object.keys(models).length, 0),
+  }
 }
 
 /** Fetch the cloud pricing feed and mirror it verbatim into

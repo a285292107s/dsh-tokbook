@@ -19,7 +19,7 @@
 | [`docs/HMR.md`](HMR.md) | lessons / reference | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
 | [`docs/LESSONS.md`](LESSONS.md) | lessons | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
 | [`docs/skills.md`](skills.md) | reference | current | 改动涉及 DSH 技能系统或 `.dsh/skills` 时 |
-| [`docs/archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md) | process(已归档) | superseded | 定价/额度升级计划的历史——各阶段已落地,勿按它实现 |
+| [`docs/PLAN.provider-pricing.md`](PLAN.provider-pricing.md) | process | current | (provider, model) 双维定价 + 时间维度 + 双桶统计的实施计划——执行中；改 `src/pricing.ts`/`stats.ts`/价格相关 wire 前先读 |
 
 ## Doc meta 约定
 

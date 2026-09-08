@@ -192,10 +192,22 @@ const CSS = `
   font-size:28px;line-height:32px;font-weight:700;color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;
 }
+[data-plugin="dsh-tokbook"] .dtpl-hero-money{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-cost{
+  display:inline-flex;align-items:baseline;gap:4px;
   font-size:14px;line-height:20px;font-weight:600;color:var(--dtpl-accent);
   font-variant-numeric:tabular-nums;
 }
+[data-plugin="dsh-tokbook"] .dtpl-hero-cost-k{font-style:normal;font-weight:500;font-size:11px;color:var(--dtpl-fg-3);}
+[data-plugin="dsh-tokbook"] .dtpl-hero-value{
+  display:inline-flex;align-items:baseline;gap:4px;
+  font-size:12px;line-height:18px;color:var(--dtpl-fg-2);white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-hero-value b{color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;}
+/* 订阅价值 amount used inside model/provider/recent rows: value styled
+   distinctly from spend so a subscription-channel amount never reads as cash. */
+[data-plugin="dsh-tokbook"] .dtpl-sub-amt{color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;}
+[data-plugin="dsh-tokbook"] .dtpl-sub-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-3);margin-left:3px;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-meta{display:flex;flex-direction:column;gap:4px;align-items:flex-end;}
 [data-plugin="dsh-tokbook"] .dtpl-meta{
   display:inline-flex;align-items:baseline;gap:4px;
@@ -722,9 +734,12 @@ const CSS = `
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-cost{
+  display:flex;flex-direction:column;align-items:flex-end;gap:1px;
   color:var(--dtpl-accent);font-size:12px;line-height:18px;font-weight:600;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
+[data-plugin="dsh-tokbook"] .dtpl-provider-spend{font-weight:600;color:var(--dtpl-accent);}
+[data-plugin="dsh-tokbook"] .dtpl-provider-value{color:var(--dtpl-fg-3);font-weight:400;font-size:10px;line-height:14px;}
 [data-plugin="dsh-tokbook"] .dtpl-provider-model-sub{
   color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
   font-variant-numeric:tabular-nums;white-space:nowrap;
@@ -989,19 +1004,86 @@ const CSS = `
 }
 
 /* ── pricing tab (价格表) ───────────────────────────────────────────────── */
-/* View + maintenance of the per-model price table (¥/M). One list whose rows
-   are either manual (editable inputs, removable) or cloud (read-only with a
-   自定义 action). Rates line up in a 4-column strip under one header. */
+/* Two editing surfaces behind one segmented switch. Everything below reuses
+   the modal's tokens; the intent is data-dense but navigable: cloud reference
+   rows live in a bounded fold, provider rows are compact until edited. */
+
+/* Segmented mode switch (模型价 / Provider 覆盖层). */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-sec{display:flex;flex-direction:column;gap:10px;}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-modes{
+  display:inline-flex;gap:2px;align-self:flex-start;flex:none;
+  padding:2px;border-radius:9px;corner-shape:round;
+  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-mode{
+  appearance:none;border:0;background:transparent;
+  height:24px;padding:0 12px;
+  font:inherit;font-size:12px;line-height:18px;font-weight:500;
+  color:var(--dtpl-fg-2);white-space:nowrap;
+  border-radius:7px;corner-shape:round;cursor:pointer;
+  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-mode:hover{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-mode[aria-pressed="true"]{
+  color:var(--dtpl-fg);
+  background:var(--dtpl-surface);
+  box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-pane{display:flex;flex-direction:column;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-pane[hidden]{display:none;}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-intro{
   margin:0;font-size:12px;line-height:20px;color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-intro b{color:var(--dtpl-accent);font-weight:600;}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-intro b{color:var(--dtpl-fg);font-weight:600;}
 
-/* Filter bar: search + manual-count hint. */
+/* Surface containers. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-model-view,
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider{
+  display:flex;flex-direction:column;gap:10px;min-width:0;
+}
+
+/* Toolbar: scope chips (with live counts) + search. */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-bar{
   display:flex;align-items:center;gap:10px;flex-wrap:wrap;
 }
+[data-plugin="dsh-tokbook"] .dtpl-pricing-scopes{
+  display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;
+  padding:2px;border-radius:9px;corner-shape:round;
+  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-scope{
+  appearance:none;border:0;background:transparent;
+  display:inline-flex;align-items:center;gap:6px;
+  height:24px;padding:0 9px;
+  font:inherit;font-size:12px;line-height:18px;font-weight:500;
+  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
+  border-radius:7px;corner-shape:round;
+  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-scope:hover{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-scope[aria-pressed="true"]{
+  color:var(--dtpl-fg);
+  background:var(--dtpl-surface);
+  box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-scope-count{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;padding:0 5px;
+  border-radius:999px;corner-shape:round;
+  font-size:10px;line-height:1;font-weight:600;color:var(--dtpl-fg-2);
+  background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-scope[aria-pressed="true"] .dtpl-pricing-scope-count{
+  color:var(--dtpl-on-accent);
+  background:var(--dtpl-accent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-scope-reset{
+  appearance:none;border:0;background:transparent;
+  height:24px;padding:0 8px;
+  font:inherit;font-size:11px;line-height:16px;cursor:pointer;
+  color:var(--dtpl-accent);border-radius:7px;corner-shape:round;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-scope-reset:hover{background:color-mix(in srgb,var(--dtpl-accent) 10%,transparent);}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-filter{flex:1;min-width:160px;}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-search{
   width:100%;box-sizing:border-box;
@@ -1012,12 +1094,43 @@ const CSS = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-search::placeholder{color:var(--dtpl-fg-3);}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-search:focus{outline:none;border-color:var(--dtpl-accent);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-hint{
-  flex:none;color:var(--dtpl-fg-3);font-size:11px;line-height:16px;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-hint-on{color:var(--dtpl-accent);font-weight:600;}
 
-/* Column header + rows share one grid: model | 4 rates | actions. */
+/* Section headers of the model groups: label + count + context hint. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-head{
+  display:flex;align-items:baseline;gap:8px;
+  margin:10px 6px 2px;padding-top:6px;
+  border-top:.5px dashed var(--dtpl-border);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-head:first-child{
+  margin-top:4px;padding-top:0;border-top:none;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-title{
+  font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-count{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;padding:0 5px;
+  border-radius:999px;corner-shape:round;
+  font-size:10px;line-height:1;font-weight:600;
+  color:var(--dtpl-fg-2);
+  background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-head-accent .dtpl-pricing-sec-title{color:var(--dtpl-accent);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-head-accent .dtpl-pricing-sec-count{
+  color:var(--dtpl-on-accent);
+  background:var(--dtpl-accent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-head-warn .dtpl-pricing-sec-title{color:var(--dtpl-warn);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-head-warn .dtpl-pricing-sec-count{
+  color:#fff;
+  background:var(--dtpl-warn);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-sec-hint{
+  margin-left:auto;color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
+  text-align:right;
+}
+
+/* Column header + rows share one grid: model (grows) | 4 rates (fixed) | actions. */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-col-header,
 [data-plugin="dsh-tokbook"] .dtpl-pricing-row{
   display:grid;
@@ -1029,7 +1142,7 @@ const CSS = `
   font-size:10px;line-height:14px;color:var(--dtpl-fg-3);letter-spacing:.02em;
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-rates{
-  display:grid;grid-template-columns:repeat(4,minmax(52px,1fr));
+  display:grid;grid-template-columns:repeat(4,56px);
   gap:6px;min-width:0;
   font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
   font-variant-numeric:tabular-nums;white-space:nowrap;
@@ -1046,7 +1159,7 @@ const CSS = `
   border-top:.5px solid var(--dtpl-hairline);
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-row{
-  min-height:44px;padding:5px 6px;
+  min-height:40px;padding:6px 10px;
   border-bottom:.5px solid var(--dtpl-hairline);
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-row:last-child{border-bottom:none;}
@@ -1062,6 +1175,7 @@ const CSS = `
   display:flex;align-items:center;gap:7px;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-model-name{
+  flex:1 1 auto;min-width:0;
   font-size:12px;line-height:18px;font-weight:500;color:var(--dtpl-fg);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
@@ -1083,7 +1197,8 @@ const CSS = `
 }
 
 /* Rate cells: values are right-aligned tabular text; manual rows swap in
-   small number inputs with the same geometry. */
+   small number inputs with the same geometry (their width is 100% of the
+   fixed 56px track above). */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-rate{
   justify-self:end;color:var(--dtpl-fg);font-size:11px;line-height:18px;
   font-variant-numeric:tabular-nums;
@@ -1098,10 +1213,13 @@ const CSS = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-input:focus{outline:none;border-color:var(--dtpl-accent);}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-input::placeholder{color:var(--dtpl-fg-dim);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-select{
+  appearance:auto;text-align:left;cursor:pointer;
+}
 
 /* Actions column: one compact secondary/ghost button. */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-actions{
-  display:flex;justify-content:flex-end;
+  display:flex;justify-content:flex-end;gap:6px;align-items:center;
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-btn{
   flex:none;height:24px;padding:0 10px;
@@ -1134,15 +1252,18 @@ const CSS = `
 
 /* Empty + skeleton states. */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-empty{
-  margin:14px 0;text-align:center;font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
+  margin:12px 0;text-align:center;font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-skeleton{height:60px;border-radius:var(--dtpl-radius-sm);}
 /* Unpriced (ledger-billed, no table entry) rows: warning-tinted so the ¥0 gap
    is visible, with a dashed leading edge distinct from manual's solid accent. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-group-label{
-  margin:8px 6px 2px;font-size:11px;line-height:16px;color:var(--dtpl-warn);
-  font-weight:500;
+[data-plugin="dsh-tokbook"] .dtpl-pricing-empty-link{
+  appearance:none;border:0;background:transparent;
+  margin-left:8px;padding:0;
+  font:inherit;font-size:12px;line-height:18px;cursor:pointer;
+  color:var(--dtpl-accent);text-decoration:underline;text-underline-offset:2px;
 }
+[data-plugin="dsh-tokbook"] .dtpl-pricing-empty-link:hover{color:var(--dtpl-accent-hover,var(--dtpl-accent));}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-row-unpriced{
   background:color-mix(in srgb,var(--dtpl-warn) 7%,transparent);
   box-shadow:inset 2px 0 0 var(--dtpl-warn);
@@ -1153,9 +1274,46 @@ const CSS = `
   background:color-mix(in srgb,var(--dtpl-warn) 15%,transparent);
 }
 
+/* Cloud mirror fold: a bar toggling a bounded scroll region. Rows inside the
+   region keep their own sticky column header so rates stay aligned. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-cloud{
+  display:flex;flex-direction:column;margin-top:2px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-cloud-bar{
+  appearance:none;border:0;background:transparent;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;padding:6px 8px;border-radius:8px;corner-shape:round;
+  font:inherit;font-size:12px;line-height:18px;cursor:pointer;
+  color:var(--dtpl-fg);
+  transition:background .15s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-cloud-bar:hover{background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-cloud-bar-title{
+  display:inline-flex;align-items:center;gap:8px;font-weight:600;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-cloud-bar-count{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:18px;height:16px;padding:0 6px;
+  border-radius:999px;corner-shape:round;
+  font-size:10px;line-height:1;font-weight:600;color:var(--dtpl-fg-3);
+  background:color-mix(in srgb,var(--dtpl-fg) 9%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-cloud-bar-cue{color:var(--dtpl-fg-3);font-size:11px;line-height:16px;}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-cloud-scroll{
+  max-height:min(320px,38vh);overflow:auto;overscroll-behavior:contain;
+  border:.5px solid var(--dtpl-hairline);border-radius:8px;corner-shape:round;
+  scrollbar-width:thin;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-col-header-sticky{
+  position:sticky;top:0;z-index:1;
+  padding:6px;background:var(--dtpl-surface);
+  border-bottom:.5px solid var(--dtpl-hairline);
+}
+
 /* Footer: save state + primary save button (mirrors the rescan pill). */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-foot{
   display:flex;align-items:center;justify-content:flex-end;gap:10px;
+  margin-top:2px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-save-state{
   color:var(--dtpl-ok);font-size:11px;line-height:16px;font-weight:600;
@@ -1171,6 +1329,96 @@ const CSS = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-save:hover:not(:disabled){background:var(--dtpl-accent-hover);}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-save:disabled{opacity:.45;cursor:default;}
+
+/* ── pricing tab · provider overlay surface ─────────────────────────────── */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-intro{
+  margin:0;font-size:12px;line-height:20px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-intro b{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-intro code{
+  font-size:11px;color:var(--dtpl-fg);
+  background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
+  padding:1px 4px;border-radius:4px;corner-shape:round;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-list{display:flex;flex-direction:column;gap:10px;}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-group{
+  border:1px solid var(--dtpl-hairline);
+  border-radius:var(--dtpl-radius-sm);corner-shape:round;
+  overflow:hidden;
+}
+/* Group head is a full-width button: name + meta counts + caret. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-head{
+  appearance:none;border:0;background:transparent;
+  display:flex;align-items:center;gap:10px;width:100%;
+  padding:8px 10px;font:inherit;cursor:pointer;color:var(--dtpl-fg);
+  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+  transition:background .15s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-head:hover{background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-head-name{
+  font-size:12px;line-height:18px;font-weight:650;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-head-meta{
+  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-head-caret{
+  margin-left:auto;color:var(--dtpl-fg-3);font-size:10px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-rows{display:flex;flex-direction:column;}
+/* One provider row: compact summary line (name/tags/billing/summary | actions). */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-row{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:6px 10px;border-top:.5px solid var(--dtpl-hairline);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-row-hand{
+  background:color-mix(in srgb,var(--dtpl-accent) 5%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-model{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-model-name{
+  font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-billing{
+  font-size:9px;line-height:14px;font-weight:600;
+  padding:0 6px;border-radius:999px;corner-shape:round;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-billing-subscription{
+  color:var(--dtpl-ok);
+  background:color-mix(in srgb,var(--dtpl-ok) 15%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-billing-metered{
+  color:var(--dtpl-accent);
+  background:color-mix(in srgb,var(--dtpl-accent) 15%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-summary{
+  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+
+/* The one-row-at-a-time inline editor. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-prov-editor{
+  display:flex;flex-direction:column;gap:8px;
+  padding:8px 10px 10px;
+  background:color-mix(in srgb,var(--dtpl-fg) 2%,transparent);
+  border-top:.5px dashed var(--dtpl-border);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-prov-editor-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+  gap:8px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-field{
+  display:flex;flex-direction:column;gap:2px;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-field > span{
+  font-size:10px;line-height:14px;color:var(--dtpl-fg-3);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-field-wide{grid-column:1/-1;}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-prov-editor .dtpl-pricing-input{text-align:left;}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-prov-editor-actions{
+  display:flex;justify-content:flex-end;gap:8px;
+}
 
 /* ── dark-skin fallback tuning ──────────────────────────────────────────── */
 /* Tokens carry most of the load; these only adjust fallback-adjacent washes

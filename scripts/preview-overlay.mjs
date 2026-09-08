@@ -79,20 +79,24 @@ const overview = {
   byDay: days(14),
   byHour: [],
   byModel: [
-    { provider: 'deepseek', model: 'deepseek-chat', totals: mk(1_510_000, 6_100_000, 402_000, 198), cost: 3.87 },
-    { provider: 'deepseek', model: 'deepseek-reasoner', totals: mk(410_000, 210_000, 84_000, 16), cost: 1.12 },
+    { provider: 'deepseek', model: 'deepseek-chat', totals: mk(1_510_000, 6_100_000, 402_000, 198), cost: 3.87, spend: 3.87, subscriptionValue: 0 },
+    { provider: 'deepseek', model: 'deepseek-reasoner', totals: mk(410_000, 210_000, 84_000, 16), cost: 1.12, spend: 1.12, subscriptionValue: 0 },
+    { provider: 'opencode-go', model: 'deepseek-v4-flash', totals: mk(800_000, 900_000, 120_000, 34), cost: 2.4, spend: 0, subscriptionValue: 2.4 },
   ],
   rateRows: [],
   recent: [
-    { requestId: 'r-01', time: Date.now() - 3 * 60_000, sessionId: 'session-abc-1234567890', model: 'deepseek-chat', provider: 'deepseek', usage: mk(4_120, 61_300, 1_842), cost: 0.0132 },
-    { requestId: 'r-02', time: Date.now() - 26 * 60_000, sessionId: 'session-abc-1234567890', model: 'deepseek-reasoner', provider: 'deepseek', usage: mk(9_840, 12_000, 3_310), cost: 0.0412 },
-    { requestId: 'r-03', time: Date.now() - 70 * 60_000, sessionId: 'session-xyz', model: 'deepseek-chat', provider: 'deepseek', kind: 'compaction', usage: mk(1_260, 0, 4_110), cost: 0.008 },
-    { requestId: 'r-04', time: Date.now() - 140 * 60_000, sessionId: 'session-xyz', model: 'deepseek-chat', provider: 'deepseek', kind: 'failure', failureCode: 'RATE_LIMIT', cost: 0 },
-    { requestId: 'r-05', time: Date.now() - 3 * 3_600_000, sessionId: 'session-abc-1234567890', model: 'deepseek-chat', provider: 'deepseek', usage: mk(2_270, 44_900, 960), cost: 0.0066 },
-    { requestId: 'r-06', time: Date.now() - 26 * 3_600_000, sessionId: 'session-old', model: 'deepseek-chat', provider: 'deepseek', usage: mk(3_715, 88_210, 2_204), cost: 0.0109 },
+    { requestId: 'r-01', time: Date.now() - 3 * 60_000, sessionId: 'session-abc-1234567890', model: 'deepseek-chat', provider: 'deepseek', usage: mk(4_120, 61_300, 1_842), cost: 0.0132, spend: 0.0132, subscriptionValue: 0 },
+    { requestId: 'r-02', time: Date.now() - 26 * 60_000, sessionId: 'session-abc-1234567890', model: 'deepseek-reasoner', provider: 'deepseek', usage: mk(9_840, 12_000, 3_310), cost: 0.0412, spend: 0.0412, subscriptionValue: 0 },
+    { requestId: 'r-03', time: Date.now() - 70 * 60_000, sessionId: 'session-xyz', model: 'deepseek-chat', provider: 'deepseek', kind: 'compaction', usage: mk(1_260, 0, 4_110), cost: 0.008, spend: 0.008, subscriptionValue: 0 },
+    { requestId: 'r-04', time: Date.now() - 140 * 60_000, sessionId: 'session-xyz', model: 'deepseek-chat', provider: 'deepseek', kind: 'failure', failureCode: 'RATE_LIMIT', cost: 0, spend: 0, subscriptionValue: 0 },
+    { requestId: 'r-05', time: Date.now() - 3 * 3_600_000, sessionId: 'session-abc-1234567890', model: 'deepseek-chat', provider: 'deepseek', usage: mk(2_270, 44_900, 960), cost: 0.0066, spend: 0.0066, subscriptionValue: 0 },
+    { requestId: 'r-06', time: Date.now() - 26 * 3_600_000, sessionId: 'session-old', model: 'deepseek-chat', provider: 'deepseek', usage: mk(3_715, 88_210, 2_204), cost: 0.0109, spend: 0.0109, subscriptionValue: 0 },
+    { requestId: 'r-07', time: Date.now() - 40 * 60_000, sessionId: 'session-go', model: 'deepseek-v4-flash', provider: 'opencode-go', usage: mk(6_000, 7_000, 900), cost: 0.021, spend: 0, subscriptionValue: 0.021 },
   ],
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
-  totalCost: 4.99,
+  totalCost: 7.39,
+  spend: 4.99,
+  subscriptionValue: 2.4,
   unpricedModels: [],
   pricing: {},
   totalTokens: 8_716_000,
@@ -112,8 +116,44 @@ const emptyOverview = {
   ...overview,
   total: { ...overview.total, ...mk(0, 0, 0, 0), compactions: 0, failures: 0 },
   byDay: [], byModel: [], recent: [],
-  totalTokens: 0, totalCost: 0, records: 0, files: 0,
+  totalTokens: 0, totalCost: 0, spend: 0, subscriptionValue: 0, records: 0, files: 0,
   lastEventAt: null, lastSyncAt: null, syncStatus: 'idle', sessions: 0,
+}
+
+/* ── pricing-tab fixtures (model layer + provider overlay) ──────────────── */
+/** Small but representative pricing view: hand override, unpriced seed, a few
+ *  cloud rows (one layered), and the provider overlay rows the Provider 覆盖
+ *  mode renders. */
+const PRICING_FIXTURE = {
+  rows: [
+    { model: 'deepseek-reasoner', manual: true, manualRates: { inputPerMillion: 3.2, outputPerMillion: 12.8, cacheReadPerMillion: 0.8 }, cloudRates: { inputPerMillion: 4, outputPerMillion: 16 } },
+    { model: 'deepseek/deepseek-v4-flash', manual: false, unpriced: true, records: 17 },
+    { model: 'deepseek-chat', manual: false, cloudRates: { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5 }, layered: true },
+    { model: 'deepseek-v4-flash', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 } },
+    { model: 'deepseek-v4-flash-vision-exp', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, layered: true },
+    { model: 'deepseek-v4-pro', manual: false, cloudRates: { inputPerMillion: 8, outputPerMillion: 32 }, layered: true },
+    { model: 'glm-5.3-flash', manual: false, cloudRates: { inputPerMillion: 0.8, outputPerMillion: 2.8 } },
+    { model: 'gpt-5.6-luna', manual: false, cloudRates: { inputPerMillion: 1.4, outputPerMillion: 8.4 }, layered: true },
+    { model: 'gpt-5.6-luna-fast', manual: false, cloudRates: { inputPerMillion: 2.8, outputPerMillion: 16.8 } },
+    { model: 'grok-4.6', manual: false, cloudRates: { inputPerMillion: 3, outputPerMillion: 12 } },
+    { model: 'MiniMax-M3', manual: false, cloudRates: { inputPerMillion: 2.1, outputPerMillion: 8.4 }, layered: true },
+    { model: 'claude-3-5-sonnet-20241022', manual: false, cloudRates: { inputPerMillion: 22.4, outputPerMillion: 112, cacheReadPerMillion: 2.24 } },
+    { model: 'claude-3-5-haiku-20241022', manual: false, cloudRates: { inputPerMillion: 5.6, outputPerMillion: 28, cacheReadPerMillion: 0.56 } },
+    { model: 'gpt-5.6-cyber', manual: false, cloudRates: { inputPerMillion: 87.5, outputPerMillion: 525 } },
+  ],
+  providerRows: [
+    { provider: 'deepseek-official', model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash', manual: false, note: '官方按量' },
+    { provider: 'opencode-go', model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: true, note: '订阅价值' },
+    { provider: 'opencode-go', model: 'deepseek-v4-flash-vision-exp', billing: 'subscription', inheritBase: 'deepseek-v4-flash-vision-exp', manual: false },
+    { provider: 'opencode-go', model: 'glm-5.3-flash', billing: 'subscription', inheritBase: 'glm-5.3-flash', manual: false },
+    { provider: 'commandcode', model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: true, note: '前缀串' },
+    { provider: 'commandcode', model: 'z-ai/glm-5.3-flash', billing: 'subscription', inheritBase: 'glm-5.3-flash', manual: false },
+    { provider: 'staryears', model: 'gpt-5.6-luna', billing: 'metered', inheritBase: 'gpt-5.6-luna', placeholder: true, manual: false, note: '中转占位' },
+    { provider: 'staryears', model: 'grok-4.6', billing: 'metered', inheritBase: 'grok-4.6', placeholder: true, manual: false },
+    { provider: 'zai', model: 'glm-5.3-flash', billing: 'metered', inheritBase: 'glm-5.3-flash', manual: false },
+    { provider: 'dots-ai', model: 'dots3-note-prev', billing: 'metered', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }], manual: false, note: '未知串 ¥0' },
+  ],
+  dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
 }
 
 /* ── quota-tab fixtures ─────────────────────────────────────────────────── */
@@ -214,6 +254,18 @@ const server = createServer((req, res) => {
   if (url.pathname === '/tokbook/rescan') {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end('{}')
+    return
+  }
+  // Pricing tab: the merged view (GET) + a silent PUT that echoes the view back.
+  if (url.pathname === '/tokbook/pricing') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(PRICING_FIXTURE))
+    return
+  }
+  if (url.pathname === '/tokbook/provider-pricing') {
+    const fixture = { providerRows: PRICING_FIXTURE.providerRows, dataDir: PRICING_FIXTURE.dataDir }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(fixture))
     return
   }
   // Quota tab: list (no provider) → enabled routes; per-provider → card.
@@ -383,3 +435,4 @@ const port = Number(process.env.PORT ?? 8931)
 server.listen(port, '127.0.0.1', () => {
   console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?empty=1, ?err=1, ?quota=rich|percent|mix|unconfigured|error|none)`)
 })
+

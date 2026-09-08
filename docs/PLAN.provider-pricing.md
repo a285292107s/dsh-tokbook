@@ -1,16 +1,35 @@
 # 消费端升级计划：dsh-tokbook 接入 (provider, model) 双维定价 + 时间维度 + 双桶统计
 
-> **Doc meta** · role: process · language: zh-CN · status: superseded · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
 
-> ⚠️ **已归档（superseded）**：本计划的各阶段已落地——provider 用量 + 官方额度
-> 见 commit `5e2c86f`（2026-09-07），pricing 手工维护 tab 等剩余工作在 2026-09-08
-> 的工作区中实现。**不要按本计划实现**；当前接口以 [`../CONTRACTS.md`](../CONTRACTS.md)
-> 为准，决策记录见 [`../DECISIONS.md`](../DECISIONS.md) D-003。本文件仅作历史留存。
+> 实施状态：2026-09-08 恢复为 current，按 §5 分阶段执行中。provider 用量 + 官方额度
+> （D-003 范围）已落地于 commit `5e2c86f`；本计划覆盖其后尚未实现的 **(provider,
+> model) 双维定价 + 时间维度 + 双桶统计**。接口/契约以 [`./CONTRACTS.md`](CONTRACTS.md)
+> 为准，决策记录见 [`./DECISIONS.md`](DECISIONS.md)。
 
 > 本文件是给「接手的 AI / 工程师」的完整实施计划。目标是让 dsh-tokbook
 > 消费端消费 [dsh-model-pricing](https://github.com/a285292107s/dsh-model-pricing)
 > 镜像的两层数据（基准价表 + provider 覆盖层），把计价从「单 model 维度」升级为
 > **(provider, model) 双维 + 按记录时间戳计价 + 实际支出/订阅价值双桶统计**。
+
+## 实施注记（落地时拍板的具体决定）
+
+- 手工 provider 覆盖文件命名为 `provider-pricing.json`（镜像为 `provider-pricing.ccsa.json`，
+  与 `pricing.json` / `pricing.ccsa.json` 的「手工 vs 镜像」命名对称）。
+- 新写回路由：`GET/PUT /tokbook/provider-pricing`（与 `/tokbook/pricing` 分开，避免路由
+  按 body 形态分派）。
+- 覆盖条目语义：`inheritBase` 与 `segments` 二选一，同给会拒绝（解析会静默偏袒其一，
+  宁可不接受歧义）；无 `billing` 的手工条目默认 `metered`。
+- `segments` 时间轴窗口为 epoch **秒**（`from ≤ t < to`，与基准价表 timeRules 同单位）；
+  open 段（无 `to`）在 key 里用超大有限上界表达，保证 JSON 可序列化。
+- 解析落地为纯函数 `resolvePriced(base, providers, provider, model, timeMs, ctx)`，
+  返回 `{ prices, key, billing, source, effective }`；`effectiveRatesOf` 供成本层对已存
+  key 复价（继承整表规则 / 分段容器），与汇总期解析共用同一条规则链。
+- 双桶字段：`CostedSummary`/`byModel`/recent/Provider 卡各带 `spend` 与
+  `subscriptionValue`；`totalCost` 保留为两者之和兼容旧 client。UI 把 `spend` 显示为
+  「实际支出」，`subscriptionValue` 单独标注「订阅价值（非现金）」。
+- rollup 升为 `schemaVersion: 2`；v1（无版本字段）读作缺失 → 由日文件重建（幂等，
+  不做逐行迁移，避免旧行 provider='' 误并）。
 
 ## 1. 背景与目标
 

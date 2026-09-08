@@ -79,6 +79,30 @@ Typert Remote。
 落地:provider 用量 + 额度的 commit `5e2c86f`(2026-09-07);pricing 手工编辑 tab 截至
 2026-09-08 在工作区。
 
+### D-004 · 2026-09-08 · (provider, model) 双维计价 + 时间维度 + 双桶统计
+
+**Status: current。Supersedes:** D-003 的"单 model 计价"部分(provider 用量/额度与手工
+价格表本体仍在,承接其成本层语义)。
+
+**背景。** 同一 model 串可能同时出现在官方 API 通道与订阅通道,计费性质与价格都不同;
+前缀串(`deepseek/deepseek-v4-flash`)在基准价表查不到;厂商按记录时间调价。旧聚合身份
+`(day, model, rate)` 会把两个 provider 的相同 (model, rate) 错并。
+
+**决策。**
+
+- 计价入口改为 `resolvePriced(provider, model, timeMs, context)`:
+  该 record 的 provider 精确串在 provider 覆盖层命中(镜像 `provider-pricing.ccsa.json` +
+  手工 `provider-pricing.json`,手工赢)→ `inheritBase` 走基准价表该 modelId 完整规则链,
+  或 `segments` 按时间取段;否则回落基准价表 model 行;再没有 → unpriced(¥0)。
+- 金额分双桶:`spend`(仅 `billing: 'metered'`,实际支出)与 `subscriptionValue`(仅
+  `'subscription'`,订阅价值,非现金);`totalCost` 保留 = 两者之和,兼容旧 wire/旧 client。
+- 聚合身份升级为 `(day, model, provider, rate)`;`byModel` 键改为 (provider, model);
+  rollup 带 `schemaVersion: 2`,旧 v1 读作缺失 → 由日文件重建(不静默误并)。
+- 价格表 tab 增加 provider 维度:查看 + 手工覆盖写回(PUT `/tokbook/provider-pricing`)。
+- 镜像仓库(dsh-model-pricing)只负责云端两层数据;tokbook 只消费 + 本地覆盖,不做社区化维护。
+
+落地:`PLAN.provider-pricing.md`(Phase 1–4)。完整推理见该计划与 `docs/DESIGN.md`。
+
 ---
 
 ## 如何追加条目

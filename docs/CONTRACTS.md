@@ -29,8 +29,10 @@
 | `GET` | `/tokbook/usage` | `range` ∈ `today` \| `yesterday` \| `last7` \| `last30`(缺失/未知 → `400 {error}`) | `ProviderUsageView` |
 | `GET` | `/tokbook/quota` | — | `QuotaView` = `{ providers: string[] }` — 仅已启用计划,无网络 |
 | `GET` | `/tokbook/quota` | `provider=<路由键>`;可选 `refresh=1` 跳过 TTL 缓存 | 该 provider 的 `QuotaCard` |
-| `GET` | `/tokbook/pricing` | — | `PricingView` |
+| `GET` | `/tokbook/pricing` | — | `PricingView`(含 `providerRows`) |
 | `PUT` | `/tokbook/pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
+| `GET` | `/tokbook/provider-pricing` | — | `{ providerRows: ProviderPricingViewRow[], dataDir }`(provider 覆盖层视图) |
+| `PUT` | `/tokbook/provider-pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
 
 Wire 形状要点(权威字段清单见 `src/types.ts`):
 
@@ -43,6 +45,13 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
 - `PUT /tokbook/pricing` body:`{ "<精确模型串>": { "inputPerMillion": number, "outputPerMillion": number, "cacheReadPerMillion"?: number, "cacheWritePerMillion"?: number } }`。
   缺失的键 = 删除该手工覆盖;整表解析、校验后**整体替换** `pricing.json`(手工条目把该
   模型的云规则整体替换为 flat 价)。
+- `PUT /tokbook/provider-pricing` body:两层级
+  `{ "<provider路由键>": { "<精确模型串>": { "billing"?: "metered"|"subscription",
+  "inheritBase"?: "<基准modelId>"| "segments"?: [{ "from"?: seconds, "to"?: seconds,
+  "rate": { inputPerMillion, outputPerMillion, … } }], "note"?: string } } }`。整表解析、校验后
+  **整体替换** `provider-pricing.json`;缺失的 (provider, model) = 删除该手工覆盖(回到镜像行)。
+- wire 上的金额已拆双桶:`spend`(metered 行,实际支出)与 `subscriptionValue`(subscription 行,
+  订阅价值、非现金);`totalCost` 保留为两者之和以兼容旧客户端。
 
 ## 配置
 
@@ -53,6 +62,7 @@ profile patch 中的 `plugins.tokbook`,类型为 `TokBookConfig` + `PlanConfig`
 |---|---|---|
 | `path` | `$DSH_HOME/tokbook`(`~/.dsh/tokbook`) | 数据目录 |
 | `pricingUrl` | 未设 | 显式云定价 feed URL;优先于 `pricingRegion` |
+| `pricingProviderUrl` | dsh-model-pricing 镜像 raw URL | 显式 provider 覆盖层 feed URL |
 | `pricingRegion` | `domestic` | `pricingUrl` 未设时的镜像选择(`domestic`/`overseas`) |
 | `recordCompaction` | `true` | 是否记录并计费压缩 summarize 调用 |
 | `plans.<provider>.enabled` | 未设 | `false` 关闭某内置计划 |
@@ -90,6 +100,8 @@ host 请指向自己的 `path`,不要共享目录。
 | `owner.json` | 单写者标记 `{ pid, start }` | host 启动 | 崩溃进程留下的陈旧标记被静默接管 |
 | `pricing.json`(+ `.tmp`) | 手编手工价覆盖(整表替换;条目永远优先于云) | `PUT /tokbook/pricing` | 缺失 = 无手工层;畸形条目只把对应模型降级为未定价 |
 | `pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的云定价镜像(`pricing.ts`) | host 启动 | 只读参考;region/URL 按配置 |
+| `provider-pricing.json`(+ `.tmp`) | 手编 provider 覆盖层(整表替换;条目覆盖对应 (provider, model) 的镜像行) | `PUT /tokbook/provider-pricing` | 缺失 = 无手工 provider 层 |
+| `provider-pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的 provider 覆盖镜像(`pricing.ts`) | host 启动 | 只读参考;URL 按 `pricingProviderUrl` 配置 |
 | `quota-<provider>.json`(+ `.tmp`) | 最近一次官方额度卡快照 `{ savedAt, card }` | host 额度拉取 | 只持久化 `ok` 卡;缺失/撕裂/畸形读作 null |
 
 约定:派生文件原子写入(temp + rename;Windows 上 rename-over-existing 偶发失败处先
@@ -100,7 +112,11 @@ unlink 目标)。日文件只追加、绝不重写。
 - 去重身份是 `requestId`(`assistant` message id,或合成的
   `compaction:<session>:<seq>` / `failure:<session>:<seq>`);同一进程内重叠写者共享
   同一个去重集与同一条串行追加队列。
-- 价格改动在**读取时**重新计价历史——不重写账本/折叠。
+- 价格改动在**读取时**重新计价历史——不重写账本/折叠;计价入口是 (provider, model)
+  双维解析(`resolvePriced`):provider 覆盖层(手工 > 镜像)先命中,再回落到基准模型价。
+- 金额分双桶:`spend` 只含 `billing: metered` 行(实际支出),`subscriptionValue` 只含
+  `billing: subscription` 行(订阅价值,非现金);UI 不得把后者当作支出展示。
+- rollup 带 `schemaVersion: 2`;旧格式(v1,无版本字段)读作缺失、由日文件重建。
 - 额度卡只展示官方 provider 数据;`unconfigured`/`error` 卡便宜地即时重推,从不当作
   "最近已知"持久化。
 

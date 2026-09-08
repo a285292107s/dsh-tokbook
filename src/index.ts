@@ -34,7 +34,7 @@ import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
+  PlanConfig, PricingTable, PricingView, ProviderPricingTable, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
 } from './types.ts'
 import { currencyOfRegion, UNPRICED_KEY, totalsTokens } from './types.ts'
 import { defaultDataDir, warnIfForeignOwner, writeOwnerMarker } from './ledger.ts'
@@ -48,12 +48,12 @@ import {
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import {
-  parseManualPricingInput, readPricingTable, readPricingView, readUsdExchangeRate, resolvePricingUrl,
-  resolveRate as resolveRateFor, syncCloudPricing, writeManualPricing,
-  type ManualPricingParse, type PricingSourceInput, type PricingRegion,
+  parseManualPricingInput, parseManualProviderPricingInput, readPricingTable, readPricingView, readProviderPricing, readProviderPricingView, readUsdExchangeRate, resolvePricingUrl, resolveProviderPricingUrl,
+  resolvePriced, effectiveRatesOf, syncCloudPricing, syncProviderPricing, writeManualPricing, writeManualProviderPricing,
+  type ManualPricingParse, type ManualProviderPricingParse, type PricingSourceInput, type PricingRegion,
 } from './pricing.ts'
 import { providerCards } from './by-provider.ts'
-import { registerTokBookPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
+import { registerTokBookPricingRoutes, registerTokBookProviderPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
 import { isBuiltinQuotaPlan, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
 import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
 import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
@@ -81,7 +81,7 @@ export const name = 'dsh-tokbook'
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: TokBookConfig): void {
   const unknown = Object.keys(config).find(key =>
-    key !== 'path' && key !== 'pricingUrl' && key !== 'pricingRegion' && key !== 'recordCompaction' && key !== 'plans')
+    key !== 'path' && key !== 'pricingUrl' && key !== 'pricingProviderUrl' && key !== 'pricingRegion' && key !== 'recordCompaction' && key !== 'plans')
   if (unknown !== undefined) {
     throw new Error(`TokBookConfig: unknown key "${unknown}"`)
   }
@@ -90,6 +90,9 @@ export function validateConfig(config: TokBookConfig): void {
   }
   if (config.pricingUrl !== undefined && (typeof config.pricingUrl !== 'string' || config.pricingUrl.length === 0)) {
     throw new Error('TokBookConfig: "pricingUrl" must be a non-empty string')
+  }
+  if (config.pricingProviderUrl !== undefined && (typeof config.pricingProviderUrl !== 'string' || config.pricingProviderUrl.length === 0)) {
+    throw new Error('TokBookConfig: "pricingProviderUrl" must be a non-empty string')
   }
   if (config.pricingRegion !== undefined && config.pricingRegion !== 'domestic' && config.pricingRegion !== 'overseas') {
     throw new Error('TokBookConfig: "pricingRegion" must be "domestic" or "overseas"')
@@ -212,6 +215,7 @@ export class TokenUsageBook extends Service {
     this.log = new UsageLog(this.dir, this.logger)
     this.pricing = {
       pricingUrl: config.pricingUrl,
+      pricingProviderUrl: config.pricingProviderUrl,
       pricingRegion: config.pricingRegion as PricingRegion | undefined,
     }
     this.planConfig = coercePlansConfig(config.plans)
@@ -342,6 +346,11 @@ export class TokenUsageBook extends Service {
         () => this.pricingView(),
         (table) => this.savePricing(table),
       ))
+      ctx.effect(() => registerTokBookProviderPricingRoutes(
+        webServer,
+        () => this.pricingView(),
+        (table) => this.saveProviderPricing(table),
+      ))
     })
   }
 
@@ -443,9 +452,10 @@ export class TokenUsageBook extends Service {
     // Authoritative refresh first, so the ledger reflects persisted sessions.
     await this.ensureFresh()
     const pricing = await readPricingTable(this.dir, this.logger)
-    const resolve: RateResolver = (record) => this.resolveRate(record, pricing)
+    const providers = await readProviderPricing(this.dir, this.logger)
+    const resolve: RateResolver = (record) => this.resolveRate(record, pricing, providers)
     const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger)
-    const costed = attachCosts(summary, pricing)
+    const costed = attachCosts(summary, pricing, providers)
     const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
     const files = (await listDayFiles(this.dir)).length
     let sessions = 0
@@ -460,16 +470,17 @@ export class TokenUsageBook extends Service {
     }
     const region = this.pricing.pricingRegion ?? 'domestic'
     const rate = await readUsdExchangeRate(this.dir, this.logger)
-    // The recent window is billed at the same rate chain as the totals, so a
-    // single row's ¥ in the 最近记录 list is exactly the amount the aggregates
-    // folded in. Read-time + additive: no ledger/rollup change, and a price
-    // table update re-prices the list on the next overview read.
-    const recent = costRecentEntries(costed.recent, pricing, resolve)
-    // Slim wire payload: the pricing table / rateRows / byHour rows are host-
+    // The recent window is billed through the same dual-dimension chain as the
+    // totals, so a single row's ¥ in the 最近记录 list is exactly the amount
+    // the aggregates folded in, split into its spend / subscription buckets.
+    // Read-time + additive: no ledger/rollup change, and a price table update
+    // re-prices the list on the next overview read.
+    const recent = costRecentEntries(costed.recent, pricing, providers)
+    // Slim wire payload: the pricing tables / rateRows / byHour rows are host-
     // side concerns the floating window never renders, and a cloud mirror can
     // be large — the cost layer has already been folded into the cost fields.
-    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, recent: _recent, ...slim } = costed
-    void _pricing; void _rateRows; void _byHour; void _recent
+    const { pricing: _pricing, providerPricing: _providerPricing, rateRows: _rateRows, byHour: _byHour, recent: _recent, ...slim } = costed
+    void _pricing; void _providerPricing; void _rateRows; void _byHour; void _recent
     return {
       ...slim,
       sessions,
@@ -493,10 +504,11 @@ export class TokenUsageBook extends Service {
   async usageByRange(range: ProviderRange): Promise<ProviderUsageView> {
     await this.ensureFresh()
     const pricing = await readPricingTable(this.dir, this.logger)
-    const resolve: RateResolver = (record) => this.resolveRate(record, pricing)
+    const providers = await readProviderPricing(this.dir, this.logger)
+    const resolve: RateResolver = (record) => this.resolveRate(record, pricing, providers)
     const { fromDay, toDay } = rangeDayWindow(range)
     const records = await readRecordsByDayRange(this.dir, fromDay, toDay, () => new Date(), this.logger)
-    const cards = providerCards(records, pricing, resolve)
+    const cards = providerCards(records, pricing, resolve, providers)
     const region = this.pricing.pricingRegion ?? 'domestic'
     const rate = await readUsdExchangeRate(this.dir, this.logger)
     return {
@@ -616,17 +628,19 @@ export class TokenUsageBook extends Service {
     return { status: already ? 'skipped' : 'running', lastSyncAt: this.lastSyncAt > 0 ? this.lastSyncAt : null }
   }
 
-  /** Resolve the rate identity one record was billed at, under the merged table. */
-  private resolveRate(record: UsageRecord, pricing: PricingTable): RateKey {
-    const rules = pricing[record.model]
-    if (rules === undefined) return UNPRICED_KEY
+  /** Resolve the rate identity one record was billed at, through the
+   * dual-dimension chain: the provider overlay for the record's own provider
+   * string wins (its `inheritBase`/`segments`), then the base model. */
+  private resolveRate(record: UsageRecord, pricing: PricingTable, providers: ProviderPricingTable): RateKey {
     const usage = record.usage
     const contextTokens = usage === undefined ? 0
       : usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
-    return resolveRateFor(rules, record.time, contextTokens).key
+    return resolvePriced(pricing, providers, record.provider, record.model, record.time, contextTokens).key
   }
 
-  /** Refresh the cloud pricing mirror (fire-and-forget; never fatal). */
+  /** Refresh the cloud pricing mirrors (base + provider overlay;
+   * fire-and-forget, never fatal). A provider-mirror failure only degrades to
+   * "no provider overlay" — the base table still prices model strings. */
   private syncPricing(): void {
     const url = resolvePricingUrl(this.pricing)
     void syncCloudPricing(this.dir, url)
@@ -635,6 +649,14 @@ export class TokenUsageBook extends Service {
       })
       .catch((error: unknown) => {
         this.logger.warn?.('[tokbook] pricing sync failed:', error)
+      })
+    const providerUrl = resolveProviderPricingUrl(this.pricing)
+    void syncProviderPricing(this.dir, providerUrl)
+      .then((result) => {
+        this.logger.info?.(`[tokbook] provider-pricing sync (${providerUrl}): version ${String(result.version)} (${String(result.providers)} providers, ${String(result.entries)} entries)`)
+      })
+      .catch((error: unknown) => {
+        this.logger.warn?.('[tokbook] provider-pricing sync failed (overlay disabled):', error)
       })
   }
 
@@ -647,9 +669,17 @@ export class TokenUsageBook extends Service {
   async pricingView(): Promise<PricingView> {
     const used = new Map<string, number>()
     try {
+      const pricing = await readPricingTable(this.dir, this.logger)
+      const providers = await readProviderPricing(this.dir, this.logger)
       const summary = await buildSummary(this.dir, () => new Date(), () => UNPRICED_KEY, this.logger)
+      // Seeds must reflect the FULL dual-dimension table: a model string the
+      // provider overlay already prices (e.g. commandcode's prefixed strings)
+      // is not "unpriced" — it is managed in the overlay layer below. Only
+      // (provider, model) rows with NO effective pricing become model-tab
+      // seeds (a model-level manual flat entry can then actually price them).
       for (const row of summary.byModel) {
         if (row.model === '') continue
+        if (effectiveRatesOf(pricing, providers, row.provider, row.model) !== null) continue
         used.set(row.model, (used.get(row.model) ?? 0) + row.totals.requests)
       }
     } catch (error) {
@@ -657,8 +687,24 @@ export class TokenUsageBook extends Service {
       // useful without the unpriced hints.
       this.logger.warn?.('[tokbook] cannot read ledger models for pricing view:', error)
     }
-    const { rows, dataDir } = await readPricingView(this.dir, used, this.logger)
-    return { rows, dataDir }
+    const [{ rows, dataDir }, provider] = await Promise.all([
+      readPricingView(this.dir, used, this.logger),
+      readProviderPricingView(this.dir, this.logger),
+    ])
+    return { rows, providerRows: provider.rows, dataDir }
+  }
+
+  /** Validate + persist a manual provider-overlay body from the 价格表 tab. The
+   *  body is the COMPLETE desired manual overlay (`provider` → `model` →
+   *  entry) — the write replaces `provider-pricing.json` wholesale, so an
+   *  omitted (provider, model) removes its override (back to the mirror row).
+   *  Only the manual file is written; the read-time merged table re-prices
+   *  history on the next overview read. */
+  async saveProviderPricing(table: unknown): Promise<ManualProviderPricingParse & { view: PricingView }> {
+    const parsed = parseManualProviderPricingInput(table)
+    if (!parsed.ok) return { ok: false, error: parsed.error, view: await this.pricingView() }
+    await writeManualProviderPricing(this.dir, parsed.table, this.logger)
+    return { ok: true, table: parsed.table, view: await this.pricingView() }
   }
 
   /** Validate + persist a manual pricing body from the 价格表 tab. The body is

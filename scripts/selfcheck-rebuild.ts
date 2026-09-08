@@ -115,6 +115,27 @@ console.log('rollup: derived-state lossless rebuild')
     const fromCorrupt = await buildSummary(dir, never, resolve, quiet)
     check('corrupt rollup rebuilds losslessly', key(first) === key(fromCorrupt))
 
+    // A v1 rollup (no `schemaVersion`) is a format-change migration: it must
+    // read as absent and rebuild under the v2 shape (rate rows now carry the
+    // provider dimension), never silently merge rows across providers.
+    const v1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
+    delete v1.schemaVersion
+    // The stored rateRows lack `provider`; strip it to simulate a real v1 file.
+    v1.rateRows = v1.rateRows.map((r: { provider?: string; day: string; model: string; rate: unknown; totals: unknown }) => {
+      const { provider: _p, ...rest } = r
+      return rest
+    })
+    v1.byModel = v1.byModel.map((r: { provider?: string; model: string; totals: unknown }) => {
+      const { provider: _p, ...rest } = r
+      return rest
+    })
+    await writeFile(join(dir, 'rollup.json'), JSON.stringify(v1), 'utf8')
+    const fromV1 = await buildSummary(dir, never, resolve, quiet)
+    check('v1 rollup rebuilds losslessly to v2', key(first) === key(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined))
+    // The rebuilt file carries the v2 schema version.
+    const afterV1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
+    check('rebuilt rollup is stamped schemaVersion 2', afterV1.schemaVersion === 2)
+
     // And both agree with a direct full aggregation of the raw day files.
     const all = await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', never, quiet)
     const direct = summarizeRecords(all, resolve)

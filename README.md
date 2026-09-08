@@ -32,13 +32,14 @@ src/
                       实例/重启间共享)
   sync.ts             首次启动 + 手动历史回填(幂等)
   sync-state.ts       首次运行标记 + 持久化同步基线
-  stats.ts            聚合(totals/byDay/byHour/byModel/recent)+ 折叠 + 缓存
-  pricing.ts          价格表(云镜像 + 手工)、resolveRate 链、costOf
+  stats.ts            聚合(totals/byDay/byHour/(provider,model)/recent)+ 折叠 + 缓存
+  pricing.ts          双维价格表(基准云镜像+手工;provider 覆盖镜像+手工)、resolvePriced 链、costOf
   by-provider.ts      纯 provider 卡片聚合(Provider-usage tab)
   quota.ts            官方额度归一化 + 内置计划身份
   quota-official.ts   key 解析 + 各 provider 官方用量抓取器
   routes.ts           host 精确 Fetch 路由 /tokbook/overview、/tokbook/rescan、
-                      /tokbook/usage?range=…、/tokbook/quota、/tokbook/pricing
+                      /tokbook/usage?range=…、/tokbook/quota、/tokbook/pricing、
+                      /tokbook/provider-pricing
   client/
     index.ts          client: apply(ctx),注册两个 slot
     contract.ts       最小 client ctx/slots 类型
@@ -46,7 +47,7 @@ src/
     styles.ts         注入样式表(DSH tokens)
     FooterButton.tsx  sidebar.footer.action 触发器
     QuotaPanel.tsx    订阅额度 tab(官方用量卡)
-    PricingPanel.tsx  价格表 tab(查看 + 维护手工价)
+    PricingPanel.tsx  价格表 tab(模型层 + provider 覆盖层,查看/维护/写回)
     LedgerOverlay.tsx shell.overlay 浮窗(带成本汇总 + 趋势 + 按模型 + 按 provider
                       + 价格 + 额度 tab)
 scripts/
@@ -163,21 +164,43 @@ fold/缓存竞争;JSONL 追加本身去重安全)。启动时插件往目录写 
 
 ## 成本
 
-每条记录按它自己的时间戳,通过 ¥/M 每模型价目表计价:基准价,随后是**时间规则 →
-上下文档位 → 高峰时段**链。上下文档位大小用请求的 input 侧 token 近似(input +
-cacheRead + cacheWrite)。表里有独立价时 cache 桶按自己的价计,否则回退普通 input 价。
+每条记录按它自己的时间戳与 **(provider, model) 双维**计价:先看该 provider 路由在
+**provider 覆盖层**里有没有这条精确模型串的条目——镜像 `provider-pricing.ccsa.json` + 手编
+`provider-pricing.json`(手工赢)。条目两种取价方式:`inheritBase`(跟随基准价表某个 modelId
+的整套规则,含调价史)或 `segments`(用户自定的时间轴分段价)。没有覆盖条目 → 回落基准价表
+该 model 行。再没有 → 未定价(¥0)。基准价内仍走 **时间规则 → 上下文档位 → 高峰时段**链,
+上下文档位大小用请求的 input 侧 token 近似(input + cacheRead + cacheWrite)。
 
-表合并两个来源(启动时同步的云镜像,以及永远整表优先的手编 `pricing.json`):
+金额拆成两个桶,浮窗分开显示、绝不混为单一"支出":
+
+- **实际支出**(`spend`)——`billing: 'metered'` 通道(官方按量/中转/未知串)的真金白银;
+- **订阅价值**(`subscriptionValue`)——`billing: 'subscription'` 通道(如 OpenCode Go /
+  Command Code 订阅)按官方价折算的"省了多少",**不是现金**。
+
+基准价表合并两个来源(启动时同步的云镜像,以及永远整表优先的手编 `pricing.json`):
 
 ```json
 { "deepseek-chat": { "inputPerMillion": 2, "outputPerMillion": 8, "cacheReadPerMillion": 0.5 } }
 ```
 
-浮窗的**价格表 tab** 让你在 UI 里维护那些手工条目:账本记过的每个模型都会列出(云行
-显示镜像基准价、带 自定义 动作;账本有、但**两表都没有**的模型标记 未定价——它们计 ¥0,
-直到你给手工价),每条手工行就地编辑四档单价,一次 保存 把整个手工文件经
-`PUT /tokbook/pricing` 写下去。保存后下一次读取即重新计价全部历史——不动折叠或账本。
-(手工层按设计只支持 flat:时间规则/档位/高峰留在云 feed;给这类模型写手工条目 = 把其
+provider 覆盖层的手编文件是同形的两层 `Record<provider, Record<model, 条目>>`:
+
+```json
+{ "opencode-go": { "deepseek-v4-flash": { "billing": "subscription", "inheritBase": "deepseek-v4-flash" } } }
+```
+
+浮窗的**价格表 tab** 分两个视图(顶部切换):
+
+- **模型价**:维护模型层的 flat 手工价。手工行(编辑中)与账本记过、但**两表都没有**的
+  未定价模型(计 ¥0)始终可见;云端镜像基准表默认折叠成一行,展开后在受限滚动区内浏览
+  (带吸顶列头),或在搜索框输入名称直达匹配行。手工行就地编辑四档单价,一次 保存 经
+  `PUT /tokbook/pricing` 写 `pricing.json`。
+- **Provider 覆盖层**:按 provider 路由分组列出镜像条目,每条一行紧凑摘要;点行内
+  「编辑/设为覆盖」才展开该行的覆盖编辑器(跟随基准 或 手工固定价),可删除覆盖回镜像,
+  经 `PUT /tokbook/provider-pricing` 写 `provider-pricing.json`。
+
+保存后下一次读取即重新计价全部历史——不动折叠或账本。
+(手工层按设计只支持 flat;时间规则/档位/高峰留在云 feed;给这类模型写手工条目 = 把其
 整套规则替换成 flat 价。)
 
 默认位置:`$DSH_HOME/tokbook/`。畸形文件只会把受影响的模型降级为未定价(¥0),不会弄坏
@@ -191,6 +214,7 @@ plugins:
     path: D:/data/tokbook        # 默认: $DSH_HOME/tokbook(或 ~/.dsh/tokbook)
     pricingRegion: overseas      # 默认: domestic(gitee 镜像)
     pricingUrl: https://...      # 可选显式 feed URL;优先于 region
+    pricingProviderUrl: https://... # 可选显式 provider 覆盖层 feed URL(默认 dsh-model-pricing 镜像)
     recordCompaction: true       # 默认: true——记录压缩调用
     # 按 provider 路由键控的额度计划。opencode-go 与 commandcode 内置:该 tab 抓取每个
     # 订阅的官方账户用量(绝非本地估算——订阅 key 跨工具共享)。
@@ -232,18 +256,22 @@ provider 的持久化*最近已知*卡(数据目录里每 provider 一个 JSON �
 
 - **逐请求、持久账本**:实时 `session/event` 折叠 → 按日 JSONL,按 request id 去重,带
   首次启动 + 手动历史回填。
-- **多维统计**:totals、按日、按小时、按模型、按 (day, model, rate) 格;冻结日折叠 +
-  进程内存解析缓存;近期窗口。
-- **成本**:¥/M 价格表(云镜像 + 手工覆盖)、规则链计价解析、逐请求成本、逐模型成本、
-  未定价模型浮出。
-- **价格表 tab**:从 UI 查看 + 维护手工价层。列出每条手工条目、每个云模型/别名(flat
-  基准价 + 分层标记),以及**两表都没有**的账本模型(未定价、今天 ¥0)作为一键手工种子。
-  逐行暂存编辑、整表经 `PUT /tokbook/pricing` 写入 `pricing.json`(`GET /tokbook/pricing`
-  提供视图);保存后下次读取即重新计价全部历史。
-- **Browser 半区**:侧边栏 footer 按钮 + shell overlay 浮窗,内含汇总卡(token + 成本)、
-  四桶拆分、按日趋势图、带成本的按模型拆分、近期记录,以及**按 provider 的 tab**:每个
-  provider 路由一张卡,展示其下各模型的 token/成本,可切换 今日 / 昨天 / 近7天 / 近30天
-  (专用精确路由 `GET /tokbook/usage?range=…` 只读窗口内的日文件)。
+- **多维统计**:totals、按日、按小时、按 (provider, model)、按 (day, model, provider,
+  rate) 格;冻结日折叠 + 进程内存解析缓存;近期窗口。
+- **成本(双维 + 双桶)**:¥/M 基准价表(云镜像 + 手工覆盖)之上叠 **provider 覆盖层**
+  (镜像 + 手工),按 (provider, model) + 记录时间戳解析(`inheritBase` 跟随官方整表含调价史 /
+  `segments` 用户时间轴);金额分 **实际支出**(metered)与 **订阅价值**(subscription,非现金)
+  两桶;未定价模型浮出。
+- **价格表 tab**:从 UI 查看 + 维护两层手工价。模型层列出每条手工条目、每个云模型/别名
+  (flat 基准价 + 分层标记),以及**两表都没有**的账本模型(未定价、今天 ¥0)作为一键手工
+  种子;下方 **Provider 覆盖层**按路由分组展示镜像/手工条目,可设覆盖或删除覆盖回云端。
+  整表经 `PUT /tokbook/pricing` 写 `pricing.json`、`PUT /tokbook/provider-pricing` 写
+  `provider-pricing.json`(`GET` 提供视图);保存后下次读取即重新计价全部历史。
+- **Browser 半区**:侧边栏 footer 按钮 + shell overlay 浮窗,内含汇总卡(token + 实际支出 +
+  订阅价值)、四桶拆分、按日趋势图、带金额的按 (provider, model) 拆分、近期记录,以及
+  **按 provider 的 tab**:每个 provider 路由一张卡,展示其下各模型的 token/双桶金额,
+  可切换 今日 / 昨天 / 近7天 / 近30天(专用精确路由 `GET /tokbook/usage?range=…` 只读
+  窗口内的日文件)。
 - **订阅额度(quota)tab**:逐计划**官方账户用量**在 host 侧从各 provider 自家端点拉取
   (`GET /tokbook/quota`)——Command Code 走其 CLI 账户端点(窗口 + 积分 + 计划),OpenCode
   Go 走 `/zen/go/v1/usage`(百分比 + 重置)。无本地估算;无 key → `unconfigured` 提示卡。

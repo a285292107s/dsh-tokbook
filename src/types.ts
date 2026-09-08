@@ -4,10 +4,12 @@
  * The token ledger records ONE row per provider-billed model call (the
  * `assistant/message` provider `usage`, plus compaction summarize calls and
  * failed attempts), then aggregates the rows into totals, per-day, per-hour,
- * per-model and per-(day, model, rate) cells. Cost is an additive layer
- * computed from a per-model price table (¥ per million tokens) through a
- * "time rule → context tier → peak slot" chain, so a price update re-prices
- * history without rebuilding the aggregation.
+ * per-model and per-(day, model, provider, rate) cells. Cost is an additive
+ * layer computed through a (provider, model) price resolution — a per-model
+ * price table (¥ per million tokens) with a provider overlay, resolved by the
+ * "time rule → context tier → peak slot" chain — so a price update re-prices
+ * history without rebuilding the aggregation. Amounts split into real spend
+ * (metered channels) and subscription value (subscription channels).
  *
  * @module dsh-tokbook/types
  */
@@ -101,6 +103,42 @@ export interface ModelPricing {
   cacheWritePerMillion?: number
 }
 
+/** Billing nature of one provider channel, decided per (provider, model). */
+export type BillingNature = 'metered' | 'subscription'
+
+/** One self-priced time segment of a provider entry: applies while
+ * `from ≤ seconds < to` (epoch seconds; `from`/`to` absent = unbounded on
+ * that side). The segment rate *is* the price during the window — it never
+ * inherits rules. */
+export interface PricingSegment {
+  /** Window start, epoch seconds; absent = the beginning of time. */
+  from?: number
+  /** Window end (exclusive), epoch seconds; absent = open-ended. */
+  to?: number
+  /** The flat price applied during the window. */
+  rate: ModelPricing
+  /** Human note. */
+  note?: string
+}
+
+/** One provider-layer override for an exact ledger model string. */
+export interface ProviderPricingEntry {
+  /** How this channel's amount is counted: real spend vs subscription value. */
+  billing?: BillingNature
+  /** Follow the base table's FULL rule set (incl. timeRules) of this modelId. */
+  inheritBase?: string
+  /** Explicit user timeline of flat prices; wins over `inheritBase` when present. */
+  segments?: PricingSegment[]
+  /** Relay placeholder: base prices stand in until the user fills real segments. */
+  placeholder?: boolean
+  /** Human note. */
+  note?: string
+}
+
+/** provider route key → exact model string → override entry. */
+export type ProviderPricingTable = Record<string, Record<string, ProviderPricingEntry>>
+
+
 /** One peak window of a day, half-open [startMinute, endMinute) in local minutes. */
 export interface RateWindow {
   startMinute: number
@@ -189,27 +227,62 @@ export interface PricingView {
   /** One row per exact model string in the merged table, manual rows first
    * then cloud models/aliases (both alphabetical within each group). */
   rows: PricingViewRow[]
+  /** One row per (provider, model) in the EFFECTIVE provider overlay (cloud
+   * mirror + hand edits), the read/display side of the provider dimension.
+   * Absent on hosts that predate the provider layer. */
+  providerRows?: ProviderPricingViewRow[]
   /** The data directory the pricing files live in (informational). */
   dataDir: string
 }
 
-/**
- * One ledger row of the overview's 最近记录 slice: a {@link UsageRecord}
- * with the billed cost (¥) of that single request folded in. The cost is a
- * server-derived read-time field — it re-prices whenever the price table
- * changes and never touches the ledger/rollup format. Failure rows and
- * unpriced rows carry 0.
- */
-export interface RecentLedgerEntry extends UsageRecord {
-  /** Billed ¥ of this request under the current price table (0 = unpriced,
-   * no usage reported, or a failed attempt that billed no tokens). */
-  cost: number
+/** One (provider, model) row of the provider-overlay view: the exact ledger
+ * string the mirror (or a hand edit) overrides for one provider route, how it
+ * bills, and where its price comes from. */
+export interface ProviderPricingViewRow {
+  /** Provider route key ('' groups unknown rows, which never have entries). */
+  provider: string
+  /** The exact model string the entry overrides. */
+  model: string
+  /** Billing nature; absent when the mirror left it unset. */
+  billing?: BillingNature
+  /** Price source: follow this base model's full rule set. */
+  inheritBase?: string
+  /** Price source: an explicit user timeline of flat segments. */
+  segments?: PricingSegment[]
+  /** Relay placeholder: base prices stand in until real segments are filled. */
+  placeholder?: boolean
+  /** Hand-edited `provider-pricing.json` entry wins over the mirror row. */
+  manual: boolean
+  /** Human note (mirror or hand). */
+  note?: string
 }
 
-/** One per-day × per-model × per-rate aggregation row. */
+/**
+ * One ledger row of the overview's 最近记录 slice: a {@link UsageRecord}
+ * with the billed amounts (¥) of that single request folded in. The amounts
+ * are server-derived read-time fields — they re-price whenever the price table
+ * changes and never touches the ledger/rollup format. Failure rows and
+ * unpriced rows carry 0. `cost` is kept as the sum (spend + subscriptionValue)
+ * so older clients that read only `cost` still see a total; the two buckets
+ * let new clients show 实际支出 and 订阅价值 separately.
+ */
+export interface RecentLedgerEntry extends UsageRecord {
+  /** Sum of the two buckets (¥); 0 = unpriced, no usage reported, or a failed
+   * attempt that billed no tokens. Compatibility field. */
+  cost: number
+  /** Real spend (¥): the amount of rows whose billing is `metered`. */
+  spend: number
+  /** Subscription value (¥, non-cash): the amount of rows whose billing is
+   * `subscription`. */
+  subscriptionValue: number
+}
+
+/** One per-day × per-model × per-provider × per-rate aggregation row. */
 export interface UsageRateRow {
   day: string
   model: string
+  /** Provider route key of the row; '' (absent) for unattributed rows. */
+  provider: string
   rate: RateKey
   totals: UsageTotals
 }
@@ -224,8 +297,19 @@ export interface TokenSummary {
   recent: UsageRecord[]
 }
 
-/** A per-model row carrying its billed cost (¥); 0 when the model is unpriced. */
-export type CostedModelRow = UsageModelRow & { cost: number }
+/** A per-model row carrying its billed amounts (¥). `cost` is the sum of the
+ * two buckets (spend + subscriptionValue) — kept so older clients reading only
+ * `cost` still see a total; `spend` and `subscriptionValue` split it by the
+ * billing nature of the (provider, model) channel. 0 when the model is
+ * unpriced. */
+export type CostedModelRow = UsageModelRow & {
+  /** Compatibility total (¥) = spend + subscriptionValue. */
+  cost: number
+  /** Real spend (¥): metered-channel amount. */
+  spend: number
+  /** Subscription value (¥, non-cash): subscription-channel amount. */
+  subscriptionValue: number
+}
 
 /** The currency the stats page renders cost figures in. Amounts on the wire
  * stay RMB; this only names the display convention. */
@@ -240,13 +324,21 @@ export function currencyOfRegion(region: 'domestic' | 'overseas' | undefined): D
 export interface CostedSummary extends TokenSummary {
   /** Absolute data directory the summary was computed from. */
   dataDir: string
-  /** Billed cost over every recorded request (¥); unpriced models count 0. */
+  /** Billed cost over every recorded request (¥); unpriced models count 0.
+   * Compatibility total = spend + subscriptionValue. */
   totalCost: number
+  /** Real spend (¥): amount of rows whose billing is `metered`. */
+  spend: number
+  /** Subscription value (¥, non-cash): amount of rows whose billing is
+   * `subscription`. */
+  subscriptionValue: number
   /** Models with usage but no entry in the pricing table. */
   unpricedModels: string[]
   /** The active pricing table (user-maintained; empty when none is configured). */
   pricing: PricingTable
-  /** Per-model rows with their billed cost attached. */
+  /** The active provider overlay table (empty when the mirror never synced). */
+  providerPricing: ProviderPricingTable
+  /** Per-model rows with their billed amounts attached. */
   byModel: CostedModelRow[]
 }
 
@@ -258,7 +350,8 @@ export type ProviderRange = 'today' | 'yesterday' | 'last7' | 'last30'
 export const PROVIDER_RANGES: readonly ProviderRange[] = ['today', 'yesterday', 'last7', 'last30']
 
 /** One provider-billed model row inside a provider card (tokens already
- * summed over the four buckets; cost is the ¥ billed under the price table). */
+ * summed over the four buckets; amounts are the ¥ billed under the price
+ * table, split into the dual buckets by the channel's billing nature). */
 export interface ProviderModelUsage {
   /** Provider model id as recorded. */
   model: string
@@ -266,8 +359,15 @@ export interface ProviderModelUsage {
   totals: UsageTotals
   /** Sum of the four provider buckets. */
   tokens: number
-  /** Billed ¥ over the window; 0 when the model is unpriced. */
+  /** Billed ¥ over the window; 0 when the model is unpriced.
+   * Compatibility total = spend + subscriptionValue. */
   cost: number
+  /** Real spend (¥) of this model inside the window. */
+  spend: number
+  /** Subscription value (¥, non-cash) of this model inside the window. */
+  subscriptionValue: number
+  /** How this model's channel bills; undefined when unpriced. */
+  billing?: BillingNature
 }
 
 /** One provider card of the Provider-usage tab: every model the provider
@@ -278,8 +378,13 @@ export interface ProviderUsageCard {
   provider: string
   /** Sum of the four buckets over the whole card. */
   tokens: number
-  /** Billed ¥ over the whole card; unpriced models count 0. */
+  /** Billed ¥ over the whole card; unpriced models count 0.
+   * Compatibility total = spend + subscriptionValue. */
   cost: number
+  /** Real spend (¥) over the whole card. */
+  spend: number
+  /** Subscription value (¥, non-cash) over the whole card. */
+  subscriptionValue: number
   /** Models whose usage has no entry in the pricing table (costed as ¥0). */
   unpricedModels: string[]
   /** Models of this provider, largest token total first. */
@@ -316,9 +421,9 @@ export interface ProviderUsageView {
  * slimmed from {@link CostedSummary}: the pricing table (a cloud mirror can be
  * hundreds of models), the rateRows, and the byHour rows are dropped — the
  * floating window renders none of them, and the cost layer has already been
- * folded into `totalCost` / `byModel[].cost`.
+ * folded into `spend` / `subscriptionValue` / `totalCost` / `byModel[].*`.
  */
-export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour' | 'recent'> {
+export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'providerPricing' | 'rateRows' | 'byHour' | 'recent'> {
   /** Distinct sessions that contributed records. */
   sessions: number
   /** Sum of the four provider buckets (input + cacheRead + cacheWrite + output). */
@@ -351,6 +456,8 @@ export interface TokBookConfig {
   path?: string
   /** Explicit cloud pricing feed URL; wins over every region/mirror setting. */
   pricingUrl?: string
+  /** Explicit provider-overlay pricing feed URL; wins over the mirror default. */
+  pricingProviderUrl?: string
   /** Which cloud mirror to pull when `pricingUrl` is unset: `domestic`
    * (default) or `overseas`. */
   pricingRegion?: 'domestic' | 'overseas'

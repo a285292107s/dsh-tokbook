@@ -1,12 +1,13 @@
 /**
  * Stats computation of the token-book: read the per-day files and fold the
- * records into totals, per-day rows, per-hour rows, per-model rows, and a
- * bounded recent window — keeping one row per (day, model, rate identity) so
- * every record is billed at the rate its own timestamp resolved through (see
- * pricing.resolveRate). Frozen (pre-today) day files are served from the
- * on-disk rollup; only today's file is read on every call. Parsed day files
- * are cached in process memory (frozen files stay resident; today's file is
- * re-read when its size/mtime changes).
+ * records into totals, per-day rows, per-hour rows, per-(provider, model)
+ * rows, and a bounded recent window — keeping one row per (day, model,
+ * provider, rate identity) so every record is billed at the rate its own
+ * timestamp resolved through the dual-dimension chain (see pricing.resolvePriced).
+ * Frozen (pre-today) day files are served from the on-disk rollup; only
+ * today's file is read on every call. Parsed day files are cached in process
+ * memory (frozen files stay resident; today's file is re-read when its
+ * size/mtime changes).
  *
  * @module dsh-tokbook/stats
  */
@@ -15,11 +16,11 @@ import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/prom
 import { join } from 'node:path'
 import { coerceRecord, parseRecord } from './usage-record.ts'
 import {
-  type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type TokenSummary,
+  type CostedSummary, type CostedModelRow, type PricingTable, type ProviderPricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type TokenSummary,
   type UsageDayRow, type UsageHourRow, type UsageModelRow, type UsageRateRow, type UsageRecord,
   type UsageTotals, UNPRICED_KEY, totalsTokens,
 } from './types.ts'
-import { costOf, ratesForKey, resolveRate } from './pricing.ts'
+import { billingOf, costOf, effectiveRatesOf, ratesForKey, resolvePriced, resolveRate } from './pricing.ts'
 
 /** Bounded recent window length: only the newest records cross the wire. */
 export const RECENT_LIMIT = 20
@@ -308,7 +309,14 @@ export async function warmRecordCache(dir: string, now?: () => Date, logger?: St
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
+/** Rollup format version. v2 adds the provider dimension to the aggregation
+ * identity (rateRows/byModel carry `provider`) and dual-bucket cost inputs;
+ * a v1 rollup (no provider) is treated as absent and rebuilt from the day
+ * files, so a format change can never silently mis-merge rows. */
+export const ROLLUP_SCHEMA_VERSION = 2
+
 export interface RollupFile {
+  schemaVersion: number
   upto: string
   total: UsageTotals
   byDay: UsageDayRow[]
@@ -338,7 +346,8 @@ function isRateKey(value: unknown): value is RateKey {
 function isRollupFile(value: unknown): value is RollupFile {
   if (typeof value !== 'object' || value === null) return false
   const rollup = value as Record<string, unknown>
-  return typeof rollup.upto === 'string' && DAY_KEY.test(rollup.upto)
+  return rollup.schemaVersion === ROLLUP_SCHEMA_VERSION
+    && typeof rollup.upto === 'string' && DAY_KEY.test(rollup.upto)
     && isTotals(rollup.total)
     && Array.isArray(rollup.byDay)
     && Array.isArray(rollup.byHour)
@@ -373,11 +382,13 @@ export async function readRollup(dir: string, logger: StatsLogger = consoleLogge
 
 /** Persist the rollup atomically (temp file + rename), so a crash mid-write
  * leaves either the old or the new rollup, never a torn one. The target is
- * unlinked first: Windows rename-over-existing fails intermittently. */
+ * unlinked first: Windows rename-over-existing fails intermittently. The
+ * current schema version is stamped, so an old-format rollup reads as absent
+ * and rebuilds. */
 export async function writeRollup(dir: string, rollup: RollupFile): Promise<void> {
   const target = join(dir, ROLLUP_FILE_NAME)
   const tmp = join(dir, `${ROLLUP_FILE_NAME}.tmp`)
-  await writeFile(tmp, JSON.stringify(rollup), 'utf8')
+  await writeFile(tmp, JSON.stringify({ ...rollup, schemaVersion: ROLLUP_SCHEMA_VERSION }), 'utf8')
   await unlink(target).catch(() => undefined)
   await rename(tmp, target)
 }
@@ -448,11 +459,22 @@ function rateRowsSorted(rows: Iterable<UsageRateRow>): UsageRateRow[] {
   return [...rows].sort((left, right) =>
     left.day < right.day ? -1 : left.day > right.day ? 1
       : left.model < right.model ? -1 : left.model > right.model ? 1
-        : compareKeys(left.rate, right.rate))
+        : left.provider < right.provider ? -1 : left.provider > right.provider ? 1
+          : compareKeys(left.rate, right.rate))
 }
 
-function rateRowKey(day: string, model: string, rate: RateKey): string {
-  return `${day}\n${model}\n${rate.ruleStart}-${rate.ruleEnd}-${rate.tier}-${rate.slot}`
+/** The provider key of one record for aggregation identity ('' = unattributed,
+ * displayed as "(未知)" at the surface). */
+function providerKey(provider: string | undefined): string {
+  return provider ?? ''
+}
+
+function modelMapKey(provider: string | undefined, model: string): string {
+  return `${providerKey(provider)}\n${model}`
+}
+
+function rateRowKey(day: string, model: string, provider: string | undefined, rate: RateKey): string {
+  return `${day}\n${model}\n${providerKey(provider)}\n${rate.ruleStart}-${rate.ruleEnd}-${rate.tier}-${rate.slot}`
 }
 
 function hourRowKey(hour: string, model: string): string {
@@ -483,7 +505,9 @@ function addUsage(totals: UsageTotals, record: UsageRecord): void {
 }
 
 /** Fold records into the token-summary shape, one rate row per (day, model,
- * rate identity) the resolver assigns. */
+ * provider, rate identity) the resolver assigns, and one model row per
+ * (provider, model) pair — the same model string billed by two providers must
+ * NOT merge, because the price and billing nature are provider-specific. */
 export function summarizeRecords(records: readonly UsageRecord[], resolve: RateResolver = () => ({ ruleStart: 0, ruleEnd: 0, tier: 0, slot: -1 })): TokenSummary {
   const total = emptyTotals()
   const days = new Map<string, UsageTotals>()
@@ -505,19 +529,18 @@ export function summarizeRecords(records: readonly UsageRecord[], resolve: RateR
       const hourTotals = hours.get(hourRowKey(hour, record.model)) ?? emptyTotals()
       addUsage(hourTotals, record)
       hours.set(hourRowKey(hour, record.model), hourTotals)
-      const key = record.model
+      const key = modelMapKey(record.provider, record.model)
       let row = models.get(key)
       if (row === undefined) {
-        row = { provider: record.provider ?? '', model: key, totals: emptyTotals() }
+        row = { provider: record.provider ?? '', model: record.model, totals: emptyTotals() }
         models.set(key, row)
       }
       addUsage(row.totals, record)
-      if (row.provider === '' && record.provider !== undefined) row.provider = record.provider
     }
     const rate = resolve(record)
-    const rowKey = rateRowKey(day, record.model, rate)
+    const rowKey = rateRowKey(day, record.model, record.provider, rate)
     const cell = rated.get(rowKey)
-      ?? { day, model: record.model, rate, totals: emptyTotals() }
+      ?? { day, model: record.model, provider: record.provider ?? '', rate, totals: emptyTotals() }
     addUsage(cell.totals, record)
     rated.set(rowKey, cell)
     if (recent.length === RECENT_LIMIT) recent.shift()
@@ -551,19 +574,20 @@ export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSu
     hours.set(key, cell)
   }
   for (const row of [...left.byModel, ...right.byModel]) {
-    const existing = models.get(row.model)
+    const key = modelMapKey(row.provider, row.model)
+    const existing = models.get(key)
     const totals = existing?.totals ?? emptyTotals()
     addTotals(totals, row.totals)
-    models.set(row.model, {
-      provider: existing?.provider !== '' ? existing?.provider ?? row.provider : row.provider,
+    models.set(key, {
+      provider: row.provider,
       model: row.model,
       totals,
     })
   }
   for (const row of [...left.rateRows, ...right.rateRows]) {
-    const key = rateRowKey(row.day, row.model, row.rate)
+    const key = rateRowKey(row.day, row.model, row.provider, row.rate)
     const cell = rated.get(key)
-      ?? { day: row.day, model: row.model, rate: row.rate, totals: emptyTotals() }
+      ?? { day: row.day, model: row.model, provider: row.provider, rate: row.rate, totals: emptyTotals() }
     addTotals(cell.totals, row.totals)
     rated.set(key, cell)
   }
@@ -581,32 +605,66 @@ export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSu
 }
 
 /** Attach the cost layer to a token-only summary: each rate row is priced at
- * the prices its rate identity resolves to under the current table. */
-export function attachCosts(summary: TokenSummary & { dataDir: string }, pricing: PricingTable): CostedSummary {
+ * the prices its rate identity resolves to under the current dual-dimension
+ * tables — the provider overlay first (via its effective rule container),
+ * then the base model. Each row's amount lands in the bucket its (provider,
+ * model) billing names: `metered` rows accumulate into `spend`, `subscription`
+ * rows into `subscriptionValue`; `totalCost` stays the sum of both so older
+ * callers keep seeing the book's total. Rows with no effective pricing at all
+ * cost ¥0 and their model strings surface in `unpricedModels`. */
+export function attachCosts(
+  summary: TokenSummary & { dataDir: string },
+  pricing: PricingTable,
+  providers: ProviderPricingTable = {},
+): CostedSummary {
   const costs = new Map<string, number>()
+  const spend = new Map<string, number>()
+  const value = new Map<string, number>()
   let totalCost = 0
+  let totalSpend = 0
+  let totalValue = 0
   for (const row of summary.rateRows) {
-    const rules = pricing[row.model]
-    if (rules === undefined) continue
-    const cost = costOf(row.totals, ratesForKey(rules, row.rate))
-    costs.set(row.model, (costs.get(row.model) ?? 0) + cost)
+    const effective = effectiveRatesOf(pricing, providers, row.provider, row.model)
+    if (effective === null) continue
+    const prices = ratesForKey(effective, row.rate)
+    const cost = costOf(row.totals, prices)
+    const key = modelMapKey(row.provider, row.model)
+    costs.set(key, (costs.get(key) ?? 0) + cost)
+    if (billingOf(providers, row.provider, row.model) === 'subscription') {
+      value.set(key, (value.get(key) ?? 0) + cost)
+      totalValue += cost
+    } else {
+      spend.set(key, (spend.get(key) ?? 0) + cost)
+      totalSpend += cost
+    }
     totalCost += cost
   }
-  const byModel: CostedModelRow[] = summary.byModel.map(row => ({
-    provider: row.provider,
-    model: row.model,
-    totals: row.totals,
-    cost: costs.get(row.model) ?? 0,
-  }))
-  const unpricedModels = summary.byModel
-    .filter(row => pricing[row.model] === undefined)
-    .map(row => row.model)
+  const byModel: CostedModelRow[] = summary.byModel.map(row => {
+    const key = modelMapKey(row.provider, row.model)
+    const cost = costs.get(key) ?? 0
+    return {
+      provider: row.provider,
+      model: row.model,
+      totals: row.totals,
+      cost,
+      spend: spend.get(key) ?? 0,
+      subscriptionValue: value.get(key) ?? 0,
+    }
+  })
+  const unpricedModels = [...new Set(
+    summary.byModel
+      .filter(row => effectiveRatesOf(pricing, providers, row.provider, row.model) === null)
+      .map(row => row.model),
+  )]
   return {
     dataDir: summary.dataDir,
     total: summary.total,
     totalCost,
+    spend: totalSpend,
+    subscriptionValue: totalValue,
     unpricedModels,
     pricing,
+    providerPricing: providers,
     byDay: summary.byDay,
     byHour: summary.byHour,
     byModel,
@@ -618,38 +676,43 @@ export function attachCosts(summary: TokenSummary & { dataDir: string }, pricing
 /**
  * Price the recent-window ledger rows for the floating window's 最近记录
  * list: each request is billed at the rate its own timestamp and context
- * resolved to (the same `resolveRate → costOf` chain the overview's totals
- * use), so a single row's ¥ is exactly the amount the totals folded in.
- * Deliberately read-time and additive: nothing is persisted, and a price
- * table change re-prices the list on the next read. Rows that bill nothing
- * carry 0 — a failed attempt (no tokens ever billed), a request with no
- * provider-reported usage, or a model absent from the price table.
+ * resolved to through the dual-dimension chain (provider overlay first), so a
+ * single row's ¥ is exactly the amount the totals folded in — and its two
+ * buckets (`spend` / `subscriptionValue`) show which side of the ledger it
+ * sits on. Deliberately read-time and additive: nothing is persisted, and a
+ * price table change re-prices the list on the next read. Rows that bill
+ * nothing carry 0 — a failed attempt (no tokens ever billed), a request with
+ * no provider-reported usage, or a string absent from every pricing source.
  */
 export function costRecentEntries(
   recent: readonly UsageRecord[],
   pricing: PricingTable,
+  providers: ProviderPricingTable = {},
   resolve: RateResolver = () => UNPRICED_KEY,
 ): RecentLedgerEntry[] {
+  void resolve
   return recent.map((record) => {
-    const rules = pricing[record.model]
-    if (rules === undefined) return { ...record, cost: 0 }
     const usage = record.usage
-    if (usage === undefined) return { ...record, cost: 0 }
+    if (usage === undefined) return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
     const contextTokens = usage.inputTokens
       + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
-    const { key } = resolveRate(rules, record.time, contextTokens)
-    const prices = ratesForKey(rules, key)
+    const resolved = resolvePriced(pricing, providers, record.provider, record.model, record.time, contextTokens)
+    if (resolved.source === 'unpriced') return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
     // Cost the four buckets as the totals layer would (absent cache buckets
     // read as 0, never NaN).
+    const amount = costOf({
+      requests: 0,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens ?? 0,
+      cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+    }, resolved.prices)
+    const subscription = billingOf(providers, record.provider, record.model) === 'subscription'
     return {
       ...record,
-      cost: costOf({
-        requests: 0,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cacheReadTokens: usage.cacheReadTokens ?? 0,
-        cacheWriteTokens: usage.cacheWriteTokens ?? 0,
-      }, prices),
+      cost: amount,
+      spend: subscription ? 0 : amount,
+      subscriptionValue: subscription ? amount : 0,
     }
   })
 }
@@ -663,7 +726,7 @@ export async function buildSummary(
   logger: StatsLogger = consoleLogger,
 ): Promise<TokenSummary & { dataDir: string }> {
   const today = dayKey(now().getTime())
-  const rollup = (await readRollup(dir, logger)) ?? { upto: '', total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [], recent: [] }
+  const rollup = (await readRollup(dir, logger)) ?? { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [], recent: [] }
   const cold: string[] = []
   const hot: string[] = []
   for (const name of await listDayFiles(dir)) {
@@ -678,6 +741,7 @@ export async function buildSummary(
     for (const name of cold) records.push(...await readDayFile(dir, name, logger))
     absorbed = {
       upto: fileDay(cold[cold.length - 1]!)!,
+      schemaVersion: ROLLUP_SCHEMA_VERSION,
       ...mergeSummaries(rollup, summarizeRecords(records, resolve)),
     }
     await writeRollup(dir, absorbed).catch((error: unknown) => {
