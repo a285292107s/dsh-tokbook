@@ -780,37 +780,89 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
+/** A day key shifted by N days; the host names its day files the same way. */
+function shiftDayKey(day: string, delta: number): string {
+  const [year, month, date] = day.split('-').map(Number)
+  const shifted = new Date(year!, month! - 1, date! + delta)
+  const m = String(shifted.getMonth() + 1).padStart(2, '0')
+  const d = String(shifted.getDate()).padStart(2, '0')
+  return `${shifted.getFullYear()}-${m}-${d}`
+}
+
+/** The browser's local calendar day, matching the host's local-day keys. */
+function localDayKey(): string {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
+/** Compact month/day label (8/26) for the axis and the chart's accessible name. */
+function shortDay(day: string): string {
+  const [, month, date] = day.split('-')
+  return `${Number(month)}/${Number(date)}`
+}
+
+/** Days in the trend window; the window never starts before the first record. */
+const TREND_DAYS = 14
+
 /**
- * Simple daily total-token bar chart (last 30 days). Pointer users get a
- * title tooltip per bar; screen readers get one summary line with the peak,
- * so the trend is never conveyed by visuals alone.
+
+/**
+ * Daily total-token column chart over a continuous calendar window. The host's
+ * `byDay` only carries days that have records, so the window is rebuilt here:
+ * a day without records becomes a zero slot instead of disappearing, which
+ * would silently compress the time axis and overstate continuity. Every column
+ * carries its own value label, so reading the chart never depends on hovering.
  */
 function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   if (days.length === 0) return null
-  const last = days.slice(-30)
-  const max = Math.max(...last.map(row => totalsOf(row.totals)), 1)
-  const peak = last.reduce((a, b) => totalsOf(a.totals) >= totalsOf(b.totals) ? a : b, last[0]!)
-  const sum = last.reduce((acc, row) => acc + totalsOf(row.totals), 0)
+  const byDay = new Map(days.map(row => [row.day, totalsOf(row.totals)]))
+  const today = localDayKey()
+  const earliest = shiftDayKey(today, -(TREND_DAYS - 1))
+  const start = days[0]!.day > earliest ? days[0]!.day : earliest
+  const slots: string[] = []
+  for (let day = start; day <= today; day = shiftDayKey(day, 1)) slots.push(day)
+  if (slots.length === 0) return null
+  const values = slots.map(day => byDay.get(day) ?? 0)
+  const max = Math.max(...values, 1)
+  const sum = values.reduce((acc, value) => acc + value, 0)
+  const active = values.filter(value => value > 0).length
+  const peak = Math.max(...values)
+  const peakIndex = peak > 0 ? values.indexOf(peak) : -1
   return (
     <section className="dtpl-trend">
       <h2 className="dtpl-sec-title">每日词元</h2>
-      <div className="dtpl-bars">
-        {last.map((row) => {
-          const tokens = totalsOf(row.totals)
-          const height = Math.max(4, Math.round((tokens / max) * 100))
+      <div
+        className="dtpl-bars"
+        role="img"
+        aria-label={`每日词元柱状图：${shortDay(slots[0]!)} 至 ${shortDay(slots[slots.length - 1]!)} 共 ${slots.length} 天，合计 ${formatTokens(sum)} 词元${peak > 0 ? `，峰值 ${shortDay(slots[peakIndex]!)} 的 ${formatTokens(peak)}` : ''}。`}
+      >
+        {slots.map((day, index) => {
+          const tokens = values[index]!
+          const isPeak = index === peakIndex
+          const edge = index === 0 ? ' is-start' : index === slots.length - 1 ? ' is-end' : ''
           return (
-            <div className="dtpl-bar" key={row.day} title={`${row.day}\n${formatTokens(tokens)}`}>
-              <div className="dtpl-bar-fill" style={{ height: `${height}%` }} />
+            <div className="dtpl-bar" key={day} title={`${day}\n${formatTokens(tokens)}`}>
+              <span className={`dtpl-bar-label${isPeak ? ' is-peak' : ''}${tokens === 0 ? ' is-zero' : ''}${edge}`}>
+                {formatTokens(tokens)}
+              </span>
+              {tokens > 0 && (
+                <div
+                  className={`dtpl-bar-fill${isPeak ? ' is-peak' : ''}`}
+                  style={{ height: `max(2px, ${Math.round((tokens / max) * 100)}%)` }}
+                />
+              )}
             </div>
           )
         })}
       </div>
       <div className="dtpl-trend-axis">
-        <span>{last[0]!.day}</span>
-        <span>{last[last.length - 1]!.day}</span>
+        {slots.map(day => <span key={day}>{shortDay(day)}</span>)}
       </div>
       <p className="dtpl-trend-sum">
-        近 {last.length} 天合计 {formatTokens(sum)} 词元，峰值 {peak.day}（{formatTokens(totalsOf(peak.totals))}）。
+        最近 {slots.length} 天（{active} 天有记录）合计 {formatTokens(sum)} 词元
+        {peak > 0 && <>，峰值 {slots[peakIndex]}（{formatTokens(peak)}）</>}。
       </p>
     </section>
   )

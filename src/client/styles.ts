@@ -234,22 +234,37 @@ const CSS = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-trend{margin-bottom:14px;}
 [data-plugin="dsh-tokbook"] .dtpl-bars{
-  display:flex;align-items:flex-end;gap:3px;height:64px;
-  padding:8px;
+  position:relative;
+  display:flex;align-items:flex-end;gap:3px;height:76px;
+  padding:20px 8px 8px;
   border-radius:var(--dtpl-radius-sm);corner-shape:round;
   background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-bar{flex:1 1 0;min-width:0;height:100%;display:flex;align-items:flex-end;}
+[data-plugin="dsh-tokbook"] .dtpl-bar{position:relative;flex:1 1 0;min-width:0;height:100%;display:flex;align-items:flex-end;}
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill{
   width:100%;border-radius:2px 2px 0 0;corner-shape:round;
   background:color-mix(in srgb,var(--dtpl-accent) 62%,transparent);
   transition:opacity .15s ease;
 }
+[data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak{background:var(--dtpl-accent);}
 [data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-fill{background:var(--dtpl-accent);}
-[data-plugin="dsh-tokbook"] .dtpl-trend-axis{
-  display:flex;justify-content:space-between;margin-top:4px;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-3);font-variant-numeric:tabular-nums;
+/* Every column carries its own value: the chart reads without hovering. */
+[data-plugin="dsh-tokbook"] .dtpl-bar-label{
+  position:absolute;bottom:calc(100% + 2px);left:50%;transform:translateX(-50%);
+  font-size:11px;line-height:14px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
+  white-space:nowrap;pointer-events:none;
 }
+[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:650;}
+/* A zero day has no column, so its label sits on the baseline instead of
+   floating at the top of the plot. */
+[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-zero{bottom:2px;color:var(--dtpl-fg-3);}
+[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-start{left:0;transform:none;}
+[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-end{left:auto;right:0;transform:none;}
+[data-plugin="dsh-tokbook"] .dtpl-trend-axis{
+  display:flex;gap:3px;margin-top:4px;padding:0 8px;
+  font-size:10px;line-height:16px;color:var(--dtpl-fg-3);font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-trend-axis span{flex:1 1 0;min-width:0;text-align:center;white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-trend-sum{
   margin:4px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
 }
