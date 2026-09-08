@@ -1,98 +1,93 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
 
-A cross-session **token-usage ledger** plugin for DeepSeek Harness (DSH). The
-host half records **one row per provider-billed model call** — the
-`assistant/message` provider `usage` (plus compaction summarize calls and
-failed attempts) — as a durable per-day JSONL ledger, then serves an
-aggregated, **costed** overview. The browser half shows it via a **sidebar
-footer button** (route A: `sidebar.footer.action`) that opens a **floating
-window** (`shell.overlay`) with summary cards (tokens **and cost**), a daily
-token trend chart, a per-model breakdown with cost — a per-provider tab
-(one card per provider route, its models' tokens/cost inside a selectable
-今日 / 昨天 / 近7天 / 近30天 window) — and a 订阅额度 tab that shows each
-configured subscription's **official account usage** (Command Code / OpenCode
-Go), fetched from the provider's own API with your key.
+DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次 provider 计费
+模型调用——`assistant/message` provider 的 `usage`(外加压缩 summarize 调用与失败尝试)
+——记成一行、写入持久化的按日 JSONL 账本,再对外提供**带成本**的聚合总览。browser
+半区通过**侧边栏 footer 按钮**(route A:`sidebar.footer.action`)把它展示出来,按钮弹出
+**浮窗**(`shell.overlay`),内含汇总卡(token **与成本**)、按日 token 趋势图、按模型拆分
+(含成本)、**按 provider 的 tab**(每个 provider 路由一张卡,内含该路由下各模型的
+token/成本,可切换 今日 / 昨天 / 近7天 / 近30天 窗口)、价格表 tab,以及**订阅额度 tab**
+——展示每个已配置订阅的**官方账户用量**(Command Code / OpenCode Go),用你的 key 从
+provider 自家 API 拉取。
 
-The doc tree is mapped in [`docs/INDEX.md`](docs/INDEX.md) (role / status /
-when-to-read per file); host contracts that must match code live in
-[`docs/CONTRACTS.md`](docs/CONTRACTS.md), enforced by `pnpm selfcheck`.
+文档树的地图见 [`docs/INDEX.md`](docs/INDEX.md)(每份文件的 role / status / 何时读);
+必须与代码一致的 host 契约在 [`docs/CONTRACTS.md`](docs/CONTRACTS.md),由
+`pnpm selfcheck` 强制同步。
 
-Design rationale, tech selection, and the two sidebar approaches are documented
-in [`docs/DESIGN.zh.md`](docs/DESIGN.zh.md). The data model follows the
-[dsh-token-usage](https://github.com/LaoYueHanNi/dsh-token-usage) reference:
-per-request rows instead of per-session aggregates, plus a ¥/M price table with
-a "time rule → context tier → peak slot" rate chain.
+设计推理、技术选型与两种侧边栏方案,见 [`docs/DESIGN.md`](docs/DESIGN.md)。数据模型
+沿用 [dsh-token-usage](https://github.com/LaoYueHanNi/dsh-token-usage) 参考:逐请求行
+而非逐会话聚合,外加 ¥/M 价格表,带「时间规则 → 上下文档位 → 高峰时段」计价链。
 
-## Layout
+## 布局
 
 ```
 src/
-  index.ts            host: TokenUsageBook service (ctx.tokbook) + live hook
-  types.ts            shared domain types (type-only)
-  ledger.ts           data-directory resolution + owner marker (single-writer guard)
-  usage-record.ts     per-call record model + session-event projections
-  usage-log.ts        per-day JSONL store (append/dedupe/refile; dedupe state
-                      shared per data directory across instances/restarts)
-  sync.ts             first-start + manual history backfill (idempotent)
-  sync-state.ts       first-run marker + persisted sync baseline
-  stats.ts            aggregation (totals/byDay/byHour/byModel/recent) + rollup + cache
-  pricing.ts          price table (cloud mirror + manual), resolveRate chain, costOf
-  by-provider.ts      pure provider-card aggregation (Provider-usage tab)
-  quota.ts            official-quota normalization + built-in plan identity
-  quota-official.ts   key resolution + per-provider official usage fetchers
-  routes.ts           host exact-Fetch routes  /tokbook/overview, /tokbook/rescan,
-                      /tokbook/usage?range=…, /tokbook/quota, /tokbook/pricing
+  index.ts            host: TokenUsageBook 服务(ctx.tokbook)+ 实时 hook
+  types.ts            共享领域类型(仅类型)
+  ledger.ts           数据目录解析 + owner 标记(单写者守卫)
+  usage-record.ts     逐调用记录模型 + 会话事件投影
+  usage-log.ts        按日 JSONL 存储(追加/去重/refile;去重状态按数据目录在
+                      实例/重启间共享)
+  sync.ts             首次启动 + 手动历史回填(幂等)
+  sync-state.ts       首次运行标记 + 持久化同步基线
+  stats.ts            聚合(totals/byDay/byHour/byModel/recent)+ 折叠 + 缓存
+  pricing.ts          价格表(云镜像 + 手工)、resolveRate 链、costOf
+  by-provider.ts      纯 provider 卡片聚合(Provider-usage tab)
+  quota.ts            官方额度归一化 + 内置计划身份
+  quota-official.ts   key 解析 + 各 provider 官方用量抓取器
+  routes.ts           host 精确 Fetch 路由 /tokbook/overview、/tokbook/rescan、
+                      /tokbook/usage?range=…、/tokbook/quota、/tokbook/pricing
   client/
-    index.ts          client: apply(ctx), registers the two slots
-    contract.ts       minimal client ctx/slots types
-    store.ts          shared button↔overlay view store
-    styles.ts         injected stylesheet (DSH tokens)
-    FooterButton.tsx  sidebar.footer.action trigger
-    QuotaPanel.tsx    订阅额度 tab (official usage cards)
-    PricingPanel.tsx  价格表 tab (view + maintain manual prices)
-    LedgerOverlay.tsx shell.overlay floating window (costed summary + trend +
-                      per-model + per-provider + pricing + quota tabs)
+    index.ts          client: apply(ctx),注册两个 slot
+    contract.ts       最小 client ctx/slots 类型
+    store.ts          按钮 ↔ 浮窗共享视图 store
+    styles.ts         注入样式表(DSH tokens)
+    FooterButton.tsx  sidebar.footer.action 触发器
+    QuotaPanel.tsx    订阅额度 tab(官方用量卡)
+    PricingPanel.tsx  价格表 tab(查看 + 维护手工价)
+    LedgerOverlay.tsx shell.overlay 浮窗(带成本汇总 + 趋势 + 按模型 + 按 provider
+                      + 价格 + 额度 tab)
 scripts/
-  build-client.mjs         builds lib/index.js + lib/client.js (lazy-CJS)
-  smoke.ts                 pure-logic smoke test of aggregation + pricing + quota
-  selfcheck-baseline.ts    restart/sync-progress semantics self-check
-  selfcheck-rebuild.ts     rollup rebuild / refile / cross-instance dedupe self-check
+  build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS)
+  smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试
+  selfcheck-baseline.ts    重启/同步进度语义自检
+  selfcheck-rebuild.ts     折叠重建 / refile / 跨实例去重自检
+  selfcheck-docs.ts        文档自检:CONTRACTS 路由 ↔ 代码、INDEX 链接、Doc meta
 ```
 
-## Build
+## 构建
 
 ```sh
-pnpm install      # installs @deepseek-ai/cordis, react, esbuild, typescript
-pnpm build        # tsc emits lib/types/*.d.ts, then esbuild bundles host+client
-pnpm smoke        # pure-logic smoke test of aggregation + pricing + quota math
-pnpm selfcheck    # restart/baseline + rollup-rebuild/refile/dedupe invariant self-checks
+pnpm install      # 安装 @deepseek-ai/cordis、react、esbuild、typescript
+pnpm build        # tsc 产出 lib/types/*.d.ts,再由 esbuild 打包 host + client
+pnpm smoke        # 聚合 + 计价 + 额度数学的纯逻辑冒烟测试
+pnpm selfcheck    # 重启/基线 + 折叠重建/refile/去重不变量自检(含 docs)
 pnpm test         # smoke + selfcheck
 ```
 
-Outputs:
+产物:
 
-- `lib/index.js` — host half (node ESM, bare imports external)
-- `lib/client.js` — browser half, the lazy-CJS factory:
+- `lib/index.js` — host 半区(node ESM,bare imports 保持 external)
+- `lib/client.js` — browser 半区,懒加载 CJS factory:
   `window.__ModuleLoader__.load({ id, factory: (require) => { ... } })`
-- `lib/types/**/*.d.ts` — declarations
+- `lib/types/**/*.d.ts` — 声明
 
-The client bundle externalizes the DSH baseline (`react`, `react-dom`, cordis,
-`dsh-client-store`, `dsh-client-ui-slots`, `dsh-client-ui-primitives`); keep
-`BASELINE_EXTERNALS` in `scripts/build-client.mjs` in sync with DSH's
-`packages/client/web/src/platform.ts`.
+client bundle 把 DSH 基线(`react`、`react-dom`、cordis、`dsh-client-store`、
+`dsh-client-ui-slots`、`dsh-client-ui-primitives`)保持 external;请保持
+`scripts/build-client.mjs` 里的 `BASELINE_EXTERNALS` 与 DSH 的
+`packages/client/web/src/platform.ts` 同步。
 
-## Install into a DSH web profile
+## 装进 DSH web profile
 
 ```sh
-dsh plugin --profile web add .            # or a git/tarball/path specifier
-# then ensure the row is mounted in $DSH_HOME/profiles/web/cordis.patch.yml
+dsh plugin --profile web add .            # 或 git/tarball/路径 说明符
+# 然后确认该行已挂载到 $DSH_HOME/profiles/web/cordis.patch.yml
 ```
 
-If the package is not installed as a bundle (it is a plain plugin, not a
-`dsh.bundle` layer), add an insert row to the profile patch (see
-[`cordis.patch.example.yml`](cordis.patch.example.yml)):
+若包不是以 bundle 安装(它是普通插件,不是 `dsh.bundle` 层),给 profile patch 加一行
+insert(见 [`cordis.patch.example.yml`](cordis.patch.example.yml)):
 
 ```yaml
 - insert:
@@ -100,212 +95,161 @@ If the package is not installed as a bundle (it is a plain plugin, not a
       name: 'dsh-tokbook'
 ```
 
-Then `dsh web` and refresh the browser. With the dev reload chain live (see
-[`docs/HMR.zh.md`](docs/HMR.zh.md)), a `pnpm build` hot-swaps the **host** half
-through the profile's enabled `cordis-plugin-hmr` row (unload → re-import →
-re-apply). The **browser** half is picked up by refreshing the page (the
-mounted `client-hmr` chain may also swap it within ~500ms without a refresh,
-but that is a bonus, not a guarantee). A hard refresh (`Cmd/Ctrl+Shift+R`) is
-the always-works fallback when the chain was not live during a build.
+然后 `dsh web` 并刷新浏览器。开发重载链活着时(见
+[`docs/HMR.md`](docs/HMR.md)),`pnpm build` 会经 profile 里启用的 `cordis-plugin-hmr`
+行热替换 **host** 半区(unload → re-import → re-apply)。**browser** 半区刷新页面即可
+拾取(挂载的 `client-hmr` 链也可能在约 500ms 内免刷新替换,但那是加分项、不是保证)。
+当链在构建期间没活着时,硬刷新(`Cmd/Ctrl+Shift+R`)永远是可靠兜底。
 
-## Dev against a source checkout
+## 对着源码检出开发
 
 ```sh
-pnpm watch                                # tsc --watch: emits lib/types/*.d.ts only —
-                                          # run pnpm build for lib/index.js / lib/client.js
-dsh web --patch /abs/path/to/tokbook/dev/cordis.yml   # host half only
+pnpm watch                                # tsc --watch:只产出 lib/types/*.d.ts ——
+                                          # 要 lib/index.js / lib/client.js 请跑 pnpm build
+dsh web --patch /abs/path/to/tokbook/dev/cordis.yml   # 仅 host 半区
 ```
 
-> A `--patch` overlay loads only the host half (module resolution cannot reach
-> package-level client declarations); to exercise the browser half, install into
-> a profile as described above.
+> `--patch` overlay 只加载 host 半区(模块解析够不到包级 client 声明);要跑 browser
+> 半区,请按上文装进 profile。
 
-## How it records tokens
+## 它怎么记 token
 
-The host listens to the durable `session/event` stream and folds each
-provider-billed model call into one JSONL row, persisted per local day under
-`$DSH_HOME/tokbook/` (configurable via `path`):
+host 监听持久化 `session/event` 流,把每次 provider 计费模型调用折叠成一行 JSONL,按
+本地日持久化在 `$DSH_HOME/tokbook/` 下(可用 `path` 配置):
 
-- **`assistant/message`** — a successful model request, with the provider's
-  reported `usage` (`inputTokens` / `outputTokens` / `cacheReadTokens` /
-  `cacheWriteTokens`). Row id = the message id (dedupe key).
-- **`compaction/summary`** — a context-compaction summarize call (a billed
-  provider call of its own), recorded when `recordCompaction` is on.
-- **`turn/end`** (reason `error`) and **`llm/retry`** — failed attempts, counted
-  in the `failures` dimension (no tokens, so they never inflate token totals).
+- **`assistant/message`** — 一次成功的模型请求,带 provider 上报的 `usage`
+  (`inputTokens` / `outputTokens` / `cacheReadTokens` / `cacheWriteTokens`)。行 id =
+  message id(去重键)。
+- **`compaction/summary`** — 一次上下文压缩 summarize 调用(自身就是一次计费 provider
+  调用),`recordCompaction` 开启时记录。
+- **`turn/end`**(reason `error`)与 **`llm/retry`** — 失败尝试,计入 `failures` 维度
+  (无 token,所以永远不会虚增 token 总量)。
 
-On first startup the plugin backfills the history of requests that happened
-before installation (idempotent, deduped by row id); a **re-scan button** in
-the floating window forces an authoritative re-sync. Reads also self-correct
-with a **cheap on-demand probe**: each overview read first asks
-`sessionPersistence.listSnapshots()` for per-session metadata (an opaque
-`revision` token; equal means unchanged; a plain-header `list()` is accepted
-as a fallback), and only when the persisted log has work the ledger does not
-already hold — a new/changed session, or one never folded — does it re-sync
-through `inspect(id)` (request-id dedupe makes that idempotent).
+首次启动时插件回填安装前发生的历史请求(幂等、按行 id 去重);浮窗里的**重新扫描按钮**
+可强制一次权威重同步。读路径也会用**廉价的按需探测**自我纠正:每次 overview 读取先问
+`sessionPersistence.listSnapshots()` 要逐会话元数据(不透明 `revision` token;相等 =
+未变;裸头 `list()` 也可作回退),只有当持久化日志里有账本尚未持有的工作——新/变过的
+会话,或从未折叠过的会话——才经 `inspect(id)` 重同步(request-id 去重使其幂等)。
 
-The probe is **incremental across restarts**: after each successful sync the
-per-session change tokens are persisted (`sync-progress.json` in the data
-directory), so a restarted process inherits the previous run's signature
-instead of walking every session log on the first open. Only sessions whose
-log actually changed while the process was down (or brand-new ones) are
-re-walked; when nothing changed the first open costs a metadata listing only.
-The baseline is written strictly after a sync, and sessions whose log could
-not be read are excluded from it, so the fallback full walk (missing/torn
-baseline, first install) re-runs idempotently and then rewrites a fresh one.
-So the floating window reflects real persisted usage even when the live hook
-missed an event, at almost no cost when nothing changed; the live hook is the
-fast path that keeps the ledger current between opens. One unreadable session
-log is skipped and counted, never fatal.
+该探测**跨重启增量**:每次成功同步后,逐会话变更 token 会被持久化
+(`sync-progress.json`,位于数据目录),所以重启后的进程继承上一次运行的签名,而不是
+首次打开时走一遍每个会话日志。只有进程宕机期间日志真的变过(或全新)的会话才会被重新
+走读;什么都没变时,首次打开只花一次元数据列出的代价。基线严格在同步后写入,读不到的
+会话被排除在外,所以兜底全量走读(基线缺失/撕裂、首次安装)会幂等重跑并重写一份新基线。
+因此即使实时 hook 漏了某事件,浮窗也反映真实持久化用量,且没变化时几乎零成本;实时
+hook 只是让账本在两次打开之间保持最新的快路径。某一份读不到的会话日志会被跳过并计数,
+绝不致命。
 
-The floating window splits its data-status facts by reader: the pinned window
-footer always shows the **freshness state** (re-sync state · newest-record
-time), visible at any scroll position and also when the ledger is empty; the
-**plumbing diagnostics** (record count, day-file count, data directory) live in
-the 统计口径 tab's 数据文件状态 section — so when a figure is 0 the cause is
-visible (whether records are being captured at all), without pipe facts
-cluttering the scroll of usage content.
+浮窗按读者拆分数据状态事实:钉住的窗口 footer 永远显示**新鲜度状态**(重同步状态 ·
+最新记录时间),任意滚动位置可见、账本为空时也在;**管道诊断**(记录数、日文件数、数据
+目录)放在 统计口径 tab 的 数据文件状态 一节——所以当某个数字是 0 时,原因可见(到底是
+否在捕获记录),管道事实不会挤占用量内容的滚动区。
 
-### One data directory, one writing process
+### 一个数据目录,一个写入进程
 
-The ledger, rollup, parse cache and refile passes assume a single host process
-writes a given data directory (rollup/cache races are the risk; the JSONL
-appends themselves are dedupe-safe). On startup the plugin writes an
-`owner.json` marker (pid + start time) into the directory and **warns when a
-live foreign process already owns it** — a stale marker from a crashed process
-is taken over silently. Point a second host at its own `path` (see
-[Configuration](#configuration)) rather than sharing one directory.
+账本、折叠、解析缓存与 refile 遍历都假设**单个 host 进程**写给定数据目录(风险在于
+fold/缓存竞争;JSONL 追加本身去重安全)。启动时插件往目录写 `owner.json` 标记
+(pid + 启动时间),**当检测到存活的异进程已占用时告警**——崩溃进程留下的陈旧标记会被
+静默接管。第二个 host 请指向自己的 `path`(见 [配置](#配置)),不要共享目录。
 
-The in-process dedupe/append state of `UsageLog` is keyed by **data
-directory**, not by plugin instance, so every instance sharing the *same loaded
-module copy* (a dependency's dispose → auto-reload, a second instance over
-service isolation, or an overlapping instance with queued appends in flight)
-shares one dedupe set and one serialized append queue — overlapping writers of
-one process can never double-write the same request id.
+`UsageLog` 的进程内去重/追加状态按**数据目录**键控,而不是按插件实例,所以每个共享
+*同一份已加载模块拷贝*的实例(依赖 dispose → 自动重载、服务隔离下的第二个实例、或带
+排队追加在途的重叠实例)共享同一个去重集与同一条串行追加队列——同一进程内重叠写者
+永远不会对同一 request id 双写。
 
-That sharing does **not** cross a module-level HMR reload (cordis-plugin-hmr
-re-imports the plugin entry, so the new module starts a fresh state map). Across
-that boundary, dedupe safety is re-derived from the on-disk rows before the new
-instance's first write; a process restart starts empty and does the same. See
-[`docs/HMR.zh.md`](docs/HMR.zh.md) §4 for the exact scope.
+这种共享**不**跨越模块级 HMR 重载(cordis-plugin-hmr 会 re-import 插件入口,新模块
+从头建状态表)。跨过那道边界后,去重安全在新实例首次写入前从磁盘上的行重新推导;进程
+重启从空开始、做同样的事。确切范围见 [`docs/HMR.md`](docs/HMR.md) §4。
 
-## Cost
+## 成本
 
-Each record is priced at its own timestamp through a ¥/M per-model price table:
-base rates, then a **time-rule → context tier → peak slot** chain. The context
-size for tier matching is approximated by the request's input-side tokens
-(input + cacheRead + cacheWrite). Cache buckets bill at their own rate when the
-table provides one, else at the plain input rate.
+每条记录按它自己的时间戳,通过 ¥/M 每模型价目表计价:基准价,随后是**时间规则 →
+上下文档位 → 高峰时段**链。上下文档位大小用请求的 input 侧 token 近似(input +
+cacheRead + cacheWrite)。表里有独立价时 cache 桶按自己的价计,否则回退普通 input 价。
 
-The table merges two sources (cloud mirror synced on startup, and a hand-edited
-`pricing.json` whose entries always win wholesale):
+表合并两个来源(启动时同步的云镜像,以及永远整表优先的手编 `pricing.json`):
 
 ```json
 { "deepseek-chat": { "inputPerMillion": 2, "outputPerMillion": 8, "cacheReadPerMillion": 0.5 } }
 ```
 
-The floating window's **价格表 tab** lets you maintain those manual entries
-from the UI: every model the ledger recorded is listed (cloud rows show their
-mirrored base rates with a 自定义 action; ledger models with **no** table entry
-are flagged 未定价 — they bill ¥0 until you give them a manual price), each
-manual row edits its four flat rates in place, and one 保存 writes the whole
-manual file through `PUT /tokbook/pricing`. Saving re-prices every history on
-the next read — no rollup or ledger change. (The manual layer is flat-only by
-design: time-rule / context-tier / peak pricing stays in the cloud feed, and a
-manual entry for such a model replaces its whole rule set with flat prices.)
+浮窗的**价格表 tab** 让你在 UI 里维护那些手工条目:账本记过的每个模型都会列出(云行
+显示镜像基准价、带 自定义 动作;账本有、但**两表都没有**的模型标记 未定价——它们计 ¥0,
+直到你给手工价),每条手工行就地编辑四档单价,一次 保存 把整个手工文件经
+`PUT /tokbook/pricing` 写下去。保存后下一次读取即重新计价全部历史——不动折叠或账本。
+(手工层按设计只支持 flat:时间规则/档位/高峰留在云 feed;给这类模型写手工条目 = 把其
+整套规则替换成 flat 价。)
 
-Default location: `$DSH_HOME/tokbook/`. A malformed file degrades the affected
-models to unpriced (¥0) without breaking the page. Unpriced models are listed in
-the floating window.
+默认位置:`$DSH_HOME/tokbook/`。畸形文件只会把受影响的模型降级为未定价(¥0),不会弄坏
+页面。未定价模型会在浮窗里列出。
 
-## Configuration
+## 配置
 
 ```yml
 plugins:
   tokbook:
-    path: D:/data/tokbook        # default: $DSH_HOME/tokbook (or ~/.dsh/tokbook)
-    pricingRegion: overseas      # default: domestic (gitee mirror)
-    pricingUrl: https://...      # optional explicit feed URL; wins over region
-    recordCompaction: true       # default: true — record compaction calls
-    # Quota plans keyed by provider route. opencode-go and commandcode are
-    # built in: the tab fetches each subscription's OFFICIAL account usage
-    # (never a local estimate — a subscription key is shared across tools).
-    # A plan is attempted unless enabled:false. The API key is resolved from
-    # the DSH credentials service under the provider's reference name
-    # (OPENCODE_GO_API_KEY / COMMANDCODE_API_KEY — the same reference the
-    # provider's Models/settings page writes when you store the key there),
-    # or from an explicit literal below. No key found → "unconfigured" card.
+    path: D:/data/tokbook        # 默认: $DSH_HOME/tokbook(或 ~/.dsh/tokbook)
+    pricingRegion: overseas      # 默认: domestic(gitee 镜像)
+    pricingUrl: https://...      # 可选显式 feed URL;优先于 region
+    recordCompaction: true       # 默认: true——记录压缩调用
+    # 按 provider 路由键控的额度计划。opencode-go 与 commandcode 内置:该 tab 抓取每个
+    # 订阅的官方账户用量(绝非本地估算——订阅 key 跨工具共享)。
+    # 计划默认被尝试,除非 enabled:false。API key 从 DSH 凭据服务按 provider 的引用名
+    # 解析(OPENCODE_GO_API_KEY / COMMANDCODE_API_KEY——与 provider 的 Models/settings
+    # 页面存 key 时写的引用一致),或从下面的显式字面量解析。找不到 key → "unconfigured" 卡。
     plans:
       opencode-go:
-        # apiKey: user_...               # literal key (wins; optional)
-        enabled: false                   # disable this built-in plan
+        # apiKey: user_...               # 字面 key(优先;可选)
+        enabled: false                   # 关闭这个内置计划
       commandcode:
-        # apiKeyEnv: COMMANDCODE_API_KEY # credential ref (provider default)
-        # enabled: false                  # disable this built-in plan
+        # apiKeyEnv: COMMANDCODE_API_KEY # 凭据引用(provider 默认)
+        # enabled: false                  # 关闭这个内置计划
 ```
 
-### Official account usage (订阅额度 tab)
+### 官方账户用量(订阅额度 tab)
 
-The **订阅额度** tab shows **account-level subscription usage fetched
-from each provider's own account API** with your key — so it reflects *all*
-tools/devices sharing the subscription, which a local token ledger cannot.
+**订阅额度** tab 展示**账户级订阅用量,用你的 key 从 provider 自己的账户 API 拉取**——
+所以它反映共享该订阅的*所有*工具/设备,本地 token 账本做不到。
 
-- **Command Code** — queries the account endpoints the official `cmd` CLI uses
-  (`/alpha/whoami`, `/alpha/usage/summary`, `/alpha/billing/credits`,
-  `/alpha/billing/subscriptions`): window `used/cap/exceeded/resetAt` in USD,
-  monthly credit pool, plan + usage summary.
-- **OpenCode Go** — queries the official usage endpoint
-  (`GET https://opencode.ai/zen/go/v1/usage`): 5h/weekly/monthly windows as
-  percent + reset (the endpoint reports no dollar amounts, so that card is
-  percent-only).
+- **Command Code** — 查询官方 `cmd` CLI 使用的账户端点(`/alpha/whoami`、
+  `/alpha/usage/summary`、`/alpha/billing/credits`、`/alpha/billing/subscriptions`):
+  以 USD 计的窗口 `used/cap/exceeded/resetAt`、月度积分池、计划 + 用量汇总。
+- **OpenCode Go** — 查询官方用量端点
+  (`GET https://opencode.ai/zen/go/v1/usage`):5h/每周/每月窗口,以百分比 + 重置时间
+  呈现(该端点不上报美元金额,所以那张卡只显示百分比)。
 
-No key → `unconfigured` card with a hint; fetch failure → `error` card with the
-reason; neither falls back to a local estimate. The browser first fetches the
-enabled-provider list (`GET /tokbook/quota` — fast, no network), then loads
-each provider's card independently via `GET /tokbook/quota?provider=<key>`:
-**a card renders the moment its own data arrives**, so one slow/failing
-provider never blocks the others. The tab opens on a **stale-while-revalidate**
-flow: the host serves the provider's durable *last-known* card instantly (a
-per-provider JSON snapshot in the data dir, refreshed after every successful
-fetch), and only refreshes from the provider API when that data is older than
-a freshness budget — the refresh then updates the numbers in place, never
-behind a blank skeleton. The in-memory card is additionally cached for 30s and
-the browser never holds the key.
+无 key → 带提示的 `unconfigured` 卡;拉取失败 → 带原因的 `error` 卡;两者都不回退到
+本地估算。browser 先拉已启用 provider 列表(`GET /tokbook/quota`——快,无网络),再独立
+经 `GET /tokbook/quota?provider=<key>` 加载每张卡:**某张卡的数据一到就渲染**,慢/失败的
+provider 不会阻塞其余卡。该 tab 走 **stale-while-revalidate**:host 即时提供该
+provider 的持久化*最近已知*卡(数据目录里每 provider 一个 JSON 快照,每次成功拉取后
+刷新),只有当那份数据超过新鲜度预算时才从 provider API 刷新——刷新就地更新数字,绝不在
+空白骨架后面。内存卡额外缓存 30s,browser 从不持有 key。
 
-## Status / WIRE notes
+## 状态 / WIRE 说明
 
-Implemented in this scaffold (see `docs/DESIGN.zh.md`):
+已在本脚手架实现(见 `docs/DESIGN.md`):
 
-- **Per-request, durable ledger**: live `session/event` fold → per-day JSONL,
-  deduped by request id, with first-run + manual history backfill.
-- **Multi-dimensional stats**: totals, per-day, per-hour, per-model, and
-  per-(day, model, rate) cells; a frozen-day rollup and a process-memory parse
-  cache; the recent window.
-- **Cost**: ¥/M price table (cloud mirror + manual overrides), rule-chain rate
-  resolution, per-request cost, per-model cost, unpriced-model surfacing.
-- **价格表 tab**: view + maintain the manual price layer from the UI. Lists
-  every manual entry, every cloud model/alias (with flat base rates and a
-  layered flag), and ledger models with **no** table entry (未定价, ¥0 today)
-  as one-click manual seeds. Edits are staged per row and written wholesale to
-  `pricing.json` through `PUT /tokbook/pricing` (`GET /tokbook/pricing` serves
-  the view); saving re-prices all history on the next read.
-- **Browser half**: sidebar footer button + shell overlay floating window with
-  summary cards (tokens + cost), a 4-bucket split, a daily trend chart, a
-  per-model breakdown with cost, the recent records, and a **per-provider tab**:
-  one card per provider route with its models' tokens/cost, switchable over
-  今日 / 昨天 / 近7天 / 近30天 (a dedicated exact route
-  `GET /tokbook/usage?range=…` reads only the window's day files).
-- **订阅额度 (quota) tab**: per-plan **official account usage** fetched
-  host-side from each provider's own endpoints (`GET /tokbook/quota`) — Command
-  Code via its CLI account endpoints (windows + credits + plan), OpenCode Go
-  via `/zen/go/v1/usage` (percent + reset). No local estimation; no key → an
-  `unconfigured` hint card.
+- **逐请求、持久账本**:实时 `session/event` 折叠 → 按日 JSONL,按 request id 去重,带
+  首次启动 + 手动历史回填。
+- **多维统计**:totals、按日、按小时、按模型、按 (day, model, rate) 格;冻结日折叠 +
+  进程内存解析缓存;近期窗口。
+- **成本**:¥/M 价格表(云镜像 + 手工覆盖)、规则链计价解析、逐请求成本、逐模型成本、
+  未定价模型浮出。
+- **价格表 tab**:从 UI 查看 + 维护手工价层。列出每条手工条目、每个云模型/别名(flat
+  基准价 + 分层标记),以及**两表都没有**的账本模型(未定价、今天 ¥0)作为一键手工种子。
+  逐行暂存编辑、整表经 `PUT /tokbook/pricing` 写入 `pricing.json`(`GET /tokbook/pricing`
+  提供视图);保存后下次读取即重新计价全部历史。
+- **Browser 半区**:侧边栏 footer 按钮 + shell overlay 浮窗,内含汇总卡(token + 成本)、
+  四桶拆分、按日趋势图、带成本的按模型拆分、近期记录,以及**按 provider 的 tab**:每个
+  provider 路由一张卡,展示其下各模型的 token/成本,可切换 今日 / 昨天 / 近7天 / 近30天
+  (专用精确路由 `GET /tokbook/usage?range=…` 只读窗口内的日文件)。
+- **订阅额度(quota)tab**:逐计划**官方账户用量**在 host 侧从各 provider 自家端点拉取
+  (`GET /tokbook/quota`)——Command Code 走其 CLI 账户端点(窗口 + 积分 + 计划),OpenCode
+  Go 走 `/zen/go/v1/usage`(百分比 + 重置)。无本地估算;无 key → `unconfigured` 提示卡。
 
-Remaining gaps / planned upgrades:
+剩余缺口 / 计划升级:
 
-- Quota plans accept one API key per provider route (no multi-account
-  rotation yet).
-- A persistent "urgency" indicator on the sidebar trigger (a color dot by the
-  tightest quota window) is not wired: it needs event-driven updates, since
-  quota is fetched on tab open and while the tab is open — nothing pushes a
-  change to the button while the window is closed.
+- 额度计划每个 provider 路由只收一个 API key(尚无多账户轮换)。
+- 侧边栏触发按钮上的持久「告急」指示(最紧额度窗口前的色点)未接线:它需要事件驱动
+  更新,因为额度只在 tab 打开时拉取——窗口关闭时,没有东西把变化推给按钮。

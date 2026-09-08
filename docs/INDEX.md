@@ -1,58 +1,54 @@
-# Docs index — dsh-tokbook
+# 文档索引 — dsh-tokbook
 
-> **Doc meta** · role: index · language: en (+zh hints) · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
 
-The map of every documentation file in this repo. Read the entry for the area
-you are about to touch, then read only that file. This file exists so that
-[`AGENTS.md`](../AGENTS.md) and your first hop can stay small: the root file
-carries breadcrumbs, this file carries the tree, the leaves carry the detail.
+本仓库所有文档文件的地图。动手前先读你要触及领域的条目,然后**只读那一份**。本文件
+的存在是为了让 [`AGENTS.md`](../AGENTS.md) 与你的第一跳保持精简:根文件只放面包屑,
+本文件放整棵树,叶子才放细节。
 
-## The tree
+## 文档树
 
-| File | Role | Lang | Status | Read when |
-|---|---|---|---|---|
-| [`AGENTS.md`](../AGENTS.md) | identity | en | current | every task — loaded into context automatically |
-| [`README.md`](../README.md) | entry + operations | en | current | first stop: scope, layout, build, install, configuration |
-| `docs/INDEX.md` | map (this file) | en | current | navigating the docs |
-| [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts | en | current | touching host routes, wire JSON shapes, config keys, session events, or data-directory files — update it in the same commit; `scripts/selfcheck-docs.ts` enforces the route list |
-| [`docs/DECISIONS.md`](DECISIONS.md) | decisions (ADR log) | en | current | changing architecture or landing a durable decision — append an entry in the same commit |
-| [`docs/DESIGN.zh.md`](DESIGN.zh.md) | reason / background | zh-CN | current | “why”: DSH mechanism background, first-phase frame, second-phase rewrite notes, hard constraints. The 阅读指南 at its top separates history from the present |
-| [`docs/HMR.zh.md`](HMR.zh.md) | lessons / reference | zh-CN | current | HMR mechanics and module-reload dedupe scope — read before touching the ledger / dedupe paths |
-| [`docs/LESSONS.zh.md`](LESSONS.zh.md) | lessons | zh-CN | current | pitfalls when changing client styles, the client bundle, the build, or browser verification |
-| [`docs/skills.md`](skills.md) / [`docs/skills.zh.md`](skills.zh.md) | reference | en / zh-CN | current | a change that touches the DSH skill system or `.dsh/skills` |
-| [`docs/archive/PLAN.provider-pricing.zh.md`](archive/PLAN.provider-pricing.zh.md) | process (archived) | zh-CN | superseded | history of the pricing/quota upgrade plan — its phases have landed; do not implement from it |
+| 文件 | 角色 | 状态 | 何时读 |
+|---|---|---|---|
+| [`AGENTS.md`](../AGENTS.md) | identity | current | 每个任务——自动载入上下文 |
+| [`README.md`](../README.md) | entry + operations | current | 第一站:范围、布局、构建、安装、配置 |
+| `docs/INDEX.md` | map(本文件) | current | 在文档间导航 |
+| [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts | current | 改动 host 路由、wire JSON 形状、配置键、会话事件或数据目录文件时——在同一 commit 更新它;`scripts/selfcheck-docs.ts` 会强制路由表同步 |
+| [`docs/DECISIONS.md`](DECISIONS.md) | decisions(ADR 日志) | current | 改架构或落下持久决策时——在同一 commit 追加条目 |
+| [`docs/DESIGN.md`](DESIGN.md) | reason / background | current | "为什么":DSH 机制背景、一期框架、二期重构说明、硬约束。顶部「阅读指南」区分历史与现状 |
+| [`docs/HMR.md`](HMR.md) | lessons / reference | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
+| [`docs/LESSONS.md`](LESSONS.md) | lessons | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
+| [`docs/skills.md`](skills.md) | reference | current | 改动涉及 DSH 技能系统或 `.dsh/skills` 时 |
+| [`docs/archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md) | process(已归档) | superseded | 定价/额度升级计划的历史——各阶段已落地,勿按它实现 |
 
-## Doc meta convention
+## Doc meta 约定
 
-Every tracked doc carries a one-line blockquote directly under its H1:
+每份受管文档在 H1 正下方带一行引用块:
 
 ```
-> **Doc meta** · role: <identity|entry|index|contracts|decisions|reason|lessons|reference|process> · language: <en|zh-CN> · status: <current|superseded|draft> · last-reviewed: <YYYY-MM-DD> · supersedes: <file | —>
+> **Doc meta** · role: <identity|entry|index|contracts|decisions|reason|lessons|reference|process> · language: zh-CN · status: <current|superseded|draft> · last-reviewed: <YYYY-MM-DD> · supersedes: <文件 | —>
 ```
 
-- `role` = which documentation layer the file belongs to (see the tree).
-- `status` = whether the file describes the present (`current`), describes
-  something already replaced (`superseded`), or is unfinished (`draft`). A
-  process/plan that has landed becomes `superseded` and moves to `docs/archive/`.
-- `last-reviewed` = the last date the file was checked against the current
-  tree. Refresh it when you edit the file — normally in the same commit as the
-  code change it documents.
+- `role` = 该文件属于文档体系的哪一层(见上表)。
+- `status` = 描述的是现状(`current`)、已被替换的事物(`superseded`)、还是未完成
+  (`draft`)。已落地的计划/过程文档应标 `superseded` 并移入 `docs/archive/`。
+- `last-reviewed` = 上次把该文件与当前代码树核对一致的日期。编辑该文件时刷新它——
+  通常与它记录的代码改动在同一个 commit。
 
-`scripts/selfcheck-docs.ts` (part of `pnpm selfcheck`) fails when a tracked doc
-lacks the meta line, when the CONTRACTS route list drifts from `src/routes.ts`,
-or when a link in this file points nowhere.
+`scripts/selfcheck-docs.ts`(属于 `pnpm selfcheck`)会在文档缺 meta 行、CONTRACTS
+路由表与 `src/routes.ts` 漂移、或本文件里的链接指向不存在的文件时失败。
 
-## Language policy
+## 语言政策
 
-Code-adjacent layers are English — identity, entry, contracts, decisions, this
-map. Narrative layers keep their existing language: the Chinese design/lesson
-docs stay Chinese. One new doc = one language; do not mix voices inside a file.
+**本仓库文档统一为中文**——唯一的真人读者是中文维护者,AI 读者语言无关,双语镜像只会
+带来漂移成本。代码标识符、命令、路由名、JSON 字段等在文中保留英文原样。
 
-## Doc lifecycle rule
+若将来要公开发布,届时**再**补一份英文 `README.md` 作门面即可(单个文件、可推迟的
+决定),内部文档无需英文版,也不维护常驻双语。
 
-Code that changes an interface (a route, config key, event, data-file name, or
-pricing rule) lands **in the same commit** as the update to `docs/CONTRACTS.md`;
-a durable architecture decision appends to `docs/DECISIONS.md`; a plan that has
-landed is archived as `superseded`. No doc may silently lag the code: if a doc
-cannot be kept true, remove or archive it instead of letting it poison context
-later.
+## 文档生命周期规则
+
+改动接口的代码(路由、配置键、事件、数据文件名、定价规则)与 `docs/CONTRACTS.md` 的
+更新**落在同一 commit**;持久架构决策追加进 `docs/DECISIONS.md`;已落地的计划归档为
+`superseded`。没有文档可以默默滞后于代码:如果一份文档无法保持真实,就删除或归档它,
+而不是让它日后毒化上下文。

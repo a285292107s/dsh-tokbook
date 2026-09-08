@@ -84,7 +84,7 @@
 ## 3. 客户端 bundle 按 `rev` 不可变缓存 + HMR 的正确姿势
 
 > ⚠️ 本节（「免刷新的 HMR」与「Host 侧与 Client 侧的 HMR」两小节）已按 2026-09-07 的
-> **运行中实测**更新。完整机制与本项目接线见 [`HMR.zh.md`](HMR.zh.md)。
+> **运行中实测**更新。完整机制与本项目接线见 [`HMR.md`](HMR.md)。
 
 ### 服务端机制（`packages/client/modules/src/index.ts`）
 
@@ -101,7 +101,7 @@
 | `pnpm build` 后重启 `dsh web` + **硬刷新**（`Cmd/Ctrl+Shift+R`） | 永远能取到新 `rev` 的 bundle（兜底，推荐用于首次接线后） |
 | 只刷新、不重启 | **只有热更链没生效时才有风险**：宿主已按新内容重哈希（`rebuilt()` 改写 rev 与响应表），而浏览器仍按启动时的旧 `rev` 请求 → `/plugins/<id>/client.js` 按“pathname+rev”精确匹配不到 → **404**（源码注释口径：“mismatched revisions are rejected”），插件可能加载失败（按钮消失） |
 
-> ⚠️ **热更链没生效前不要只刷新**。判定“client-hmr 是否活着”见 [`HMR.zh.md`](HMR.zh.md) §3.2
+> ⚠️ **热更链没生效前不要只刷新**。判定“client-hmr 是否活着”见 [`HMR.md`](HMR.md) §3.2
 > （探测 `GET /plugins/events` 的 SSE）。`pnpm build` 后若 graph 里该插件的 `rev` 变了，说明
 > 运行中已重哈希，浏览器会免刷新热换。
 
@@ -129,7 +129,7 @@
   需重启一次 `dsh web`。官方文档：<https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>。
 - **Client（浏览器 bundle）**：走 `client-modules` 的 `rev` 缓存 + `@deepseek-ai/dsh-client-hmr`
   （web-app 常驻挂载）；变化经 `pnpm build` 落盘 `lib/client.js`，**主路径 = 刷新浏览器取新 rev**
-  （client-hmr 活着时可能 ≤500ms 免刷新热更，加分项非保证；见 [`HMR.zh.md`](HMR.zh.md) §3.2）。
+  （client-hmr 活着时可能 ≤500ms 免刷新热更，加分项非保证；见 [`HMR.md`](HMR.md) §3.2）。
 - **两者互不影响**：host HMR 只重载 host 半区，**不会**热更浏览器端的 `lib/client.js`；反之亦然。
 
 ---
@@ -215,7 +215,7 @@
 - [ ] 改 UI（client）后：`pnpm build` 落盘 `lib/client.js` → 刷新浏览器取新 rev（client-hmr 活着时可能 ≤500ms 自动热更，加分项非保证）。
 - [ ] 改 host 后：`pnpm build` 落盘 `lib/index.js` → host HMR 自动 卸载→重载→重 `apply`（profile 已启用 `hmr`）。
 - [ ] 兜底（首次接线 / 没热更上）：`pnpm build` → **重启 `dsh web`** → **硬刷新**（`Cmd/Ctrl+Shift+R`）。
-- [ ] `pnpm run dev:web` 只重建 DSH 仓库内包；外置插件的重建 = 自己的 `pnpm build`（详见 [`HMR.zh.md`](HMR.zh.md)）。
+- [ ] `pnpm run dev:web` 只重建 DSH 仓库内包；外置插件的重建 = 自己的 `pnpm build`（详见 [`HMR.md`](HMR.md)）。
 - [ ] 只刷新不重启（且热更链没生效时）：会因 `rev` 不符被拒 → 可能插件加载失败，**不要**。
 - [ ] 图标用内联 SVG；文案用中文；给可访问名字与 `aria-pressed`/`aria-label`。
 - [ ] 对齐 DSH 外观：用 `--dsw-*` 令牌复刻，别 import 私有 CSS module。

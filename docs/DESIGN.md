@@ -17,7 +17,7 @@
 > - 「重构说明」(自 §428「重构说明:从「每会话聚合」改为「逐请求账本 + 成本」」起)描述
 >   **第二期 = 当前代码形态**(逐请求 JSONL 账本 + 成本计价 + provider/额度)。**以此段为准**;
 > - §1 的「本期不做成本」与 §11 的「成本折算…后续二期或独立 costbook」预判**已被二期推翻并落地**;
->   provider/额度/pricing 升级的原始计划见 [`archive/PLAN.provider-pricing.zh.md`](archive/PLAN.provider-pricing.zh.md)(已归档,superseded)。
+>   provider/额度/pricing 升级的原始计划见 [`archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md)(已归档,superseded)。
 >
 > **精确接口**(路由/配置/事件/数据文件)→ [`CONTRACTS.md`](CONTRACTS.md);**持久决策** →
 > [`DECISIONS.md`](DECISIONS.md);实现/操作现状 → [`../README.md`](../README.md)。
@@ -352,7 +352,7 @@ react, react/jsx-runtime, react-dom, react-dom/client,
 > 注：为避免手工改 `cordis.patch.yml`，也可以把 `dsh-tokbook` 做成一个 bundle 包（声明 `dsh.bundle.patch`），
 > 但那需要你把 patch 层也打进包里；两者见 §7 取舍。
 
-> ⚠️ **client 改动生效方式（实测更新 2026-09-07，详见 [`HMR.zh.md`](HMR.zh.md)）**：DSH 的
+> ⚠️ **client 改动生效方式（实测更新 2026-09-07，详见 [`HMR.md`](HMR.md)）**：DSH 的
 > `/plugins/<id>/client.js` 按 `rev`（内容 hash）做**不可变缓存**，`rev` 启动时写进
 > `window.__DSH_BOOT__`；但 `@deepseek-ai/dsh-client-hmr`（web-app 常驻挂载）会在运行中重哈希改写
 > `rev` 并广播。所以（本机实测）：
@@ -388,7 +388,7 @@ dsh-tokbook/
 │     ├─ LedgerOverlay.tsx          # shell.overlay 浮窗
 │     └─ store.ts                   # createTokBookStore()（若需跨入口共享视图状态）
 ├─ styles/                          # 若用 CSS Modules；外置需自编译
-└─ docs/DESIGN.zh.md                # 本文件
+└─ docs/DESIGN.md                # 本文件
 ```
 
 **第一期验证点**
@@ -419,7 +419,7 @@ dsh-tokbook/
 |---|---|
 | 外置 bundle 格式 | 需自己维护基线 external 列表与纯净化纪律；DSH 升级若改 `PLATFORM_MODULES` 需同步。风险可控 |
 | client 插件默认导出 | 不可给 client 入口加 `export default`（cordis loader `exports.default ?? exports` 会因 default 掩盖 `.inject`，报 “without inject”）。见 §7.4 |
-| client 改动不生效 | bundle 按 `rev` 不可变缓存，但 `client-hmr`（web-app 常驻）运行中会重哈希广播；本项目 `pnpm build` 后**刷新浏览器**取新 rev（client-hmr 活着时可能 ≤500ms 免刷新热更，加分项非保证），兜底才重启 + 硬刷新。见 §8 / [`HMR.zh.md`](HMR.zh.md) |
+| client 改动不生效 | bundle 按 `rev` 不可变缓存，但 `client-hmr`（web-app 常驻）运行中会重哈希广播；本项目 `pnpm build` 后**刷新浏览器**取新 rev（client-hmr 活着时可能 ≤500ms 免刷新热更，加分项非保证），兜底才重启 + 硬刷新。见 §8 / [`HMR.md`](HMR.md) |
 | 跨重启幂等 | 用 DSH 权威投影（`tokenUsage`/`sessionStats`，见 §5.4），无自定义折叠、无重复计数问题 |
 | 成本折算 | 本期不做；DSH `token-meter` 不算钱，需自建价格表（后续二期或独立 costbook） |
 | 左栏常驻入口 | 本期用 footer 按钮 + 浮窗；若要「常驻左栏列表项」需 in-repo 给 `ui-sidebar` 声明新子槽 |

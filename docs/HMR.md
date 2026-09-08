@@ -262,5 +262,5 @@ pnpm build     # scripts/build-client.mjs（esbuild）重写 lib/index.js（host
   `apps/cli/src/profile-boot.ts`、`scripts/dev-web.ts`。
 - 官方文档：<https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>
 
-相关本地文档：`docs/LESSONS.zh.md` §3（客户端 `rev` 缓存 + HMR 姿势）、`docs/DESIGN.zh.md` §8
+相关本地文档：`docs/LESSONS.md` §3（客户端 `rev` 缓存 + HMR 姿势）、`docs/DESIGN.md` §8
 （外置插件接入 `web` profile）。

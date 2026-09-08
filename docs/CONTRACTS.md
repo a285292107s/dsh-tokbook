@@ -1,123 +1,112 @@
-# Host & data contracts — dsh-tokbook
+# Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: en · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
 
-The single home for the facts that other code and the browser half must get
-**exactly** right: host routes and their wire JSON, the plugin configuration,
-the `session/event` types consumed, and the data-directory file layout.
+其他代码与 browser 半区必须**分毫不差**依赖的事实的唯一家园:host 路由与 wire JSON、
+插件配置、消费的 `session/event` 类型、数据目录文件布局。
 
-**The code is authoritative.** Sources: `src/routes.ts`, `src/types.ts`,
-`src/usage-record.ts`, `src/ledger.ts`, `src/usage-log.ts`, `src/pricing.ts`,
-`src/quota-cache.ts`. This file is a checked map: `scripts/selfcheck-docs.ts`
-(part of `pnpm selfcheck`) fails when the host route list below drifts from
-`src/routes.ts`. If prose here and code disagree, trust the code, fix this
-file, and refresh `last-reviewed`.
+**代码是权威。** 来源:`src/routes.ts`、`src/types.ts`、`src/usage-record.ts`、
+`src/ledger.ts`、`src/usage-log.ts`、`src/pricing.ts`、`src/quota-cache.ts`。本文件是一张
+受检地图:`scripts/selfcheck-docs.ts`(属于 `pnpm selfcheck`)会在下方 host 路由表与
+`src/routes.ts` 漂移时失败。若这里的文字与代码冲突,以代码为准、修本文件,并刷新
+`last-reviewed`。
 
-## Host routes
+## Host 路由
 
-Exact routes registered on the DSH host webserver via
-`ctx.webServer.register({ kind: 'exact', path, handler })`. Every handler:
+经 `ctx.webServer.register({ kind: 'exact', path, handler })` 注册在 DSH host webserver
+上的精确路由。每个 handler 都:
 
-- guards the method (`405` text/plain on a wrong method),
-- guards same-origin (`Sec-Fetch-Site` absent, `same-origin`, or `none`
-  passes; anything else → `403` text/plain),
-- answers `application/json; charset=utf-8` with `cache-control: no-store`,
-- wraps internal errors in `500 { "error": <message> }` — never an unhandled
-  rejection,
-- reads the query string inside the handler (exact routes match on pathname).
+- 校验方法(方法不对 → `405` text/plain),
+- 校验同源(`Sec-Fetch-Site` 缺失、`same-origin`、`none` 通过;其余 → `403` text/plain),
+- 以 `application/json; charset=utf-8` 应答,带 `cache-control: no-store`,
+- 内部错误包装成 `500 { "error": <消息> }`——绝不让 unhandled rejection 外泄,
+- 在 handler 内部读取 query(exact 路由只在 pathname 上匹配)。
 
-| Method | Path | Query / body | Success payload (type in `src/types.ts`) |
+| 方法 | 路径 | Query / body | 成功载荷(类型见 `src/types.ts`) |
 |---|---|---|---|
-| `GET` | `/tokbook/overview` | — | `TokBookOverview` (costed summary + trend + per-model + recent + freshness) |
+| `GET` | `/tokbook/overview` | — | `TokBookOverview`(带成本的汇总 + 趋势 + 按模型 + 最近记录 + 新鲜度) |
 | `POST` | `/tokbook/rescan` | — | `RescanView` = `{ status: 'running'\|'skipped', lastSyncAt: number\|null }` |
-| `GET` | `/tokbook/usage` | `range` ∈ `today` \| `yesterday` \| `last7` \| `last30` (missing/unknown → `400 {error}`) | `ProviderUsageView` |
-| `GET` | `/tokbook/quota` | — | `QuotaView` = `{ providers: string[] }` — enabled plans only, no network |
-| `GET` | `/tokbook/quota` | `provider=<route key>`; optional `refresh=1` bypasses the TTL cache | `QuotaCard` for that provider |
+| `GET` | `/tokbook/usage` | `range` ∈ `today` \| `yesterday` \| `last7` \| `last30`(缺失/未知 → `400 {error}`) | `ProviderUsageView` |
+| `GET` | `/tokbook/quota` | — | `QuotaView` = `{ providers: string[] }` — 仅已启用计划,无网络 |
+| `GET` | `/tokbook/quota` | `provider=<路由键>`;可选 `refresh=1` 跳过 TTL 缓存 | 该 provider 的 `QuotaCard` |
 | `GET` | `/tokbook/pricing` | — | `PricingView` |
-| `PUT` | `/tokbook/pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`; invalid table → `400 { error, view }` |
+| `PUT` | `/tokbook/pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
 
-Wire-shape notes (authoritative field lists live in `src/types.ts`):
+Wire 形状要点(权威字段清单见 `src/types.ts`):
 
-- Amounts on the wire are RMB (¥) **except** fields a provider's official API
-  reports in USD (`QuotaCard.usage / credits / windows.usedUsd / capUsd`).
-  Cost figures convert for display via each payload's `currency` and
-  `usdExchangeRate` fields.
-- `range` ids are local-calendar windows named after the day files they read.
-- Provider rows that never saw a provider header group under `'(未知)'`.
-- Unpriced models bill ¥0 and are surfaced in `unpricedModels`.
-- `PUT /tokbook/pricing` body: `{ "<exact model string>": { "inputPerMillion": number, "outputPerMillion": number, "cacheReadPerMillion"?: number, "cacheWritePerMillion"?: number } }`.
-  An absent key deletes that manual override; the whole table is parsed,
-  validated, and replaces `pricing.json` wholesale (a manual entry replaces the
-  cloud rules for that model with flat prices).
+- wire 上的金额是人民币(¥),**除非**某 provider 官方 API 以美元上报
+  (`QuotaCard.usage / credits / windows.usedUsd / capUsd`)。成本数字通过各载荷的
+  `currency` 与 `usdExchangeRate` 字段换算后展示。
+- `range` id 是以本地日历天命名的窗口,与它们读取的日文件对应。
+- 从未见过 provider 头的行归入 `'(未知)'` 组。
+- 未定价模型计 ¥0,并在 `unpricedModels` 中列出。
+- `PUT /tokbook/pricing` body:`{ "<精确模型串>": { "inputPerMillion": number, "outputPerMillion": number, "cacheReadPerMillion"?: number, "cacheWritePerMillion"?: number } }`。
+  缺失的键 = 删除该手工覆盖;整表解析、校验后**整体替换** `pricing.json`(手工条目把该
+  模型的云规则整体替换为 flat 价)。
 
-## Configuration
+## 配置
 
-`plugins.tokbook` in the profile patch, typed as `TokBookConfig` + `PlanConfig`
-in `src/types.ts` (see README · Configuration for the annotated YAML):
+profile patch 中的 `plugins.tokbook`,类型为 `TokBookConfig` + `PlanConfig`
+(见 `src/types.ts`;带注释的 YAML 示例见 README · Configuration):
 
-| Key | Default | Meaning |
+| 键 | 默认 | 含义 |
 |---|---|---|
-| `path` | `$DSH_HOME/tokbook` (`~/.dsh/tokbook`) | data directory |
-| `pricingUrl` | unset | explicit cloud pricing feed URL; wins over `pricingRegion` |
-| `pricingRegion` | `domestic` | mirror choice (`domestic`/`overseas`) when `pricingUrl` is unset |
-| `recordCompaction` | `true` | whether compaction summarize calls are recorded and billed |
-| `plans.<provider>.enabled` | unset | `false` disables a built-in plan |
-| `plans.<provider>.apiKey` | unset | literal key; wins over the credentials service |
-| `plans.<provider>.apiKeyEnv` | provider ref (`OPENCODE_GO_API_KEY` / `COMMANDCODE_API_KEY`) | credential name to resolve via `ctx.credentials` |
+| `path` | `$DSH_HOME/tokbook`(`~/.dsh/tokbook`) | 数据目录 |
+| `pricingUrl` | 未设 | 显式云定价 feed URL;优先于 `pricingRegion` |
+| `pricingRegion` | `domestic` | `pricingUrl` 未设时的镜像选择(`domestic`/`overseas`) |
+| `recordCompaction` | `true` | 是否记录并计费压缩 summarize 调用 |
+| `plans.<provider>.enabled` | 未设 | `false` 关闭某内置计划 |
+| `plans.<provider>.apiKey` | 未设 | 字面 key;优先于 credentials 服务 |
+| `plans.<provider>.apiKeyEnv` | provider 引用(`OPENCODE_GO_API_KEY` / `COMMANDCODE_API_KEY`) | 经 `ctx.credentials` 解析的凭据名 |
 
-Quota plans are built in per provider route (`opencode-go`, `commandcode`) and
-turn on once a usable key is found — config literal, then the provider's
-credentials reference — unless `enabled: false`. No key → an `unconfigured`
-card; fetch failure → an `error` card; the tab never falls back to a local
-estimate.
+额度计划按 provider 路由(`opencode-go`、`commandcode`)内置,一旦找到可用 key 即启用
+——配置字面量优先,其次 provider 的凭据引用——除非 `enabled: false`。无 key → 一张
+`unconfigured` 卡;拉取失败 → 一张 `error` 卡;该 tab 绝不回退到本地估算。
 
-## Session events consumed
+## 消费的会话事件
 
-From the durable `session/event` stream (folding logic: `src/usage-record.ts`).
-One JSONL row is written per provider-billed model call:
+来自持久化的 `session/event` 流(折叠逻辑:`src/usage-record.ts`)。每条 provider 计费
+模型调用写一行 JSONL:
 
-| Event | Recorded as | Notes |
+| 事件 | 记为 | 说明 |
 |---|---|---|
-| `assistant/message` | `kind: request` | successful call; row id = message id (dedupe key); carries the provider's `usage` buckets |
-| `compaction/summary` | `kind: compaction` | only when `recordCompaction` is on; billed call of its own |
-| `turn/end` (reason `error`) | `kind: failure` | failed attempt — `failures` dimension only, never tokens/cost |
-| `llm/retry` | `kind: failure` | failed attempt — `failures` dimension only |
-| `request/context` (+ `assistant/message`) | no row | maintains the session's last-known model/provider used to attribute failure rows |
+| `assistant/message` | `kind: request` | 成功调用;行 id = message id(去重键);携带 provider 上报的 `usage` 桶 |
+| `compaction/summary` | `kind: compaction` | 仅在 `recordCompaction` 开启时;其自身是一次计费调用 |
+| `turn/end`(reason `error`) | `kind: failure` | 失败尝试——只进 `failures` 维度,不计 token/费用 |
+| `llm/retry` | `kind: failure` | 失败尝试——只进 `failures` 维度 |
+| `request/context`(+ `assistant/message`) | 不写行 | 维护会话最后已知的 model/provider,用于给失败行归属 |
 
-## Data directory
+## 数据目录
 
-One directory per data set (default `$DSH_HOME/tokbook`, configurable via
-`path`); **one host process writes a given directory** — on startup the host
-writes an `owner.json` marker and warns when a live foreign process already
-owns it. Point a second host at its own `path` instead of sharing one.
+一个数据集一个目录(默认 `$DSH_HOME/tokbook`,可用 `path` 配置);**一个 host 进程写一个
+目录**——启动时 host 写 `owner.json` 标记,若检测到存活的异进程已占用则告警。第二个
+host 请指向自己的 `path`,不要共享目录。
 
-| File | Purpose | Written by | Notes |
+| 文件 | 用途 | 由谁写 | 说明 |
 |---|---|---|---|
-| `usage-YYYY-MM-DD.jsonl` | per-day ledger of `UsageRecord` rows, one per provider-billed call | host append path | append + serialized queue; dedupe by `requestId`; a row belongs to the local calendar day of its event (`src/usage-log.ts` refile logic keeps it there) |
-| `rollup.json` (+ `.tmp`) | frozen-day derived stats rollup up to day `upto` | host stats read path | missing/malformed → rebuilt from day files; unlinked and rebuilt after a sync appends rows |
-| `sync-progress.json` (+ `.tmp`) | persisted per-session `revision` baseline for the incremental freshness probe | host sync | written strictly after a sync; sessions whose log could not be read are excluded |
-| `owner.json` | single-writer marker `{ pid, start }` | host startup | a stale marker from a crashed process is taken over silently |
-| `pricing.json` (+ `.tmp`) | hand-edited manual price overrides (wholesale replace; entries win over the cloud) | `PUT /tokbook/pricing` | absent = no manual layer; malformed entries degrade only their models to unpriced |
-| `pricing.ccsa.json` (+ `.tmp`) | cloud pricing mirror fetched on startup (`pricing.ts`) | host startup | read-only reference; region/URL per config |
-| `quota-<provider>.json` (+ `.tmp`) | last-known official quota card snapshot `{ savedAt, card }` | host quota fetch | only `ok` cards persisted; missing/torn/malformed reads as null |
+| `usage-YYYY-MM-DD.jsonl` | 逐日账本,每行一个 `UsageRecord`,每条 provider 计费调用一行 | host 追加路径 | 追加 + 串行队列;按 `requestId` 去重;行归属于其事件的本地日历日(`src/usage-log.ts` 的 refile 逻辑保证) |
+| `rollup.json`(+ `.tmp`) | 冻结日的派生统计折叠,截至 `upto` 日 | host stats 读路径 | 缺失/损坏 → 由日文件重建;同步追加行后删除重建 |
+| `sync-progress.json`(+ `.tmp`) | 持久化的逐会话 `revision` 基线,供增量新鲜度探测 | host sync | 严格在同步成功后写;读不到的会话被排除 |
+| `owner.json` | 单写者标记 `{ pid, start }` | host 启动 | 崩溃进程留下的陈旧标记被静默接管 |
+| `pricing.json`(+ `.tmp`) | 手编手工价覆盖(整表替换;条目永远优先于云) | `PUT /tokbook/pricing` | 缺失 = 无手工层;畸形条目只把对应模型降级为未定价 |
+| `pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的云定价镜像(`pricing.ts`) | host 启动 | 只读参考;region/URL 按配置 |
+| `quota-<provider>.json`(+ `.tmp`) | 最近一次官方额度卡快照 `{ savedAt, card }` | host 额度拉取 | 只持久化 `ok` 卡;缺失/撕裂/畸形读作 null |
 
-Conventions: derived files are written atomically (temp file + rename; where
-Windows rename-over-existing fails intermittently the target is unlinked
-first). Day files are append-only and never rewritten.
+约定:派生文件原子写入(temp + rename;Windows 上 rename-over-existing 偶发失败处先
+unlink 目标)。日文件只追加、绝不重写。
 
-## Invariants that keep the numbers honest
+## 让数字保持诚实的不变量
 
-- Dedupe identity is `requestId` (`assistant` message id, or a synthesized
-  `compaction:<session>:<seq>` / `failure:<session>:<seq>`); overlapping
-  writers of one process share one dedupe set + one serialized append queue.
-- Price changes re-price history **at read time** — no ledger/rollup rewrite.
-- A quota card shows only official provider data; `unconfigured`/`error` cards
-  are re-derived cheaply and never persisted as “last known”.
+- 去重身份是 `requestId`(`assistant` message id,或合成的
+  `compaction:<session>:<seq>` / `failure:<session>:<seq>`);同一进程内重叠写者共享
+  同一个去重集与同一条串行追加队列。
+- 价格改动在**读取时**重新计价历史——不重写账本/折叠。
+- 额度卡只展示官方 provider 数据;`unconfigured`/`error` 卡便宜地即时重推,从不当作
+  "最近已知"持久化。
 
-## Cross-references
+## 交叉引用
 
-- Semantics of the events, sync probe, and dedupe scope across a module-level
-  reload: `docs/HMR.zh.md` §4.
-- End-to-end story, install, and config examples: `../README.md`.
-- Why these shapes exist (data model rationale): `docs/DESIGN.zh.md` (重构说明
-  section) and `docs/DECISIONS.md`.
+- 事件、同步探测、以及跨模块级重载的去重边界语义:`docs/HMR.md` §4。
+- 端到端故事、安装与配置示例:`../README.md`。
+- 这些形状为什么存在(数据模型推理):`docs/DESIGN.md`(重构说明一节)与
+  `docs/DECISIONS.md`。

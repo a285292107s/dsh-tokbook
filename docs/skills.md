@@ -1,189 +1,120 @@
-# Skills in dsh-tokbook
+# dsh-tokbook 中的技能（Skills）
 
-> **Doc meta** · role: reference · language: en · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
 
-[中文](skills.zh.md) | English
+**技能（skill）** 是插件向 DeepSeek Harness（DSH）会话贡献的一种可复用、面向特定任务的指令。模型在其目录中只看到技能的 `name` 与 `description`，并通过 `skill({ name })` 工具按需加载完整的 Markdown 正文；用户也可直接用 `/name` 调用。技能是可选的指令，而非会话事件。
 
-A **skill** is a reusable, task-specific instruction a plugin contributes to a
-DeepSeek Harness (DSH) session. The model sees only the skill's `name` and
-`description` in its catalog and loads the full Markdown body on demand through
-the `skill({ name })` tool; users can also invoke one directly with `/name`.
-Skills are optional instructions, not session events.
+本文档是 DSH 技能系统的**插件开发者视角**，范围限定于 `dsh-tokbook`：该插件如何贡献一个技能、必须遵循的 `SKILL.md` 契约，以及其技能文件在何处被发现。它改编自 DSH 子系统参考文档，使技术事实保持正确，而叙述框架与链接贴合本仓库。
 
-This document is the **plugin-developer view** of the DSH skill system, scoped to
-`dsh-tokbook`: how this plugin can contribute a skill, the `SKILL.md` contract it
-must follow, and where its skill files are discovered. It is adapted from the DSH
-subsystem reference so the technical facts stay correct while the framing and
-links fit this repository.
+## 本插件贡献技能的两种方式
 
-## The two ways this plugin contributes a skill
-
-| Way | How | Requirements | Best for |
+| 方式 | 怎么做 | 要求 | 适用 |
 |---|---|---|---|
-| **Bundled / project skill files** | Ship a `SKILL.md` in a discovered skill directory | No code; discovered by the filesystem provider (`@deepseek-ai/dsh-skill-filesystem`) | A static instruction body the plugin can publish immediately |
-| **Runtime registration** | Call `ctx.skills.register(...)` (a full skill) or `ctx.skills.registerProvider(...)` (a custom provider) during `apply()` | The skill registry (`@deepseek-ai/dsh-skill`) is mounted in the host composition and `ctx.skills` is in scope | A computed body, provider-specific resources, or skills that depend on runtime state |
+| **随包 / 项目技能文件** | 在可被发现的技能目录中放置 `SKILL.md` | 无需代码；由文件系统提供方（`@deepseek-ai/dsh-skill-filesystem`）发现 | 插件可立即发布的静态指令正文 |
+| **运行时注册** | 在 `apply()` 中调用 `ctx.skills.register(...)`（完整技能）或 `ctx.skills.registerProvider(...)`（自定义提供方） | 技能注册表（`@deepseek-ai/dsh-skill`）已挂载到宿主组合，且 `ctx.skills` 在作用域内 | 计算生成的正文、提供方专属资源，或依赖运行时状态的技能 |
 
-- **Bundled files** are the simplest path: drop a `SKILL.md` in the project's
-  `.dsh/skills` or `.agents/skills` directory (or a configured bundled root) and
-  it appears in the session catalog. No plugin code is needed.
-- **Runtime registration** lets the plugin build the instruction body
-  programmatically and register it against `ctx.skills`. It only works where the
-  skill registry is mounted, which is a host-side capacity — the browser/client
-  half of this plugin cannot contribute skills.
+- **随包文件**是最简单的路径：在项目的 `.dsh/skills` 或 `.agents/skills` 目录（或已配置的 bundled 根目录）中放一个 `SKILL.md`，它就会出现在会话目录里。无需任何插件代码。
+- **运行时注册**让插件以程序方式构造指令正文并注册到 `ctx.skills`。它只在技能注册表被挂载时生效，而这是宿主侧能力——本插件的浏览器/客户端半区无法贡献技能。
 
-## The SKILL.md format
+## SKILL.md 格式
 
-A skill is either a directory bundle `<name>/SKILL.md` or a flat Markdown file
-`<name>.md`. The name must be kebab-case
-(`^[a-z0-9]+(?:-[a-z0-9]+)*$`); nested recursive `**/SKILL.md` discovery is not
-supported. Every skill carries YAML frontmatter; `name` and `description` are
-required, and a skill with a missing or invalid name/description is ignored.
+技能可以是目录包 `<name>/SKILL.md`，也可以是扁平 Markdown 文件 `<name>.md`。名称必须为 kebab-case（`^[a-z0-9]+(?:-[a-z0-9]+)*$`）；不支持嵌套递归的 `**/SKILL.md` 发现。每个技能都带有 YAML frontmatter；`name` 与 `description` 为必填，名称或描述缺失/非法的技能会被忽略。
 
-| Frontmatter key | Type | Default | Notes |
+| Frontmatter 键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `name` | string (kebab-case) | required | Skill identifier; must match the file/dir name |
-| `description` | string | required | Short routing text shown in the catalog |
-| `whenToUse` | string | omitted | Optional extra routing guidance (note: camelCase) |
-| `disable-model-invocation` | boolean | `false` (model-invocable) | Set `true` to hide from the model catalog and loader |
-| `user-invocable` | boolean | `true` | Set `false` to hide from the user `/name` surface |
+| `name` | string（kebab-case） | 必填 | 技能标识；必须与文件/目录名一致 |
+| `description` | string | 必填 | 目录中显示的简短路由文本 |
+| `whenToUse` | string | 省略 | 可选的额外路由引导（注意：camelCase） |
+| `disable-model-invocation` | boolean | `false`（可被模型调用） | 设为 `true` 则从模型目录与加载器中隐藏 |
+| `user-invocable` | boolean | `true` | 设为 `false` 则从用户 `/name` 界面中隐藏 |
 
-The body after the frontmatter is the Markdown instruction content the model
-reads. Relative resources referenced by the body are resolved through the
-skill's `resourceBase` (a directory, URL, or opaque provider-managed base); the
-loaded result never enumerates the directory. Arbitrary extra frontmatter
-metadata is parsed and passed through, but only the keys above are the domain
-model.
+frontmatter 之后的正文即模型阅读的 Markdown 指令内容。正文引用的相对资源通过技能的 `resourceBase`（目录、URL 或提供方管理的不透明基址）按需解析；加载结果从不枚举目录。其余任意额外 frontmatter 元数据会被解析并透传，但仅上述键属于领域模型。
 
-`dsh-tool-skill` injects the initial durable catalog as a user-role
-`<system-reminder>` on the first live `agent/pre-step` that sees a non-empty
-complete view, and it only forwards the skill `name` and XML-escaped
-`description` — never the body, path, source, or provider.
+`dsh-tool-skill` 会在第一个观察非空完整视图的存活 `agent/pre-step` 上注入初始的持久 user-role `<system-reminder>` 目录，且只转发技能 `name` 与经 XML 转义的 `description`——绝不包含正文、路径、来源或提供方。
 
-## Where skill files are discovered
+## 技能文件在何处被发现
 
-The shipped local provider scans roots in rank order; equal names resolve by
-rank, then provider order, then local order. For this plugin, the relevant roots
-are the project-level ones:
+随附的本地提供方按 rank 顺序扫描各根目录；重名时依次按 rank、提供方顺序、本地顺序裁决。对本插件而言，相关的根目录为项目级目录：
 
-| Rank | Source | Root | Applies to dsh-tokbook? |
+| Rank | Source | Root | 是否适用于 dsh-tokbook？ |
 |---|---|---|---|
-| 100 | `project-dsh` | `<projectRoot>/.dsh/skills` | Yes — a project-level skill |
-| 200 | `project-agents` | `<projectRoot>/.agents/skills` | Yes — also project-level |
-| 300 | `custom` | `Config.customSkillDirs` | Indirect — set by the profile |
-| 400 | `user-dsh` | `<dshHome>/skills` | Indirect — the user's own skills |
-| 500 | `user-agents` | `<agentsHome>/skills` | Indirect — the user's own skills |
-| 600 | `bundled` | `Config.bundledSkillDir` | Yes if the profile configures a bundled dir |
+| 100 | `project-dsh` | `<projectRoot>/.dsh/skills` | 是——项目级技能 |
+| 200 | `project-agents` | `<projectRoot>/.agents/skills` | 是——同样为项目级 |
+| 300 | `custom` | `Config.customSkillDirs` | 间接——由 profile 设置 |
+| 400 | `user-dsh` | `<dshHome>/skills` | 间接——用户自有技能 |
+| 500 | `user-agents` | `<agentsHome>/skills` | 间接——用户自有技能 |
+| 600 | `bundled` | `Config.bundledSkillDir` | 是（若 profile 配置了 bundled 目录） |
 
-The `projectRoot` is the nearest ancestor containing `.git`; without one the
-current cwd is used. A skill shipped inside this repo therefore lands in the
-`project-dsh` or `project-agents` root when the harness project root is a git
-worktree. The local provider does **not** synthesize built-in system skills; a
-plugin ships packaged skills through a configured bundled root or a dedicated
-provider.
+`projectRoot` 为包含 `.git` 的最近祖先目录；找不到时使用当前 cwd。因此，当 harness 项目根是一个 git 工作树时，随本仓库一起发布的技能会落入 `project-dsh` 或 `project-agents` 根目录。本地提供方**不会**合成内置系统技能；插件通过已配置的 bundled 根目录或专用提供方提供随包技能。
 
-## Invocation policy
+## 调用策略（Invocation Policy）
 
-`SkillInvocationPolicy` normalizes the two independent controls into booleans;
-every resolved summary, candidate, and definition carries it. The frontmatter
-keys `disable-model-invocation` and `user-invocable` map directly to it (keep
-them kebab-case — a camelCase legacy key is rejected):
+`SkillInvocationPolicy` 将两个独立控制规范化为布尔值；每个已解析的摘要、候选项与定义都携带它。frontmatter 键 `disable-model-invocation` 与 `user-invocable` 直接映射到它（请保持 kebab-case——camelCase 的旧键会被拒绝）：
 
-- `{ modelInvocable: true, userInvocable: true }` — visible to the model and to
-  the user (the default when both keys are omitted).
-- `{ modelInvocable: false, userInvocable: true }` — user-only.
-- `{ modelInvocable: true, userInvocable: false }` — model-only.
-- `{ modelInvocable: false, userInvocable: false }` — only reachable through a
-  trusted `ctx.skills.get()` caller, not via the model or user surface.
+- `{ modelInvocable: true, userInvocable: true }` —— 对模型与用户均可见（当两个键均省略时的默认值）。
+- `{ modelInvocable: false, userInvocable: true }` —— 仅用户。
+- `{ modelInvocable: true, userInvocable: false }` —— 仅模型。
+- `{ modelInvocable: false, userInvocable: false }` —— 只能经受信的 `ctx.skills.get()` 调用者访问，不能经模型或用户界面。
 
-## Registry contract (what the plugin touches)
+## 注册表契约（插件需要触及的部分）
 
-`ctx.skills` is the layered host registry. A registration files into the layer
-of its calling context's scope: host rows and repository plugins land in the
-global layer, while a plugin mounted by an agent preset's standing composition
-lands in that preset's layer. A read merges the global layer with the viewing
-scope's chain; the nearest layer's entry wins duplicate names outright, and the
-rank order decides duplicates only within one layer.
+`ctx.skills` 为分层的宿主注册表。注册会落入调用方上下文 scope 对应的层：宿主行与 repository 插件落入全局层，而由 agent preset 常驻组合挂载的插件落入该 preset 的层。读取时会将全局层与观察 scope 的链合并；最近层的条目直接赢得重名，rank 顺序只在单层内裁决重名。
 
 ```ts
-// Register a full runtime skill during apply().
+// 在 apply() 中注册一个完整运行时技能。
 const dispose = ctx.skills.register({
   name: 'dsh-tokbook-usage',
-  description: 'Read and summarize the dsh-tokbook token-usage ledger.',
-  content: '...',       // Markdown body
+  description: '读取并总结 dsh-tokbook 令牌用量账本。',
+  content: '...',       // Markdown 正文
   invocation: { modelInvocable: true, userInvocable: true },
-  // provider is defaulted to the registry-owned runtime provider
+  // provider 默认为注册表自有的运行时提供方
 })
 
-ctx.on('dispose', dispose) // or yield the disposer from the effect
+ctx.on('dispose', dispose) // 或从 effect 中直接 yield 该 disposer
 ```
 
 ```ts
-// Or register a provider that discovers/loads skills from your own source.
+// 或注册一个从自有来源发现/加载技能的提供方。
 const disposeProvider = ctx.skills.registerProvider((control) => ({
   name: 'tokbook-provider',
   async list(options) {
-    // options.cwd selects workspace-sensitive skills; options.signal cancels work.
-    return [] // or return SkillProviderObservation for incomplete discovery
+    // options.cwd 选择工作区敏感的技能；options.signal 取消工作。
+    return [] // 或不完整发现时返回 SkillProviderObservation
   },
   async get(candidate, options) {
-    // candidate.locator is opaque provider state passed back to you.
+    // candidate.locator 是传回给你的不透明提供方状态。
     return undefined
   },
 }))
 ```
 
-The other registry reads are `ctx.skills.list(options)` (sorted
-invocation-neutral summaries), `ctx.skills.snapshot(options)` (summaries plus a
-`complete` flag), and `ctx.skills.get(name, options)` (the full definition).
-Provider and runtime mutations emit the unfiltered invalidation event
-`skills/change`; consumers refetch the catalog with their own lookup options.
-Lookup options are `{ cwd?, signal? }`, plus an optional `scope` when the caller
-is an agent (the agent is its own scope key).
+其余注册表读取为 `ctx.skills.list(options)`（排序后的、与调用策略无关的摘要）、`ctx.skills.snapshot(options)`（摘要加 `complete` 标志），以及 `ctx.skills.get(name, options)`（完整定义）。提供方与运行时变更会发出不带过滤条件的失效事件 `skills/change`；消费方使用自身查找选项重新获取目录。查找选项为 `{ cwd?, signal? }`，当调用方是 agent 时还可带 `scope`（agent 自身即其 scope key）。
 
-These types and methods are provided by the runtime skill packages
-(`@deepseek-ai/dsh-skill`, `@deepseek-ai/dsh-skill-filesystem`,
-`@deepseek-ai/dsh-tool-skill`), not by local source in this repository. For the
-authoritative type signatures and the full provider/registry contract, read the
-installed package declarations; they live in the DSH runtime, not here.
+这些类型与方法由运行时技能包（`@deepseek-ai/dsh-skill`、`@deepseek-ai/dsh-skill-filesystem`、`@deepseek-ai/dsh-tool-skill`）提供，而非本仓库内的本地源码。要获取权威的类型签名与完整的提供方/注册表契约，请阅读已安装包的类型声明；它们位于 DSH 运行时中，而非此处。
 
-## Making a tokbook skill useful
+## 让 tokbook 技能真正有用
 
-A skill is only useful if it tells the model something it would otherwise not
-know and cannot safely guess. For `dsh-tokbook`, a skill is a good fit when it
-encodes the durable contract of the plugin — for example how an agent should
-read the token-usage overview route and report it — rather than narrating the
-implementation. A plausible shipped `SKILL.md`:
+技能只有当它告诉模型一些模型本不知道、也无法安全猜测的信息时才有用。对 `dsh-tokbook` 而言，技能适合编码插件的**持久契约**——例如 agent 应如何读取令牌用量概览路由并汇报——而不是复述实现。一个合理的随包 `SKILL.md`：
 
 ```markdown
 ---
 name: dsh-tokbook-usage
-description: Use to read and summarize cross-session token usage from the dsh-tokbook ledger.
-whenToUse: When the user asks about token consumption, cost, or usage across sessions.
+description: 用于读取并总结 dsh-tokbook 账本的跨会话令牌用量。
+whenToUse: 当用户询问跨会话的令牌消耗、成本或用量时。
 ---
 
-# Reading dsh-tokbook usage
+# 读取 dsh-tokbook 用量
 
-Fetch the exact-Fetch host route `tokbook.overview` and summarize the returned
-ledger. State provider/model granularity, aggregations, and the current
-persistence caveats (see the plugin README) so the user does not over-trust the
-numbers. Do not invent rows that are not present.
+抓取 exact-Fetch 的宿主路由 `tokbook.overview` 并总结返回的账本。说明
+提供方/模型的粒度、聚合方式与当前的持久化注意事项（见插件 README），
+以免用户过度信任数字。不要断言账本中不存在的行。
 ```
 
-Keep the instruction body stable and contract-oriented. Editing only the body
-changes later tool calls without producing new catalog messages or rewriting
-earlier tool results.
+请保持正文稳定且面向契约。仅修改正文会改变后续工具调用，而不会生成新的目录消息或改写先前工具结果。
 
-## Prerequisites and cautions for this plugin
+## 本插件的前置条件与注意事项
 
-- **`ctx.skills` is host-side.** It is available only where the skill registry is
-  mounted in the host composition. The browser/client half of this plugin cannot
-  contribute skills directly.
-- **The consumer must be mounted.** For the model to see a catalog, the
-  `@deepseek-ai/dsh-tool-skill` consumer must be present; without it no
-  `<system-reminder>` catalog or `skill` tool is injected.
-- **Prefer bundled files for a static skill.** If the body is fixed, ship a
-  `SKILL.md` in a discovered root rather than registering it in code. Runtime
-  registration is worth it only when the body is computed or the skill needs a
-  custom provider.
-- **Keep frontmatter keys exact.** `whenToUse` is camelCase; the invocation keys
-  are kebab-case. A camelCase invocation key is explicitly rejected.
+- **`ctx.skills` 是宿主侧能力。** 它只在技能注册表挂载到宿主组合时可用。本插件的浏览器/客户端半区无法直接贡献技能。
+- **消费方必须被挂载。** 要让模型看到目录，必须存在 `@deepseek-ai/dsh-tool-skill` 消费方；否则不会有 `<system-reminder>` 目录或 `skill` 工具被注入。
+- **静态技能优先用随包文件。** 若正文固定，请在可发现的根目录中发布 `SKILL.md`，而非在代码中注册。仅当正文是计算生成、或技能需要自定义提供方时，运行时注册才值得。
+- **保持 frontmatter 键精确。** `whenToUse` 为 camelCase；调用键为 kebab-case。camelCase 的调用键会被明确拒绝。

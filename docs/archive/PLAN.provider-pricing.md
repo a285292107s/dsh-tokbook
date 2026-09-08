@@ -248,7 +248,7 @@ export function resolvePriced(
   opencode-go 同模型金额归属正确、commandcode 前缀串不再是 ¥0（按官方折算价值）、
   中转占位可编辑、未知串默认 ¥0 可编辑。
 - 文档：README「Cost」段 + 统计口径 tab 更新为双桶口径；本计划收尾后归档到
-  DESIGN.zh.md。
+  DESIGN.md。
 
 ## 9. 明确非目标（本期不做）
 
