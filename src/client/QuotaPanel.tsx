@@ -21,8 +21,10 @@
  * Card anatomy (see `QuotaCard` in types):
  *  - header identity: the worst-window ring gauge (max used %, number
  *    centered inside the ring) leads on the left in place of a monogram,
- *    followed by provider + plan/account context; a per-card refresh
- *    control (or state chip) sits on the right.
+ *    followed by provider + plan/account context; on the right sits the
+ *    "更新于 HH:mm" freshness label driven by `fetchedAt` (the time of the
+ *    official fetch, so a cached render is honest about its age), in front
+ *    of the per-card refresh control (or a state chip).
  *  - ok body, top to bottom:
  *    1. one meter row per budget window (amount windows show used/cap +
  *       remaining $; percent-only windows show used % + remaining % on the
@@ -30,9 +32,7 @@
  *       from the monthly credit pool (see `monthlyAllowanceWindow`), so every
  *       budget reads identically;
  *    2. a thin period-activity strip (completed calls / success / tokens),
- *       only when the provider reports a usage summary;
- *    3. an "更新于 HH:mm" footnote driven by `fetchedAt` (the time of the
- *       official fetch, so a cached render is honest about its age).
+ *       only when the provider reports a usage summary.
  *  - unconfigured / error states: a state chip in the header + an explanatory
  *    panel (hint names the fix / reason).
  *
@@ -95,8 +95,7 @@ export function QuotaPanel() {
   return (
     <section className="dtpl-quota-sec" aria-label="订阅额度">
       <p className="dtpl-quota-intro">
-        各订阅的<b>官方账户用量</b>（由插件用你配置的 key 直接查询服务商，含你在其它
-        工具/设备上的用量；不做事后本地推算）。
+        各订阅的<b>官方账户用量</b>（由插件用你配置的 key 直接查询服务商）。
       </p>
 
       {hasProviders && (
@@ -247,8 +246,9 @@ function QuotaCardController({ provider, autoTicker }: { provider: string; autoT
   )
 }
 
-/** The card's shell: a header (identity + gauge/chip + refresh), then either
- * the loading placeholder, an error/hint panel, or the data body. */
+/** The card's shell: a header (identity + freshness + gauge/chip + refresh),
+ * then either the loading placeholder, an error/hint panel, or the data
+ * body. */
 function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   provider: string
   card: QuotaCard | null
@@ -261,6 +261,14 @@ function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   const ctx = ok && card !== null ? planContext(card) : ''
   const worst = ok && card !== null ? worstPressure(card) : undefined
   const state = card?.state ?? 'loading'
+  // One-shot click feedback: re-trigger the pop animation on every press even
+  // though the button flips to `disabled` (spinner) immediately after.
+  const [popTick, setPopTick] = useState(0)
+
+  const handleRefresh = () => {
+    setPopTick((t) => t + 1)
+    onRefresh()
+  }
 
   return (
     <article className="dtpl-quota-card" data-plan={provider} data-state={state}>
@@ -278,6 +286,9 @@ function QuotaCardView({ provider, card, error, loading, onRefresh }: {
         </div>
 
         <div className="dtpl-quota-head-side">
+          {ok && card !== null && card.fetchedAt !== undefined && (
+            <span className="dtpl-quota-updated">更新于 {formatClock(card.fetchedAt)}</span>
+          )}
           {card !== null && card.state === 'unconfigured' && (
             <span className="dtpl-quota-chip dtpl-quota-chip-muted">未配置</span>
           )}
@@ -287,12 +298,19 @@ function QuotaCardView({ provider, card, error, loading, onRefresh }: {
           <button
             type="button"
             className="dtpl-quota-refresh"
-            onClick={onRefresh}
+            onClick={handleRefresh}
             disabled={loading}
             aria-label={`刷新 ${title} 用量`}
             title="刷新此卡片"
           >
-            <RefreshGlyph className={`dtpl-quota-refresh-ico${loading ? ' dtpl-spin' : ''}`} />
+            {/* The wrapper owns the one-shot click pop; remounting it via `key`
+                restarts the animation on every press even though the button
+                flips to disabled (spinner) in the same render. The glyph
+                inside keeps the rotation spinner — separate elements, so the
+                two transform animations never fight. */}
+            <span key={popTick} className={`dtpl-quota-refresh-anim${popTick > 0 ? ' dtpl-quota-refresh-pop' : ''}`}>
+              <RefreshGlyph className={`dtpl-quota-refresh-ico${loading ? ' dtpl-spin' : ''}`} />
+            </span>
           </button>
         </div>
       </header>
@@ -332,8 +350,8 @@ function QuotaCardView({ provider, card, error, loading, onRefresh }: {
 }
 
 /** The data body of an ok card. Top to bottom: budget-window meter rows
- * (Command Code appends its monthly-allowance meter), activity strip,
- * freshness footnote. */
+ * (Command Code appends its monthly-allowance meter), activity strip. The
+ * freshness label lives in the header next to the refresh control. */
 function QuotaCardBody({ card }: { card: QuotaCard }) {
   const rows = [...card.windows]
   const monthly = monthlyAllowanceWindow(card)
@@ -348,9 +366,6 @@ function QuotaCardBody({ card }: { card: QuotaCard }) {
         </div>
       )}
       {card.usage !== undefined && <ActivityStrip usage={card.usage} />}
-      {card.fetchedAt !== undefined && (
-        <p className="dtpl-quota-updated">更新于 {formatClock(card.fetchedAt)}</p>
-      )}
     </>
   )
 }
@@ -599,7 +614,7 @@ function formatTokens(value: number): string {
   return `${Math.round(value / 100_000) / 10}M`
 }
 
-/** HH:mm of a fetch timestamp, shown in the card footnote. */
+/** HH:mm of a fetch timestamp, shown next to the card's refresh control. */
 function formatClock(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }

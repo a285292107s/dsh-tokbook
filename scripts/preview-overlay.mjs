@@ -366,12 +366,12 @@ const server = createServer((req, res) => {
     const btn = document.querySelector('[data-plugin="dsh-tokbook"]');
     // React 18 mounts concurrently, so delegated listeners are not attached
     // synchronously after render() — wait a beat before opening the overlay.
-    const quotaFlag = params.has('tab') && params.get('tab') === 'quota' ? true : params.has('quota');
+    const tabFlag = params.has('tab') ? params.get('tab') : (params.has('quota') ? 'quota' : null);
     setTimeout(() => {
       if (btn) btn.click();
-      if (quotaFlag) {
-        const quotaTab = document.getElementById('dtpl-tab-quota');
-        if (quotaTab) quotaTab.click();
+      if (tabFlag) {
+        const tabEl = document.getElementById('dtpl-tab-' + tabFlag);
+        if (tabEl) tabEl.click();
       }
     }, 200);
   </script>
@@ -381,5 +381,5 @@ const server = createServer((req, res) => {
 
 const port = Number(process.env.PORT ?? 8931)
 server.listen(port, '127.0.0.1', () => {
-  console.log(`preview on http://127.0.0.1:${port}/  (?dark=1, ?empty=1, ?err=1, ?quota=rich|percent|mix|unconfigured|error|none)`)
+  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?empty=1, ?err=1, ?quota=rich|percent|mix|unconfigured|error|none)`)
 })

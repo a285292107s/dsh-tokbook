@@ -34,10 +34,10 @@ import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  PlanConfig, PricingTable, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
+  PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
 } from './types.ts'
 import { currencyOfRegion, UNPRICED_KEY, totalsTokens } from './types.ts'
-import { defaultDataDir } from './ledger.ts'
+import { defaultDataDir, warnIfForeignOwner, writeOwnerMarker } from './ledger.ts'
 import { UsageLog } from './usage-log.ts'
 import { modelOfEvent, providerOfEvent, recordOfEvent, type SessionEventLike } from './usage-record.ts'
 import { autoSyncIfNeeded, listPersistenceSnapshots, syncHistory, type SyncPersistence } from './sync.ts'
@@ -48,11 +48,12 @@ import {
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import {
-  readPricingTable, readUsdExchangeRate, resolvePricingUrl, resolveRate as resolveRateFor, syncCloudPricing,
-  type PricingSourceInput, type PricingRegion,
+  parseManualPricingInput, readPricingTable, readPricingView, readUsdExchangeRate, resolvePricingUrl,
+  resolveRate as resolveRateFor, syncCloudPricing, writeManualPricing,
+  type ManualPricingParse, type PricingSourceInput, type PricingRegion,
 } from './pricing.ts'
 import { providerCards } from './by-provider.ts'
-import { registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
+import { registerTokBookPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
 import { isBuiltinQuotaPlan, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
 import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
 import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
@@ -173,10 +174,38 @@ export class TokenUsageBook extends Service {
   /** Loads the persisted baseline exactly once; callers await it before the
    * first probe so a restart inherits the previous process's signature. */
   private readonly baselineReady: Promise<void>
+  /** True once this fiber has been unloaded (HMR reload, or a dependency's
+   * dispose → auto-reload). Fire-and-forget continuations that outlive the
+   * fiber check it before their final side effect, so a disposed instance
+   * never schedules derived-state writes (rollup invalidation, baseline
+   * persistence) on behalf of a world that already moved on. */
+  private disposed = false
 
   constructor(ctx: Context, config: TokBookConfig = {}) {
     super(ctx, 'tokbook')
     validateConfig(config)
+    // Fiber-unload cleanup: mark this instance disposed and settle whatever
+    // append work it already queued. Cordis runs disposers in reverse order
+    // when the owning fiber unloads — service-isolation teardown or a
+    // dependency's dispose → auto-reload — and awaits each fiber's disposers
+    // before the fiber is gone.
+    //
+    // IMPORTANT scope note for a module-level HMR reload (cordis-plugin-hmr):
+    // that path calls `registry.delete(plugin)` WITHOUT awaiting fiber
+    // disposal, then immediately re-imports the plugin entry. The successor
+    // module gets a FRESH module-level state map (see UsageLog), so it neither
+    // "inherits" this instance's queue nor waits for this flush — dedupe safety
+    // across that boundary is re-derived from the on-disk rows before the
+    // successor's first write. Marking `disposed` here only stops THIS
+    // instance's own fire-and-forget continuations; it does not gate the
+    // successor. The flush is best-effort under module HMR, awaited under the
+    // in-process teardown paths.
+    ctx.effect(() => {
+      return () => {
+        this.disposed = true
+        return this.log.flush()
+      }
+    })
     this.logger = resolveLogger(ctx)
     this.recordCompaction = config.recordCompaction !== false
     this.dir = defaultDataDir(config.path)
@@ -186,6 +215,12 @@ export class TokenUsageBook extends Service {
       pricingRegion: config.pricingRegion as PricingRegion | undefined,
     }
     this.planConfig = coercePlansConfig(config.plans)
+
+    // "One data directory, one writing process" guard: warn when a live
+    // foreign host owns this directory (two writers race the rollup/cache),
+    // then record this process as the current owner. Advisory, never fatal.
+    void warnIfForeignOwner(this.dir, this.logger).then(() => writeOwnerMarker(this.dir))
+    void warmRecordCache(this.dir, undefined, this.logger)
 
     // Inherit the previous process's sync baseline (which session logs were
     // folded through which revision), so a restart does not re-walk every
@@ -229,10 +264,9 @@ export class TokenUsageBook extends Service {
       }
     })
 
-    // Warm the parse cache. The authoritative re-sync needs the session
-    // persistence service; wire it lazily so a host that mounts no persistence
-    // still records live requests (it just cannot backfill history).
-    void warmRecordCache(this.dir, undefined, this.logger)
+    // The authoritative re-sync needs the session persistence service; wire
+    // it lazily so a host that mounts no persistence still records live
+    // requests (it just cannot backfill history).
     ctx.inject(['sessionPersistence'], (persistenceCtx: Context) => {
       const persistence = persistenceCtx.get('sessionPersistence') as SyncPersistence
       this.persistence = persistence
@@ -249,6 +283,7 @@ export class TokenUsageBook extends Service {
         this.dir,
       )
         .then(async (result) => {
+          if (this.disposed) return
           if (result !== null) {
             this.logger.info?.(`[tokbook] first-run sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions`)
             if (result.added > 0) invalidateDerivedState(this.dir)
@@ -300,7 +335,12 @@ export class TokenUsageBook extends Service {
       ctx.effect(() => registerTokBookQuotaRoute(
         webServer,
         () => this.quota(),
-        (provider) => this.quotaCardOf(provider),
+        (provider, force) => this.quotaCardOf(provider, force),
+      ))
+      ctx.effect(() => registerTokBookPricingRoutes(
+        webServer,
+        () => this.pricingView(),
+        (table) => this.savePricing(table),
       ))
     })
   }
@@ -385,7 +425,11 @@ export class TokenUsageBook extends Service {
     const baseline = snapshotBaseline(snapshots)
     for (const id of failed) baseline.delete(id)
     this.syncedBySession = baseline
-    // Fire-and-forget: never block the read path on a metadata write.
+    // Fire-and-forget: never block the read path on a metadata write. A
+    // disposed instance stops persisting (its successor will write its own
+    // baseline after the next sync; an in-memory signature already covers this
+    // process's remaining reads).
+    if (this.disposed) return
     writeSyncProgress(this.dir, {
       syncedAt: Date.now(),
       sessions: Object.fromEntries(baseline),
@@ -592,6 +636,44 @@ export class TokenUsageBook extends Service {
       .catch((error: unknown) => {
         this.logger.warn?.('[tokbook] pricing sync failed:', error)
       })
+  }
+
+  /** The pricing-table view for the 价格表 tab. The merged table is the
+   *  content; the ledger's own distinct model strings are folded in so models
+   *  that actually billed but have NO table entry (neither manual nor cloud —
+   *  they cost ¥0 today) surface at the top of the list as one-click manual
+   *  seeds. The model count reuses `buildSummary`'s rollup + hot-file read,
+   *  the same cost path an overview read already pays. */
+  async pricingView(): Promise<PricingView> {
+    const used = new Map<string, number>()
+    try {
+      const summary = await buildSummary(this.dir, () => new Date(), () => UNPRICED_KEY, this.logger)
+      for (const row of summary.byModel) {
+        if (row.model === '') continue
+        used.set(row.model, (used.get(row.model) ?? 0) + row.totals.requests)
+      }
+    } catch (error) {
+      // A failing summary must not block the tab — the price list is still
+      // useful without the unpriced hints.
+      this.logger.warn?.('[tokbook] cannot read ledger models for pricing view:', error)
+    }
+    const { rows, dataDir } = await readPricingView(this.dir, used, this.logger)
+    return { rows, dataDir }
+  }
+
+  /** Validate + persist a manual pricing body from the 价格表 tab. The body is
+   *  the COMPLETE desired manual table (every model the user maintains, with
+   *  its four rates) — the write replaces `pricing.json` wholesale, so an
+   *  omitted entry is removed. Always answers a parse verdict plus the fresh
+   *  view, so the client can apply the result (success or validation error)
+   *  and refresh from one response. Only the manual file is written — the
+   *  cloud mirror is never touched, and the merged read-time table re-prices
+   *  history on the next overview read (no rollup/ledger change). */
+  async savePricing(table: unknown): Promise<ManualPricingParse & { view: PricingView }> {
+    const parsed = parseManualPricingInput(table)
+    if (!parsed.ok) return { ok: false, error: parsed.error, view: await this.pricingView() }
+    await writeManualPricing(this.dir, parsed.table, this.logger)
+    return { ok: true, table: parsed.table, view: await this.pricingView() }
   }
 }
 

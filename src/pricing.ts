@@ -18,7 +18,7 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
-  ContextTier, DailySlot, ModelPricing, ModelRates, PricingTable, RateKey, TimeRule, UsageTotals,
+  ContextTier, DailySlot, ModelPricing, ModelRates, PricingTable, PricingViewRow, RateKey, TimeRule, UsageTotals,
 } from './types.ts'
 
 /** The hand-maintained pricing file inside the data directory. */
@@ -420,8 +420,134 @@ export function coercePricingTable(value: unknown): Record<string, ModelPricing>
   return table
 }
 
-async function readManualPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<Record<string, ModelPricing>> {
+/** Read the hand-edited `pricing.json` into a flat table (entries with
+ *  invalid rates are dropped, never fatal). */
+export async function readManualPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<Record<string, ModelPricing>> {
   return coercePricingTable(await readJsonFile(dir, PRICING_FILE, logger))
+}
+
+/** Outcome of validating a client-submitted manual pricing body. */
+export type ManualPricingParse =
+  | { ok: true; table: Record<string, ModelPricing> }
+  | { ok: false; error: string }
+
+/** Validate a manual pricing body (as sent by the 价格表 tab) into a flat
+ *  table. Unlike {@link coercePricingTable}, a malformed body is REJECTED with
+ *  a reason instead of silently dropping rows — this is the write path, where
+ *  a typo must surface rather than disappear. The empty table is valid: it
+ *  removes every manual override. */
+export function parseManualPricingInput(value: unknown): ManualPricingParse {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: '手工价格表必须是 JSON 对象（模型 → 单价）' }
+  }
+  const raw = value as Record<string, unknown>
+  const table: Record<string, ModelPricing> = {}
+  for (const [model, entry] of Object.entries(raw)) {
+    if (model === '') return { ok: false, error: '存在空模型名' }
+    if (model.length > 256) return { ok: false, error: `模型名过长：${model.slice(0, 40)}…` }
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return { ok: false, error: `「${model}」的单价必须是对象` }
+    }
+    const prices = entry as Record<string, unknown>
+    const readRate = (key: string): number | undefined => {
+      const v = prices[key]
+      if (v === undefined) return undefined
+      return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : NaN
+    }
+    const inputPerMillion = readRate('inputPerMillion')
+    const outputPerMillion = readRate('outputPerMillion')
+    if (inputPerMillion === undefined || outputPerMillion === undefined || Number.isNaN(inputPerMillion) || Number.isNaN(outputPerMillion)) {
+      return { ok: false, error: `「${model}」缺少合法的 inputPerMillion / outputPerMillion（非负数字）` }
+    }
+    const out: ModelPricing = { inputPerMillion, outputPerMillion }
+    const cacheReadPerMillion = readRate('cacheReadPerMillion')
+    const cacheWritePerMillion = readRate('cacheWritePerMillion')
+    if (cacheReadPerMillion !== undefined && Number.isNaN(cacheReadPerMillion)) {
+      return { ok: false, error: `「${model}」的 cacheReadPerMillion 必须是非负数字` }
+    }
+    if (cacheWritePerMillion !== undefined && Number.isNaN(cacheWritePerMillion)) {
+      return { ok: false, error: `「${model}」的 cacheWritePerMillion 必须是非负数字` }
+    }
+    if (cacheReadPerMillion !== undefined) out.cacheReadPerMillion = cacheReadPerMillion
+    if (cacheWritePerMillion !== undefined) out.cacheWritePerMillion = cacheWritePerMillion
+    table[model] = out
+  }
+  return { ok: true, table }
+}
+
+/** Persist the hand-edited `pricing.json` atomically (temp file + rename; the
+ *  target is unlinked first because Windows rename-over-existing fails
+ *  intermittently — the same recipe the quota snapshots and the cloud mirror
+ *  use). Replaces the whole file; an absent cloud mirror is unaffected. */
+export async function writeManualPricing(
+  dir: string,
+  table: Record<string, ModelPricing>,
+  logger: { error(...args: unknown[]): void } = console,
+): Promise<void> {
+  const target = join(dir, PRICING_FILE)
+  const tmp = join(dir, `${PRICING_FILE}.tmp`)
+  try {
+    await mkdir(dirname(target), { recursive: true })
+    await writeFile(tmp, `${JSON.stringify(table, null, 2)}\n`, 'utf8')
+    await unlink(target).catch(() => undefined)
+    await rename(tmp, target)
+  } catch (error) {
+    logger.error('[tokbook] cannot write pricing.json:', error)
+    throw error
+  }
+}
+
+/** Assemble the pricing-table view the 价格表 tab renders: one row per exact
+ *  model string a record can be billed under. Manual (`pricing.json`) entries
+ *  come first — they are the ones the user maintains — then every cloud model
+ *  id and alias from the synced mirror, each group alphabetical. A manual row
+ *  that shadows a cloud string keeps its cloud base rates alongside (as a
+ *  "参考" reference for the edit form); a manual-only row (a model the cloud
+ *  never named) has no cloud side. Cloud rows expose their flat base rates
+ *  plus a `layered` flag when the cloud entry also carries time rules /
+ *  context tiers / peak slots: the billed rate then varies by time/context,
+ *  and a manual entry replaces the whole rule set with flat prices.
+ *
+ *  `usedModels` (model string → ledger record count) marks models the ledger
+ *  actually billed that neither the cloud feed nor a manual entry names —
+ *  they currently bill ¥0, and surface at the top of the list as one-click
+ *  manual seeds. */
+export async function readPricingView(
+  dir: string,
+  usedModels: ReadonlyMap<string, number> = new Map(),
+  logger: { error(...args: unknown[]): void } = console,
+): Promise<{ rows: PricingViewRow[]; dataDir: string }> {
+  const synced = await readSyncedPricing(dir, logger)
+  const manual = await readManualPricing(dir, logger)
+  const rows: PricingViewRow[] = []
+  const seen = new Set<string>()
+  const manualModels = Object.keys(manual).sort((a, b) => a.localeCompare(b))
+  for (const model of manualModels) {
+    const cloudRates = synced[model]?.base
+    rows.push({ model, manual: true, manualRates: manual[model], cloudRates })
+    seen.add(model)
+  }
+  // Ledger-billed strings with NO entry at all (neither manual nor cloud):
+  // these bill ¥0 today, listed right under the manual rows as seeds.
+  const unpriced = [...usedModels.keys()]
+    .filter(model => !(model in synced) && !(model in manual))
+    .sort((a, b) => a.localeCompare(b))
+  for (const model of unpriced) {
+    rows.push({ model, manual: false, unpriced: true, records: usedModels.get(model), cloudRates: undefined })
+    seen.add(model)
+  }
+  const cloudModels = Object.keys(synced).sort((a, b) => a.localeCompare(b))
+  for (const model of cloudModels) {
+    if (seen.has(model)) continue
+    const rates = synced[model]!
+    rows.push({
+      model,
+      manual: false,
+      cloudRates: rates.base,
+      layered: rates.timeRules.length > 0 || rates.contextTiers.length > 0 || rates.dailySlots.length > 0,
+    })
+  }
+  return { rows, dataDir: dir }
 }
 
 async function readSyncedPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<PricingTable> {

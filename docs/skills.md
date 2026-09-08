@@ -1,5 +1,7 @@
 # Skills in dsh-tokbook
 
+> **Doc meta** · role: reference · language: en · status: current · last-reviewed: 2026-09-08 · supersedes: —
+
 [中文](skills.zh.md) | English
 
 A **skill** is a reusable, task-specific instruction a plugin contributes to a

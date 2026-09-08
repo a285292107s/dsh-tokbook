@@ -1,9 +1,26 @@
-# dsh-tokbook —— 技术选型与插件框架设计（第一期）
+# dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
+
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。
 > 本文档是第一期的**调研结论 + 技术选型 + 框架设计**。调研依据仅两个权威来源：
 > 官方文档站点 `https://deepseek-harness.github.io/deepseek-harness/` 与 DSH 源码
 > `C:\Users\28529\Desktop\deepseek-harness`。文中引用的文件路径均相对该源码根。
+
+---
+
+## 阅读指南（先读这里，分清时间线）
+
+> 本文是**设计推理与演进记录**,不是当前接口的唯一真相。时间线如下:
+>
+> - §1–§11 主体描述**第一期**框架(外置插件 + 浮窗 + 每会话聚合,不折算成本);
+> - 「重构说明」(自 §428「重构说明:从「每会话聚合」改为「逐请求账本 + 成本」」起)描述
+>   **第二期 = 当前代码形态**(逐请求 JSONL 账本 + 成本计价 + provider/额度)。**以此段为准**;
+> - §1 的「本期不做成本」与 §11 的「成本折算…后续二期或独立 costbook」预判**已被二期推翻并落地**;
+>   provider/额度/pricing 升级的原始计划见 [`archive/PLAN.provider-pricing.zh.md`](archive/PLAN.provider-pricing.zh.md)(已归档,superseded)。
+>
+> **精确接口**(路由/配置/事件/数据文件)→ [`CONTRACTS.md`](CONTRACTS.md);**持久决策** →
+> [`DECISIONS.md`](DECISIONS.md);实现/操作现状 → [`../README.md`](../README.md)。
 
 ---
 
@@ -335,11 +352,14 @@ react, react/jsx-runtime, react-dom, react-dom/client,
 > 注：为避免手工改 `cordis.patch.yml`，也可以把 `dsh-tokbook` 做成一个 bundle 包（声明 `dsh.bundle.patch`），
 > 但那需要你把 patch 层也打进包里；两者见 §7 取舍。
 
-> ⚠️ **client 改动生效方式（实测坑）**：DSH 的 `/plugins/<id>/client.js` 按 `rev`（内容 hash/非ce）做
-> **不可变缓存**，这个 `rev` 在**宿主启动时**写进 `window.__DSH_BOOT__`。所以：
-> - 只用普通刷新浏览器 → 拿到的是**旧 rev 的旧 bundle**（被 immutable 缓存住），改动不生效；
-> - 让改动生效：**重启 `dsh web`**（宿主重算 rev）+ **硬刷新浏览器**（`Cmd/Ctrl+Shift+R`）；
->   或跑 DSH 源码的 dev HMR watcher（`pnpm run dev:web`，免重启）。
+> ⚠️ **client 改动生效方式（实测更新 2026-09-07，详见 [`HMR.zh.md`](HMR.zh.md)）**：DSH 的
+> `/plugins/<id>/client.js` 按 `rev`（内容 hash）做**不可变缓存**，`rev` 启动时写进
+> `window.__DSH_BOOT__`；但 `@deepseek-ai/dsh-client-hmr`（web-app 常驻挂载）会在运行中重哈希改写
+> `rev` 并广播。所以（本机实测）：
+> - `pnpm build` 落盘 `lib/client.js` 后，**刷新浏览器**即可取到新 rev 的 bundle（**主路径**）；
+>   client-hmr 活着时也可能 ≤500ms 免刷新热更（加分项，非保证）；
+> - 兜底/首次接线：**重启 `dsh web`** + **硬刷新浏览器**（`Cmd/Ctrl+Shift+R`）；
+> - `pnpm run dev:web` 只重建 DSH 仓库内包，外置 dsh-tokbook 的重建 = 自己的 `pnpm build`；
 > - 若当初是**打成 tarball/复制**装进 profile，profile 里的 `lib/client.js` 是旧的——改为**路径/link** 安装
 >   （`dsh plugin --profile web add <abs path>`，或 profile package.json 写
 >   `"dsh-tokbook": "link:<abs path>"` 后 `pnpm install`）。
@@ -399,7 +419,7 @@ dsh-tokbook/
 |---|---|
 | 外置 bundle 格式 | 需自己维护基线 external 列表与纯净化纪律；DSH 升级若改 `PLATFORM_MODULES` 需同步。风险可控 |
 | client 插件默认导出 | 不可给 client 入口加 `export default`（cordis loader `exports.default ?? exports` 会因 default 掩盖 `.inject`，报 “without inject”）。见 §7.4 |
-| client 改动不生效 | bundle 按 `rev` 不可变缓存；改 client 需重启 `dsh web` + 硬刷新（或用 dev HMR watcher），且 profile 需指向本仓库 `lib`。见 §8 |
+| client 改动不生效 | bundle 按 `rev` 不可变缓存，但 `client-hmr`（web-app 常驻）运行中会重哈希广播；本项目 `pnpm build` 后**刷新浏览器**取新 rev（client-hmr 活着时可能 ≤500ms 免刷新热更，加分项非保证），兜底才重启 + 硬刷新。见 §8 / [`HMR.zh.md`](HMR.zh.md) |
 | 跨重启幂等 | 用 DSH 权威投影（`tokenUsage`/`sessionStats`，见 §5.4），无自定义折叠、无重复计数问题 |
 | 成本折算 | 本期不做；DSH `token-meter` 不算钱，需自建价格表（后续二期或独立 costbook） |
 | 左栏常驻入口 | 本期用 footer 按钮 + 浮窗；若要「常驻左栏列表项」需 in-repo 给 `ui-sidebar` 声明新子槽 |
@@ -464,6 +484,13 @@ dsh-tokbook/
   各自单价计费，cache 桶无独立价则回退 input 价。
 - `attachCosts` 把 token 聚合加上成本层，`totalCost` / 每模型 `cost` / `unpricedModels`，
   且价格更新无需重建聚合即可重新计价历史。
+- **价格维护 UI**（价格表 tab）：浮窗内新增第 5 个 tab，`GET/PUT /tokbook/pricing`。
+  列表 = 手工条目 + 云端模型/别名 + **账本记过但两表都没有的模型串**（标「未定价」、
+  计 ¥0，可直接转手工价）——避免用户对着一串云端列表却找不到自己账本里那 10 个模型。
+  手工层语义本就 flat，故 UI 只编辑四档单价（输入/输出/缓存读/缓存写），不做三层规则
+  编辑器；云端带 timeRules/contextTiers/dailySlots 的行只标「分时/分档」，手工覆盖
+  一写入即整体替换为 flat 价。整表 PUT（absent = 删除该覆盖），host 校验后原子写
+  `pricing.json`，返回新 view 与概览刷新联动。
 
 ### 4. 前端（保留浮窗形态，内容升级，覆盖 §6.1/§6.2）
 

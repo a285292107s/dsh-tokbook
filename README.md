@@ -1,5 +1,7 @@
 # dsh-tokbook
 
+> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-09-08 · supersedes: —
+
 A cross-session **token-usage ledger** plugin for DeepSeek Harness (DSH). The
 host half records **one row per provider-billed model call** — the
 `assistant/message` provider `usage` (plus compaction summarize calls and
@@ -13,6 +15,10 @@ token trend chart, a per-model breakdown with cost — a per-provider tab
 configured subscription's **official account usage** (Command Code / OpenCode
 Go), fetched from the provider's own API with your key.
 
+The doc tree is mapped in [`docs/INDEX.md`](docs/INDEX.md) (role / status /
+when-to-read per file); host contracts that must match code live in
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md), enforced by `pnpm selfcheck`.
+
 Design rationale, tech selection, and the two sidebar approaches are documented
 in [`docs/DESIGN.zh.md`](docs/DESIGN.zh.md). The data model follows the
 [dsh-token-usage](https://github.com/LaoYueHanNi/dsh-token-usage) reference:
@@ -25,18 +31,19 @@ a "time rule → context tier → peak slot" rate chain.
 src/
   index.ts            host: TokenUsageBook service (ctx.tokbook) + live hook
   types.ts            shared domain types (type-only)
-  ledger.ts           data-directory resolution
+  ledger.ts           data-directory resolution + owner marker (single-writer guard)
   usage-record.ts     per-call record model + session-event projections
-  usage-log.ts        per-day JSONL store (append/dedupe/refile)
+  usage-log.ts        per-day JSONL store (append/dedupe/refile; dedupe state
+                      shared per data directory across instances/restarts)
   sync.ts             first-start + manual history backfill (idempotent)
-  sync-state.ts       first-run marker
+  sync-state.ts       first-run marker + persisted sync baseline
   stats.ts            aggregation (totals/byDay/byHour/byModel/recent) + rollup + cache
   pricing.ts          price table (cloud mirror + manual), resolveRate chain, costOf
   by-provider.ts      pure provider-card aggregation (Provider-usage tab)
   quota.ts            official-quota normalization + built-in plan identity
   quota-official.ts   key resolution + per-provider official usage fetchers
   routes.ts           host exact-Fetch routes  /tokbook/overview, /tokbook/rescan,
-                      /tokbook/usage?range=…, /tokbook/quota
+                      /tokbook/usage?range=…, /tokbook/quota, /tokbook/pricing
   client/
     index.ts          client: apply(ctx), registers the two slots
     contract.ts       minimal client ctx/slots types
@@ -44,11 +51,14 @@ src/
     styles.ts         injected stylesheet (DSH tokens)
     FooterButton.tsx  sidebar.footer.action trigger
     QuotaPanel.tsx    订阅额度 tab (official usage cards)
+    PricingPanel.tsx  价格表 tab (view + maintain manual prices)
     LedgerOverlay.tsx shell.overlay floating window (costed summary + trend +
-                      per-model + per-provider + quota tabs)
+                      per-model + per-provider + pricing + quota tabs)
 scripts/
-  build-client.mjs    builds lib/index.js + lib/client.js (lazy-CJS)
-  smoke.ts            pure-logic smoke test of aggregation + pricing + quota
+  build-client.mjs         builds lib/index.js + lib/client.js (lazy-CJS)
+  smoke.ts                 pure-logic smoke test of aggregation + pricing + quota
+  selfcheck-baseline.ts    restart/sync-progress semantics self-check
+  selfcheck-rebuild.ts     rollup rebuild / refile / cross-instance dedupe self-check
 ```
 
 ## Build
@@ -56,7 +66,9 @@ scripts/
 ```sh
 pnpm install      # installs @deepseek-ai/cordis, react, esbuild, typescript
 pnpm build        # tsc emits lib/types/*.d.ts, then esbuild bundles host+client
-pnpm smoke        # pure-logic smoke test of the aggregation + pricing math
+pnpm smoke        # pure-logic smoke test of aggregation + pricing + quota math
+pnpm selfcheck    # restart/baseline + rollup-rebuild/refile/dedupe invariant self-checks
+pnpm test         # smoke + selfcheck
 ```
 
 Outputs:
@@ -88,13 +100,19 @@ If the package is not installed as a bundle (it is a plain plugin, not a
       name: 'dsh-tokbook'
 ```
 
-Then `dsh web` and refresh the browser. Client-half changes hot-reload (hard
-refresh to pick the new `rev`), host-half changes need a restart.
+Then `dsh web` and refresh the browser. With the dev reload chain live (see
+[`docs/HMR.zh.md`](docs/HMR.zh.md)), a `pnpm build` hot-swaps the **host** half
+through the profile's enabled `cordis-plugin-hmr` row (unload → re-import →
+re-apply). The **browser** half is picked up by refreshing the page (the
+mounted `client-hmr` chain may also swap it within ~500ms without a refresh,
+but that is a bonus, not a guarantee). A hard refresh (`Cmd/Ctrl+Shift+R`) is
+the always-works fallback when the chain was not live during a build.
 
 ## Dev against a source checkout
 
 ```sh
-pnpm watch                                # rebuild on change
+pnpm watch                                # tsc --watch: emits lib/types/*.d.ts only —
+                                          # run pnpm build for lib/index.js / lib/client.js
 dsh web --patch /abs/path/to/tokbook/dev/cordis.yml   # host half only
 ```
 
@@ -148,6 +166,29 @@ the 统计口径 tab's 数据文件状态 section — so when a figure is 0 the 
 visible (whether records are being captured at all), without pipe facts
 cluttering the scroll of usage content.
 
+### One data directory, one writing process
+
+The ledger, rollup, parse cache and refile passes assume a single host process
+writes a given data directory (rollup/cache races are the risk; the JSONL
+appends themselves are dedupe-safe). On startup the plugin writes an
+`owner.json` marker (pid + start time) into the directory and **warns when a
+live foreign process already owns it** — a stale marker from a crashed process
+is taken over silently. Point a second host at its own `path` (see
+[Configuration](#configuration)) rather than sharing one directory.
+
+The in-process dedupe/append state of `UsageLog` is keyed by **data
+directory**, not by plugin instance, so every instance sharing the *same loaded
+module copy* (a dependency's dispose → auto-reload, a second instance over
+service isolation, or an overlapping instance with queued appends in flight)
+shares one dedupe set and one serialized append queue — overlapping writers of
+one process can never double-write the same request id.
+
+That sharing does **not** cross a module-level HMR reload (cordis-plugin-hmr
+re-imports the plugin entry, so the new module starts a fresh state map). Across
+that boundary, dedupe safety is re-derived from the on-disk rows before the new
+instance's first write; a process restart starts empty and does the same. See
+[`docs/HMR.zh.md`](docs/HMR.zh.md) §4 for the exact scope.
+
 ## Cost
 
 Each record is priced at its own timestamp through a ¥/M per-model price table:
@@ -162,6 +203,16 @@ The table merges two sources (cloud mirror synced on startup, and a hand-edited
 ```json
 { "deepseek-chat": { "inputPerMillion": 2, "outputPerMillion": 8, "cacheReadPerMillion": 0.5 } }
 ```
+
+The floating window's **价格表 tab** lets you maintain those manual entries
+from the UI: every model the ledger recorded is listed (cloud rows show their
+mirrored base rates with a 自定义 action; ledger models with **no** table entry
+are flagged 未定价 — they bill ¥0 until you give them a manual price), each
+manual row edits its four flat rates in place, and one 保存 writes the whole
+manual file through `PUT /tokbook/pricing`. Saving re-prices every history on
+the next read — no rollup or ledger change. (The manual layer is flat-only by
+design: time-rule / context-tier / peak pricing stays in the cloud feed, and a
+manual entry for such a model replaces its whole rule set with flat prices.)
 
 Default location: `$DSH_HOME/tokbook/`. A malformed file degrades the affected
 models to unpriced (¥0) without breaking the page. Unpriced models are listed in
@@ -195,7 +246,7 @@ plugins:
 
 ### Official account usage (订阅额度 tab)
 
-A fourth floating-window tab shows **account-level subscription usage fetched
+The **订阅额度** tab shows **account-level subscription usage fetched
 from each provider's own account API** with your key — so it reflects *all*
 tools/devices sharing the subscription, which a local token ledger cannot.
 
@@ -232,6 +283,12 @@ Implemented in this scaffold (see `docs/DESIGN.zh.md`):
   cache; the recent window.
 - **Cost**: ¥/M price table (cloud mirror + manual overrides), rule-chain rate
   resolution, per-request cost, per-model cost, unpriced-model surfacing.
+- **价格表 tab**: view + maintain the manual price layer from the UI. Lists
+  every manual entry, every cloud model/alias (with flat base rates and a
+  layered flag), and ledger models with **no** table entry (未定价, ¥0 today)
+  as one-click manual seeds. Edits are staged per row and written wholesale to
+  `pricing.json` through `PUT /tokbook/pricing` (`GET /tokbook/pricing` serves
+  the view); saving re-prices all history on the next read.
 - **Browser half**: sidebar footer button + shell overlay floating window with
   summary cards (tokens + cost), a 4-bucket split, a daily trend chart, a
   per-model breakdown with cost, the recent records, and a **per-provider tab**:
@@ -246,19 +303,9 @@ Implemented in this scaffold (see `docs/DESIGN.zh.md`):
 
 Remaining gaps / planned upgrades:
 
-- The `session/event` / `sessionPersistence` / `webServer` service faces are
-  locally typed; tighten against the real `@deepseek-ai/*` type packages once
-  wired as devDependencies. (The event payload shapes and the persistence
-  surface have been verified against the DSH v11.9.0 source: listing uses
-  `sessionPersistence.listSnapshots()` — `{ header, revision }` per session,
-  with a plain-header `list()` fallback — and each session's events are read
-  through `inspect(id)` → `{ meta, events }`.)
-- The overview is a snapshot per open; live SSE push is a follow-up.
-- The cloud pricing sync fires on startup (best-effort); exposure of the
-  pricing mirror as a settings card is not yet wired.
-- Quota is an official fetch served stale-while-revalidate: a 30s in-memory
-  TTL plus a durable per-provider last-known snapshot, refreshed in place when
-  the client sees data older than its freshness budget. No multi-account
-  rotation (one key per plan) yet. A persistent "urgency" indicator on the
-  sidebar trigger (color dot by the tightest window) needs event-driven
-  updates.
+- Quota plans accept one API key per provider route (no multi-account
+  rotation yet).
+- A persistent "urgency" indicator on the sidebar trigger (a color dot by the
+  tightest quota window) is not wired: it needs event-driven updates, since
+  quota is fetched on tab open and while the tab is open — nothing pushes a
+  change to the button while the window is closed.

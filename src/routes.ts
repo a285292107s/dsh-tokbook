@@ -18,7 +18,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { PROVIDER_RANGES, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type TokBookOverview } from './types.ts'
+import { PROVIDER_RANGES, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type TokBookOverview } from './types.ts'
+import type { ManualPricingParse } from './pricing.ts'
 
 /** The subset of the host webserver this plugin uses. */
 export interface WebServerLike {
@@ -181,5 +182,96 @@ export function registerTokBookQuotaRoute(
     kind: 'exact',
     path: '/tokbook/quota',
     handler: handleQuota,
+  })
+}
+
+/** Read a small JSON request body (the pricing write path sends one). Bound
+ *  so a malicious or broken client cannot make the host buffer unboundedly;
+ *  answers null on any transport/parse error. */
+function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolveBody) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    let settled = false
+    req.on('data', (chunk: Buffer) => {
+      if (settled) return
+      size += chunk.length
+      if (size > 256 * 1024) {
+        settled = true
+        resolveBody(null)
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      if (settled) return
+      settled = true
+      if (chunks.length === 0) { resolveBody(null); return }
+      try {
+        resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      } catch {
+        resolveBody(null)
+      }
+    })
+    req.on('error', () => {
+      if (settled) return
+      settled = true
+      resolveBody(null)
+    })
+  })
+}
+
+/** Bind the pricing-table routes to snapshot/parse/save providers. Returns the
+ *  combined disposer. One exact route on `/tokbook/pricing` dispatches by
+ *  method (exact routes match on pathname, so registering the same path twice
+ *  would collide): GET answers the read-only view; PUT accepts a manual
+ *  pricing body `{ "model": { inputPerMillion… } }`, persists it, and returns
+ *  the parse verdict plus the fresh view so the client can refresh its list
+ *  from one response. */
+export function registerTokBookPricingRoutes(
+  webServer: WebServerLike | undefined,
+  pricingView: () => PricingView | Promise<PricingView>,
+  savePricing: (table: unknown) => Promise<ManualPricingParse & { view: PricingView }>,
+): () => void {
+  if (webServer === undefined) return () => {}
+
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    if (req.method === 'GET') {
+      try {
+        const snapshot = await pricingView()
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(snapshot))
+      } catch (error) {
+        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+      }
+      return
+    }
+    if (req.method === 'PUT') {
+      const body = await readJsonBody(req)
+      try {
+        const result = await savePricing(body)
+        if (!result.ok) {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: result.error, view: result.view }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify({ ok: true, view: result.view }))
+      } catch (error) {
+        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+      }
+      return
+    }
+    return refuse(res, 405, 'method not allowed')
+  }
+
+  return webServer.register({
+    kind: 'exact',
+    path: '/tokbook/pricing',
+    handler: handle,
   })
 }

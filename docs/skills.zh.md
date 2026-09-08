@@ -1,5 +1,7 @@
 # dsh-tokbook 中的技能（Skills）
 
+> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
+
 中文 | [English](skills.md)
 
 **技能（skill）** 是插件向 DeepSeek Harness（DSH）会话贡献的一种可复用、面向特定任务的指令。模型在其目录中只看到技能的 `name` 与 `description`，并通过 `skill({ name })` 工具按需加载完整的 Markdown 正文；用户也可直接用 `/name` 调用。技能是可选的指令，而非会话事件。

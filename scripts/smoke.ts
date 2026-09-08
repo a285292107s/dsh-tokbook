@@ -1,10 +1,10 @@
 // Smoke test of the pure aggregation + pricing math (no DSH runtime needed).
 // Run with: node --experimental-strip-types scripts/smoke.ts
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
-import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing } from '../src/pricing.ts'
+import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE } from '../src/pricing.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
@@ -71,6 +71,71 @@ console.log('pricing rule chain + cost')
   check('costOf math', Math.abs(cost - (2 + 4 + 0.1 + 0.1)) < 1e-9, `got ${cost}`)
   const priced = coercePricingTable(table)
   check('coercePricingTable', priced['deepseek-chat']?.inputPerMillion === 2)
+}
+
+console.log('manual pricing file write/read/merge/view')
+{
+  const dir = await mkdtemp(join(tmpdir(), 'tokbook-pricing-'))
+  try {
+    // Simulate a synced cloud mirror: deepseek-chat (with a peak slot, i.e.
+    // layered), deepseek-reasoner (flat), gpt-5.6-luna with an alias.
+    const feed = {
+      version: 1,
+      updatedAt: 0,
+      currency: 'RMB',
+      models: [
+        { modelId: 'deepseek-chat', inputCostPerMillion: 2, outputCostPerMillion: 8, cacheReadCostPerMillion: 0.5, cacheCreationCostPerMillion: 0,
+          dailySlots: [{ label: 'peak', windows: [{ startMinute: 540, endMinute: 720 }], inputCostPerMillion: 4, outputCostPerMillion: 16 }],
+          contextTiers: [], timeRules: [], aliases: ['deepseek-chat-v3'] },
+        { modelId: 'deepseek-reasoner', inputCostPerMillion: 4, outputCostPerMillion: 16, cacheReadCostPerMillion: 1, cacheCreationCostPerMillion: 0,
+          dailySlots: [], contextTiers: [], timeRules: [], aliases: [] },
+        { modelId: 'gpt-5.6-luna', inputCostPerMillion: 3, outputCostPerMillion: 12, cacheReadCostPerMillion: 0, cacheCreationCostPerMillion: 0,
+          dailySlots: [], contextTiers: [], timeRules: [], aliases: [] },
+      ],
+    }
+    // Persist the feed as the synced mirror (what `readSyncedPricing` reads).
+    await writeFile(join(dir, PRICING_CCSA_FILE), JSON.stringify(feed), 'utf8')
+    const view0 = await readPricingView(dir, new Map(), { error: () => {} })
+    check('empty manual file → view has only cloud rows', view0.rows.length === 4, `got ${view0.rows.length}`)
+    // Write a manual entry for one flat cloud model and one brand-new model.
+    const parsed = parseManualPricingInput({
+      'deepseek-reasoner': { inputPerMillion: 4.5, outputPerMillion: 18 },
+      'brand-new-x': { inputPerMillion: 9, outputPerMillion: 36, cacheReadPerMillion: 1 },
+    })
+    check('parse ok', parsed.ok === true)
+    if (parsed.ok) {
+      await writeManualPricing(dir, parsed.table, { error: () => {} })
+      const manual = await readManualPricing(dir, { error: () => {} })
+      check('manual file round-trips', manual['deepseek-reasoner']?.inputPerMillion === 4.5 && manual['brand-new-x']?.cacheReadPerMillion === 1)
+      const merged = await readPricingTable(dir, { error: () => {} })
+      check('manual wins wholesale', merged['deepseek-reasoner']?.base.inputPerMillion === 4.5 && merged['deepseek-reasoner']?.timeRules.length === 0)
+      check('manual-only model added', merged['brand-new-x']?.base.inputPerMillion === 9)
+      check('cloud model still present', merged['deepseek-chat']?.base.inputPerMillion === 2)
+      const view1 = await readPricingView(dir, new Map([['deepseek-v4-pro', 3]]), { error: () => {} })
+      // 6 = manual-only brand-new-x + deepseek-reasoner (manual now covers a
+      //     cloud row, merged view still lists it once) + 3 remaining cloud rows
+      //     + 1 unpriced ledger model (deepseek-v4-pro).
+      check('view lists manual + cloud', view1.rows.length === 6, `got ${view1.rows.length}`)
+      check('unpriced ledger model surfaces', view1.rows.some(r => r.model === 'deepseek-v4-pro' && r.unpriced === true && r.records === 3))
+      const manualRow = view1.rows.find(r => r.model === 'deepseek-reasoner')
+      check('manual row flagged with both rates', manualRow?.manual === true && manualRow.manualRates?.inputPerMillion === 4.5 && manualRow.cloudRates?.inputPerMillion === 4)
+      const cloudRow = view1.rows.find(r => r.model === 'deepseek-chat')
+      check('layered cloud row flagged', cloudRow?.manual === false && cloudRow.layered === true)
+      // Manual entry for a layered model replaces the whole rule set (flat).
+      const parse2 = parseManualPricingInput({ 'deepseek-chat': { inputPerMillion: 1.9, outputPerMillion: 7.6 } })
+      check('parse replaces layered', parse2.ok === true)
+      if (parse2.ok) {
+        await writeManualPricing(dir, parse2.table, { error: () => {} })
+        const merged2 = await readPricingTable(dir, { error: () => {} })
+        check('layered replaced wholesale', merged2['deepseek-chat']?.timeRules.length === 0 && merged2['deepseek-chat']?.dailySlots.length === 0 && merged2['deepseek-chat']?.base.inputPerMillion === 1.9)
+      }
+    }
+    check('parse rejects junk', parseManualPricingInput([1, 2]).ok === false)
+    check('parse rejects missing output', (() => { const r = parseManualPricingInput({ m: { inputPerMillion: 1 } }); return r.ok === false && 'error' in r && (r as { error: string }).error !== '' })())
+    check('parse rejects negative', parseManualPricingInput({ m: { inputPerMillion: -1, outputPerMillion: 2 } }).ok === false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 }
 
 console.log('costRecentEntries (recent-window per-row cost)')

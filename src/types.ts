@@ -156,6 +156,43 @@ export const UNPRICED_KEY: RateKey = { ruleStart: 0, ruleEnd: 0, tier: 0, slot: 
 /** The merged pricing table: model id → full rule set. */
 export type PricingTable = Record<string, ModelRates>
 
+/** One model row of the pricing-table view: an exact model string records can
+ * be billed under. `cloudRates` is the synced feed's flat base price for that
+ * string (absent = manual-only row, i.e. a model the cloud never named);
+ * `manualRates` is the hand-edited `pricing.json` entry, which — when present
+ * — replaces the cloud rules wholesale. `layered` marks a cloud entry that
+ * also carries time rules / context tiers / peak slots: its billed rate then
+ * varies, and writing a manual entry replaces the whole rule set with flat
+ * prices. */
+export interface PricingViewRow {
+  /** The exact model string (modelId or alias) records may use. */
+  model: string
+  /** Whether a manual `pricing.json` entry exists for this exact string. */
+  manual: boolean
+  /** Manual entry rates (¥/M); present when `manual` is true. */
+  manualRates?: ModelPricing
+  /** Cloud base rates (¥/M) behind this string; absent on manual-only rows. */
+  cloudRates?: ModelPricing
+  /** Cloud entry carries time/context/peak rules (its flat base is not the
+   * whole story; a manual entry would replace those rules). */
+  layered?: boolean
+  /** True when the ledger recorded this model string but neither the cloud
+   * feed nor a manual entry names it — it is currently billed ¥0. */
+  unpriced?: boolean
+  /** Number of ledger records naming this model (present on unpriced rows,
+   *  so the hint can show how much usage is at stake). */
+  records?: number
+}
+
+/** The wire payload of the pricing-table view (价格表 tab). */
+export interface PricingView {
+  /** One row per exact model string in the merged table, manual rows first
+   * then cloud models/aliases (both alphabetical within each group). */
+  rows: PricingViewRow[]
+  /** The data directory the pricing files live in (informational). */
+  dataDir: string
+}
+
 /**
  * One ledger row of the overview's 最近记录 slice: a {@link UsageRecord}
  * with the billed cost (¥) of that single request folded in. The cost is a

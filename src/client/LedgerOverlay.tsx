@@ -31,6 +31,7 @@ import type {
 } from '../types.ts'
 import type { TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
+import { PricingPanel } from './PricingPanel.tsx'
 import { QuotaPanel } from './QuotaPanel.tsx'
 import { CloseGlyph, RefreshGlyph, UsageGlyph } from './icons.tsx'
 
@@ -86,15 +87,16 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       scanning={scanning}
       onRescan={onRescan}
       onRetry={() => { view.setError(null); void fetchOverview() }}
+      onRefresh={fetchOverview}
       onClose={() => view.setOpen(false)}
     />
   )
 }
 
 /** Which surface of the overlay is visible. */
-type OverlayTab = 'ledger' | 'provider' | 'quota' | 'method'
+type OverlayTab = 'ledger' | 'provider' | 'quota' | 'pricing' | 'method'
 
-const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'provider', 'quota', 'method']
+const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'provider', 'quota', 'pricing', 'method']
 
 /** Provider-usage window ids in display order. */
 const RANGE_IDS: ReadonlyArray<ProviderRange> = ['today', 'yesterday', 'last7', 'last30']
@@ -113,12 +115,13 @@ const RANGE_DAY_LABELS: Record<ProviderRange, string> = {
   last30: '近 30 天',
 }
 
-function OverviewCard({ overview, error, scanning, onRescan, onRetry, onClose }: {
+function OverviewCard({ overview, error, scanning, onRescan, onRetry, onRefresh, onClose }: {
   overview: TokBookOverview | null
   error: string | null
   scanning: boolean
   onRescan: () => void
   onRetry: () => void
+  onRefresh: () => void
   onClose: () => void
 }) {
   const [tab, setTab] = useState<OverlayTab>('ledger')
@@ -241,6 +244,18 @@ function OverviewCard({ overview, error, scanning, onRescan, onRetry, onClose }:
           <button
             type="button"
             role="tab"
+            id="dtpl-tab-pricing"
+            aria-selected={tab === 'pricing'}
+            aria-controls="dtpl-panel-pricing"
+            tabIndex={tab === 'pricing' ? 0 : -1}
+            className="dtpl-tab"
+            onClick={() => setTab('pricing')}
+          >
+            价格表
+          </button>
+          <button
+            type="button"
+            role="tab"
             id="dtpl-tab-method"
             aria-selected={tab === 'method'}
             aria-controls="dtpl-panel-method"
@@ -265,7 +280,9 @@ function OverviewCard({ overview, error, scanning, onRescan, onRetry, onClose }:
               ? <ProviderPanel />
               : tab === 'quota'
                 ? <QuotaPanel />
-                : (
+                : tab === 'pricing'
+                  ? <PricingPanel onChanged={onRefresh} />
+                  : (
                   <>
                     {error !== null && (
                       <div className="dtpl-error" role="alert">
@@ -277,7 +294,7 @@ function OverviewCard({ overview, error, scanning, onRescan, onRetry, onClose }:
                       ? <LedgerSkeleton />
                       : <LedgerView overview={overview} />}
                   </>
-                )}
+                  )}
         </div>
 
         {overview !== null && tab === 'ledger' && (
@@ -530,103 +547,194 @@ function ProviderSkeleton() {
 
 /**
  * The 统计口径 tab: how the numbers are produced and where they stop matching
- * the provider's bill. Structured as 算法 → 采集范围 → 局限 → 与账单对账, so a
- * reader can stop after the first section and still be correct about the happy
- * path. The overview payload feeds one live diagnostics block at the bottom
- * (记录/日文件/最新/数据目录) — plumbing facts belong with the counting method,
- * not in the ledger tab's scroll of usage content.
+ * the provider's bill.
+ *
+ * Reading order follows what a skeptical user actually asks, newest first:
+ *   1. 一眼看懂 — a 3-fact strip (source / precision / coverage) answers
+ *      "can I trust this" before any detail;
+ *   2. 词元分四桶 — the four mutually-exclusive buckets as scannable tiles
+ *      with the sum equation under them;
+ *   3. 记了哪些调用 — scope of the recording (what is / isn't a row);
+ *   4. 差额从哪来 — the two reasons a number diverges from the bill, side by
+ *      side: calls the ledger structurally cannot see vs. same facts counted
+ *      under a different rule;
+ *   5. 怎么核对 — 30-second field mapping against the DeepSeek console.
+ * Then one cross-reference line for the 订阅额度 tab's separate (official)
+ * counting rule, the live data-file diagnostics, and the source-version foot.
+ *
+ * Only facts worth keeping made the cut; implementation plumbing (event
+ * anchor names, credential resolution) lives in the README, not this tab.
  */
 function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
   return (
     <div className="dtpl-doc">
-      <h2 className="dtpl-doc-title">tokens 是怎么算出来的</h2>
-      <p>
-        本插件<b>不做任何 token 估算或分词</b>。每次成功模型调用完成后，DSH
-        适配层把 provider 返回的原始用量（如 DeepSeek 的 <code>prompt_tokens</code> /
-        <code>completion_tokens</code>）整理成四个互斥桶，本插件原样采信并逐条落盘：
-      </p>
-      <ul>
-        <li><b>输入</b>（<code>inputTokens</code>）— 未命中缓存的输入词元。provider 原始值里含缓存命中的部分已被适配层减去。</li>
-        <li><b>缓存读取</b>（<code>cacheReadTokens</code>）— 命中前缀缓存的输入部分。</li>
-        <li><b>缓存写入</b>（<code>cacheWriteTokens</code>）— 本次写入缓存的输入部分（DeepSeek 官方 API 不报此项，故通常恒为 0）。</li>
-        <li><b>输出</b>（<code>outputTokens</code>）— 模型生成的全部输出（含推理词元）。</li>
-      </ul>
-      <p>
-        展示的「累计词元」= 四桶之和；费用按每模型价格表（¥/M，时间规则 → 上下文档位
-        → 峰时时段链）逐条计价后累加。单条记录的数值与 provider 上报值一致，没有舍入或采样。
-      </p>
+      <div className="dtpl-doc-lede">
+        <p>本插件<b>不估算</b>：每个数字都来自<b>本机保存的对话记录</b>。</p>
+        <p>向模型提问时，提供服务的厂商（界面里叫 <b>Provider</b>，如 DeepSeek、Anthropic）会回报这次消耗了多少词元。</p>
+        <p>本插件照实记录、逐条累加——不是厂商官网上的账户数据。</p>
+      </div>
 
-      <h2 className="dtpl-doc-title">采集范围</h2>
-      <ul>
-        <li><b>成功请求</b> — 会话日志里的 <code>assistant/message</code> 锚点事件，每次 provider 计费调用恰好一条。</li>
-        <li><b>上下文压缩</b> — <code>compaction/summary</code> 携带 summarize 调用自身的 usage，按普通请求同样计入（可在配置中关闭）。</li>
-        <li><b>失败请求</b> — <code>llm/retry</code> / 出错的 <code>turn/end</code> 只计次数（失败维度），不计词元，因此不会抬高 token 总量。</li>
-        <li><b>历史回填</b> — 首次启动与「重新扫描」会从持久会话日志重放补齐，按请求 id 去重，不重复计数。</li>
-      </ul>
+      {/* ── 1 · 一眼看懂：来源 / 精度 / 完整度 ── */}
+      <div className="dtpl-doc-facts" aria-label="口径速览">
+        <div className="dtpl-doc-fact">
+          <span className="dtpl-doc-fact-k">来源</span>
+          <span className="dtpl-doc-fact-v">本机对话记录，逐条统计</span>
+        </div>
+        <div className="dtpl-doc-fact">
+          <span className="dtpl-doc-fact-k">精度</span>
+          <span className="dtpl-doc-fact-v">单条照实记录，无舍入</span>
+        </div>
+        <div className="dtpl-doc-fact dtpl-doc-fact-key">
+          <span className="dtpl-doc-fact-k">完整度</span>
+          <span className="dtpl-doc-fact-v"><b className="dtpl-doc-fact-big">≈95%</b><span className="dtpl-doc-fact-tail"> 正常使用下</span></span>
+        </div>
+      </div>
 
-      <h2 className="dtpl-doc-title">已知局限（账本 &lt; 实际消耗的部分）</h2>
-      <p>凡 provider 已计费、但 usage 从未落盘的调用，本账本结构性看不见：</p>
-      <ul>
-        <li><b>会话标题生成</b> — 标题模型调用直接走底层流式接口，用量在消费处即被丢弃、不进入会话日志。这是最主要的固定漏项（每个新会话一次小请求）。</li>
-        <li><b>中断流的前缀</b> — 请求被取消且 provider 未报 usage 时，已消耗的输入前缀不落盘。</li>
-        <li><b>失败尝试的前缀</b> — 超时 / 连接中断的尝试可能已被 provider 计费，但账本只记失败次数。</li>
-        <li><b>插件级直连调用</b> — 任何不走会话锚点机制的模型调用同理不可见。</li>
-      </ul>
-      <p>正常负载下账本约为实际消耗的 <b>95% 以上</b>；单请求粒度则是精确值。</p>
+      {/* ── 2 · 词元分四桶 ── */}
+      <section className="dtpl-doc-sec">
+        <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">1</span>词元分四桶</h2>
+        <p className="dtpl-doc-sub">
+          厂商按 <b>词元（token）</b>计费——可以理解为模型读写的最小文字单位。
+        </p>
+        <p className="dtpl-doc-sub">
+          一次请求的用量被拆成四类、互不重复，加起来就是「累计词元」：
+        </p>
+        <div className="dtpl-doc-buckets">
+          <Bucket name="输入" desc="你发过去、但没命中缓存的文字量。" />
+          <Bucket name="缓存读取" desc="命中了缓存、不必重新计算的文字量，费率更低。" />
+          <Bucket name="缓存写入" desc="写入缓存的文字量；多数厂商不上报，多为 0。" />
+          <Bucket name="输出" desc="模型回复的全部文字（含思考过程）。" />
+        </div>
+        <div className="dtpl-doc-eq" role="note">
+          <span className="dtpl-doc-eq-lead">累计词元</span>
+          <span className="dtpl-doc-eq-op">=</span>
+          <span className="dtpl-doc-eq-term">输入</span>
+          <span className="dtpl-doc-eq-op">+</span>
+          <span className="dtpl-doc-eq-term">缓存读取</span>
+          <span className="dtpl-doc-eq-op">+</span>
+          <span className="dtpl-doc-eq-term">缓存写入</span>
+          <span className="dtpl-doc-eq-op">+</span>
+          <span className="dtpl-doc-eq-term">输出</span>
+        </div>
+        <p className="dtpl-doc-sub">
+          金额 = 按每模型价格表（每百万词元多少元）逐条计价后累加。价格表存在本机、
+          可能跟不上厂商最新费率——所以<b>金额是近似值</b>，词元数不受影响。
+        </p>
+      </section>
 
-      <h2 className="dtpl-doc-title">口径差异（记了，但和账单对不上号的部分）</h2>
-      <ul>
-        <li><b>缓存写入桶</b> — DeepSeek 官方路由恒缺省（计 0）；经其他适配器的 provider（如 Anthropic）才有真实值。跨 provider 比较时注意口径。</li>
-        <li><b>归因维度</b> — 本账本按会话 / 模型 / 路由记账；provider 账单按 API key 汇总。多配置共用一把 key 时只能内部自洽，无法逐条对账。</li>
-        <li><b>计价是本地近似</b> — 费用来自本地价格表，若与 provider 实际费率（或其缓存折扣）不同步，金额会偏离；token 数不受影响。</li>
-      </ul>
+      {/* ── 3 · 记了哪些调用 ── */}
+      <section className="dtpl-doc-sec">
+        <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">2</span>记了哪些调用</h2>
+        <ul className="dtpl-doc-scope">
+          <li><span className="dtpl-doc-chip">计入</span>对话中每次向模型发起请求、并成功收到回复——一次一记。</li>
+          <li><span className="dtpl-doc-chip">计入</span>自动总结——对话太长时自动压缩上文，那次总结也按一次请求计费并记录（可在配置中关闭）。</li>
+          <li><span className="dtpl-doc-chip dtpl-doc-chip-off">仅计次数</span>失败请求——没收到回复，不计词元、不抬高总量。</li>
+          <li><span className="dtpl-doc-chip dtpl-doc-chip-off">回填</span>历史——安装前的旧记录、或当时漏记的，会按原始记录自动补齐。</li>
+        </ul>
+      </section>
 
-      <h2 className="dtpl-doc-title">如何验证</h2>
-      <p>
-        在 DeepSeek 开放平台后台按天导出用量，与本页「每日词元」对照：
-        <code>cacheReadTokens ↔ prompt_cache_hit_tokens</code>、
-        <code>inputTokens ↔ prompt_cache_miss_tokens</code>、
-        <code>outputTokens ↔ completion_tokens</code>。
-        除标题调用与失败前缀外应逐日吻合。
-      </p>
+      {/* ── 4 · 差额从哪来 ── */}
+      <section className="dtpl-doc-sec">
+        <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">3</span>差额从哪来</h2>
+        <div className="dtpl-doc-gap">
+          <article className="dtpl-doc-gap-card dtpl-doc-gap-warn">
+            <h3 className="dtpl-doc-gap-title">账本会比账单少：没记到的</h3>
+            <ul className="dtpl-doc-gap-list">
+              <li>
+                <span className="dtpl-doc-gap-item-name">自动生成的会话标题</span>
+                <span className="dtpl-doc-gap-item-desc">给新对话起标题的小请求没有走常规记录通道，本账本拿不到那次用量。每个新会话发生一次，是最大的固定漏项。</span>
+              </li>
+              <li>
+                <span className="dtpl-doc-gap-item-name">中途取消 / 出错的请求</span>
+                <span className="dtpl-doc-gap-item-desc">已经发出去、但没等到厂商回复的那部分文字，厂商可能照常计费，本账本却拿不到用量。</span>
+              </li>
+              <li>
+                <span className="dtpl-doc-gap-item-name">不走会话记录的调用</span>
+                <span className="dtpl-doc-gap-item-desc">其它插件或脚本直接调用模型时，本账本同样看不到。</span>
+              </li>
+            </ul>
+            <p className="dtpl-doc-gap-sum">同一请求不会重复计数，可以放心反复扫描——但「重新扫描」只能补齐日志里有的调用，补不回这些根本没进日志的。</p>
+          </article>
+          <article className="dtpl-doc-gap-card">
+            <h3 className="dtpl-doc-gap-title">对不上 ≠ 记错：统计方式不同</h3>
+            <ul className="dtpl-doc-gap-list">
+              <li>
+                <span className="dtpl-doc-gap-item-name">缓存写入常为 0</span>
+                <span className="dtpl-doc-gap-item-desc">多数厂商不单独报「写入缓存」这项，所以它通常为 0，不是记漏；少数厂商（如 Anthropic）会报，对比时注意。</span>
+              </li>
+              <li>
+                <span className="dtpl-doc-gap-item-name">记账维度不同</span>
+                <span className="dtpl-doc-gap-item-desc">本账本按「这台设备上的会话」记账，账单按「账号」汇总；同一个账号在多台设备 / 多个工具里使用时，两边必然对不齐。</span>
+              </li>
+              <li>
+                <span className="dtpl-doc-gap-item-name">金额是估算</span>
+                <span className="dtpl-doc-gap-item-desc">本机价格表跟不上厂商最新费率时，金额会偏离（词元数不受影响）。</span>
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
 
-      <h2 className="dtpl-doc-title">订阅额度的数据来源</h2>
-      <p>
-        「订阅额度」页展示的是各订阅的<b>官方账户用量</b>，由插件用你配置的 key
-        直接查询服务商自己的账户接口得到——<b>不是本地推算</b>。因为订阅 key 在
-        多个工具 / 设备间共享，本地账本只能看到本机的那部分，推算不出真实剩余；
-        只有官方接口才掌握账号级（全部消费）口径。
-      </p>
-      <ul>
-        <li><b>Command Code</b> — 查询官方 CLI 同款账户接口（<code>whoami</code> /
-          <code>usage/summary</code> / <code>billing/credits</code> /
-          <code>billing/subscriptions</code>），给出美元窗口
-          <code>used/cap/exceeded/resetAt</code>、月度额度池与套餐信息。</li>
-        <li><b>OpenCode Go</b> — 查询官方 usage 接口（<code>/zen/go/v1/usage</code>），
-          给出三个窗口的 <code>usagePercent + resetInSec + rate-limited</code>
-          （官方不返回金额，故该卡只显示百分比与重置）。</li>
-      </ul>
-      <p><b>Key 从哪来</b>：从 <b>DSH 凭据服务</b>（<code>ctx.credentials</code>）解析
-        该 provider 的凭据引用——你在「设置 → Models」里为 commandcode /
-        opencode-go 填写的 key 就存在那里，引用名默认 <code>COMMANDCODE_API_KEY</code> /
-        <code>OPENCODE_GO_API_KEY</code>（可用 <code>plans.&lt;provider&gt;.apiKeyEnv</code>
-        换名；也接受插件配置里的字面量 <code>apiKey</code> 覆盖）。未找到 key 时卡片显示
-        “未配置”；查询失败显示原因；两者都不回退本地估算。</p>
-      <p>官方数字即为权威值，但仍可能因展示延迟而滞后实时扣减；账户是否被限流
-        以服务商实时判定为准。</p>
+      {/* ── 5 · 怎么核对 ── */}
+      <section className="dtpl-doc-sec">
+        <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">4</span>怎么核对</h2>
+        <p className="dtpl-doc-sub">
+          登录模型厂商的官网（如 DeepSeek 开放平台），<b>按天导出用量</b>，
+          与本页「每日词元」对比。
+        </p>
+        <p className="dtpl-doc-sub">
+          左侧是本账本，右侧是平台导出的字段：
+        </p>
+        <div className="dtpl-doc-map">
+          <div className="dtpl-doc-map-row">
+            <span className="dtpl-doc-map-side"><b>输入</b></span>
+            <span className="dtpl-doc-map-arrow">↔</span>
+            <span className="dtpl-doc-map-side"><code>prompt_cache_miss_tokens</code></span>
+          </div>
+          <div className="dtpl-doc-map-row">
+            <span className="dtpl-doc-map-side"><b>缓存读取</b></span>
+            <span className="dtpl-doc-map-arrow">↔</span>
+            <span className="dtpl-doc-map-side"><code>prompt_cache_hit_tokens</code></span>
+          </div>
+          <div className="dtpl-doc-map-row">
+            <span className="dtpl-doc-map-side"><b>输出</b></span>
+            <span className="dtpl-doc-map-arrow">↔</span>
+            <span className="dtpl-doc-map-side"><code>completion_tokens</code></span>
+          </div>
+        </div>
+        <p className="dtpl-doc-map-note">输入、缓存读取、输出正好对应平台导出的三个字段。</p>
+        <p className="dtpl-doc-map-note">除「会话标题」和「中途取消的请求」两类外，应逐日吻合。</p>
+      </section>
+
+      {/* ── 6 · 订阅额度页是另一套口径 ── */}
+      <div className="dtpl-doc-quota">
+        <p><b>小提示：</b>旁边的「订阅额度」页用的是<b>另一套数据</b>。</p>
+        <p>它用你的账号凭据直接向厂商查询<b>官方用量</b>（含你在其它设备上的消费），与本页的本机账本不同。</p>
+      </div>
 
       {overview !== null && overview.dataDir !== '' && (
-        <>
-          <h2 className="dtpl-doc-title">数据文件状态</h2>
-          <p>
-            账本已记录 <b>{overview.records}</b> 条原始记录，分布在 <b>{overview.files}</b>
-            个按天文件中；最新一条记录于 <b>{overview.lastEventAt === null ? '—' : formatDateTime(overview.lastEventAt)}</b>。
-            数据目录：<code>{overview.dataDir}</code>。
+        <div className="dtpl-doc-data">
+          <p className="dtpl-doc-data-line">
+            账本已记录 <b>{overview.records}</b> 条原始记录，分布在 <b>{overview.files}</b> 个按天文件中。
           </p>
-        </>
+          <p className="dtpl-doc-data-line">
+            最新一条记录于 <b>{overview.lastEventAt === null ? '—' : formatDateTime(overview.lastEventAt)}</b>。
+          </p>
+          <p className="dtpl-doc-data-dir">数据目录：<code>{overview.dataDir}</code></p>
+        </div>
       )}
 
-      <p className="dtpl-doc-foot">口径说明基于 DSH v11.9.0 源码核对 · 适配层约定：四桶互斥（billed input = input + cacheRead + cacheWrite）。</p>
+      <p className="dtpl-doc-foot">以上口径基于当前 DSH 版本源码核对。</p>
+    </div>
+  )
+}
+
+/** One 词元分四桶 tile: short label + a plain-language definition. */
+function Bucket({ name, desc }: { name: string; desc: string }) {
+  return (
+    <div className="dtpl-doc-bucket">
+      <span className="dtpl-doc-bucket-name">{name}</span>
+      <span className="dtpl-doc-bucket-desc">{desc}</span>
     </div>
   )
 }

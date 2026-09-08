@@ -5,6 +5,30 @@
  * time (`record.time` in local Y-M-D), never the wall clock of the append —
  * live events and history backfill share that rule.
  *
+ * State scoping: the mutable dedupe/queue state is keyed by DATA DIRECTORY,
+ * not by UsageLog instance, so every `UsageLog` of one directory that shares
+ * THIS module copy also shares one dedupe set and one serialized append queue.
+ * That covers same-process overlap: a dependency's dispose → auto-reload, a
+ * second instance over service isolation, or a second `TokenUsageBook`
+ * constructed while an earlier instance still has queued appends in flight
+ * (all within the same loaded module object). Because the JSONL files are the
+ * shared resource, the guard around them must be shared too for those writers.
+ *
+ * This sharing does NOT survive a module-level HMR reload: the cordis-plugin-hmr
+ * host reload clears the module cache and re-imports the plugin entry, so the
+ * re-created module gets a FRESH `dirs` map. An old instance being disposed
+ * keeps flushing through its own (old) queue while the new instance starts its
+ * own — the two do not share a dedupe set. Overlap safety across that boundary
+ * comes from the disk, not from this map: the new instance re-derives its
+ * dedupe set from the on-disk rows before its first write (see `UsageLog.record`),
+ * so rows the old instance already landed are not re-appended; a request id
+ * re-delivered while the old flush is still in flight is the residual (rare)
+ * risk window.
+ *
+ * A process restart starts with an empty map; the first write of that directory
+ * re-derives the dedupe set from the on-disk rows first (see `UsageLog.record`),
+ * so a fresh process never re-appends rows that already landed.
+ *
  * @module dsh-tokbook/usage-log
  */
 
@@ -35,48 +59,107 @@ function dayFilePath(dir: string, time: number): string {
   return join(dir, dayFileNameOf(time))
 }
 
-/** Append-only per-day JSONL log with request-id dedupe.
+/**
+ * Mutable state of ONE data directory within this process: the dedupe set,
+ * the serialized append queue, and the directory readiness/scanned flags.
+ * Shared by every UsageLog of that directory that holds THIS module copy (see
+ * the module doc) — e.g. a second instance constructed over the same loaded
+ * module while the first still has appends in flight shares this state instead
+ * of starting from zero. A module-level HMR reload replaces this whole map
+ * (fresh module object); the disk, not this map, is the guard across that.
+ */
+interface DirState {
+  seen: Set<string>
+  queue: Promise<void>
+  ready: Promise<void> | undefined
+  scanned: boolean
+  /** In-flight {@link DirState} rebuild; concurrent callers await it. */
+  scanning: Promise<void> | undefined
+}
+
+const dirs = new Map<string, DirState>()
+
+function stateOf(dir: string): DirState {
+  const existing = dirs.get(dir)
+  if (existing !== undefined) return existing
+  const created: DirState = {
+    seen: new Set(),
+    queue: Promise.resolve(),
+    ready: undefined,
+    scanned: false,
+    scanning: undefined,
+  }
+  dirs.set(dir, created)
+  return created
+}
+
+/**
+ * Forget one directory's (or every directory's) in-process state. A test /
+ * restart seam: a real process restart starts with an empty map, and this
+ * reproduces that so a fresh UsageLog over the same directory re-derives the
+ * dedupe set from disk exactly like a restarted host would.
+ */
+export function resetUsageLogState(dir?: string): void {
+  if (dir === undefined) dirs.clear()
+  else dirs.delete(dir)
+}
+
+/**
+ * Append-only per-day JSONL log with request-id dedupe.
  *
- * Ordering: every append (and a refile pass) runs on one promise chain, so
- * concurrent callers land in call order. Dedupe: a request id is claimed
- * synchronously before its append is queued; a failed append releases the
- * claim, so the row can be retried later. */
+ * Ordering: every append (and a refile pass) runs on one per-directory promise
+ * chain, so concurrent callers land in call order. Dedupe: a request id is
+ * claimed synchronously before its append is queued; a failed append releases
+ * the claim, so the row can be retried later.
+ */
 export class UsageLog {
-  private readonly seen = new Set<string>()
-  private queue: Promise<void> = Promise.resolve()
-  private ready: Promise<void> | undefined
-  /** Whether {@link scan} has rebuilt the dedupe set this process. Only the
-   * live hook and the sync write rows — both through this instance's `seen` —
-   * so one rebuild per process is sufficient and later calls are a no-op. */
-  private scanned = false
   private readonly dir: string
   private readonly logger: { error(...args: unknown[]): void }
+  private readonly state: DirState
 
   constructor(dir: string, logger: { error(...args: unknown[]): void } = console) {
     this.dir = dir
     this.logger = logger
+    this.state = stateOf(dir)
   }
 
-  /** Whether a request id is already known to this log. */
+  /** Whether a request id is already known to this directory's log. */
   has(requestId: string): boolean {
-    return this.seen.has(requestId)
+    return this.state.seen.has(requestId)
   }
 
-  /** Settle every queued append. The chain never rejects (each task absorbs
-   * its own failure), so this is the quiescence point a data-directory move
-   * waits on before reading the files. */
+  /** Settle every queued append of this directory. The chain never rejects
+   * (each task absorbs its own failure), so this is the quiescence point a
+   * data-directory move waits on before reading the files. */
   flush(): Promise<void> {
-    return this.queue
+    return this.state.queue
   }
 
-  /** Rebuild the dedupe set from every existing day file, once per process
-   * (later calls are a no-op — see {@link UsageLog.scanned}). Malformed lines
-   * are skipped; unreadable files are skipped the same way; a failed listing
-   * leaves the flag unset so the next call retries. */
+  /**
+   * Rebuild the dedupe set from every existing day file, once per directory
+   * per process (later calls are a no-op). Malformed lines are skipped;
+   * unreadable files are skipped the same way; a failed listing leaves the
+   * flag unset so the next call retries.
+   */
   async scan(): Promise<void> {
-    if (this.scanned) return
-    this.ready ??= mkdir(this.dir, { recursive: true }).then(() => undefined)
-    await this.ready
+    const state = this.state
+    if (state.scanned) return
+    if (state.scanning !== undefined) {
+      await state.scanning
+      return
+    }
+    const pending = this.doScan().finally(() => {
+      if (state.scanning === pending) state.scanning = undefined
+    })
+    state.scanning = pending
+    await pending
+  }
+
+  /** The actual scan; {@link scan} wraps it with the in-flight guard. */
+  private async doScan(): Promise<void> {
+    const state = this.state
+    state.ready ??= mkdir(this.dir, { recursive: true }).then(() => undefined)
+    await state.ready
     let names: string[]
     try {
       names = await readdir(this.dir)
@@ -97,29 +180,65 @@ export class UsageLog {
           this.logger.error(`[tokbook] skipping malformed line in ${name}: ${line.slice(0, 120)}`)
           continue
         }
-        this.seen.add(record.requestId)
+        state.seen.add(record.requestId)
       }
     }
-    this.scanned = true
+    state.scanned = true
   }
 
-  /** Persist one record unless its request id was already written.
-   * @returns true when the row was appended, false when deduped. */
+  /**
+   * Persist one record unless its request id was already written.
+   * @returns true when the row was appended, false when deduped.
+   *
+   * The first write of a directory in this process first loads the on-disk
+   * rows into the dedupe set, so a restarted host never re-appends rows that
+   * already landed. A failing listing never gates a write away — a broken data
+   * directory must not drop live records — so in that (already degraded) case
+   * the row is written and a later idempotent rescan cleans up. Never rejects:
+   * a scan failure degrades to an unscanned write, exactly like the old
+   * always-in-memory path.
+   */
   record(record: UsageRecord): Promise<boolean> {
-    if (this.seen.has(record.requestId)) return Promise.resolve(false)
+    const state = this.state
+    if (state.scanned) return this.enqueue(record)
+    const scan = state.scanning ?? this.beginScan()
+    return scan
+      .catch((error: unknown) => {
+        // A scan failure (unreadable data dir) must not gate live writes away.
+        this.logger.error('[tokbook] cannot rebuild dedupe set; writing without it:', error)
+      })
+      .then(() => this.enqueue(record))
+  }
+
+  /** Start (or await) the one-shot on-disk dedupe rebuild. Callers that must
+   * not have the write gated on it use {@link record}; callers that need a
+   * settled set before a batch (history sync) await {@link scan} instead. */
+  private beginScan(): Promise<void> {
+    const state = this.state
+    const pending = this.doScan().finally(() => {
+      if (state.scanning === pending) state.scanning = undefined
+    })
+    state.scanning = pending
+    return pending
+  }
+
+  /** Claim + queue one append against the (already settled) dedupe set. */
+  private enqueue(record: UsageRecord): Promise<boolean> {
+    const state = this.state
+    if (state.seen.has(record.requestId)) return Promise.resolve(false)
     // Claim before queueing: a concurrent call with the same id dedupes here.
-    this.seen.add(record.requestId)
-    const task = this.queue.then(async () => {
+    state.seen.add(record.requestId)
+    const task = state.queue.then(async () => {
       await this.ensureDir()
       await this.appendOnce(record)
     })
     // A failed append must not poison the chain for later rows.
-    this.queue = task.catch(() => {})
+    state.queue = task.catch(() => {})
     return task
       .then(() => true)
       .catch((error: unknown) => {
         // Release the claim so a later sync can retry this row.
-        this.seen.delete(record.requestId)
+        state.seen.delete(record.requestId)
         this.logger.error('[tokbook] append failed:', error)
         return false
       })
@@ -129,11 +248,12 @@ export class UsageLog {
    * Idempotent; runs on the append queue so a live write cannot interleave. */
   refileByEventDay(): Promise<number> {
     let moved = 0
-    const task = this.queue.then(async () => {
+    const state = this.state
+    const task = state.queue.then(async () => {
       await this.ensureDir()
       moved = await refileDayFiles(this.dir, this.logger)
     })
-    this.queue = task.catch(() => {})
+    state.queue = task.catch(() => {})
     return task.then(() => moved).catch((error: unknown) => {
       this.logger.error('[tokbook] refile by event day failed:', error)
       return 0
@@ -141,8 +261,9 @@ export class UsageLog {
   }
 
   private async ensureDir(): Promise<void> {
-    this.ready ??= mkdir(this.dir, { recursive: true }).then(() => undefined)
-    await this.ready
+    const state = this.state
+    state.ready ??= mkdir(this.dir, { recursive: true }).then(() => undefined)
+    await state.ready
   }
 
   /** Append one row, self-healing once when the directory vanished after the
@@ -153,7 +274,7 @@ export class UsageLog {
       await appendFile(path, `${serializeRecord(record)}\n`, { flag: 'a' })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      this.ready = undefined
+      this.state.ready = undefined
       await this.ensureDir()
       await appendFile(path, `${serializeRecord(record)}\n`, { flag: 'a' })
     }
