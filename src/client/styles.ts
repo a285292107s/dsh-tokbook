@@ -192,6 +192,15 @@ const CSS = `
   font-size:28px;line-height:32px;font-weight:700;color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;
 }
+/* The hero's context line: today vs the 近7天 baseline. Neutral by design —
+   "more than usual" is not inherently bad, so it never borrows the warn color
+   (that stays reserved for failures). Direction is carried by the ↑/↓ glyph
+   and by weight, not by hue. */
+[data-plugin="dsh-tokbook"] .dtpl-hero-base{
+  font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
+  font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-hero-base b{font-weight:600;color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-hero-money{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-cost{
   display:inline-flex;align-items:baseline;gap:4px;
@@ -199,6 +208,9 @@ const CSS = `
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-cost-k{font-style:normal;font-weight:500;font-size:11px;color:var(--dtpl-fg-3);}
+/* A zero spend is an answer, not a headline: it holds the row without pulling
+   the eye off the non-zero figure beside it (and never reads as cash). */
+[data-plugin="dsh-tokbook"] .dtpl-hero-cost.dtpl-hero-cost-zero{color:var(--dtpl-fg-3);}
 [data-plugin="dsh-tokbook"] .dtpl-hero-value{
   display:inline-flex;align-items:baseline;gap:4px;
   font-size:12px;line-height:18px;color:var(--dtpl-fg-2);white-space:nowrap;
@@ -218,6 +230,10 @@ const CSS = `
 
 /* ── stat tiles (4 buckets) ─────────────────────────────────────────────── */
 [data-plugin="dsh-tokbook"] .dtpl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;}
+/* Three buckets (cache-write is not a dimension of this ledger) fill one row
+   instead of leaving a ragged half-row. Still 3 columns on narrow sheets —
+   each tile keeps ~110px, enough for its label and figure. */
+[data-plugin="dsh-tokbook"] .dtpl-grid-3{grid-template-columns:repeat(3,1fr);}
 [data-plugin="dsh-tokbook"] .dtpl-stat{
   display:flex;flex-direction:column-reverse;gap:2px;
   padding:10px 12px;
@@ -231,6 +247,13 @@ const CSS = `
 [data-plugin="dsh-tokbook"] .dtpl-sec-title{
   font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
   margin:0 0 8px;
+}
+/* Section title with a right-aligned derived metric (e.g. the cache hit rate). */
+[data-plugin="dsh-tokbook"] .dtpl-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+[data-plugin="dsh-tokbook"] .dtpl-sec-head .dtpl-sec-title{margin:0 0 8px;}
+[data-plugin="dsh-tokbook"] .dtpl-sec-aside{
+  font-size:11px;line-height:18px;color:var(--dtpl-fg-3);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-trend{margin-bottom:14px;}
 [data-plugin="dsh-tokbook"] .dtpl-bars{
@@ -1473,7 +1496,9 @@ body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
   [data-plugin="dsh-tokbook"] .dtpl-body{padding:12px 16px 14px;}
   [data-plugin="dsh-tokbook"] .dtpl-foot{padding:10px 16px 12px;}
   [data-plugin="dsh-tokbook"] .dtpl-hero{flex-direction:column;align-items:flex-start;gap:8px;}
-  [data-plugin="dsh-tokbook"] .dtpl-hero-meta{flex-direction:row;gap:12px;align-items:baseline;}
+  /* The meta line turns horizontal on a narrow sheet; let its items wrap as
+     units instead of running off the card edge. */
+  [data-plugin="dsh-tokbook"] .dtpl-hero-meta{flex-direction:row;flex-wrap:wrap;gap:8px 12px;align-items:baseline;}
   /* Method doc: stack the multi-column groups on narrow sheets. */
   [data-plugin="dsh-tokbook"] .dtpl-doc-facts{grid-template-columns:1fr;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-buckets{grid-template-columns:1fr;}

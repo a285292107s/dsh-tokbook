@@ -78,6 +78,13 @@ export interface UsageTotals {
 export interface UsageDayRow {
   day: string
   totals: UsageTotals
+  /** Real spend (¥) of this day; present only once the cost layer has run
+   * (`attachCosts`). The token-only summary and the stored rollup carry none —
+   * the cost layer re-derives it from the rate rows on every read. */
+  spend?: number
+  /** Subscription value (¥, non-cash) of this day; same presence rule as
+   * {@link spend}. */
+  subscriptionValue?: number
 }
 
 /** One per-hour × per-model row, keyed by local `YYYY-MM-DDTHH`. */

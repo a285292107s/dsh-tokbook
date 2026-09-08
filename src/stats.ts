@@ -620,6 +620,8 @@ export function attachCosts(
   const costs = new Map<string, number>()
   const spend = new Map<string, number>()
   const value = new Map<string, number>()
+  const daySpend = new Map<string, number>()
+  const dayValue = new Map<string, number>()
   let totalCost = 0
   let totalSpend = 0
   let totalValue = 0
@@ -632,9 +634,11 @@ export function attachCosts(
     costs.set(key, (costs.get(key) ?? 0) + cost)
     if (billingOf(providers, row.provider, row.model) === 'subscription') {
       value.set(key, (value.get(key) ?? 0) + cost)
+      dayValue.set(row.day, (dayValue.get(row.day) ?? 0) + cost)
       totalValue += cost
     } else {
       spend.set(key, (spend.get(key) ?? 0) + cost)
+      daySpend.set(row.day, (daySpend.get(row.day) ?? 0) + cost)
       totalSpend += cost
     }
     totalCost += cost
@@ -656,6 +660,12 @@ export function attachCosts(
       .filter(row => effectiveRatesOf(pricing, providers, row.provider, row.model) === null)
       .map(row => row.model),
   )]
+  const byDay: UsageDayRow[] = summary.byDay.map(row => ({
+    day: row.day,
+    totals: row.totals,
+    spend: daySpend.get(row.day) ?? 0,
+    subscriptionValue: dayValue.get(row.day) ?? 0,
+  }))
   return {
     dataDir: summary.dataDir,
     total: summary.total,
@@ -665,7 +675,7 @@ export function attachCosts(
     unpricedModels,
     pricing,
     providerPricing: providers,
-    byDay: summary.byDay,
+    byDay,
     byHour: summary.byHour,
     byModel,
     rateRows: summary.rateRows,

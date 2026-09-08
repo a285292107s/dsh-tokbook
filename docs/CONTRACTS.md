@@ -52,6 +52,9 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   **整体替换** `provider-pricing.json`;缺失的 (provider, model) = 删除该手工覆盖(回到镜像行)。
 - wire 上的金额已拆双桶:`spend`(metered 行,实际支出)与 `subscriptionValue`(subscription 行,
   订阅价值、非现金);`totalCost` 保留为两者之和以兼容旧客户端。
+- `byDay` 每行除 token 汇总外还带该日 `spend` / `subscriptionValue`(`attachCosts` 从
+  rate rows 按天折叠得出)。token-only 汇总与磁盘 rollup 里没有这两个字段——成本层每次
+  读取都从 rate rows 重新推导,所以价格表改动后逐日金额自动跟着变。
 
 ## 配置
 

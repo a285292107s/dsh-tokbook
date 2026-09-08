@@ -3,7 +3,8 @@
  *
  * Registered into the root-scoped list slot; renders null until the store says
  * it is open, then fetches `/tokbook/overview` and presents the costed
- * aggregate: a data-first hero (total tokens + cost), the 4-bucket split, a
+ * aggregate: a data-first hero (today's tokens + a 近7天 baseline line + cost),
+ * the 4-bucket split, a
  * daily trend chart, a per-model breakdown with cost, a data-status line
  * (records/files/latest event), and a pinned window footer with the live
  * re-sync state + "重新扫描" button. A second tab (Provider 用量) shows one
@@ -328,6 +329,17 @@ function LedgerView({ overview }: {
 }) {
   const money = (value: number): string => formatMoney(value, overview.currency, overview.usdExchangeRate)
   const empty = overview.records === 0
+  const hero = todayHero(overview)
+  const today = hero.totals
+  const cacheBase = today.cacheReadTokens + today.inputTokens
+  const hitRate = cacheBase > 0 ? Math.round((today.cacheReadTokens / cacheBase) * 100) : null
+  // Whether cache-write is a dimension of THIS ledger at all. Decided per
+  // install, not per day: the aggregate cannot tell "reported 0" from "not
+  // reported" (UsageFields marks it optional, UsageTotals does not), and a
+  // per-day decision would make the grid reflow whenever the channel mix
+  // changes. A zero bucket therefore means "not a dimension here", not "0
+  // tokens today".
+  const showCacheWrite = overview.byDay.some(row => row.totals.cacheWriteTokens > 0)
 
   return (
     <>
@@ -341,13 +353,28 @@ function LedgerView({ overview }: {
         <>
           <div className="dtpl-hero">
             <div className="dtpl-hero-main">
-              <span className="dtpl-total-k">累计词元</span>
-              <span className="dtpl-total-num">{formatTokens(overview.totalTokens)}</span>
+              <span className="dtpl-total-k">今日词元</span>
+              <span className="dtpl-total-num">{formatTokens(hero.tokens)}</span>
+              {hero.reference !== null && (
+                <span className="dtpl-hero-base" title={hero.reference.title}>
+                  {hero.reference.label}
+                  {hero.reference.value !== undefined && <> <b>{hero.reference.value}</b></>}
+                </span>
+              )}
+              {/* One line per bucket that has something to say; when neither
+                  does, a muted zero holds the row so it never silently
+                  disappears. The zero never borrows the accent color: a
+                  subscription-only day has no cash spend, and the meaningful
+                  number beside it must not read as cash. */}
               <span className="dtpl-hero-money">
-                <span className="dtpl-hero-cost">{money(overview.spend)}<em className="dtpl-hero-cost-k">实际支出</em></span>
-                {overview.subscriptionValue > 0 && (
+                {(hero.spend > 0 || hero.subscriptionValue === 0) && (
+                  <span className={`dtpl-hero-cost${hero.spend > 0 ? '' : ' dtpl-hero-cost-zero'}`}>
+                    {money(hero.spend)}<em className="dtpl-hero-cost-k">今日支出</em>
+                  </span>
+                )}
+                {hero.subscriptionValue > 0 && (
                   <span className="dtpl-hero-value" title="订阅通道按官方价折算的价值——非实际扣款，不加入上方支出">
-                    <b>{money(overview.subscriptionValue)}</b> 订阅价值
+                    <b>{money(hero.subscriptionValue)}</b> 今日订阅价值
                   </span>
                 )}
               </span>
@@ -356,14 +383,29 @@ function LedgerView({ overview }: {
               <span className="dtpl-meta"><b className="dtpl-meta-n">{overview.sessions}</b> 会话</span>
               <span className="dtpl-meta"><b className="dtpl-meta-n">{overview.total.requests}</b> 请求</span>
               <span className={`dtpl-meta${(overview.total.failures ?? 0) > 0 ? ' dtpl-meta-warn' : ''}`}><b className="dtpl-meta-n">{(overview.total.failures ?? 0)}</b> 失败</span>
+              <span className="dtpl-meta"><b className="dtpl-meta-n">{formatTokens(overview.totalTokens)}</b> 累计词元</span>
+              <span className="dtpl-meta">
+                <b className="dtpl-meta-n">{money(overview.spend)}</b> 累计支出
+                {overview.subscriptionValue > 0 && <> · <b className="dtpl-meta-n">{money(overview.subscriptionValue)}</b> 累计订阅价值</>}
+              </span>
             </div>
           </div>
 
-          <div className="dtpl-grid">
-            <Stat label="输入" value={formatTokens(overview.total.inputTokens)} />
-            <Stat label="缓存读取" value={formatTokens(overview.total.cacheReadTokens)} />
-            <Stat label="缓存写入" value={formatTokens(overview.total.cacheWriteTokens)} />
-            <Stat label="输出" value={formatTokens(overview.total.outputTokens)} />
+          {/* One window on the first screen: these tiles break the hero number
+              down, so they are today's — not lifetime. */}
+          <div className="dtpl-sec-head">
+            <h2 className="dtpl-sec-title">今日词元构成</h2>
+            {hitRate !== null && (
+              <span className="dtpl-sec-aside" title="缓存读取 ÷（缓存读取 + 输入）——越高，同样的词元越便宜。">
+                缓存命中率 {hitRate}%
+              </span>
+            )}
+          </div>
+          <div className={`dtpl-grid${showCacheWrite ? '' : ' dtpl-grid-3'}`}>
+            <Stat label="输入" value={formatTokens(today.inputTokens)} />
+            <Stat label="缓存读取" value={formatTokens(today.cacheReadTokens)} />
+            {showCacheWrite && <Stat label="缓存写入" value={formatTokens(today.cacheWriteTokens)} />}
+            <Stat label="输出" value={formatTokens(today.outputTokens)} />
           </div>
 
           <DailyTrend days={overview.byDay} />
@@ -614,7 +656,7 @@ function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           厂商按 <b>词元（token）</b>计费——可以理解为模型读写的最小文字单位。
         </p>
         <p className="dtpl-doc-sub">
-          一次请求的用量被拆成四类、互不重复，加起来就是「累计词元」：
+          一次请求的用量被拆成四类、互不重复，加起来就是「词元合计」：
         </p>
         <div className="dtpl-doc-buckets">
           <Bucket name="输入" desc="你发过去、但没命中缓存的文字量。" />
@@ -623,7 +665,7 @@ function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           <Bucket name="输出" desc="模型回复的全部文字（含思考过程）。" />
         </div>
         <div className="dtpl-doc-eq" role="note">
-          <span className="dtpl-doc-eq-lead">累计词元</span>
+          <span className="dtpl-doc-eq-lead">词元合计</span>
           <span className="dtpl-doc-eq-op">=</span>
           <span className="dtpl-doc-eq-term">输入</span>
           <span className="dtpl-doc-eq-op">+</span>
@@ -806,7 +848,100 @@ function shortDay(day: string): string {
 /** Days in the trend window; the window never starts before the first record. */
 const TREND_DAYS = 14
 
+/** Complete days compared against today. Today itself is excluded, so a busy
+ * day cannot pull its own baseline up. */
+const BASELINE_DAYS = 7
+
+/** Today's ledger row when it has one; the zero row otherwise. */
+const ZERO_TOTALS: UsageTotals = {
+  requests: 0,
+  inputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  outputTokens: 0,
+}
+
+/** Everything the hero and the bucket tiles need, all in one window (today). */
+interface TodayHero {
+  /** Today's four buckets; the zero row when the ledger holds nothing today. */
+  totals: UsageTotals
+  /** Sum of {@link totals}; the hero's headline number. */
+  tokens: number
+  /** Today's real spend (¥); 0 when nothing was recorded or nothing is priced. */
+  spend: number
+  /** Today's subscription value (¥, non-cash). */
+  subscriptionValue: number
+  /** The context line under the number, or null when there is nothing honest
+   * to compare against. `value` is the figure worth lifting out of the label
+   * (the delta, or the baseline when today is zero); the label stays
+   * secondary. */
+  reference: { label: string; value?: string; title: string } | null
+}
+
 /**
+ * Today's tokens, today's money, and "is that a lot?" — today against the
+ * previous seven complete days. A single number cannot answer the last part,
+ * and the cumulative total cannot either (it only ever grows and never changes
+ * a decision), so the whole first screen is one window: today. The cumulative
+ * facts stay in the meta line, where context belongs.
+ */
+function todayHero(overview: TokBookOverview): TodayHero {
+  const today = localDayKey()
+  const row = overview.byDay.find(entry => entry.day === today)
+  const tokens = row === undefined ? 0 : totalsOf(row.totals)
+  return {
+    totals: row?.totals ?? ZERO_TOTALS,
+    tokens,
+    spend: row?.spend ?? 0,
+    subscriptionValue: row?.subscriptionValue ?? 0,
+    reference: todayReference(overview, today, tokens),
+  }
+}
+
+/**
+ * The one line that turns today's number into a judgement. Withheld rather
+ * than approximated: a ledger younger than the baseline window would average
+ * missing days in as zero and make a normal day read as a spike, so a young
+ * ledger shows no ratio at all.
+ */
+function todayReference(overview: TokBookOverview, today: string, todayTokens: number): TodayHero['reference'] {
+  const byDay = new Map(overview.byDay.map(entry => [entry.day, totalsOf(entry.totals)]))
+  const noRecord = {
+    label: '今天还没有记录',
+    title: '本机账本今天尚未记录到任何 provider 计费调用。',
+  }
+  const young = !overview.byDay.some(entry => entry.day <= shiftDayKey(today, -BASELINE_DAYS))
+  if (young) return todayTokens === 0 ? noRecord : null
+
+  let sum = 0
+  for (let back = 1; back <= BASELINE_DAYS; back++) sum += byDay.get(shiftDayKey(today, -back)) ?? 0
+  const average = sum / BASELINE_DAYS
+  if (average <= 0) return todayTokens === 0 ? noRecord : null
+
+  // A zero today needs the baseline as its context; a percentage off zero
+  // would be noise dressed up as a signal.
+  if (todayTokens === 0) {
+    return {
+      label: `近${BASELINE_DAYS}天日均`,
+      value: formatTokens(average),
+      title: `今天还没有记录；近 ${BASELINE_DAYS} 天日均 ${formatTokens(average)} 词元。`,
+    }
+  }
+
+  const percent = Math.round(Math.abs(todayTokens / average - 1) * 100)
+  if (percent === 0) {
+    return {
+      label: `≈ 近${BASELINE_DAYS}天日均`,
+      title: `今日与近 ${BASELINE_DAYS} 天日均持平（${formatTokens(average)} 词元）。`,
+    }
+  }
+  const arrow = todayTokens > average ? '↑' : '↓'
+  return {
+    label: `较近${BASELINE_DAYS}天日均`,
+    value: `${arrow}${percent}%`,
+    title: `今日 ${formatTokens(todayTokens)} 词元，近 ${BASELINE_DAYS} 天日均 ${formatTokens(average)} 词元。`,
+  }
+}
 
 /**
  * Daily total-token column chart over a continuous calendar window. The host's

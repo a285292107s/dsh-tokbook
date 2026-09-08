@@ -6,7 +6,8 @@ DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把�
 模型调用——`assistant/message` provider 的 `usage`(外加压缩 summarize 调用与失败尝试)
 ——记成一行、写入持久化的按日 JSONL 账本,再对外提供**带成本**的聚合总览。browser
 半区通过**侧边栏 footer 按钮**(route A:`sidebar.footer.action`)把它展示出来,按钮弹出
-**浮窗**(`shell.overlay`),内含汇总卡(token **与成本**)、按日 token 趋势图、按模型拆分
+**浮窗**(`shell.overlay`),内含汇总卡(**今日词元** + 较近7天日均涨跌参照 + 今日成本)、
+今日词元构成(四桶 + 缓存命中率)、按日 token 趋势图、按模型拆分
 (含成本)、**按 provider 的 tab**(每个 provider 路由一张卡,内含该路由下各模型的
 token/成本,可切换 今日 / 昨天 / 近7天 / 近30天 窗口)、价格表 tab,以及**订阅额度 tab**
 ——展示每个已配置订阅的**官方账户用量**(Command Code / OpenCode Go),用你的 key 从
@@ -267,8 +268,11 @@ provider 的持久化*最近已知*卡(数据目录里每 provider 一个 JSON �
   种子;下方 **Provider 覆盖层**按路由分组展示镜像/手工条目,可设覆盖或删除覆盖回云端。
   整表经 `PUT /tokbook/pricing` 写 `pricing.json`、`PUT /tokbook/provider-pricing` 写
   `provider-pricing.json`(`GET` 提供视图);保存后下次读取即重新计价全部历史。
-- **Browser 半区**:侧边栏 footer 按钮 + shell overlay 浮窗,内含汇总卡(token + 实际支出 +
-  订阅价值)、四桶拆分、按日趋势图、带金额的按 (provider, model) 拆分、近期记录,以及
+- **Browser 半区**:侧边栏 footer 按钮 + shell overlay 浮窗,内含汇总卡(**今日词元** +
+  较近7天日均涨跌参照 + 今日实际支出/订阅价值,零值的桶不占行;元数据行放
+  会话/请求/失败/累计词元/累计支出)、
+  今日词元构成(四桶 + 缓存命中率;缓存写入不是该账本的维度时不渲染该格)、按日趋势图、
+  带金额的按 (provider, model) 拆分、近期记录,以及
   **按 provider 的 tab**:每个 provider 路由一张卡,展示其下各模型的 token/双桶金额,
   可切换 今日 / 昨天 / 近7天 / 近30天(专用精确路由 `GET /tokbook/usage?range=…` 只读
   窗口内的日文件)。

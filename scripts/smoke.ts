@@ -672,6 +672,14 @@ console.log('dual-bucket cost: spend vs subscriptionValue')
     const opencode = costed.byModel.find(r => r.provider === 'opencode-go' && r.model === 'deepseek-v4-flash')
     check('official row: spend only', official !== undefined && Math.abs(official!.cost - 2) < 1e-9 && Math.abs(official!.spend - 2) < 1e-9 && official!.subscriptionValue === 0)
     check('opencode row: value only', opencode !== undefined && Math.abs(opencode!.cost - 2) < 1e-9 && Math.abs(opencode!.subscriptionValue - 2) < 1e-9 && opencode!.spend === 0)
+    // The per-day cost layer must add up to the totals: the hero reads a day
+    // row while the meta line reads the total, so a drift would show two
+    // different money numbers on the same screen.
+    const daySpend = costed.byDay.reduce((acc, row) => acc + (row.spend ?? 0), 0)
+    const dayValue = costed.byDay.reduce((acc, row) => acc + (row.subscriptionValue ?? 0), 0)
+    check('byDay spend sums to spend', Math.abs(daySpend - costed.spend) < 1e-9, `got ${daySpend}`)
+    check('byDay value sums to subscriptionValue', Math.abs(dayValue - costed.subscriptionValue) < 1e-9, `got ${dayValue}`)
+    check('the day row carries ¥3 / ¥3', costed.byDay.length === 1 && costed.byDay[0]!.spend === 3 && costed.byDay[0]!.subscriptionValue === 3)
     // recent entries split too
     const recent = costRecentEntries(recs, base, overlay)
     const officialRecent = recent.find(r => r.requestId === 'official-1')
