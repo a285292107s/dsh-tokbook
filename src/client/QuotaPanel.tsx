@@ -19,9 +19,13 @@
  * of a fresh install, when nothing is known yet.
  *
  * Card anatomy (see `QuotaCard` in types):
- *  - header identity: the worst-window ring gauge (max used %, number
- *    centered inside the ring) leads on the left in place of a monogram,
- *    followed by provider + plan/account context; on the right sits the
+ *  - header identity: a ring gauge leads on the left in place of a monogram,
+ *    followed by provider + plan/account context. The ring answers one fixed
+ *    question — this month's budget used (Command Code: the monthly credit
+ *    pool; OpenCode Go: the official `monthly` window) — and names itself
+ *    with a small visible caption beneath the number, so it never silently
+ *    means a different window; a card with no monthly measure falls back to
+ *    its tightest rolling window, still captioned. On the right sits the
  *    "更新于 HH:mm" freshness label driven by `fetchedAt` (the time of the
  *    official fetch, so a cached render is honest about its age), in front
  *    of the per-card refresh control (or a state chip).
@@ -259,7 +263,7 @@ function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   const title = card?.title ?? provider
   const ok = card !== null && card.state === 'ok'
   const ctx = ok && card !== null ? planContext(card) : ''
-  const worst = ok && card !== null ? worstPressure(card) : undefined
+  const ring = ok && card !== null ? ringPressure(card) : undefined
   const state = card?.state ?? 'loading'
   // One-shot click feedback: re-trigger the pop animation on every press even
   // though the button flips to `disabled` (spinner) immediately after.
@@ -274,8 +278,8 @@ function QuotaCardView({ provider, card, error, loading, onRefresh }: {
     <article className="dtpl-quota-card" data-plan={provider} data-state={state}>
       <header className="dtpl-quota-head">
         <div className="dtpl-quota-id">
-          {ok && card !== null && worst !== undefined ? (
-            <QuotaGauge pct={worst.pct} tone={worst.tone} caption={worst.label} />
+          {ok && card !== null && ring !== undefined ? (
+            <QuotaGauge pct={ring.pct} tone={ring.tone} cap={ring.cap} />
           ) : (
             <span className="dtpl-quota-state-gap" aria-hidden="true" />
           )}
@@ -459,19 +463,33 @@ function allowanceState(card: QuotaCard): {
   }
 }
 
-/** The most constrained budget on the card — whichever of the monthly
- * allowance (Command Code) or the rolling windows is closest to its cap. The
- * header ring should scream about what will actually stop you first. */
-function worstPressure(card: QuotaCard): { pct: number; tone: QuotaTone; label: string } | undefined {
-  let worst: { pct: number; label: string } | undefined
-  const consider = (pct: number, label: string): void => {
-    if (worst === undefined || pct > worst.pct) worst = { pct, label }
+/** What the header ring summarizes. The ring answers one *fixed* question —
+ * how much of the month's budget the account has used — instead of whichever
+ * rolling window happens to be tightest. A "worst window" headline made the
+ * referent ambiguous (the user could not tell 5 小时 / 本周 / 本月 apart, and
+ * the % jumped when a rolling window reset even though nothing was spent).
+ *
+ * Command Code reports no official monthly window, so its monthly measure is
+ * the credit-pool allowance (`allowanceState` — the same 本月额度 the body
+ * row draws). OpenCode Go reports an official `monthly` window. Only when a
+ * card carries no monthly measure at all does the ring fall back to the
+ * tightest rolling window — and `cap` then names that window, so the ring's
+ * referent is never implicit. */
+function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; cap: string } | undefined {
+  const monthly = card.windows.find((w) => w.id === 'monthly')
+  if (monthly !== undefined) {
+    return { pct: monthly.usagePercent, tone: toneOf(monthly.usagePercent), cap: '本月' }
   }
-  for (const w of card.windows) consider(w.usagePercent, w.label)
   const allowance = allowanceState(card)
-  if (allowance !== null) consider(allowance.percent, '本月额度')
+  if (allowance !== null && allowance.spent !== undefined && allowance.total !== undefined) {
+    return { pct: allowance.percent, tone: allowance.tone, cap: '本月' }
+  }
+  let worst: QuotaWindowView | undefined
+  for (const w of card.windows) {
+    if (worst === undefined || w.usagePercent > worst.usagePercent) worst = w
+  }
   if (worst === undefined) return undefined
-  return { pct: worst.pct, tone: toneOf(worst.pct), label: worst.label }
+  return { pct: worst.usagePercent, tone: toneOf(worst.usagePercent), cap: worst.label }
 }
 
 /** Optional period-activity stat strip (Command Code): completed calls +
@@ -512,23 +530,22 @@ function ActivityStrip({ usage }: { usage: NonNullable<QuotaCard['usage']> }) {
   )
 }
 
-/** Ring gauge showing the card's worst (max) window usage. Sits in the
- * header identity slot on the card's leading edge (where the plan monogram
- * used to be): the ring stroke carries the tone and the used-% number is
- * centered *inside* the ring. The window it summarizes is exposed via the
- * accessible name / tooltip rather than a visible caption, keeping the
- * identity row compact. */
-function QuotaGauge({ pct, tone, caption }: { pct: number; tone: QuotaTone; caption?: string }) {
+/** Ring gauge heading the card's identity row (where the plan monogram used
+ * to be). The ring stroke carries the tone and the used-% number is centered
+ * *inside* the ring; the budget that % refers to (normally 本月 — see
+ * `ringPressure`) is written as a small caption beneath the number, so the
+ * ring never silently means a different window. The same text feeds the
+ * accessible name / tooltip. */
+function QuotaGauge({ pct, tone, cap }: { pct: number; tone: QuotaTone; cap: string }) {
   const p = Math.max(0, Math.min(100, pct))
   const R = 15.5
   const C = 2 * Math.PI * R
-  const label = caption ?? '当前窗口'
   return (
-    <div
+    <span
       className={`dtpl-quota-gauge dtpl-quota-tone-${tone}`}
       role="img"
-      aria-label={`${label} 已用 ${Math.round(p)}%`}
-      title={`${label} 已用 ${Math.round(p)}%`}
+      aria-label={`${cap} 已用 ${Math.round(p)}%`}
+      title={`${cap} 已用 ${Math.round(p)}%`}
     >
       <svg viewBox="0 0 40 40" aria-hidden="true" className="dtpl-quota-gauge-svg">
         <circle className="dtpl-quota-gauge-track" cx="20" cy="20" r={R} />
@@ -541,9 +558,10 @@ function QuotaGauge({ pct, tone, caption }: { pct: number; tone: QuotaTone; capt
         />
       </svg>
       <span className="dtpl-quota-gauge-n" aria-hidden="true">
-        {Math.round(p)}<i>%</i>
+        <span>{Math.round(p)}<i>%</i></span>
+        <span className="dtpl-quota-gauge-cap">{cap}</span>
       </span>
-    </div>
+    </span>
   )
 }
 

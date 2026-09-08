@@ -844,10 +844,10 @@ const CSS = `
 [data-plugin="dsh-tokbook"] .dtpl-quota-id{
   display:flex;align-items:center;gap:10px;min-width:0;
 }
-/* Reserved slot for the leading worst-window ring gauge; keeps the title
-   from shifting when a card is loading / errored / unconfigured (no ring). */
+/* Reserved slot for the leading monthly ring gauge; keeps the title from
+   shifting when a card is loading / errored / unconfigured (no ring). */
 [data-plugin="dsh-tokbook"] .dtpl-quota-state-gap{
-  flex:none;width:38px;height:38px;
+  flex:none;width:44px;height:44px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-id-text{display:flex;flex-direction:column;gap:1px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-name{
@@ -902,16 +902,17 @@ const CSS = `
   color:var(--dtpl-err);
   background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);
 }
-/* Worst-window ring gauge. Sits in the header identity slot on the card's
-   leading edge (where the plan monogram used to be): a fixed 38px square,
-   the ring fills it, and the used-% number is centered *inside* the ring.
-   The summarized window lives in the accessible name / tooltip, not a
-   visible caption, so the identity row stays compact. */
+/* Monthly-budget ring gauge. Sits in the header identity slot on the card's
+   leading edge (where the plan monogram used to be): the ring stroke carries
+   the tone and the used-% number is centered *inside* the ring, with the
+   budget it refers to (本月 by default — see ringPressure) as a small
+   caption beneath the number, so the ring never silently means a different
+   window. */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge{
-  position:relative;flex:none;width:38px;height:38px;
+  position:relative;flex:none;width:44px;height:44px;
   color:var(--dtpl-fg);
 }
-[data-plugin="dsh-tokbook"] .dtpl-quota-gauge-svg{width:38px;height:38px;display:block;}
+[data-plugin="dsh-tokbook"] .dtpl-quota-gauge-svg{width:44px;height:44px;display:block;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-track{
   fill:none;stroke:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
   stroke-width:4;stroke-linecap:round;
@@ -922,7 +923,8 @@ const CSS = `
   transition:stroke-dasharray .4s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-n{
-  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:2px;
   color:inherit;font-size:11px;line-height:1;font-weight:700;
   font-variant-numeric:tabular-nums;white-space:nowrap;
   pointer-events:none;
@@ -930,6 +932,11 @@ const CSS = `
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-n i{
   font-style:normal;font-size:8px;line-height:1;font-weight:600;
   color:var(--dtpl-fg-3);margin-left:.5px;
+}
+/* Small caption naming the budget the ring summarizes (本月 / a fallback
+   window label). Muted so the tone-colored number stays the focal point. */
+[data-plugin="dsh-tokbook"] .dtpl-quota-gauge-cap{
+  font-size:8px;line-height:1;font-weight:600;color:var(--dtpl-fg-3);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge.dtpl-quota-tone-ok{color:var(--dtpl-ok);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge.dtpl-quota-tone-warn{color:var(--dtpl-warn);}
