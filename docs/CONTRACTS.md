@@ -1,6 +1,6 @@
 # Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-09 · supersedes: —
 
 其他代码与 browser 半区必须**分毫不差**依赖的事实的唯一家园:host 路由与 wire JSON、
 插件配置、消费的 `session/event` 类型、数据目录文件布局。
@@ -66,6 +66,11 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   "rate": { inputPerMillion, outputPerMillion, … }, "note"?: string }], "note"?: string } } }`。
   `segments` 是完整的自定时间轴(可多段);整表解析、校验后**整体替换** `provider-pricing.json`;
   缺失的 (provider, model) = 删除该手工覆盖(回到镜像行)。
+- 镜像 feed(`provider_pricing.json` → `provider-pricing.ccsa.json`)的 `providers[]` 是
+  `{ provider, label?, billing?, entries[] }`:**通道级 `billing`** 是该通道所有条目的
+  缺省计费性质(条目自带 `billing` 时条目赢),解析时下发给条目;通道级 `billing` 非法 →
+  整组丢弃(绝不静默回落 metered)。手工层的 body 仍是条目级 `billing`(无通道级字段),
+  省略按 metered。
 - wire 上的金额已拆双桶:`spend`(metered 行,实际支出)与 `subscriptionValue`(subscription 行,
   订阅价值、非现金);`totalCost` 保留为两者之和以兼容旧客户端。
 - `byDay` 每行除 token 汇总外还带该日 `spend` / `subscriptionValue`(`attachCosts` 从
@@ -135,6 +140,8 @@ unlink 目标)。日文件只追加、绝不重写。
   双维解析(`resolvePriced`):provider 覆盖层(手工 > 镜像)先命中,再回落到基准模型价。
 - 金额分双桶:`spend` 只含 `billing: metered` 行(实际支出),`subscriptionValue` 只含
   `billing: subscription` 行(订阅价值,非现金);UI 不得把后者当作支出展示。
+- 计费性质以**通道**为单位:镜像的 `providers[].billing` 覆盖其全部条目,条目级 `billing`
+  可覆盖通道缺省;两者都缺 → metered。
 - rollup 带 `schemaVersion: 2`;旧格式(v1,无版本字段)读作缺失、由日文件重建。
 - 额度卡只展示官方 provider 数据;`unconfigured`/`error` 卡便宜地即时重推,从不当作
   "最近已知"持久化。

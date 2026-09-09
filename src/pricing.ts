@@ -324,6 +324,9 @@ interface CloudProviderEntry {
 
 interface CloudProviderGroup {
   provider?: unknown
+  label?: unknown
+  /** Channel-level billing nature; the default for every entry of the group. */
+  billing?: unknown
   entries?: unknown
 }
 
@@ -348,13 +351,17 @@ function coerceSegment(value: unknown): PricingSegment | null {
   }
 }
 
-function coerceProviderEntry(value: unknown): ProviderPricingEntry | null {
+function coerceProviderEntry(value: unknown, defaultBilling?: BillingNature): ProviderPricingEntry | null {
   if (typeof value !== 'object' || value === null) return null
   const raw = value as CloudProviderEntry
   const out: ProviderPricingEntry = {}
   if (raw.billing !== undefined) {
     if (!isBillingNature(raw.billing)) return null
     out.billing = raw.billing
+  } else if (defaultBilling !== undefined) {
+    // The channel's own billing nature covers every entry that does not
+    // override it; stamping it here keeps the rest of the pipeline unchanged.
+    out.billing = defaultBilling
   }
   const inheritBase = typeof raw.inheritBase === 'string' && raw.inheritBase !== '' ? raw.inheritBase : undefined
   const segments = Array.isArray(raw.segments)
@@ -374,12 +381,17 @@ function coerceProviderGroup(value: unknown): { provider: string; entries: Recor
   if (typeof value !== 'object' || value === null) return null
   const group = value as CloudProviderGroup
   if (typeof group.provider !== 'string' || group.provider === '' || !Array.isArray(group.entries)) return null
+  // A malformed channel-level billing is a malformed group, not a silent
+  // fall-through to the metered default (that would mislabel a subscription
+  // channel as real spend).
+  if (group.billing !== undefined && !isBillingNature(group.billing)) return null
+  const defaultBilling = group.billing === undefined ? undefined : group.billing
   const entries: Record<string, ProviderPricingEntry> = {}
   for (const raw of group.entries as unknown[]) {
     if (typeof raw !== 'object' || raw === null) continue
     const model = (raw as CloudProviderEntry).model
     if (typeof model !== 'string' || model === '') continue
-    const entry = coerceProviderEntry(raw)
+    const entry = coerceProviderEntry(raw, defaultBilling)
     if (entry !== null) entries[model] = entry
   }
   if (Object.keys(entries).length === 0) return null

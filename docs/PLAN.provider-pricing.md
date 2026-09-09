@@ -53,7 +53,7 @@
 | 官方/直连（deepseek-official、zai） | `metered` | 跟随官方基准价（含调价史） | 实际支出 |
 | 订阅（opencode-go、commandcode、modlens-commandcode） | `subscription` | 官方基准价折算价值 | 订阅价值（非现金） |
 | 中转站（staryears） | `metered` | 先用官方价占位；**用户填真实价后**改显式 segments | 实际支出 |
-| 未知串（dots-ai / dots3-note-prev） | `metered` | 默认 ¥0；**用户填价** | 实际支出 |
+| 未知串（如 dots-ai / dots3-note-prev） | `metered` | 镜像**不建条目** → 未定价 ¥0（在 `unpricedModels` 里可见）；用户填价后加 segments | 实际支出 |
 
 时间维度：官方/订阅跟随基准价 `timeRules`（自动得调价史）；中转/未知串用显式
 `segments` 时间轴（用户维护自己的调价史）。
@@ -65,12 +65,13 @@
   `pricing.ccsa.json` 相同：modelId + input/output/cache* + timeRules +
   contextTiers + dailySlots + aliases + family）。**官方调价史在每模型 `timeRules`**。
 - `provider_pricing.json` —— provider 覆盖层。Schema：
-  `providers[].provider`（路由键）+ `entries[]`：
+  `providers[].provider`（路由键）+ `providers[].billing`（通道级计费性质，缺省下发给
+  组内条目）+ `entries[]`：
   - `model`：账本里**精确串**（可带 provider 前缀）
-  - `billing`: `metered` | `subscription`
+  - `billing`: `metered` | `subscription`（条目级，覆盖通道缺省；镜像里通常不写）
   - `inheritBase: <modelId>`：跟随基准价该 model 的**完整规则与调价史**
   - 或 `segments[]`：`{ from?, to?, rate: {input/output/cacheRead/cacheWrite}, note? }`
-    用户自定价时间轴（to 缺省开放）
+    用户自定价时间轴（to 缺省开放；只支持平铺价，无峰谷/档位）
   - `placeholder?: true`：中转占位（当前值=官方价，等用户填真实 segments）
   - `note`：人类注释
 - raw URL：

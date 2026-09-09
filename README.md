@@ -172,6 +172,9 @@ fold/缓存竞争;JSONL 追加本身去重安全)。启动时插件往目录写 
 该 model 行。再没有 → 未定价(¥0)。基准价内仍走 **时间规则 → 上下文档位 → 高峰时段**链,
 上下文档位大小用请求的 input 侧 token 近似(input + cacheRead + cacheWrite)。
 
+计费性质是**通道**属性:镜像里每个 `providers[]` 组自带 `billing`,下发给组内所有条目
+(条目自带 `billing` 时条目赢);手工层仍按条目给 `billing`,省略按 metered。
+
 金额拆成两个桶,浮窗分开显示、绝不混为单一"支出":
 
 - **实际支出**(`spend`)——`billing: 'metered'` 通道(官方按量/中转/未知串)的真金白银;

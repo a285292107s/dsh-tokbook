@@ -130,7 +130,9 @@ export interface PricingSegment {
 
 /** One provider-layer override for an exact ledger model string. */
 export interface ProviderPricingEntry {
-  /** How this channel's amount is counted: real spend vs subscription value. */
+  /** How this channel's amount is counted: real spend vs subscription value.
+   * In the mirror feed this is normally the channel-level `billing` inherited
+   * at parse time; an entry may override it (mixed channels, hand edits). */
   billing?: BillingNature
   /** Follow the base table's FULL rule set (incl. timeRules) of this modelId. */
   inheritBase?: string

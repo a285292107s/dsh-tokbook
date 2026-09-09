@@ -678,33 +678,53 @@ console.log('dual-dimension pricing: provider overlay resolution')
     dailySlots: [],
     timeRules: [{ startTime: dsOld, endTime: dsEnd - 1, rates: { inputPerMillion: 1, outputPerMillion: 4 } }],
   }
-  // Provider overlay mirrors the real dsh-model-pricing shape: a metered
-  // official channel, a subscription channel with the SAME base model string,
-  // a prefixed subscription string (inheritBase), and a ¥0 placeholder entry
-  // for a relay whose real price is unknown (segments).
+  // Provider overlay mirrors the real dsh-model-pricing shape: a channel-level
+  // `billing` covering its entries (a metered official channel, subscription
+  // channels, a relay placeholder with an explicit ¥0 segments timeline), plus
+  // an entry-level override for a mixed channel and a malformed channel billing.
   const overlay = coerceProviderPricing({
     currency: 'RMB',
     providers: [
       {
         provider: 'deepseek-official',
-        entries: [{ model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash' }],
+        billing: 'metered',
+        entries: [{ model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }],
       },
       {
         provider: 'opencode-go',
-        entries: [{ model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }],
+        billing: 'subscription',
+        entries: [{ model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }],
       },
       {
         provider: 'commandcode',
-        entries: [{ model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }],
+        billing: 'subscription',
+        entries: [{ model: 'deepseek/deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }],
       },
       {
         provider: 'relay',
-        entries: [{ model: 'unknown-relay-model', billing: 'metered', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }] }],
+        billing: 'metered',
+        entries: [{ model: 'unknown-relay-model', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }] }],
+      },
+      {
+        provider: 'mixed',
+        billing: 'subscription',
+        entries: [
+          { model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' },
+          { model: 'deepseek-v4-flash-metered', billing: 'metered', inheritBase: 'deepseek-v4-flash' },
+        ],
+      },
+      {
+        provider: 'broken',
+        billing: 'free',
+        entries: [{ model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }],
       },
     ],
   })
   check('provider overlay coerces', overlay !== null && overlay!['commandcode']!['deepseek/deepseek-v4-flash']?.billing === 'subscription')
   if (overlay === null) throw new Error('overlay coerce failed')
+  check('channel-level billing covers its entries', overlay['opencode-go']?.['deepseek-v4-flash']?.billing === 'subscription' && overlay['deepseek-official']?.['deepseek-v4-flash']?.billing === 'metered')
+  check('entry-level billing overrides the channel default', overlay['mixed']?.['deepseek-v4-flash']?.billing === 'subscription' && overlay['mixed']?.['deepseek-v4-flash-metered']?.billing === 'metered')
+  check('malformed channel billing drops the group', overlay['broken'] === undefined)
   const baseTable = base as never as Record<string, { base: Record<string, number>; contextTiers: unknown[]; dailySlots: unknown[]; timeRules: unknown[] }>
 
   // inheritBase follows the base model's full rule set (time rules included).
@@ -800,15 +820,16 @@ console.log('provider overlay file round-trip')
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-provider-'))
   try {
     const feed = {
-      version: 3,
+      version: 4,
       updatedAt: 1788810809,
       currency: 'RMB',
       providers: [
         {
           provider: 'commandcode',
-          entries: [{ model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', note: '订阅价值' }],
+          billing: 'subscription',
+          entries: [{ model: 'deepseek/deepseek-v4-flash', inheritBase: 'deepseek-v4-flash', note: '订阅价值' }],
         },
-        { provider: 'dots-ai', entries: [{ model: 'dots3-note-prev', billing: 'metered', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }] }] },
+        { provider: 'dots-ai', billing: 'metered', entries: [{ model: 'dots3-note-prev', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }] }] },
       ],
     }
     const synced = join(dir, PROVIDER_PRICING_CCSA_FILE)
