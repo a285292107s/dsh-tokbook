@@ -120,39 +120,70 @@ const emptyOverview = {
   lastEventAt: null, lastSyncAt: null, syncStatus: 'idle', sessions: 0,
 }
 
-/* ── pricing-tab fixtures (model layer + provider overlay) ──────────────── */
+/* ── pricing-tab fixtures (model layer + provider overlay + channel lens) ── */
 /** Small but representative pricing view: hand override, unpriced seed, a few
- *  cloud rows (one layered), and the provider overlay rows the Provider 覆盖
- *  mode renders. */
+ *  cloud rows (one layered), the provider overlay rows the Provider 覆盖 mode
+ *  renders, and `channelRows` — the per-route usage the 在用 view groups by,
+ *  including strings billed by two routes (deepseek-v4-flash, glm-5.3-flash,
+ *  deepseek/deepseek-v4-flash). */
 const PRICING_FIXTURE = {
   rows: [
     { model: 'deepseek-reasoner', manual: true, manualRates: { inputPerMillion: 3.2, outputPerMillion: 12.8, cacheReadPerMillion: 0.8 }, cloudRates: { inputPerMillion: 4, outputPerMillion: 16 } },
-    { model: 'deepseek/deepseek-v4-flash', manual: false, unpriced: true, records: 17 },
-    { model: 'deepseek-chat', manual: false, cloudRates: { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5 }, layered: true },
-    { model: 'deepseek-v4-flash', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 } },
-    { model: 'deepseek-v4-flash-vision-exp', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, layered: true },
-    { model: 'deepseek-v4-pro', manual: false, cloudRates: { inputPerMillion: 8, outputPerMillion: 32 }, layered: true },
-    { model: 'glm-5.3-flash', manual: false, cloudRates: { inputPerMillion: 0.8, outputPerMillion: 2.8 } },
-    { model: 'gpt-5.6-luna', manual: false, cloudRates: { inputPerMillion: 1.4, outputPerMillion: 8.4 }, layered: true },
-    { model: 'gpt-5.6-luna-fast', manual: false, cloudRates: { inputPerMillion: 2.8, outputPerMillion: 16.8 } },
-    { model: 'grok-4.6', manual: false, cloudRates: { inputPerMillion: 3, outputPerMillion: 12 } },
-    { model: 'MiniMax-M3', manual: false, cloudRates: { inputPerMillion: 2.1, outputPerMillion: 8.4 }, layered: true },
-    { model: 'claude-3-5-sonnet-20241022', manual: false, cloudRates: { inputPerMillion: 22.4, outputPerMillion: 112, cacheReadPerMillion: 2.24 } },
-    { model: 'claude-3-5-haiku-20241022', manual: false, cloudRates: { inputPerMillion: 5.6, outputPerMillion: 28, cacheReadPerMillion: 0.56 } },
-    { model: 'gpt-5.6-cyber', manual: false, cloudRates: { inputPerMillion: 87.5, outputPerMillion: 525 } },
+    { model: 'deepseek/deepseek-v4-flash', manual: false, overlayPriced: true, provider: 'commandcode', records: 2979, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
+    { model: 'z-ai/glm-5.3-flash', manual: false, overlayPriced: true, provider: 'commandcode', records: 276, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
+    { model: 'mimo-v2.5', manual: false, overlayPriced: true, provider: 'opencode-go', records: 83, now: { rates: { inputPerMillion: 0.6, outputPerMillion: 2.4 }, peak: false } },
+    { model: 'dots3-note-prev', manual: false, unpriced: true, records: 644 },
+    { model: 'deepseek-chat', manual: false, cloudRates: { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5 }, layered: true, family: 'deepseek' },
+    { model: 'deepseek-v4-flash', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, family: 'deepseek', records: 2913 },
+    { model: 'deepseek-v4-flash-vision-exp', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, layered: true, family: 'deepseek', records: 3092 },
+    { model: 'deepseek-v4-pro', manual: false, cloudRates: { inputPerMillion: 8, outputPerMillion: 32 }, layered: true, family: 'deepseek' },
+    { model: 'glm-5.3-flash', manual: false, cloudRates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, family: 'glm', records: 626 },
+    { model: 'gpt-5.6-luna', manual: false, cloudRates: { inputPerMillion: 1.4, outputPerMillion: 8.4 }, layered: true, family: 'gpt', records: 784 },
+    { model: 'gpt-5.6-luna-fast', manual: false, cloudRates: { inputPerMillion: 2.8, outputPerMillion: 16.8 }, family: 'gpt' },
+    { model: 'grok-4.6', manual: false, cloudRates: { inputPerMillion: 3, outputPerMillion: 12 }, family: 'spacex-ai', records: 322 },
+    { model: 'MiniMax-M3', manual: false, cloudRates: { inputPerMillion: 2.1, outputPerMillion: 8.4 }, layered: true, family: 'minimax' },
+    { model: 'claude-3-5-sonnet-20241022', manual: false, cloudRates: { inputPerMillion: 22.4, outputPerMillion: 112, cacheReadPerMillion: 2.24 }, family: 'claude' },
+    { model: 'claude-3-5-haiku-20241022', manual: false, cloudRates: { inputPerMillion: 5.6, outputPerMillion: 28, cacheReadPerMillion: 0.56 }, family: 'claude' },
+    { model: 'gpt-5.6-cyber', manual: false, cloudRates: { inputPerMillion: 87.5, outputPerMillion: 525 }, family: 'gpt' },
+    { model: 'commandcode/some-prefixed', manual: false, overlayPriced: true, provider: 'commandcode', cloudRates: { inputPerMillion: 1, outputPerMillion: 2 } },
   ],
+  channelRows: [
+    { provider: 'deepseek-official', model: 'deepseek-v4-flash', records: 323, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
+    { provider: 'deepseek-official', model: 'deepseek-v4-flash-vision-exp', records: 3092, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
+    { provider: 'opencode-go', model: 'deepseek-v4-flash', records: 2590, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
+    { provider: 'opencode-go', model: 'glm-5.3-flash', records: 243, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
+    { provider: 'opencode-go', model: 'mimo-v2.5', records: 83, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 0.6, outputPerMillion: 2.4 }, peak: false } },
+    { provider: 'commandcode', model: 'deepseek/deepseek-v4-flash', records: 2964, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
+    { provider: 'commandcode', model: 'z-ai/glm-5.3-flash', records: 276, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
+    { provider: 'modlens-commandcode', model: 'deepseek/deepseek-v4-flash', records: 15, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
+    { provider: 'zai', model: 'glm-5.3-flash', records: 383, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
+    { provider: 'staryears', model: 'gpt-5.6-luna', records: 784, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 1.4, outputPerMillion: 8.4 }, peak: false } },
+    { provider: 'staryears', model: 'grok-4.6', records: 322, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 3, outputPerMillion: 12 }, peak: false } },
+    { provider: 'dots-ai', model: 'dots3-note-prev', records: 644, billing: 'metered', overlay: false, unpriced: true },
+  ],
+  providerLabels: {
+    'deepseek-official': 'DeepSeek 官方 API',
+    'opencode-go': 'OpenCode Go 订阅',
+    'commandcode': 'Command Code GOAT 订阅',
+    'modlens-commandcode': 'modlens 经 Command Code',
+    zai: 'Z.ai（智谱直连）',
+    staryears: 'StarYears 中转',
+  },
   providerRows: [
     { provider: 'deepseek-official', model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash', manual: false, note: '官方按量' },
     { provider: 'opencode-go', model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: true, note: '订阅价值' },
     { provider: 'opencode-go', model: 'deepseek-v4-flash-vision-exp', billing: 'subscription', inheritBase: 'deepseek-v4-flash-vision-exp', manual: false },
     { provider: 'opencode-go', model: 'glm-5.3-flash', billing: 'subscription', inheritBase: 'glm-5.3-flash', manual: false },
+    { provider: 'opencode-go', model: 'mimo-v2.5', billing: 'subscription', inheritBase: 'mimo-v2.5', manual: false },
     { provider: 'commandcode', model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: true, note: '前缀串' },
     { provider: 'commandcode', model: 'z-ai/glm-5.3-flash', billing: 'subscription', inheritBase: 'glm-5.3-flash', manual: false },
     { provider: 'staryears', model: 'gpt-5.6-luna', billing: 'metered', inheritBase: 'gpt-5.6-luna', placeholder: true, manual: false, note: '中转占位' },
     { provider: 'staryears', model: 'grok-4.6', billing: 'metered', inheritBase: 'grok-4.6', placeholder: true, manual: false },
     { provider: 'zai', model: 'glm-5.3-flash', billing: 'metered', inheritBase: 'glm-5.3-flash', manual: false },
-    { provider: 'dots-ai', model: 'dots3-note-prev', billing: 'metered', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }], manual: false, note: '未知串 ¥0' },
+    { provider: 'opencode-go-2', model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: false, via: 'opencode-go', note: '同款套餐的第二份' },
   ],
+  providerRoutes: { 'opencode-go-2': 'opencode-go' },
+  providerNames: ['commandcode', 'deepseek-official', 'dots-ai', 'opencode-go', 'opencode-go-2', 'opencode-go-3', 'staryears', 'zai'],
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
 }
 
@@ -263,7 +294,12 @@ const server = createServer((req, res) => {
     return
   }
   if (url.pathname === '/tokbook/provider-pricing') {
-    const fixture = { providerRows: PRICING_FIXTURE.providerRows, dataDir: PRICING_FIXTURE.dataDir }
+    const fixture = {
+      providerRows: PRICING_FIXTURE.providerRows,
+      providerRoutes: PRICING_FIXTURE.providerRoutes,
+      providerNames: PRICING_FIXTURE.providerNames,
+      dataDir: PRICING_FIXTURE.dataDir,
+    }
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify(fixture))
     return

@@ -34,7 +34,7 @@ import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  PlanConfig, PricingTable, PricingView, ProviderPricingTable, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
+  ChannelUsageRow, PlanConfig, PricingTable, PricingView, ProviderPricingTable, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
 } from './types.ts'
 import { currencyOfRegion, UNPRICED_KEY, totalsTokens } from './types.ts'
 import { defaultDataDir, warnIfForeignOwner, writeOwnerMarker } from './ledger.ts'
@@ -49,7 +49,7 @@ import {
 } from './stats.ts'
 import {
   parseManualPricingInput, parseManualProviderPricingInput, readPricingTable, readPricingView, readProviderPricing, readProviderPricingView, readUsdExchangeRate, resolvePricingUrl, resolveProviderPricingUrl,
-  resolvePriced, effectiveRatesOf, nowOf, syncCloudPricing, syncProviderPricing, writeManualPricing, writeManualProviderPricing,
+  resolvePriced, effectiveRatesOf, nowOf, billingOf, syncCloudPricing, syncProviderPricing, writeManualPricing, writeManualProviderOverlay,
   type ManualPricingParse, type ManualProviderPricingParse, type PricingSourceInput, type PricingRegion, type UsedModelHint,
 } from './pricing.ts'
 import { providerCards } from './by-provider.ts'
@@ -664,16 +664,24 @@ export class TokenUsageBook extends Service {
    *  content; the ledger's own distinct model strings are folded in so the tab
    *  can filter to the models actually in use and surface the ones with no
    *  model-layer entry — either unpriced (¥0 today) or priced only by a
-   *  provider-overlay entry. The model counts reuse `buildSummary`'s rollup +
-   *  hot-file read, the same cost path an overview read already pays. */
+   *  provider-overlay entry. `channelRows` is the same usage seen per
+   *  (provider, model) channel, which is what the 在用 view groups by. The
+   *  model counts reuse `buildSummary`'s rollup + hot-file read, the same cost
+   *  path an overview read already pays. */
   async pricingView(): Promise<PricingView> {
     const used = new Map<string, UsedModelHint>()
+    const channelRows: ChannelUsageRow[] = []
+    // The ledger's provider routes: a brand-new key has no overlay entry yet,
+    // so this is the only place the tab can learn about it (it offers these as
+    // alias targets).
+    const billedProviders = new Set<string>()
     try {
       const pricing = await readPricingTable(this.dir, this.logger)
       const providers = await readProviderPricing(this.dir, this.logger)
       const summary = await buildSummary(this.dir, () => new Date(), () => UNPRICED_KEY, this.logger)
       for (const row of summary.byModel) {
         if (row.model === '') continue
+        if (row.provider !== undefined && row.provider !== '') billedProviders.add(row.provider)
         const previous = used.get(row.model)
         // A string the model layer does NOT price but a provider-overlay entry
         // does is "overlay-priced": resolve its price now so the row can show
@@ -691,6 +699,19 @@ export class TokenUsageBook extends Service {
             ? { overlayNow: nowOf(rules), overlayProvider: row.provider }
             : {}),
         })
+        // The channel lens: what THIS route paid for this exact string. The
+        // price is the route's own resolution (overlay entry first, base row
+        // otherwise), so a channel-specific segments entry shows its number.
+        const provider = row.provider ?? ''
+        const channelRules = effectiveRatesOf(pricing, providers, provider, row.model)
+        channelRows.push({
+          provider,
+          model: row.model,
+          records: row.totals.requests,
+          billing: billingOf(providers, provider, row.model),
+          overlay: provider !== '' && providers[provider]?.[row.model] !== undefined,
+          ...(channelRules !== null ? { now: nowOf(channelRules) } : { unpriced: true }),
+        })
       }
     } catch (error) {
       // A failing summary must not block the tab — the price list is still
@@ -699,22 +720,31 @@ export class TokenUsageBook extends Service {
     }
     const [{ rows, dataDir }, provider] = await Promise.all([
       readPricingView(this.dir, used, this.logger),
-      readProviderPricingView(this.dir, this.logger),
+      readProviderPricingView(this.dir, billedProviders, this.logger),
     ])
-    return { rows, providerRows: provider.rows, dataDir }
+    return {
+      rows,
+      channelRows,
+      providerRows: provider.rows,
+      providerRoutes: provider.routes,
+      providerNames: provider.names,
+      providerLabels: provider.labels,
+      dataDir,
+    }
   }
 
   /** Validate + persist a manual provider-overlay body from the 价格表 tab. The
    *  body is the COMPLETE desired manual overlay (`provider` → `model` →
-   *  entry) — the write replaces `provider-pricing.json` wholesale, so an
-   *  omitted (provider, model) removes its override (back to the mirror row).
-   *  Only the manual file is written; the read-time merged table re-prices
-   *  history on the next overview read. */
+   *  entry, plus the reserved `$routes` alias map) — the write replaces
+   *  `provider-pricing.json` wholesale, so an omitted (provider, model)
+   *  removes its override (back to the mirror row) and an omitted alias stops
+   *  following. Only the manual file is written; the read-time merged table
+   *  re-prices history on the next overview read. */
   async saveProviderPricing(table: unknown): Promise<ManualProviderPricingParse & { view: PricingView }> {
     const parsed = parseManualProviderPricingInput(table)
     if (!parsed.ok) return { ok: false, error: parsed.error, view: await this.pricingView() }
-    await writeManualProviderPricing(this.dir, parsed.table, this.logger)
-    return { ok: true, table: parsed.table, view: await this.pricingView() }
+    await writeManualProviderOverlay(this.dir, { table: parsed.table, routes: parsed.routes }, this.logger)
+    return { ok: true, table: parsed.table, routes: parsed.routes, view: await this.pricingView() }
   }
 
   /** Validate + persist a manual pricing body from the 价格表 tab. The body is

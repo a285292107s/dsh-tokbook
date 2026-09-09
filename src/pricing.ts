@@ -28,7 +28,7 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
-  BillingNature, ContextTier, DailySlot, ModelPricing, ModelRates, PricingNow, PricingSegment, PricingTable, PricingViewRow, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, RateWindow, TimeRule, UsageTotals,
+  BillingNature, ContextTier, DailySlot, ModelPricing, ModelRates, PricingNow, PricingSegment, PricingTable, PricingViewRow, ProviderAliasMap, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, RateWindow, TimeRule, UsageTotals,
 } from './types.ts'
 
 /** The hand-maintained pricing file inside the data directory. */
@@ -42,6 +42,10 @@ export const PROVIDER_PRICING_CCSA_FILE = 'provider-pricing.ccsa.json'
 
 /** The hand-maintained provider-overlay file (user edits win over the mirror). */
 export const PROVIDER_PRICING_FILE = 'provider-pricing.json'
+
+/** The reserved top-level key of `provider-pricing.json` holding route aliases
+ *  (`{ "$routes": { "plan-b": "plan-a" } }`): route → the route it follows. */
+export const PROVIDER_ROUTES_KEY = '$routes'
 
 /** Default domestic (China) cloud pricing feed (¥ per million tokens, RMB). */
 export const DEFAULT_PRICING_URL_DOMESTIC = 'https://gitee.com/oyw125/model-price-table/raw/master/model_pricing.json'
@@ -124,6 +128,9 @@ export interface CloudPricingModel extends CloudRates {
   contextTiers?: CloudTier[]
   timeRules?: CloudTimeRule[]
   aliases?: string[]
+  /** Model vendor / family the feed groups the model under (`deepseek`, `claude`,
+   *  `qwen`, …) — display metadata only, never used by the price chain. */
+  family?: string
 }
 
 export interface CloudPricingData {
@@ -227,6 +234,7 @@ export function coerceCloudPricing(value: unknown): CloudPricingData | null {
       ...(Array.isArray(row.aliases) && row.aliases.every(alias => typeof alias === 'string')
         ? { aliases: row.aliases as string[] }
         : {}),
+      ...(typeof row.family === 'string' && row.family !== '' ? { family: row.family } : {}),
     })
   }
   return {
@@ -300,6 +308,21 @@ export function cloudToTable(feed: CloudPricingData): PricingTable {
   }
   for (const model of feed.models) table[model.modelId] = cloudModelRates(model)
   return table
+}
+
+/** The vendor/family of every cloud key (each `modelId` plus its aliases) — the
+ *  grouping the pricing tab renders the cloud reference list by. Key precedence
+ *  mirrors {@link cloudToTable}: a modelId wins over another row's alias. */
+export function cloudFamilies(feed: CloudPricingData): Record<string, string> {
+  const families: Record<string, string> = {}
+  for (const model of feed.models) {
+    if (model.family === undefined) continue
+    for (const alias of model.aliases ?? []) {
+      if (alias !== '' && !(alias in families)) families[alias] = model.family
+    }
+  }
+  for (const model of feed.models) if (model.family !== undefined) families[model.modelId] = model.family
+  return families
 }
 
 // ---------------------------------------------------------------------------
@@ -414,15 +437,53 @@ export function coerceProviderPricing(value: unknown): ProviderPricingTable | nu
   return table
 }
 
+/** The mirror feed's provider labels (`providers[].label`), route → label.
+ *  Display-only: a route the feed does not label is simply absent, and a
+ *  malformed label never invalidates the entries themselves. */
+export function coerceProviderLabels(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null) return {}
+  const feed = value as CloudProviderData
+  if (!Array.isArray(feed.providers)) return {}
+  const labels: Record<string, string> = {}
+  for (const raw of feed.providers as unknown[]) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const group = raw as CloudProviderGroup
+    if (typeof group.provider !== 'string' || group.provider === '') continue
+    if (typeof group.label !== 'string' || group.label === '') continue
+    labels[group.provider] = group.label
+  }
+  return labels
+}
+
+/** Coerce the hand file's `$routes` section into a one-hop alias map, dropping
+ *  malformed pairs (lenient read path, like every other hand-file read). */
+export function coerceProviderAliases(value: unknown): ProviderAliasMap {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const aliases: ProviderAliasMap = {}
+  for (const [route, target] of Object.entries(value as Record<string, unknown>)) {
+    if (route === '' || route === PROVIDER_ROUTES_KEY) continue
+    if (typeof target !== 'string' || target === '' || target === route) continue
+    aliases[route] = target
+  }
+  return aliases
+}
+
+/** One hand-edited overlay file: its per-route entries plus its route aliases. */
+export interface ManualProviderOverlay {
+  table: ProviderPricingTable
+  routes: ProviderAliasMap
+}
+
 /** Coerce a hand-edited provider-overlay body (the `Record<provider, Record<
- *  model, entry>>` shape of `provider-pricing.json`) into the two-level table,
- *  dropping malformed entries — never fatal, like the model-level manual file.
- */
+ *  model, entry>>` shape of `provider-pricing.json`, plus the reserved
+ *  `$routes` key) into the two-level table, dropping malformed entries — never
+ *  fatal, like the model-level manual file. Aliases are read separately by
+ *  {@link coerceProviderAliases}. */
 export function coerceManualProviderPricing(value: unknown): ProviderPricingTable {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
   const table: ProviderPricingTable = {}
   for (const [provider, models] of Object.entries(value)) {
-    if (provider === '' || typeof models !== 'object' || models === null || Array.isArray(models)) continue
+    if (provider === '' || provider === PROVIDER_ROUTES_KEY || typeof models !== 'object' || models === null || Array.isArray(models)) continue
     const entries: Record<string, ProviderPricingEntry> = {}
     for (const [model, raw] of Object.entries(models)) {
       if (model === '' || typeof raw !== 'object' || raw === null) continue
@@ -434,33 +495,61 @@ export function coerceManualProviderPricing(value: unknown): ProviderPricingTabl
   return table
 }
 
-/** Read the hand-edited `provider-pricing.json` into the two-level table. */
-export async function readManualProviderPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ProviderPricingTable> {
-  return coerceManualProviderPricing(await readJsonFile(dir, PROVIDER_PRICING_FILE, logger))
+/** Read the hand-edited `provider-pricing.json` (entries + `$routes`). */
+export async function readManualProviderOverlay(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ManualProviderOverlay> {
+  const raw = await readJsonFile(dir, PROVIDER_PRICING_FILE, logger)
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { table: {}, routes: {} }
+  return {
+    table: coerceManualProviderPricing(raw),
+    routes: coerceProviderAliases((raw as Record<string, unknown>)[PROVIDER_ROUTES_KEY]),
+  }
+}
+
+/** Apply route aliases to a merged overlay: an aliased route inherits its
+ *  target's entries, while the route's OWN entries (hand or mirror) win — an
+ *  explicit per-route entry is the escape hatch that overrides the group.
+ *  Computed against the UN-aliased table, so the result is order-independent
+ *  and alias chains never apply (one hop, by construction). */
+export function applyProviderAliases(table: ProviderPricingTable, routes: ProviderAliasMap): ProviderPricingTable {
+  const aliased = Object.entries(routes)
+  if (aliased.length === 0) return table
+  const out: ProviderPricingTable = { ...table }
+  for (const [route, target] of aliased) {
+    if (route === target) continue
+    const inherited = table[target]
+    if (inherited === undefined) continue
+    const own = table[route]
+    out[route] = own === undefined ? { ...inherited } : { ...inherited, ...own }
+  }
+  return out
 }
 
 /** Read the EFFECTIVE provider overlay: the synced cloud mirror as the base,
  * the hand-edited `provider-pricing.json` layered on top — a manual entry
- * wins wholesale for that exact (provider, model). Absent files read as empty,
- * so a broken table never blocks the route. */
+ * wins wholesale for that exact (provider, model) — then route aliases
+ * materialized, so every lookup can stay a plain `providers[route][model]`.
+ * Absent files read as empty, so a broken table never blocks the route. */
 export async function readProviderPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ProviderPricingTable> {
-  const merged: ProviderPricingTable = { ...await readSyncedProviderPricing(dir, logger) }
-  const manual = await readManualProviderPricing(dir, logger)
-  for (const [provider, entries] of Object.entries(manual)) {
+  const merged: ProviderPricingTable = { ...(await readSyncedProviderPricing(dir, logger)).table }
+  const manual = await readManualProviderOverlay(dir, logger)
+  for (const [provider, entries] of Object.entries(manual.table)) {
     merged[provider] = { ...merged[provider], ...entries }
   }
-  return merged
+  return applyProviderAliases(merged, manual.routes)
 }
 
-async function readSyncedProviderPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ProviderPricingTable> {
+async function readSyncedProviderPricing(
+  dir: string,
+  logger: { error(...args: unknown[]): void } = console,
+): Promise<{ table: ProviderPricingTable; labels: Record<string, string> }> {
   const raw = await readJsonFile(dir, PROVIDER_PRICING_CCSA_FILE, logger)
-  if (raw === null) return {}
+  if (raw === null) return { table: {}, labels: {} }
   const coerced = coerceProviderPricing(raw)
   if (coerced === null) {
     logger.error(`[tokbook] ${PROVIDER_PRICING_CCSA_FILE} is not a valid RMB provider overlay; treating as absent`)
-    return {}
+    return { table: {}, labels: {} }
   }
-  return coerced
+  return { table: coerced, labels: coerceProviderLabels(raw) }
 }
 
 /** Build the provider-overlay rows the 价格表 tab renders for its provider
@@ -473,23 +562,33 @@ async function readSyncedProviderPricing(dir: string, logger: { error(...args: u
  *  number it inherits instead of only naming the model it follows. */
 export async function readProviderPricingView(
   dir: string,
+  usedProviders: Iterable<string> = [],
   logger: { error(...args: unknown[]): void } = console,
-): Promise<{ rows: ProviderPricingViewRow[]; dataDir: string }> {
+): Promise<{ rows: ProviderPricingViewRow[]; dataDir: string; routes: ProviderAliasMap; names: string[]; labels: Record<string, string> }> {
   const rows: ProviderPricingViewRow[] = []
   const seen = new Set<string>()
-  const manual = await readManualProviderPricing(dir, logger)
-  const synced = await readSyncedProviderPricing(dir, logger)
+  const manual = await readManualProviderOverlay(dir, logger)
+  const { table: synced, labels } = await readSyncedProviderPricing(dir, logger)
   // The merged overlay + merged base table price every row through the same
-  // dual-dimension chain the cost layer uses.
-  const overlay: ProviderPricingTable = { ...synced }
-  for (const [provider, entries] of Object.entries(manual)) overlay[provider] = { ...overlay[provider], ...entries }
+  // dual-dimension chain the cost layer uses; aliases are materialized so an
+  // inherited row prices exactly like the canonical row it follows.
+  const merged: ProviderPricingTable = { ...synced }
+  for (const [provider, entries] of Object.entries(manual.table)) merged[provider] = { ...merged[provider], ...entries }
+  const overlay = applyProviderAliases(merged, manual.routes)
   const base = await readPricingTable(dir, logger)
-  const toRow = (provider: string, model: string, entry: ProviderPricingEntry, manualRow: boolean): ProviderPricingViewRow => {
+  const toRow = (
+    provider: string,
+    model: string,
+    entry: ProviderPricingEntry,
+    manualRow: boolean,
+    via?: string,
+  ): ProviderPricingViewRow => {
     const rules = effectiveRatesOf(base, overlay, provider, model)
     return {
       provider,
       model,
       manual: manualRow,
+      ...(via !== undefined ? { via } : {}),
       ...(entry.billing !== undefined ? { billing: entry.billing } : {}),
       ...(entry.inheritBase !== undefined ? { inheritBase: entry.inheritBase } : {}),
       ...(entry.segments !== undefined ? { segments: entry.segments } : {}),
@@ -498,7 +597,7 @@ export async function readProviderPricingView(
       ...(rules !== null ? { rules, now: nowOf(rules) } : {}),
     }
   }
-  for (const [provider, entries] of Object.entries(manual)) {
+  for (const [provider, entries] of Object.entries(manual.table)) {
     for (const [model, entry] of Object.entries(entries)) {
       rows.push(toRow(provider, model, entry, true))
       seen.add(`${provider}\n${model}`)
@@ -508,31 +607,85 @@ export async function readProviderPricingView(
     for (const [model, entry] of Object.entries(entries)) {
       if (seen.has(`${provider}\n${model}`)) continue // hand row shadows the mirror row
       rows.push(toRow(provider, model, entry, false))
+      seen.add(`${provider}\n${model}`)
+    }
+  }
+  // A route following another: synthesize the rows it inherits, so the tab
+  // shows what that route actually pays and where to go edit it. A model the
+  // route defines itself was already emitted above and is left alone.
+  for (const [route, target] of Object.entries(manual.routes)) {
+    if (route === target) continue
+    const inherited = merged[target]
+    if (inherited === undefined) continue
+    for (const [model, entry] of Object.entries(inherited)) {
+      if (seen.has(`${route}\n${model}`)) continue
+      rows.push(toRow(route, model, entry, false, target))
+      seen.add(`${route}\n${model}`)
     }
   }
   rows.sort((a, b) =>
     a.provider < b.provider ? -1 : a.provider > b.provider ? 1
       : a.model < b.model ? -1 : a.model > b.model ? 1 : 0)
-  return { rows, dataDir: dir }
+  // Every route the tab can offer as an alias target: mirror/hand keys, alias
+  // sources and targets, and the routes the ledger billed (a brand-new key has
+  // no entries yet, so the ledger is the only place it appears).
+  const names = [...new Set([
+    ...Object.keys(merged),
+    ...Object.keys(manual.routes),
+    ...Object.values(manual.routes),
+    ...usedProviders,
+  ])].filter(name => name !== '').sort((a, b) => a.localeCompare(b))
+  return { rows, dataDir: dir, routes: manual.routes, names, labels }
 }
 
 /** Outcome of validating a client-submitted manual provider-overlay body. */
 export type ManualProviderPricingParse =
-  | { ok: true; table: ProviderPricingTable }
+  | { ok: true; table: ProviderPricingTable; routes: ProviderAliasMap }
   | { ok: false; error: string }
 
+/** Validate the `$routes` section of a submitted overlay body: route → the
+ *  route it follows. Strict like the rest of the write path: one hop only
+ *  (the target must not itself be an alias), never itself, non-empty names. */
+function parseProviderAliasesInput(value: unknown): { ok: true; routes: ProviderAliasMap } | { ok: false; error: string } {
+  if (value === undefined) return { ok: true, routes: {} }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: `${PROVIDER_ROUTES_KEY} 必须是对象（路由 → 它跟随的路由）` }
+  }
+  const raw = value as Record<string, unknown>
+  const routes: ProviderAliasMap = {}
+  for (const [route, target] of Object.entries(raw)) {
+    if (route === '') return { ok: false, error: `${PROVIDER_ROUTES_KEY} 下存在空路由名` }
+    if (route.length > 128) return { ok: false, error: `路由名过长：${route.slice(0, 40)}…` }
+    if (typeof target !== 'string' || target === '') {
+      return { ok: false, error: `「${route}」跟随的路由名必须是非空字符串` }
+    }
+    if (target.length > 128) return { ok: false, error: `「${route}」跟随的路由名过长：${target.slice(0, 40)}…` }
+    if (target === route) return { ok: false, error: `「${route}」不能跟随自己` }
+    // One hop: following a route that itself follows another would make the
+    // resolution order matter, so it is refused rather than silently flattened.
+    if (target in raw) return { ok: false, error: `「${route}」跟随的「${target}」自己也在跟随别的路由（只允许一跳）` }
+    routes[route] = target
+  }
+  return { ok: true, routes }
+}
+
 /** Validate a manual provider-overlay body (as sent by the 价格表 tab) into
- *  the two-level table. The body is the COMPLETE desired manual overlay
- *  (`provider` → `model` → entry), whole-table semantics like the model-level
- *  manual file: an omitted (provider, model) drops its override. A malformed
- *  body is REJECTED with a reason — this is the write path, where a typo must
- *  surface. The empty object is valid: it removes every manual override. */
+ *  the two-level table plus its route aliases. The body is the COMPLETE
+ *  desired manual overlay (`provider` → `model` → entry, plus the reserved
+ *  `$routes` key), whole-table semantics like the model-level manual file: an
+ *  omitted (provider, model) drops its override. A malformed body is REJECTED
+ *  with a reason — this is the write path, where a typo must surface. The
+ *  empty object is valid: it removes every manual override and alias. */
 export function parseManualProviderPricingInput(value: unknown): ManualProviderPricingParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: '手工 provider 覆盖必须是 JSON 对象（provider → model → 条目）' }
   }
+  const raw = value as Record<string, unknown>
+  const aliases = parseProviderAliasesInput(raw[PROVIDER_ROUTES_KEY])
+  if (!aliases.ok) return aliases
   const table: ProviderPricingTable = {}
-  for (const [provider, models] of Object.entries(value)) {
+  for (const [provider, models] of Object.entries(raw)) {
+    if (provider === PROVIDER_ROUTES_KEY) continue
     if (provider === '') return { ok: false, error: '存在空 provider 名' }
     if (provider.length > 128) return { ok: false, error: `provider 名过长：${provider.slice(0, 40)}…` }
     if (typeof models !== 'object' || models === null || Array.isArray(models)) {
@@ -584,7 +737,7 @@ export function parseManualProviderPricingInput(value: unknown): ManualProviderP
     }
     if (Object.keys(entries).length > 0) table[provider] = entries
   }
-  return { ok: true, table }
+  return { ok: true, table, routes: aliases.routes }
 }
 
 function parseProviderSegment(value: unknown): PricingSegment | null {
@@ -605,17 +758,20 @@ function parseProviderSegment(value: unknown): PricingSegment | null {
 }
 
 /** Persist the hand-edited `provider-pricing.json` atomically (temp file +
- *  rename; the same recipe the other writers use). Replaces the whole file. */
-export async function writeManualProviderPricing(
+ *  rename; the same recipe the other writers use). Replaces the whole file;
+ *  the `$routes` section is written only when there are aliases. */
+export async function writeManualProviderOverlay(
   dir: string,
-  table: ProviderPricingTable,
+  overlay: ManualProviderOverlay,
   logger: { error(...args: unknown[]): void } = console,
 ): Promise<void> {
+  const file: Record<string, unknown> = { ...overlay.table }
+  if (Object.keys(overlay.routes).length > 0) file[PROVIDER_ROUTES_KEY] = overlay.routes
   const target = join(dir, PROVIDER_PRICING_FILE)
   const tmp = join(dir, `${PROVIDER_PRICING_FILE}.tmp`)
   try {
     await mkdir(dirname(target), { recursive: true })
-    await writeFile(tmp, `${JSON.stringify(table, null, 2)}\n`, 'utf8')
+    await writeFile(tmp, `${JSON.stringify(file, null, 2)}\n`, 'utf8')
     await unlink(target).catch(() => undefined)
     await rename(tmp, target)
   } catch (error) {
@@ -1289,7 +1445,9 @@ export async function readPricingView(
   usedModels: ReadonlyMap<string, UsedModelHint> = new Map(),
   logger: { error(...args: unknown[]): void } = console,
 ): Promise<{ rows: PricingViewRow[]; dataDir: string }> {
-  const synced = await readSyncedPricing(dir, logger)
+  const feed = await readCloudFeed(dir, logger)
+  const synced = feed === null ? {} : cloudToTable(feed)
+  const families = feed === null ? {} : cloudFamilies(feed)
   const manual = await readManualPricing(dir, logger)
   const rows: PricingViewRow[] = []
   const seen = new Set<string>()
@@ -1345,6 +1503,7 @@ export async function readPricingView(
       manual: false,
       cloudRules: rates,
       cloudRates: rates.base,
+      ...(families[model] !== undefined ? { family: families[model] } : {}),
       ...(isLayeredRules(rates) ? { layered: true } : {}),
       ...recordsOf(model),
       now: nowOf(rates),
@@ -1353,8 +1512,12 @@ export async function readPricingView(
   return { rows, dataDir: dir }
 }
 
+async function readCloudFeed(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<CloudPricingData | null> {
+  return coerceCloudPricing(await readJsonFile(dir, PRICING_CCSA_FILE, logger))
+}
+
 async function readSyncedPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<PricingTable> {
-  const feed = coerceCloudPricing(await readJsonFile(dir, PRICING_CCSA_FILE, logger))
+  const feed = await readCloudFeed(dir, logger)
   return feed === null ? {} : cloudToTable(feed)
 }
 

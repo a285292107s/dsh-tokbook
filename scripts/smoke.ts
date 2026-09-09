@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
-import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, PRICING_FILE, coerceProviderPricing, readProviderPricing, resolvePriced, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE } from '../src/pricing.ts'
+import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, PRICING_FILE, coerceProviderPricing, coerceProviderLabels, readProviderPricing, resolvePriced, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE, PROVIDER_PRICING_FILE, PROVIDER_ROUTES_KEY, applyProviderAliases, coerceProviderAliases, parseManualProviderPricingInput, readManualProviderOverlay, readProviderPricingView, writeManualProviderOverlay } from '../src/pricing.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
@@ -85,9 +85,11 @@ console.log('manual pricing file write/read/merge/view')
       currency: 'RMB',
       models: [
         { modelId: 'deepseek-chat', inputCostPerMillion: 2, outputCostPerMillion: 8, cacheReadCostPerMillion: 0.5, cacheCreationCostPerMillion: 0,
+          family: 'deepseek',
           dailySlots: [{ label: 'peak', windows: [{ startMinute: 540, endMinute: 720 }], inputCostPerMillion: 4, outputCostPerMillion: 16 }],
           contextTiers: [], timeRules: [], aliases: ['deepseek-chat-v3'] },
         { modelId: 'deepseek-reasoner', inputCostPerMillion: 4, outputCostPerMillion: 16, cacheReadCostPerMillion: 1, cacheCreationCostPerMillion: 0,
+          family: 'deepseek',
           dailySlots: [], contextTiers: [], timeRules: [], aliases: [] },
         { modelId: 'gpt-5.6-luna', inputCostPerMillion: 3, outputCostPerMillion: 12, cacheReadCostPerMillion: 0, cacheCreationCostPerMillion: 0,
           dailySlots: [], contextTiers: [], timeRules: [], aliases: [] },
@@ -97,6 +99,11 @@ console.log('manual pricing file write/read/merge/view')
     await writeFile(join(dir, PRICING_CCSA_FILE), JSON.stringify(feed), 'utf8')
     const view0 = await readPricingView(dir, new Map(), { error: () => {} })
     check('empty manual file → view has only cloud rows', view0.rows.length === 4, `got ${view0.rows.length}`)
+    // The cloud feed's vendor grouping rides along on every cloud key, aliases
+    // included; a model the feed does not name carries no family at all.
+    check('cloud row carries its family', view0.rows.find(r => r.model === 'deepseek-chat')?.family === 'deepseek')
+    check('alias carries its model\'s family', view0.rows.find(r => r.model === 'deepseek-chat-v3')?.family === 'deepseek')
+    check('unnamed cloud row has no family', view0.rows.find(r => r.model === 'gpt-5.6-luna')?.family === undefined)
     // Write a manual entry for one flat cloud model and one brand-new model.
     const parsed = parseManualPricingInput({
       'deepseek-reasoner': { inputPerMillion: 4.5, outputPerMillion: 18 },
@@ -840,6 +847,93 @@ console.log('provider overlay file round-trip')
     // A provider entry with neither inheritBase nor segments is dropped.
     const junk = coerceProviderPricing({ currency: 'RMB', providers: [{ provider: 'p', entries: [{ model: 'm', note: 'nothing' }] }] })
     check('bare provider entry rejected', junk !== null && junk['p'] === undefined)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+console.log('provider route aliases (同价通道)')
+{
+  const dir = await mkdtemp(join(tmpdir(), 'tokbook-alias-'))
+  try {
+    // The base table prices the two models the overlay follows.
+    await writeFile(join(dir, PRICING_CCSA_FILE), JSON.stringify({
+      version: 1,
+      updatedAt: 0,
+      currency: 'RMB',
+      models: [
+        { modelId: 'deepseek-v4-flash', inputCostPerMillion: 1, outputCostPerMillion: 4 },
+        { modelId: 'glm-5.3-flash', inputCostPerMillion: 0.8, outputCostPerMillion: 2.8 },
+      ],
+    }), 'utf8')
+    // Mirror: the canonical subscription route, plus a second route of the same
+    // plan the feed happens to name itself (its explicit entry must keep winning).
+    await writeFile(join(dir, PROVIDER_PRICING_CCSA_FILE), JSON.stringify({
+      version: 1,
+      updatedAt: 0,
+      currency: 'RMB',
+      providers: [
+        {
+          provider: 'opencode-go',
+          label: 'OpenCode Go 订阅',
+          billing: 'subscription',
+          entries: [
+            { model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' },
+            { model: 'glm-5.3-flash', inheritBase: 'glm-5.3-flash' },
+          ],
+        },
+        { provider: 'opencode-go-2', entries: [{ model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash' }] },
+      ],
+    }), 'utf8')
+
+    // Write path: strict validation, one hop only.
+    const okParse = parseManualProviderPricingInput({ [PROVIDER_ROUTES_KEY]: { 'opencode-go-3': 'opencode-go' } })
+    check('alias body parses', okParse.ok && okParse.routes['opencode-go-3'] === 'opencode-go' && Object.keys(okParse.table).length === 0)
+    check('self alias rejected', !parseManualProviderPricingInput({ [PROVIDER_ROUTES_KEY]: { a: 'a' } }).ok)
+    check('alias chain rejected (one hop)', !parseManualProviderPricingInput({ [PROVIDER_ROUTES_KEY]: { a: 'b', b: 'c' } }).ok)
+    check('non-string alias target rejected', !parseManualProviderPricingInput({ [PROVIDER_ROUTES_KEY]: { a: 42 } }).ok)
+    check('lenient read drops self/invalid pairs', JSON.stringify(coerceProviderAliases({ a: 'b', c: 'c', d: 1, '': 'x' })) === '{"a":"b"}')
+
+    // Materialization precedence: exact entry > inherited; one hop by construction.
+    const applied = applyProviderAliases(
+      { A: { m1: { inheritBase: 'm1' }, m2: { inheritBase: 'm2' } }, B: { m1: { inheritBase: 'own' } } },
+      { B: 'A', C: 'B' },
+    )
+    check('alias inherits the target entries', applied['C']?.['m1']?.inheritBase === 'own')
+    check('exact route entry beats the alias', applied['B']?.['m1']?.inheritBase === 'own' && applied['B']?.['m2']?.inheritBase === 'm2')
+    check('one hop only: C follows B, never A through B', applied['C']?.['m2'] === undefined)
+
+    // File round-trip: `$routes` survives the atomic write.
+    await writeManualProviderOverlay(dir, {
+      table: { 'opencode-go-3': { 'deepseek-v4-flash': { billing: 'subscription', inheritBase: 'deepseek-v4-flash' } } },
+      routes: { 'opencode-go-3': 'opencode-go' },
+    }, { error: () => {} })
+    const file = JSON.parse(await readFile(join(dir, PROVIDER_PRICING_FILE), 'utf8')) as Record<string, unknown>
+    check('hand file keeps $routes', JSON.stringify(file[PROVIDER_ROUTES_KEY]) === '{"opencode-go-3":"opencode-go"}')
+    const overlay = await readManualProviderOverlay(dir, { error: () => {} })
+    check('overlay reads both halves', overlay.routes['opencode-go-3'] === 'opencode-go' && overlay.table['opencode-go-3']?.['deepseek-v4-flash']?.billing === 'subscription')
+
+    // Effective table: the aliased route prices like its target, its own entry
+    // still wins, and the mirror's explicit second-route entry is untouched.
+    const effective = await readProviderPricing(dir, { error: () => {} })
+    check('alias route inherits the mirror entry', effective['opencode-go-3']?.['glm-5.3-flash']?.inheritBase === 'glm-5.3-flash')
+    check('alias route keeps its own entry', effective['opencode-go-3']?.['deepseek-v4-flash']?.billing === 'subscription')
+    check('a mirror entry for the route itself still wins', effective['opencode-go-2']?.['deepseek-v4-flash']?.billing === 'metered')
+    const priced = resolvePriced(await readPricingTable(dir, { error: () => {} }), effective, 'opencode-go-3', 'glm-5.3-flash', dayMillis('2026-08-17', 9), 0)
+    check('aliased route bills like the canonical route', priced.source === 'inheritBase' && priced.billing === 'subscription' && priced.prices.inputPerMillion === 0.8, JSON.stringify(priced))
+
+    // View: inherited rows are marked, and every known route is offered.
+    const view = await readProviderPricingView(dir, ['opencode-go-2'], { error: () => {} })
+    check('view echoes the aliases', view.routes['opencode-go-3'] === 'opencode-go')
+    check('view names the ledger route too', view.names.includes('opencode-go-2') && view.names.includes('opencode-go-3'))
+    check('view carries the mirror labels', view.labels['opencode-go'] === 'OpenCode Go 订阅' && view.labels['opencode-go-2'] === undefined)
+    check('labels coerce leniently', JSON.stringify(coerceProviderLabels({
+      providers: [{ provider: 'a', label: 'A' }, { provider: '', label: 'x' }, { provider: 'b' }, { provider: 'c', label: '' }],
+    })) === '{"a":"A"}')
+    const inherited = view.rows.find(row => row.provider === 'opencode-go-3' && row.model === 'glm-5.3-flash')
+    check('inherited row carries via + a resolved price', inherited?.via === 'opencode-go' && inherited.now?.rates.inputPerMillion === 0.8, JSON.stringify(inherited))
+    const ownRow = view.rows.find(row => row.provider === 'opencode-go-3' && row.model === 'deepseek-v4-flash')
+    check('own row is not marked via', ownRow !== undefined && ownRow.via === undefined)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

@@ -32,7 +32,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { BillingNature, DailySlot, ModelPricing, ModelRates, PricingNow, PricingView, PricingViewRow, ProviderPricingTable, ProviderPricingViewRow, TimeRule } from '../types.ts'
+import type { BillingNature, ChannelUsageRow, DailySlot, ModelPricing, ModelRates, PricingNow, PricingView, PricingViewRow, ProviderAliasMap, ProviderPricingTable, ProviderPricingViewRow, TimeRule } from '../types.ts'
 
 /** Blank editable rate slate (undefined = leave the field out on save). */
 interface DraftRates {
@@ -103,22 +103,34 @@ export interface PricingPanelProps {
  */
 interface StagedModelDrafts {
   rows: readonly EditableRow[]
-  baseline: string
+  baseline: ReadonlyMap<string, string>
+  /** The channel lens travels with the drafts so a rehydrated panel still
+   *  groups 在用 by provider instead of silently falling back to a flat list. */
+  channels: readonly ChannelUsageRow[]
+  labels: Record<string, string>
 }
 let stagedModelDrafts: StagedModelDrafts | null = null
 
 interface StagedProviderDrafts {
   rows: readonly ProviderPricingViewRow[]
   drafts: ReadonlyMap<string, ProviderDraft>
-  baseline: string
+  baseline: ReadonlyMap<string, string>
+  aliases: ReadonlyMap<string, string>
+  /** Signature of the loaded aliases, for the staged-alias dirty check. */
+  aliasBaseline: string
+  /** Every route the tab can offer in the alias / override pickers. */
+  names: readonly string[]
+  /** Every model id the base table knows, offered by the 跟随官方价 field. */
+  modelNames: readonly string[]
 }
 let stagedProviderDrafts: StagedProviderDrafts | null = null
 
 /** Which editing surface the tab shows. */
 type PricingMode = 'model' | 'provider'
 
-/** Which slice of the model list the toolbar narrows to. */
-export type ModelScope = 'manual' | 'used' | 'unpriced' | 'cloud' | null
+/** Which slice of the model list the toolbar narrows to. `null` = 全部 (the
+ *  grouped view: hand prices / ledger-unpriced / cloud reference). */
+export type ModelScope = 'used' | 'unpriced' | null
 
 const BLANK_RATES: DraftRates = { input: '', output: '', cacheRead: '', cacheWrite: '' }
 
@@ -294,6 +306,26 @@ function composeRules(rules: readonly DraftRule[]): Array<Record<string, unknown
     }))
 }
 
+/** The staged draft as a `ModelRates` shape, so the READ-ONLY timeline can show
+ *  what a hand price looks like without turning the row into a form. Staged
+ *  values that do not parse read as ¥0 (the save path reports the real error). */
+function draftToRates(draft: ManualDraft): ModelRates {
+  return {
+    base: composeRates(draft.base) ?? { inputPerMillion: 0, outputPerMillion: 0 },
+    contextTiers: [],
+    dailySlots: composeSlots(draft.slots),
+    timeRules: [...draft.rules]
+      .sort((a, b) => ruleStartSec(a) - ruleStartSec(b))
+      .map(rule => ({
+        startTime: ruleStartSec(rule),
+        endTime: ruleEndSec(rule),
+        rates: composeRates(rule.rates) ?? { inputPerMillion: 0, outputPerMillion: 0 },
+        ...(rule.slots.length > 0 ? { dailySlots: composeSlots(rule.slots) } : {}),
+        ...(rule.label.trim() !== '' ? { label: rule.label.trim() } : {}),
+      })),
+  }
+}
+
 function composeEntry(draft: ManualDraft): Record<string, unknown> | null {
   const base = composeRates(draft.base)
   if (base === null) return null
@@ -318,12 +350,45 @@ function composeTable(rows: readonly EditableRow[]): Record<string, unknown> {
   return table
 }
 
-/** Signature of every staged hand draft, used for dirty tracking. It includes
- *  INVALID staged values (unlike the composed table, which drops them), so an
- *  incomplete row still marks the surface dirty and one 保存 press surfaces the
- *  validation error instead of leaving a disabled button. */
-function draftSignature(rows: readonly EditableRow[]): string {
-  return JSON.stringify(rows.filter(row => row.manual).map(row => ({ model: row.model, draft: row.draft })))
+/** How one row's staged state differs from the view it was loaded from. */
+type RowStatus = 'clean' | 'unsaved' | 'pending-delete'
+
+/** Signature of ONE staged hand draft, so a row can answer "am I unsaved?" on
+ *  its own. It includes INVALID staged values (unlike the composed table, which
+ *  drops them), so an incomplete row still counts as unsaved and one 保存 press
+ *  surfaces the validation error instead of leaving a disabled button. */
+function rowSignature(row: EditableRow): string {
+  return JSON.stringify(row.draft)
+}
+
+/** Per-model baseline signatures of the loaded/saved view. A map rather than
+ *  one whole-table string: row order never counts as an edit, and every row
+ *  carries its own dirty state instead of sharing one global flag. */
+function modelBaseline(rows: readonly EditableRow[]): ReadonlyMap<string, string> {
+  return new Map(rows.filter(row => row.manual).map(row => [row.model, rowSignature(row)]))
+}
+
+/** One row's staged state. An edited hand price is 未保存; a row whose baseline
+ *  hand price is staged for deletion (the user went back to 云端/未定价) is
+ *  待删除 — a staged deletion must be as visible as a staged edit. */
+function rowStatus(row: EditableRow, baseline: ReadonlyMap<string, string>): RowStatus {
+  const saved = baseline.get(row.model)
+  if (row.manual) return saved === rowSignature(row) ? 'clean' : 'unsaved'
+  return saved === undefined ? 'clean' : 'pending-delete'
+}
+
+/** The per-row staged marker, shown in the row header so an unsaved change is
+ *  visible without expanding the row. */
+function StagedTag({ staged }: { staged: RowStatus }) {
+  if (staged === 'clean') return null
+  return (
+    <span
+      className="dtpl-pricing-model-tag dtpl-pricing-model-tag-staged"
+      title={staged === 'pending-delete' ? '保存后这条手工价会被删除' : '这条改动还没有保存'}
+    >
+      {staged === 'pending-delete' ? '待删除' : '未保存'}
+    </span>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -553,16 +618,32 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
   onOpenProvider: (provider: string, model: string) => void
 }) {
   const [rows, setRows] = useState<readonly EditableRow[] | null>(() => stagedModelDrafts?.rows ?? null)
-  const [baseline, setBaseline] = useState(() => stagedModelDrafts?.baseline ?? '')
+  const [baseline, setBaseline] = useState<ReadonlyMap<string, string>>(() => stagedModelDrafts?.baseline ?? new Map())
+  // The channel lens of the 在用 view (one row per billed (provider, model)) and
+  // the mirror's provider labels; both absent on an older host, which makes the
+  // view fall back to the flat model list.
+  const [channels, setChannels] = useState<readonly ChannelUsageRow[] | null>(() => stagedModelDrafts?.channels ?? null)
+  const [labels, setLabels] = useState<Record<string, string>>(() => stagedModelDrafts?.labels ?? {})
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
   const [query, setQuery] = useState('')
   const [cloudOpen, setCloudOpen] = useState(false)
+  // Which vendor groups of the cloud reference list are expanded. Groups start
+  // collapsed (the list is a browse-only reference of ~185 rows); a search
+  // expands every group that still has matches.
+  const [openFamilies, setOpenFamilies] = useState<ReadonlySet<string>>(() => new Set())
   // The default view answers the tab's main question: what do the models the
   // ledger actually billed cost right now?
   const [scope, setScope] = useState<ModelScope>('used')
+  // One row is editable at a time (the same interaction the provider surface
+  // uses): the default state of a hand row is a READ-only summary, so looking
+  // at prices never means staring at input boxes.
+  const [editingModel, setEditingModel] = useState<string | null>(null)
   const [flashModel, setFlashModel] = useState<string | null>(null)
+  // Which provider route the flash should land on, when the 在用 view renders
+  // the same model string under several routes.
+  const [flashProvider, setFlashProvider] = useState<string | null>(null)
   const activeRef = useRef(0)
   const errorRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<readonly EditableRow[] | null>(rows)
@@ -580,11 +661,12 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
   useEffect(() => {
     if (flashModel === null) return
     const target = [...document.querySelectorAll<HTMLElement>('.dtpl-pricing-item')]
-      .find(element => element.dataset.pricingModel === flashModel)
+      .find(element => element.dataset.pricingModel === flashModel
+        && (flashProvider === null || element.dataset.pricingProvider === flashProvider))
     target?.scrollIntoView({ block: 'center' })
-    const timer = window.setTimeout(() => setFlashModel(null), 1500)
+    const timer = window.setTimeout(() => { setFlashModel(null); setFlashProvider(null) }, 1500)
     return () => { window.clearTimeout(timer) }
-  }, [flashModel])
+  }, [flashModel, flashProvider])
 
   const applyView = useCallback((view: PricingView) => {
     // Keep the rows the user had expanded across a save: a refresh must not
@@ -593,7 +675,9 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
     const openModels = new Set((rowsRef.current ?? []).filter(row => row.open).map(row => row.model))
     const next = view.rows.map(row => ({ ...rowOf(row), open: openModels.has(row.model) }))
     setRows(next)
-    setBaseline(draftSignature(next))
+    setBaseline(modelBaseline(next))
+    setChannels(view.channelRows ?? null)
+    setLabels(view.providerLabels ?? {})
   }, [])
 
   const load = useCallback(async () => {
@@ -633,6 +717,8 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
       open: true,
       draft: draftOf(row.origin.manualRules ?? row.origin.cloudRules),
     }))
+    setEditingModel(model)
+    setFlashProvider(null)
     setFlashModel(model)
   }, [updateRow])
 
@@ -643,6 +729,8 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
       open: false,
       draft: { base: { ...BLANK_RATES }, rules: [], slots: [] },
     }))
+    setEditingModel(current => current === model ? null : current)
+    setFlashProvider(null)
     setFlashModel(model)
   }, [updateRow])
 
@@ -650,24 +738,37 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
     updateRow(model, row => ({ ...row, open: !row.open }))
   }, [updateRow])
 
+  /** Enter edit mode on one row (expanding it, since the rule editor lives in
+   *  the detail area). */
+  const startEdit = useCallback((model: string) => {
+    setEditingModel(model)
+    updateRow(model, row => row.open ? row : { ...row, open: true })
+  }, [updateRow])
+
+  const stopEdit = useCallback(() => setEditingModel(null), [])
+
   const addRow = useCallback((model: string) => {
     setRows(current => current === null ? current : [
       { model, origin: { model, manual: true }, manual: true, open: true, draft: { base: { ...BLANK_RATES }, rules: [], slots: [] } },
       ...current,
     ])
-    // A brand-new model has no ledger records, so a "在用 / 未定价 / 云端" scope
-    // would hide it right after adding: widen to 手工价 when needed.
-    setScope(current => current === 'used' || current === 'unpriced' || current === 'cloud' ? 'manual' : current)
+    // A brand-new model has no ledger records, so a narrowed scope would hide
+    // it right after adding: widen to 全部.
+    setScope(current => current === 'used' || current === 'unpriced' ? null : current)
+    setEditingModel(model)
+    setFlashProvider(null)
     setFlashModel(model)
   }, [])
 
-  const dirty = rows !== null && draftSignature(rows) !== baseline
+  const dirty = rows !== null && rows.some(row => rowStatus(row, baseline) !== 'clean')
 
   // Cache only dirty state; a clean view is re-fetched on the next mount.
   useEffect(() => {
-    stagedModelDrafts = dirty && rows !== null ? { rows, baseline } : null
+    stagedModelDrafts = dirty && rows !== null
+      ? { rows, baseline, channels: channels ?? [], labels }
+      : null
     onDirtyChange(dirty)
-  }, [rows, baseline, dirty, onDirtyChange])
+  }, [rows, baseline, channels, labels, dirty, onDirtyChange])
 
   // A cross-tab jump (未定价 note) narrows this surface once, then clears.
   useEffect(() => {
@@ -687,6 +788,7 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
       if (problem !== null) {
         setError(problem)
         updateRow(row.model, current => ({ ...current, open: true }))
+        setEditingModel(row.model)
         return
       }
     }
@@ -721,16 +823,16 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
     const onKey = (event: KeyboardEvent): void => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
       event.preventDefault()
-      if (!saving && rows !== null && draftSignature(rows) !== baseline) void save()
+      if (!saving && dirty) void save()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [active, saving, rows, baseline, save])
+  }, [active, saving, dirty, save])
 
   // 在用 is a FILTER over the whole table, not a mutually exclusive group: the
   // models the ledger billed are the tab's main subject, and a row must not
-  // vanish from that view just because the user gave it a hand price. The
-  // other scopes keep the grouped layout (手工价 / 账本未定价 / 云端基准表).
+  // vanish from that view just because the user gave it a hand price. 全部 keeps
+  // the grouped layout (手工价 / 账本未定价 / 云端基准表).
   const manualRows = useMemo(() => rows === null ? [] : rows.filter(row => row.manual), [rows])
   const unpricedRows = useMemo(() => rows === null ? [] : rows.filter(row => !row.manual && row.origin.unpriced === true), [rows])
   const cloudRows = useMemo(() => rows === null ? [] : rows.filter(row => !row.manual && row.origin.unpriced !== true), [rows])
@@ -739,10 +841,8 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
   const q = query.trim().toLowerCase()
   const inScope = (row: EditableRow): boolean => {
     switch (scope) {
-      case 'manual': return row.manual
       case 'used': return (row.origin.records ?? 0) > 0
       case 'unpriced': return !row.manual && row.origin.unpriced === true
-      case 'cloud': return !row.manual && row.origin.unpriced !== true
       default: return true
     }
   }
@@ -758,26 +858,87 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
   const manualVisible = scoped.filter(row => row.manual)
   const unpricedVisible = scoped.filter(row => !row.manual && row.origin.unpriced === true)
   const cloudVisible = scoped.filter(row => !row.manual && row.origin.unpriced !== true)
-  // The bounded scroll exists only for the unfiltered/云端 browsing of hundreds
-  // of reference rows; a narrowed view is small and stays in the page flow.
-  const cloudBounded = scope === null || scope === 'cloud'
+  // The cloud reference list is grouped by the feed's vendor/family: the flat
+  // ~185-row dump was this tab's least scannable surface. Strings the feed does
+  // not name (e.g. overlay-priced aggregator strings) fall into 未标注厂商, last
+  // — deliberately not 其他, which is a real `family` value in the feed.
+  const cloudGroups = groupByFamily(cloudVisible)
+  // The bounded scroll exists only for the 全部 view's browsing of hundreds of
+  // reference rows; a narrowed view is small and stays in the page flow.
+  const cloudBounded = scope === null
   const cloudShown = cloudRows.length > 0 && cloudBounded
-  const cloudPaneOpen = cloudBounded ? (scope === 'cloud' || cloudOpen || q !== '') : true
+  const cloudPaneOpen = cloudBounded ? (cloudOpen || q !== '') : true
   const showOuterHeader = scope === 'used' ? usedList.length > 0 : manualVisible.length > 0 || unpricedVisible.length > 0
   const hasFilter = q !== '' || scope !== null
   const nothingVisible = scoped.length === 0
 
-  const toggleScope = useCallback((next: Exclude<ModelScope, null>) => {
-    setScope(current => current === next ? null : next)
-  }, [])
-
   const nowSec = Math.floor(Date.now() / 1000)
+  const rowsByModel = useMemo(() => new Map((rows ?? []).map(row => [row.model, row])), [rows])
+
+  // 在用's channel lens: one entry per billed (provider, model) route.
+  const channelsOfModel = useMemo(() => {
+    const map = new Map<string, ChannelUsageRow[]>()
+    for (const row of channels ?? []) {
+      const list = map.get(row.model)
+      if (list === undefined) map.set(row.model, [row])
+      else list.push(row)
+    }
+    return map
+  }, [channels])
+
+  /** The route whose row carries the EDITABLE price for a model string. The
+   *  model-layer price is global (one entry per string), so a string billed by
+   *  several routes must not offer an editor in each of them: prefer a route
+   *  that actually spends money (`metered`), then the one with the most
+   *  records, then the route key — a deterministic choice the user can see. */
+  const canonicalRoute = (model: string): string => {
+    const group = channelsOfModel.get(model) ?? []
+    const metered = group.filter(row => row.billing === 'metered')
+    const pool = metered.length > 0 ? metered : group
+    return [...pool].sort((a, b) => b.records - a.records || a.provider.localeCompare(b.provider))[0]?.provider ?? ''
+  }
+
+  const jumpToChannel = (model: string, provider: string): void => {
+    setFlashProvider(provider)
+    setFlashModel(model)
+  }
+
+  // One renderer for every model list (在用 / 手工价 / 未定价 / 云端厂商分组):
+  // the props are identical, only the React key prefix differs. `provider`
+  // marks the row as a channel row of the 在用 view (it disambiguates the same
+  // model string rendered under several routes).
+  const renderRow = (row: EditableRow, prefix: string, opts?: { provider?: string; sharedRoutes?: readonly string[] }) => (
+    <ModelRow
+      key={`${prefix}:${row.model}`}
+      row={row}
+      nowSec={nowSec}
+      flash={flashModel === row.model && (flashProvider === null || opts?.provider === flashProvider)}
+      staged={rowStatus(row, baseline)}
+      editing={editingModel === row.model}
+      {...(opts?.provider !== undefined ? { dataProvider: opts.provider } : {})}
+      {...(opts?.sharedRoutes !== undefined ? { sharedRoutes: opts.sharedRoutes } : {})}
+      onEdit={() => startEdit(row.model)}
+      onDone={stopEdit}
+      onToggle={() => toggleOpen(row.model)}
+      onPatchDraft={patch => patchDraft(row.model, patch)}
+      onRevert={() => revert(row.model)}
+      onCustomize={() => customize(row.model)}
+      onOpenProvider={() => onOpenProvider(row.origin.provider ?? '', row.model)}
+    />
+  )
+
+  // The 在用 view grouped by billing channel. Null when the host predates the
+  // channel lens (or the ledger has nothing in use) — the view then stays flat.
+  const usedGroups = scope !== 'used' || channels === null || channels.length === 0
+    ? null
+    : groupByProvider(usedList.flatMap(row => channelsOfModel.get(row.model) ?? []))
 
   return (
     <div className="dtpl-pricing-model-view">
       <p className="dtpl-pricing-intro">
-        金额按本机价格表逐条计价：<b>手工覆盖价优先</b>，云端基准表只作参考。手工条目可带
-        <b>调价时段</b>（限时/永久降价）与<b>峰谷时段</b>；写入即整体替换该模型的规则集，保存后全部历史按新价重算。
+        金额按本机价格表逐条计价：<b>你手工写的价优先</b>，云端基准表只作参考。展开一行看它
+        现在生效的价与时段；点「编辑」可以改四档单价，并加<b>限时/长期降价</b>与
+        <b>高峰时段</b>。保存后全部历史按新价重算。
       </p>
 
       {error !== null && (
@@ -790,20 +951,17 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
       {/* Toolbar: scope chips with live counts + a search input. */}
       <div className="dtpl-pricing-bar">
         <div className="dtpl-pricing-scopes" role="group" aria-label="显示范围">
-          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'manual'} onClick={() => toggleScope('manual')}>
-            手工价<span className="dtpl-pricing-scope-count">{manualRows.length}</span>
-          </button>
-          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'used'} onClick={() => toggleScope('used')}>
+          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'used'} onClick={() => setScope('used')}>
             在用<span className="dtpl-pricing-scope-count">{usedCount}</span>
           </button>
-          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'unpriced'} onClick={() => toggleScope('unpriced')}>
+          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'unpriced'} onClick={() => setScope('unpriced')}>
             未定价<span className="dtpl-pricing-scope-count">{unpricedRows.length}</span>
           </button>
-          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'cloud'} onClick={() => toggleScope('cloud')}>
-            云端<span className="dtpl-pricing-scope-count">{cloudRows.length}</span>
+          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === null} onClick={() => setScope(null)}>
+            全部<span className="dtpl-pricing-scope-count">{rows?.length ?? 0}</span>
           </button>
-          {hasFilter && (
-            <button type="button" className="dtpl-pricing-scope-reset" onClick={() => { setQuery(''); setScope(null); setCloudOpen(false) }}>
+          {(q !== '' || scope === 'unpriced') && (
+            <button type="button" className="dtpl-pricing-scope-reset" onClick={() => { setQuery(''); setScope('used'); setCloudOpen(false) }}>
               清除筛选
             </button>
           )}
@@ -848,19 +1006,60 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
                     {q !== '' ? `没有匹配「${query}」的在用模型。` : '账本还没有记过模型用量。'}
                     <button type="button" className="dtpl-pricing-empty-link" onClick={() => { setQuery(''); setScope(null) }}>浏览全部价表</button>
                   </p>
-                ) : usedList.map(row => (
-                  <ModelRow
-                    key={`u:${row.model}`}
-                    row={row}
-                    nowSec={nowSec}
-                    flash={flashModel === row.model}
-                    onToggle={() => toggleOpen(row.model)}
-                    onPatchDraft={patch => patchDraft(row.model, patch)}
-                    onRevert={() => revert(row.model)}
-                    onCustomize={() => customize(row.model)}
-                    onOpenProvider={() => onOpenProvider(row.origin.provider ?? '', row.model)}
-                  />
-                ))}
+                ) : usedGroups === null ? (
+                  // An older host does not send the channel lens: stay flat.
+                  usedList.map(row => renderRow(row, 'u'))
+                ) : (
+                  <div className="dtpl-pricing-chan-groups">
+                    {usedGroups.map(([provider, group]) => {
+                      const records = group.reduce((sum, row) => sum + row.records, 0)
+                      const billing = group[0]?.billing ?? 'metered'
+                      // A channel nothing prices is not "实际支出" — say 未定价
+                      // instead of claiming a spend bucket it cannot fill.
+                      const allUnpriced = group.every(row => row.unpriced === true)
+                      const name = provider === '' ? '(未知)' : labels[provider] ?? provider
+                      return (
+                        <section className="dtpl-pricing-chan-group" key={provider} data-provider={provider}>
+                          <div className="dtpl-pricing-chan-head">
+                            <span className="dtpl-pricing-chan-name">{name}</span>
+                            {labels[provider] !== undefined && provider !== '' && (
+                              <span className="dtpl-pricing-chan-route">{provider}</span>
+                            )}
+                            <span className={`dtpl-pricing-chan-billing dtpl-pricing-chan-billing-${allUnpriced ? 'unpriced' : billing}`}>
+                              {allUnpriced ? '未定价' : billing === 'subscription' ? '订阅价值' : '实际支出'}
+                            </span>
+                            <span className="dtpl-pricing-chan-meta">{group.length} 个模型 · {records} 条</span>
+                          </div>
+                          <div className="dtpl-pricing-chan-rows">
+                            {group.map((channel) => {
+                              const modelRow = rowsByModel.get(channel.model)
+                              if (modelRow === undefined) return null
+                              const shared = channelsOfModel.get(channel.model) ?? []
+                              const canonical = canonicalRoute(channel.model)
+                              if (channel.provider === canonical) {
+                                return renderRow(modelRow, `u-${provider}`, {
+                                  provider,
+                                  ...(shared.length > 1
+                                    ? { sharedRoutes: shared.filter(row => row.provider !== provider).map(row => row.provider) }
+                                    : {}),
+                                })
+                              }
+                              return (
+                                <SharedChannelRow
+                                  key={`s:${provider}:${channel.model}`}
+                                  channel={channel}
+                                  source={channelSourceTag(channel, modelRow)}
+                                  canonicalRoute={canonical}
+                                  onJump={() => jumpToChannel(channel.model, canonical)}
+                                />
+                              )
+                            })}
+                          </div>
+                        </section>
+                      )
+                    })}
+                  </div>
+                )}
                 <AddRow onAdd={addRow} />
               </>
             ) : (
@@ -869,43 +1068,19 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
                 {manualRows.length > 0 && (
                   <SectionHead title="手工价" count={manualRows.length} shown={manualVisible.length} tone="accent" hint="本机覆盖，保存后生效" />
                 )}
-                {manualVisible.map(row => (
-                  <ModelRow
-                    key={`m:${row.model}`}
-                    row={row}
-                    nowSec={nowSec}
-                    flash={flashModel === row.model}
-                    onToggle={() => toggleOpen(row.model)}
-                    onPatchDraft={patch => patchDraft(row.model, patch)}
-                    onRevert={() => revert(row.model)}
-                    onCustomize={() => customize(row.model)}
-                    onOpenProvider={() => onOpenProvider(row.origin.provider ?? '', row.model)}
-                  />
-                ))}
-                {scope === 'manual' && manualVisible.length === 0 && (
-                  <p className="dtpl-pricing-empty">还没有手工价。展开在用 / 未定价去「自定义 / 去定价」，或在下方输入模型串新增。</p>
+                {manualVisible.map(row => renderRow(row, 'm'))}
+                {scope === null && manualRows.length === 0 && (
+                  <p className="dtpl-pricing-empty">还没有手工价。在「在用 / 未定价」里点「自定义 / 去定价」，或在下方输入模型串新增。</p>
                 )}
 
                 {/* ── 新增模型 entry: starts an empty hand row. ── */}
-                {(scope === null || scope === 'manual') && <AddRow onAdd={addRow} />}
+                {scope !== 'unpriced' && <AddRow onAdd={addRow} />}
 
                 {/* ── ledger-billed, no model-layer entry, currently ¥0 ── */}
                 {unpricedRows.length > 0 && (
                   <SectionHead title="账本未定价" count={unpricedRows.length} shown={unpricedVisible.length} tone="warn" hint="按 ¥0 计，点「去定价」设置手工价" />
                 )}
-                {unpricedVisible.map(row => (
-                  <ModelRow
-                    key={`p:${row.model}`}
-                    row={row}
-                    nowSec={nowSec}
-                    flash={flashModel === row.model}
-                    onToggle={() => toggleOpen(row.model)}
-                    onPatchDraft={patch => patchDraft(row.model, patch)}
-                    onRevert={() => revert(row.model)}
-                    onCustomize={() => customize(row.model)}
-                    onOpenProvider={() => onOpenProvider(row.origin.provider ?? '', row.model)}
-                  />
-                ))}
+                {unpricedVisible.map(row => renderRow(row, 'p'))}
                 {scope === 'unpriced' && unpricedVisible.length === 0 && (
                   <p className="dtpl-pricing-empty">没有未定价的账本模型。</p>
                 )}
@@ -942,19 +1117,36 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
                         </div>
                         {cloudVisible.length === 0 ? (
                           <p className="dtpl-pricing-empty">{q !== '' ? `没有匹配「${query}」的云端模型。` : '没有符合条件的模型。'}</p>
-                        ) : cloudVisible.map(row => (
-                          <ModelRow
-                            key={`c:${row.model}`}
-                            row={row}
-                            nowSec={nowSec}
-                            flash={flashModel === row.model}
-                            onToggle={() => toggleOpen(row.model)}
-                            onPatchDraft={patch => patchDraft(row.model, patch)}
-                            onRevert={() => revert(row.model)}
-                            onCustomize={() => customize(row.model)}
-                            onOpenProvider={() => onOpenProvider(row.origin.provider ?? '', row.model)}
-                          />
-                        ))}
+                        ) : cloudGroups.map(([family, list]) => {
+                          const key = family === '' ? '__other__' : family
+                          // A search expands every group that still has matches.
+                          const open = q !== '' || openFamilies.has(key)
+                          return (
+                            <section className="dtpl-pricing-family-group" key={key} data-family={key}>
+                              <button
+                                type="button"
+                                className="dtpl-pricing-family-head"
+                                aria-expanded={open}
+                                aria-controls={`dtpl-fam-${cssId(key)}`}
+                                onClick={() => setOpenFamilies(current => {
+                                  const next = new Set(current)
+                                  if (next.has(key)) next.delete(key)
+                                  else next.add(key)
+                                  return next
+                                })}
+                              >
+                                <span className="dtpl-pricing-family-head-name">{family === '' ? '未标注厂商' : family}</span>
+                                <span className="dtpl-pricing-family-head-meta">{list.length} 个模型</span>
+                                <span className="dtpl-pricing-family-head-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+                              </button>
+                              {open && (
+                                <div className="dtpl-pricing-family-rows" id={`dtpl-fam-${cssId(key)}`}>
+                                  {list.map(row => renderRow(row, 'c'))}
+                                </div>
+                              )}
+                            </section>
+                          )
+                        })}
                       </div>
                     )}
                   </div>
@@ -967,10 +1159,7 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
               <p className="dtpl-pricing-empty">价格表为空（云端镜像可能尚未同步成功）。可以用下方输入框手工添加模型。</p>
             )}
             {rows.length > 0 && hasFilter && nothingVisible && scope !== 'used' && (
-              <p className="dtpl-pricing-empty">没有匹配「{query}」的模型。<button type="button" className="dtpl-pricing-empty-link" onClick={() => { setQuery(''); setScope(null) }}>清除筛选</button></p>
-            )}
-            {rows.length > 0 && scope === 'cloud' && cloudRows.length === 0 && (
-              <p className="dtpl-pricing-empty">云端基准表为空（镜像可能尚未同步成功）。</p>
+              <p className="dtpl-pricing-empty">没有匹配「{query}」的模型。<button type="button" className="dtpl-pricing-empty-link" onClick={() => { setQuery(''); setScope('used') }}>清除筛选</button></p>
             )}
           </div>
         </>
@@ -1013,16 +1202,84 @@ function SectionHead({ title, count, shown, tone, hint }: {
 }
 
 /**
- * One model row plus, when expanded, its price timeline. A hand row edits the
- * base slate in the four cells; a read-only row shows the price in force now.
- * The `当前` line appears whenever a timeline window or peak window decides the
- * price, so the base slate is never mistaken for the billed rate.
+ * One channel row of the 在用 view that is NOT the editable row for its model
+ * string. The price shown is this channel's own resolved price, but the entry
+ * the user can edit is the model-layer one — global, one per string — so the
+ * row is read-only, carries the 全局价 chip, and points at the route that holds
+ * the editor.
  */
-function ModelRow({ row, nowSec, flash, onToggle, onPatchDraft, onRevert, onCustomize, onOpenProvider }: {
+function SharedChannelRow({ channel, source, canonicalRoute, onJump }: {
+  channel: ChannelUsageRow
+  source: string
+  canonicalRoute: string
+  onJump: () => void
+}) {
+  const now = channel.now
+  const value = (field: keyof DraftRates): string => fmtRate(
+    field === 'input' ? now?.rates.inputPerMillion
+      : field === 'output' ? now?.rates.outputPerMillion
+        : field === 'cacheRead' ? now?.rates.cacheReadPerMillion
+          : now?.rates.cacheWritePerMillion,
+  )
+  return (
+    <div
+      className="dtpl-pricing-item dtpl-pricing-item-shared"
+      data-pricing-model={channel.model}
+      data-pricing-provider={channel.provider}
+    >
+      <div className={`dtpl-pricing-row${channel.unpriced === true ? ' dtpl-pricing-row-unpriced' : ''}`}>
+        <div className="dtpl-pricing-model">
+          <span className="dtpl-pricing-model-head">
+            <span className="dtpl-pricing-model-name" title={channel.model}>{channel.model}</span>
+            <span className="dtpl-pricing-model-tag">{source}</span>
+            <span
+              className="dtpl-pricing-global-chip"
+              title={`模型层价是全局的：这条串由 ${canonicalRoute} 下的那一行编辑，改动对所有通道生效`}
+            >全局价</span>
+            <span className="dtpl-pricing-used" title={`账本记过 ${String(channel.records)} 条`}>{channel.records} 条</span>
+          </span>
+        </div>
+        <div className="dtpl-pricing-rates">
+          {FIELD_ORDER.map(field => (
+            <RateCell key={field} field={field} editing={false} value={value(field)} onChange={() => {}} />
+          ))}
+        </div>
+        <div className="dtpl-pricing-actions">
+          <button
+            type="button"
+            className="dtpl-pricing-btn dtpl-pricing-custom"
+            onClick={onJump}
+            title={`模型层价在 ${canonicalRoute} 下编辑（改动对所有通道生效）`}
+          >改全局价</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One model row plus, when expanded, its price timeline. A hand row is a
+ * READ-ONLY summary until the user clicks 编辑 (one row at a time, the same
+ * interaction the provider surface uses); then its four cells become inputs and
+ * the detail area becomes the rule editor. The `当前` line appears whenever a
+ * timeline window or peak window decides the price, so the base slate is never
+ * mistaken for the billed rate.
+ */
+function ModelRow({ row, nowSec, flash, staged, editing, dataProvider, sharedRoutes, onToggle, onEdit, onDone, onPatchDraft, onRevert, onCustomize, onOpenProvider }: {
   row: EditableRow
   nowSec: number
   flash: boolean
+  staged: RowStatus
+  editing: boolean
+  /** Set on the 在用 view's channel rows: which route this row belongs to, so a
+   *  jump can land on the right one when the string is billed by several. */
+  dataProvider?: string
+  /** The OTHER routes billing this same string. Present when >1 route does:
+   *  the model-layer price edited here applies to all of them. */
+  sharedRoutes?: readonly string[]
   onToggle: () => void
+  onEdit: () => void
+  onDone: () => void
   onPatchDraft: (patch: (draft: ManualDraft) => ManualDraft) => void
   onRevert: () => void
   onCustomize: () => void
@@ -1031,14 +1288,17 @@ function ModelRow({ row, nowSec, flash, onToggle, onPatchDraft, onRevert, onCust
   const origin = row.origin
   const savedNow = origin.now ?? null
   const live = row.manual ? draftNow(row.draft) : savedNow
+  const editable = row.manual && editing
   const layered = row.manual
     ? row.draft.rules.length > 0 || row.draft.slots.length > 0
     : (origin.layered === true)
   const overlayPriced = origin.overlayPriced === true
-  const tag = row.manual ? '手工'
+  const tag = row.manual ? '手工价'
     : origin.unpriced === true ? `未定价${origin.records !== undefined && origin.records > 0 ? ` · ${String(origin.records)} 条` : ''}`
-      : overlayPriced ? `覆盖层定价${origin.provider !== undefined && origin.provider !== '' ? ` · ${origin.provider}` : ''}`
-        : origin.layered === true ? '云端分时/分档' : '云端'
+      // Inside a channel group the route is the group's own header, so the tag
+      // does not repeat it (that space goes to the model name instead).
+      : overlayPriced ? `覆盖层定价${dataProvider === undefined && origin.provider !== undefined && origin.provider !== '' ? ` · ${origin.provider}` : ''}`
+        : origin.layered === true ? '云端 · 分时' : '云端'
   // The base slate differs from the price in force → say which rule wins.
   const base = row.manual ? composeRates(row.draft.base) : origin.cloudRules?.base ?? null
   const usedRecords = origin.records
@@ -1061,6 +1321,7 @@ function ModelRow({ row, nowSec, flash, onToggle, onPatchDraft, onRevert, onCust
     <div
       className={`dtpl-pricing-item${row.manual ? ' dtpl-pricing-item-manual' : ''}${flash ? ' dtpl-pricing-item-flash' : ''}`}
       data-pricing-model={row.model}
+      {...(dataProvider !== undefined ? { 'data-pricing-provider': dataProvider } : {})}
     >
       <div className={`dtpl-pricing-row${row.manual ? ' dtpl-pricing-row-manual' : ''}${origin.unpriced === true ? ' dtpl-pricing-row-unpriced' : ''}${layered ? ' dtpl-pricing-row-layered' : ''}`}>
         <div className="dtpl-pricing-model">
@@ -1076,6 +1337,13 @@ function ModelRow({ row, nowSec, flash, onToggle, onPatchDraft, onRevert, onCust
             </button>
             <span className="dtpl-pricing-model-name" title={row.model}>{row.model}</span>
             <span className="dtpl-pricing-model-tag">{tag}</span>
+            {sharedRoutes !== undefined && sharedRoutes.length > 0 && (
+              <span
+                className="dtpl-pricing-global-chip"
+                title={`模型层价是全局的：另有 ${sharedRoutes.join('、')} 也按这条串计费，在这里改价对所有通道生效`}
+              >全局价 · 另 {sharedRoutes.length} 条通道</span>
+            )}
+            <StagedTag staged={staged} />
             {usedRecords !== undefined && usedRecords > 0 && !row.manual && origin.unpriced !== true && (
               <span className="dtpl-pricing-used" title={`账本记过 ${String(usedRecords)} 条`}>{usedRecords} 条</span>
             )}
@@ -1087,7 +1355,7 @@ function ModelRow({ row, nowSec, flash, onToggle, onPatchDraft, onRevert, onCust
             <RateCell
               key={field}
               field={field}
-              editing={row.manual}
+              editing={editable}
               value={row.manual ? row.draft.base[field] : fmtRate(field === 'input' ? savedNow?.rates.inputPerMillion : field === 'output' ? savedNow?.rates.outputPerMillion : field === 'cacheRead' ? savedNow?.rates.cacheReadPerMillion : savedNow?.rates.cacheWritePerMillion)}
               onChange={value => onPatchDraft(draft => ({ ...draft, base: { ...draft.base, [field]: value } }))}
             />
@@ -1095,16 +1363,18 @@ function ModelRow({ row, nowSec, flash, onToggle, onPatchDraft, onRevert, onCust
         </div>
         <div className="dtpl-pricing-actions">
           {row.manual ? (
-            <button type="button" className="dtpl-pricing-btn dtpl-pricing-remove" onClick={onRevert} title="删除手工覆盖，回到云端/未定价">删除覆盖</button>
+            editable
+              ? <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onDone}>完成</button>
+              : <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onEdit} title="编辑这条手工价：四档单价 + 限时降价 / 高峰时段">编辑</button>
           ) : origin.unpriced === true ? (
             <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onCustomize} title="此模型账本有记录但未定价，现按 ¥0 计。点击为它设置手工价">去定价</button>
           ) : overlayPriced ? (
             // A model-layer entry for this string would never be read (the
             // overlay entry wins), so send the user to the override instead of
             // offering an edit that cannot take effect.
-            <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onOpenProvider} title="由 Provider 覆盖层定价；点击跳到那条覆盖去编辑">到覆盖层编辑</button>
+            <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onOpenProvider} title="由 Provider 覆盖层定价；点击跳到那条覆盖去编辑">去覆盖层</button>
           ) : (
-            <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onCustomize} title="以当前规则集为底稿新增手工覆盖">自定义</button>
+            <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onCustomize} title="以当前规则集为底稿新增手工价">自定义</button>
           )}
         </div>
       </div>
@@ -1112,14 +1382,28 @@ function ModelRow({ row, nowSec, flash, onToggle, onPatchDraft, onRevert, onCust
       {row.open && (
         <div className="dtpl-pricing-detail">
           {row.manual ? (
-            <DraftRulesEditor draft={row.draft} onPatch={onPatchDraft} />
+            editable ? (
+              <>
+                <DraftRulesEditor draft={row.draft} onPatch={onPatchDraft} />
+                <div className="dtpl-pricing-detail-actions">
+                  <button type="button" className="dtpl-pricing-btn dtpl-pricing-remove" onClick={onRevert} title="删除这条手工价，回到云端/未定价">删除手工价</button>
+                </div>
+              </>
+            ) : (
+              <RuleTimeline
+                rules={draftToRates(row.draft)}
+                now={live}
+                nowSec={nowSec}
+                emptyHint="这条手工价只有一个价，没有限时降价或高峰时段。"
+              />
+            )
           ) : (
             <RuleTimeline
               rules={origin.manualRules ?? origin.cloudRules}
               now={savedNow}
               nowSec={nowSec}
               emptyHint={overlayPriced
-                ? `这个模型串由 Provider 覆盖层（${origin.provider !== undefined && origin.provider !== '' ? origin.provider : '—'}）定价，模型层没有条目；点「到覆盖层编辑」修改那条覆盖。`
+                ? `这个模型串由 Provider 覆盖层（${origin.provider !== undefined && origin.provider !== '' ? origin.provider : '—'}）定价，模型层没有条目；点「去覆盖层」修改那条覆盖。`
                 : origin.unpriced === true ? '这个模型串没有任何价格条目，当前按 ¥0 计价。' : undefined}
             />
           )}
@@ -1155,7 +1439,7 @@ function RateCell({ field, editing, value, onChange }: {
           onChange={event => onChange(event.target.value)}
         />
       ) : (
-        <span className="dtpl-pricing-rate" title={`${FIELD_LABELS[field]}（¥/百万词元）`}>{value}</span>
+        <span className="dtpl-pricing-rate" title={`${FIELD_LABELS[field]}（¥/百万词元）`}>{value === '' ? '—' : value}</span>
       )}
     </span>
   )
@@ -1202,7 +1486,7 @@ function DraftRulesEditor({ draft, onPatch }: {
 
   return (
     <div className="dtpl-pricing-rules">
-      <p className="dtpl-pricing-detail-hint">基础价 = 上方四档单价；下面是<b>调价时段</b>与<b>峰谷时段</b>（按本机时区）。</p>
+      <p className="dtpl-pricing-detail-hint">基础价 = 上方四档单价。下面可以加<b>限时/长期降价</b>和<b>高峰时段</b>（按本机时区）。</p>
 
       <div className="dtpl-pricing-rule-list">
         {draft.rules.map((rule, index) => (
@@ -1458,16 +1742,21 @@ function AddRow({ onAdd }: { onAdd: (model: string) => void }) {
   return (
     <div className="dtpl-pricing-row dtpl-pricing-row-add">
       <div className="dtpl-pricing-model">
-        <input
-          className="dtpl-pricing-search dtpl-pricing-name-input"
-          type="text"
-          placeholder="新增模型：输入账本里的精确模型串…"
-          value={name}
-          onChange={event => setName(event.target.value)}
-          onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); submit() } }}
-          aria-label="新增模型名"
-        />
-        <span className="dtpl-pricing-model-tag dtpl-pricing-model-tag-new">新增</span>
+        {/* The head wrapper is a ROW flex (name + tag side by side); without it
+            the column layout of .dtpl-pricing-model stacks the tag underneath
+            and stretches it across the whole track. */}
+        <span className="dtpl-pricing-model-head">
+          <input
+            className="dtpl-pricing-search dtpl-pricing-name-input"
+            type="text"
+            placeholder="新增模型：输入账本里的精确模型串…"
+            value={name}
+            onChange={event => setName(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); submit() } }}
+            aria-label="新增模型名"
+          />
+          <span className="dtpl-pricing-model-tag dtpl-pricing-model-tag-new">新增</span>
+        </span>
       </div>
       <div className="dtpl-pricing-rates" aria-hidden="true">
         <span /><span /><span /><span />
@@ -1518,11 +1807,11 @@ interface ProviderDraft {
 
 const providerKeyOf = (provider: string, model: string): string => `${provider}\n${model}`
 
-/** Signature of every staged overlay draft, for dirty tracking. Invalid staged
- *  values are included, so an incomplete override still marks the surface
- *  dirty and one 保存 press surfaces the validation error. */
-function providerSignature(drafts: ReadonlyMap<string, ProviderDraft>): string {
-  return JSON.stringify([...drafts.values()].map(draft => ({
+/** Signature of ONE staged overlay draft, so a row can answer "am I unsaved?"
+ *  on its own. Invalid staged values are included, so an incomplete override
+ *  still counts as unsaved and one 保存 press surfaces the validation error. */
+function providerDraftSignature(draft: ProviderDraft): string {
+  return JSON.stringify({
     key: draft.key,
     billing: draft.billing,
     source: draft.source,
@@ -1530,7 +1819,39 @@ function providerSignature(drafts: ReadonlyMap<string, ProviderDraft>): string {
     segments: draft.segments,
     note: draft.note,
     placeholder: draft.placeholder,
-  })))
+  })
+}
+
+/** Per-key baseline signatures of the loaded/saved overlay (see `modelBaseline`
+ *  for why this is a map rather than one whole-table string). */
+function providerBaseline(drafts: ReadonlyMap<string, ProviderDraft>): ReadonlyMap<string, string> {
+  return new Map([...drafts].map(([key, draft]) => [key, providerDraftSignature(draft)]))
+}
+
+/** One overlay row's staged state (see `rowStatus`). A draft with no baseline
+ *  is a new override; a baseline key with no draft is a staged deletion. */
+function providerRowStatus(key: string, draft: ProviderDraft | undefined, baseline: ReadonlyMap<string, string>): RowStatus {
+  const saved = baseline.get(key)
+  if (draft !== undefined) return saved === providerDraftSignature(draft) ? 'clean' : 'unsaved'
+  return saved === undefined ? 'clean' : 'pending-delete'
+}
+
+/** Whether the overlay holds staged changes. Iterates drafts ∪ baseline keys,
+ *  because deleting a draft can leave no row behind at all (an override the
+ *  mirror never named). */
+function providerDirty(drafts: ReadonlyMap<string, ProviderDraft>, baseline: ReadonlyMap<string, string>): boolean {
+  for (const [key, draft] of drafts) {
+    if (baseline.get(key) !== providerDraftSignature(draft)) return true
+  }
+  for (const key of baseline.keys()) {
+    if (!drafts.has(key)) return true
+  }
+  return false
+}
+
+/** Order-insensitive signature of a staged alias map (route → canonical). */
+function aliasSignature(aliases: ReadonlyMap<string, string>): string {
+  return JSON.stringify([...aliases].sort(([left], [right]) => left.localeCompare(right)))
 }
 
 /** Seed a draft from a mirror/hand row so the user can edit it in place. */
@@ -1603,11 +1924,11 @@ function providerSourceSummary(row: ProviderPricingViewRow): string {
       const rate = row.segments[0]!.rate
       return `固定价 入 ¥${fmtRate(rate.inputPerMillion)} · 出 ¥${fmtRate(rate.outputPerMillion)}`
     }
-    return `自定时间轴 ×${String(row.segments.length)}`
+    return `自己填价 · ${String(row.segments.length)} 段`
   }
-  if (row.placeholder === true) return '占位 = 官方价（待填真实价）'
-  if (row.inheritBase !== undefined) return `跟随基准 ${row.inheritBase}`
-  return '云端覆盖'
+  if (row.placeholder === true) return '先按官方价（还没填中转价）'
+  if (row.inheritBase !== undefined) return `跟随 ${row.inheritBase} 的价`
+  return '云端给的价'
 }
 
 /**
@@ -1626,7 +1947,14 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
 }) {
   const [rows, setRows] = useState<readonly ProviderPricingViewRow[] | null>(() => stagedProviderDrafts?.rows ?? null)
   const [drafts, setDrafts] = useState<ReadonlyMap<string, ProviderDraft>>(() => stagedProviderDrafts?.drafts ?? new Map())
-  const [baseline, setBaseline] = useState(() => stagedProviderDrafts?.baseline ?? '')
+  const [baseline, setBaseline] = useState<ReadonlyMap<string, string>>(() => stagedProviderDrafts?.baseline ?? new Map())
+  const [aliases, setAliases] = useState<ReadonlyMap<string, string>>(() => stagedProviderDrafts?.aliases ?? new Map())
+  const [aliasBaseline, setAliasBaseline] = useState(() => stagedProviderDrafts?.aliasBaseline ?? aliasSignature(new Map()))
+  const [names, setNames] = useState<readonly string[]>(() => stagedProviderDrafts?.names ?? [])
+  const [modelNames, setModelNames] = useState<readonly string[]>(() => stagedProviderDrafts?.modelNames ?? [])
+  const [aliasSource, setAliasSource] = useState('')
+  const [aliasTarget, setAliasTarget] = useState('')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const [error, setError] = useState<string | null>(null)
@@ -1634,10 +1962,13 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
   const [savedFlash, setSavedFlash] = useState(false)
   const activeRef = useRef(0)
 
-  const seed = useCallback((providerRows: readonly ProviderPricingViewRow[]) => {
+  const seed = useCallback((providerRows: readonly ProviderPricingViewRow[], routes: ProviderAliasMap) => {
     const next = new Map(providerRows.filter(row => row.manual).map(row => [providerKeyOf(row.provider, row.model), providerDraftOf(row)]))
+    const aliasMap = new Map(Object.entries(routes))
     setDrafts(next)
-    setBaseline(providerSignature(next))
+    setBaseline(providerBaseline(next))
+    setAliases(aliasMap)
+    setAliasBaseline(aliasSignature(aliasMap))
   }, [])
 
   const load = useCallback(async () => {
@@ -1646,11 +1977,18 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
     try {
       const res = await fetch('/tokbook/provider-pricing')
       if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
-      const payload = await res.json() as { providerRows?: ProviderPricingViewRow[] }
+      const payload = await res.json() as {
+        providerRows?: ProviderPricingViewRow[]
+        providerRoutes?: ProviderAliasMap
+        providerNames?: string[]
+        modelNames?: string[]
+      }
       if (token !== activeRef.current) return
       const providerRows = payload.providerRows ?? []
       setRows(providerRows)
-      seed(providerRows)
+      setNames(payload.providerNames ?? [])
+      setModelNames(payload.modelNames ?? [])
+      seed(providerRows, payload.providerRoutes ?? {})
       setCollapsed(new Set())
       setEditingKey(null)
     } catch (err) {
@@ -1666,11 +2004,16 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
     return () => { activeRef.current += 1 }
   }, [load])
 
-  // Deep link from a model row the overlay prices: open that exact override.
+  // Deep link from a model row the overlay prices: open that exact override. A
+  // row inherited through a route alias has no entry of its own, so the link
+  // lands on the canonical row instead — that is where its price lives.
   useEffect(() => {
     if (focus === null || rows === null) return
-    const row = rows.find(candidate => candidate.provider === focus.provider && candidate.model === focus.model)
-    if (row !== undefined) {
+    const found = rows.find(candidate => candidate.provider === focus.provider && candidate.model === focus.model)
+    if (found !== undefined) {
+      const row = found.via === undefined
+        ? found
+        : rows.find(candidate => candidate.provider === found.via && candidate.model === found.model) ?? found
       const key = providerKeyOf(row.provider, row.model)
       setDrafts(current => {
         if (current.has(key)) return current
@@ -1678,7 +2021,7 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
         next.set(key, providerDraftOf(row))
         return next
       })
-      setCollapsed(current => { const next = new Set(current); next.delete(focus.provider); return next })
+      setCollapsed(current => { const next = new Set(current); next.delete(row.provider); return next })
       setEditingKey(key)
       window.setTimeout(() => {
         const target = [...document.querySelectorAll<HTMLElement>('.dtpl-pricing-provider-row')]
@@ -1752,13 +2095,16 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
     })
   }, [])
 
-  const dirty = rows !== null && providerSignature(drafts) !== baseline
+  const aliasDirty = aliasSignature(aliases) !== aliasBaseline
+  const dirty = rows !== null && (providerDirty(drafts, baseline) || aliasDirty)
 
   // Cache only dirty state; a clean view is re-fetched on the next mount.
   useEffect(() => {
-    stagedProviderDrafts = dirty && rows !== null ? { rows, drafts, baseline } : null
+    stagedProviderDrafts = dirty && rows !== null
+      ? { rows, drafts, baseline, aliases, aliasBaseline, names, modelNames }
+      : null
     onDirtyChange(dirty)
-  }, [rows, drafts, baseline, dirty, onDirtyChange])
+  }, [rows, drafts, baseline, aliases, aliasBaseline, names, modelNames, dirty, onDirtyChange])
 
   const save = useCallback(async () => {
     const result = composeProviderTable(drafts)
@@ -1766,13 +2112,17 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
       setError(result.error)
       return
     }
+    // The wire body is the file shape: the entry map plus the reserved
+    // `$routes` alias section (`pricing.ts` PROVIDER_ROUTES_KEY).
+    const body: Record<string, unknown> = { ...result.table }
+    if (aliases.size > 0) body.$routes = Object.fromEntries(aliases)
     setSaving(true)
     setError(null)
     try {
       const res = await fetch('/tokbook/provider-pricing', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(result.table),
+        body: JSON.stringify(body),
       })
       const payload = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null
       if (!res.ok || payload === null || payload.ok !== true) {
@@ -1788,7 +2138,7 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
     } finally {
       setSaving(false)
     }
-  }, [drafts, onChanged, load])
+  }, [drafts, aliases, onChanged, load])
 
   // Ctrl/Cmd+S saves while this pane is the visible one.
   useEffect(() => {
@@ -1796,11 +2146,11 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
     const onKey = (event: KeyboardEvent): void => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
       event.preventDefault()
-      if (!saving && rows !== null && providerSignature(drafts) !== baseline) void save()
+      if (!saving && dirty) void save()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [active, saving, rows, drafts, baseline, save])
+  }, [active, saving, dirty, save])
 
   // Group rows by provider; hand rows first within each group. Hand rows the
   // mirror never named are synthesized so a new override is visible at once.
@@ -1831,7 +2181,61 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
     return out
   }, [rows, drafts])
 
-  const providerNames = useMemo(() => [...new Set((rows ?? []).map(row => row.provider))].sort((a, b) => a.localeCompare(b)), [rows])
+  const providerNames = useMemo(
+    () => [...new Set([...(rows ?? []).map(row => row.provider), ...names])].filter(name => name !== '').sort((a, b) => a.localeCompare(b)),
+    [rows, names],
+  )
+  // Alias pickers: a route can follow one other route, one hop only — so a
+  // route already following something is not a source, and a route someone
+  // already follows is not a source either (that would make a chain).
+  const aliasTargeted = useMemo(() => new Set(aliases.values()), [aliases])
+  const aliasSourceCandidates = useMemo(
+    () => names.filter(name => !aliases.has(name) && !aliasTargeted.has(name)),
+    [names, aliases, aliasTargeted],
+  )
+  const aliasTargetCandidates = useMemo(() => names.filter(name => !aliases.has(name)), [names, aliases])
+
+  const addAlias = useCallback((route: string, target: string) => {
+    if (route === '' || target === '' || route === target) return
+    setAliases(current => {
+      const next = new Map(current)
+      next.set(route, target)
+      return next
+    })
+    setAliasSource('')
+    setAliasTarget('')
+  }, [])
+
+  const removeAlias = useCallback((route: string) => {
+    setAliases(current => {
+      const next = new Map(current)
+      next.delete(route)
+      return next
+    })
+  }, [])
+
+  /** Jump from an inherited row to the canonical override it follows, opening
+   *  its editor (a mirror row is staged as a hand override, since that is the
+   *  only way its price can be edited). */
+  const openCanonical = useCallback((target: string, model: string) => {
+    const canonical = (rows ?? []).find(row => row.provider === target && row.model === model)
+    if (canonical === undefined) return
+    const key = providerKeyOf(target, model)
+    setDrafts(current => {
+      if (current.has(key)) return current
+      const next = new Map(current)
+      next.set(key, providerDraftOf(canonical))
+      return next
+    })
+    setCollapsed(current => { const next = new Set(current); next.delete(target); return next })
+    setEditingKey(key)
+    window.setTimeout(() => {
+      const element = [...document.querySelectorAll<HTMLElement>('.dtpl-pricing-provider-row')]
+        .find(candidate => candidate.dataset.providerModel === key)
+      element?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 0)
+  }, [rows])
+
   const draftCount = drafts.size
   const nowSec = Math.floor(Date.now() / 1000)
 
@@ -1845,8 +2249,8 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
       )}
 
       <p className="dtpl-pricing-provider-intro">
-        按「路由 Provider + 精确模型串」定价——订阅通道标「订阅价值」、跟随官方价的写「跟随基准」（含调价史与峰谷），
-        中转自定价用「自定时间轴」逐段填写。前缀串（如 <code>deepseek/deepseek-v4-flash</code>）在这里命中。
+        按「路由 + 精确模型串」定价：订阅通道算<b>订阅价值</b>、跟随官方价的写「跟随官方价」、
+        中转自定价用「自己填价」逐段填。前缀串（如 <code>deepseek/deepseek-v4-flash</code>）在这里命中。
       </p>
 
       {rows === null ? (
@@ -1869,6 +2273,7 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
                   <span className="dtpl-pricing-provider-head-name">{provider}</span>
                   <span className="dtpl-pricing-provider-head-meta">
                     {list.length} 条{handCount > 0 ? ` · 手工 ${String(handCount)}` : ''}
+                    {aliases.has(provider) ? ` · 跟随 ${aliases.get(provider)!}` : ''}
                   </span>
                   <span className="dtpl-pricing-provider-head-caret" aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
                 </button>
@@ -1879,14 +2284,20 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
                       const key = providerKeyOf(row.provider, row.model)
                       const draft = drafts.get(key)
                       const isEditing = editingKey === key
-                      const isHand = draft !== undefined
-                      const summary = draft !== undefined
-                        ? (draft.source === 'inherit' ? `跟随基准 ${draft.inheritBase !== '' ? draft.inheritBase : '—'}` : `自定时间轴 ×${String(draft.segments.length)}`)
-                        : providerSourceSummary(row)
-                      const tag = draft !== undefined ? '手工'
-                        : row.segments !== undefined ? '时间轴'
-                          : row.placeholder === true ? '占位(官方)'
-                            : row.inheritBase !== undefined ? '跟随基准' : '覆盖'
+                      // A row inherited through a route alias is read-only here:
+                      // its price is owned by the canonical route.
+                      const via = row.via
+                      const isHand = draft !== undefined && via === undefined
+                      const summary = via !== undefined
+                        ? `跟随 ${via} · ${providerSourceSummary(row)}`
+                        : draft !== undefined
+                          ? (draft.source === 'inherit' ? `跟随 ${draft.inheritBase !== '' ? draft.inheritBase : '—'} 的价` : `自己填价 · ${String(draft.segments.length)} 段`)
+                          : providerSourceSummary(row)
+                      const tag = via !== undefined ? '跟随'
+                        : draft !== undefined ? '手工价'
+                          : row.segments !== undefined ? '自己填价'
+                            : row.placeholder === true ? '先按官方价'
+                              : row.inheritBase !== undefined ? '跟随官方价' : '云端给的价'
                       const live = draft !== undefined && draft.source === 'segments'
                         ? segmentNow(draft.segments, nowSec)
                         : row.now
@@ -1900,6 +2311,7 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
                               <span className="dtpl-pricing-model-head">
                                 <span className="dtpl-pricing-provider-model-name" title={row.model}>{row.model}</span>
                                 <span className="dtpl-pricing-model-tag">{tag}</span>
+                                <StagedTag staged={providerRowStatus(key, draft, baseline)} />
                                 <span className={`dtpl-pricing-provider-billing dtpl-pricing-provider-billing-${(draft ?? row).billing ?? 'metered'}`}>
                                   {(draft ?? row).billing === 'subscription' ? '订阅价值' : '按量支出'}
                                 </span>
@@ -1913,7 +2325,16 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
                               )}
                             </div>
                             <div className="dtpl-pricing-actions">
-                              {isEditing ? (
+                              {via !== undefined ? (
+                                <button
+                                  type="button"
+                                  className="dtpl-pricing-btn dtpl-pricing-custom"
+                                  onClick={() => openCanonical(via, row.model)}
+                                  title={`这条路由跟随「${via}」，点这里去那条覆盖编辑`}
+                                >
+                                  去编辑
+                                </button>
+                              ) : isEditing ? (
                                 <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={() => setEditingKey(null)}>收起</button>
                               ) : isHand ? (
                                 <>
@@ -1931,6 +2352,7 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
                               draft={draft}
                               rules={row.rules}
                               nowSec={nowSec}
+                              models={modelNames}
                               onPatch={patch => patchDraft(key, patch)}
                               onDone={() => setEditingKey(null)}
                               onDelete={() => deleteDraft(key)}
@@ -1947,13 +2369,91 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
         </div>
       )}
 
-      <AddOverrideForm providers={providerNames} onAdd={addOverride} />
+      {/* 高级：同价通道（一条路由跟随另一条的价格）与「新增覆盖」。收起来是
+          为了让首屏只有「一张表」；展开后才出现配置表单。 */}
+      {rows !== null && (
+        <div className="dtpl-pricing-advanced">
+          <button
+            type="button"
+            className="dtpl-pricing-advanced-bar"
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen(open => !open)}
+          >
+            <span className="dtpl-pricing-advanced-title">高级：同价通道 / 新增覆盖</span>
+            {aliases.size > 0 && <span className="dtpl-pricing-advanced-count">同价通道 {aliases.size}</span>}
+            <StagedTag staged={aliasDirty ? 'unsaved' : 'clean'} />
+            <span className="dtpl-pricing-advanced-cue">{advancedOpen ? '收起' : '展开'}</span>
+          </button>
+
+          {advancedOpen && (
+            <>
+              <section className="dtpl-pricing-alias" aria-label="同价通道">
+                <div className="dtpl-pricing-alias-head">
+                  <span className="dtpl-pricing-alias-title">同价通道</span>
+                  <span className="dtpl-pricing-alias-hint">一条路由跟随另一条的价格；同款套餐买多份时只维护一处</span>
+                </div>
+                {aliases.size > 0 && (
+                  <div className="dtpl-pricing-alias-list">
+                    {[...aliases].map(([route, target]) => (
+                      <span className="dtpl-pricing-alias-item" key={route}>
+                        <span className="dtpl-pricing-alias-route" title={route}>{route}</span>
+                        <span className="dtpl-pricing-alias-arrow" aria-hidden="true">跟随</span>
+                        <span className="dtpl-pricing-alias-route" title={target}>{target}</span>
+                        <button
+                          type="button"
+                          className="dtpl-pricing-alias-remove"
+                          onClick={() => removeAlias(route)}
+                          title="取消跟随"
+                          aria-label={`取消「${route}」跟随「${target}」`}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="dtpl-pricing-alias-add">
+                  <select
+                    className="dtpl-pricing-input dtpl-pricing-select"
+                    value={aliasSource}
+                    onChange={event => setAliasSource(event.target.value)}
+                    aria-label="要跟随别的价格的路由"
+                  >
+                    <option value="">选择路由…</option>
+                    {aliasSourceCandidates.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  <span className="dtpl-pricing-alias-arrow" aria-hidden="true">跟随</span>
+                  <select
+                    className="dtpl-pricing-input dtpl-pricing-select"
+                    value={aliasTarget}
+                    onChange={event => setAliasTarget(event.target.value)}
+                    aria-label="被跟随的路由"
+                  >
+                    <option value="">选择被跟随的路由…</option>
+                    {aliasTargetCandidates.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className="dtpl-pricing-btn"
+                    onClick={() => addAlias(aliasSource, aliasTarget)}
+                    disabled={aliasSource === '' || aliasTarget === '' || aliasSource === aliasTarget}
+                  >
+                    添加
+                  </button>
+                </div>
+              </section>
+
+              <AddOverrideForm providers={providerNames} onAdd={addOverride} />
+            </>
+          )}
+        </div>
+      )}
 
       <div className="dtpl-pricing-foot">
         <span className={`dtpl-pricing-save-state${savedFlash ? ' dtpl-pricing-saved' : ''}`}>{savedFlash ? '已保存' : ''}</span>
         {dirty && <button type="button" className="dtpl-pricing-btn" onClick={() => void load()} disabled={saving}>放弃修改</button>}
         <button type="button" className="dtpl-pricing-save" onClick={() => void save()} disabled={saving || rows === null || !dirty}>
-          {saving ? '保存中…' : draftCount > 0 ? `保存 ${String(draftCount)} 条 Provider 覆盖` : '保存 Provider 覆盖'}
+          {saving ? '保存中…' : draftCount > 0 ? `保存 ${String(draftCount)} 条 Provider 覆盖` : aliasDirty ? '保存同价通道' : '保存 Provider 覆盖'}
         </button>
       </div>
     </div>
@@ -1978,10 +2478,12 @@ function segmentNow(segments: readonly DraftSegment[], nowSec: number): PricingN
 /** The inline editor of ONE provider row, shown only while that row is being
  *  edited. Every change stages into the row's draft; the footer 保存 persists
  *  all drafts at once. */
-function ProviderRowEditor({ draft, rules, nowSec, onPatch, onDone, onDelete }: {
+function ProviderRowEditor({ draft, rules, nowSec, models, onPatch, onDone, onDelete }: {
   draft: ProviderDraft
   rules: ModelRates | undefined
   nowSec: number
+  /** Base-table model ids offered by the 跟随官方价 field. */
+  models: readonly string[]
   onPatch: (patch: Partial<ProviderDraft>) => void
   onDone: () => void
   onDelete: () => void
@@ -1993,7 +2495,7 @@ function ProviderRowEditor({ draft, rules, nowSec, onPatch, onDone, onDelete }: 
     <div className="dtpl-pricing-prov-editor" role="group" aria-label={`编辑 ${draft.provider}/${draft.model} 覆盖`}>
       <div className="dtpl-pricing-prov-editor-grid">
         <label className="dtpl-pricing-field">
-          <span>计费</span>
+          <span>计费方式</span>
           <select
             className="dtpl-pricing-input dtpl-pricing-select"
             value={draft.billing}
@@ -2001,19 +2503,19 @@ function ProviderRowEditor({ draft, rules, nowSec, onPatch, onDone, onDelete }: 
             onChange={event => onPatch({ billing: event.target.value as BillingNature })}
           >
             <option value="metered">按量（实际支出）</option>
-            <option value="subscription">订阅（价值）</option>
+            <option value="subscription">订阅（算作价值）</option>
           </select>
         </label>
         <label className="dtpl-pricing-field">
-          <span>价格来源</span>
+          <span>价格从哪来</span>
           <select
             className="dtpl-pricing-input dtpl-pricing-select"
             value={draft.source}
             aria-label="价格来源"
             onChange={event => onPatch({ source: event.target.value as ProviderDraft['source'] })}
           >
-            <option value="inherit">跟随基准价表（含调价史/峰谷）</option>
-            <option value="segments">自定时间轴（逐段固定价）</option>
+            <option value="inherit">跟随官方价（含调价史/峰谷）</option>
+            <option value="segments">自己填价（逐段固定价）</option>
           </select>
         </label>
         <label className="dtpl-pricing-field dtpl-pricing-field-wide">
@@ -2025,10 +2527,20 @@ function ProviderRowEditor({ draft, rules, nowSec, onPatch, onDone, onDelete }: 
       {draft.source === 'inherit' ? (
         <>
           <label className="dtpl-pricing-field dtpl-pricing-field-wide">
-            <span>跟随基准模型</span>
-            <input className="dtpl-pricing-input" type="text" value={draft.inheritBase} aria-label="跟随基准模型" onChange={event => onPatch({ inheritBase: event.target.value })} />
+            <span>跟随哪个模型的价</span>
+            <input
+              className="dtpl-pricing-input"
+              type="text"
+              list="dtpl-pricing-model-ids"
+              value={draft.inheritBase}
+              aria-label="跟随基准模型"
+              onChange={event => onPatch({ inheritBase: event.target.value })}
+            />
+            <datalist id="dtpl-pricing-model-ids">
+              {models.map(model => <option key={model} value={model} />)}
+            </datalist>
           </label>
-          <RuleTimeline rules={rules} now={undefined} nowSec={nowSec} emptyHint={rules === undefined ? '基准价表里没有这个模型，跟随不会生效。' : undefined} />
+          <RuleTimeline rules={rules} now={undefined} nowSec={nowSec} emptyHint={rules === undefined ? '云端基准价表里没有这个模型，跟随不会生效。' : undefined} />
         </>
       ) : (
         <div className="dtpl-pricing-segments">
@@ -2126,4 +2638,45 @@ function AddOverrideForm({ providers, onAdd }: {
 /** Provider route keys can contain characters invalid in an HTML id. */
 function cssId(provider: string): string {
   return provider.replace(/[^a-zA-Z0-9_-]/g, '-')
+}
+
+/** Group cloud reference rows by the feed's `family`: most models first, then
+ *  name; the unnamed bucket (`''`, rendered as 未标注厂商) always sorts last. */
+function groupByFamily(rows: readonly EditableRow[]): Array<[string, EditableRow[]]> {
+  const byFamily = new Map<string, EditableRow[]>()
+  for (const row of rows) {
+    const family = row.origin.family ?? ''
+    const list = byFamily.get(family)
+    if (list === undefined) byFamily.set(family, [row])
+    else list.push(row)
+  }
+  return [...byFamily].sort(([a, listA], [b, listB]) => {
+    if (a === '') return 1
+    if (b === '') return -1
+    return listB.length - listA.length || a.localeCompare(b)
+  })
+}
+
+/** Group the 在用 channel rows by billing route: most-used channel first (by
+ *  records, then route key), models inside a group by records then name. */
+function groupByProvider(rows: readonly ChannelUsageRow[]): Array<[string, ChannelUsageRow[]]> {
+  const byProvider = new Map<string, ChannelUsageRow[]>()
+  for (const row of rows) {
+    const list = byProvider.get(row.provider)
+    if (list === undefined) byProvider.set(row.provider, [row])
+    else list.push(row)
+  }
+  for (const list of byProvider.values()) {
+    list.sort((a, b) => b.records - a.records || a.model.localeCompare(b.model))
+  }
+  const total = (list: readonly ChannelUsageRow[]): number => list.reduce((sum, row) => sum + row.records, 0)
+  return [...byProvider].sort(([a, listA], [b, listB]) => total(listB) - total(listA) || a.localeCompare(b))
+}
+
+/** The source chip of one channel row: which layer prices THIS channel. */
+function channelSourceTag(channel: ChannelUsageRow, modelRow: EditableRow | undefined): string {
+  if (channel.unpriced === true) return '未定价'
+  if (channel.overlay) return '覆盖层定价'
+  if (modelRow?.manual === true) return '手工价'
+  return modelRow?.origin.layered === true ? '云端 · 分时' : '云端'
 }

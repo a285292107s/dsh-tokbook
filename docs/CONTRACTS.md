@@ -31,7 +31,7 @@
 | `GET` | `/tokbook/quota` | `provider=<路由键>`;可选 `refresh=1` 跳过 TTL 缓存 | 该 provider 的 `QuotaCard` |
 | `GET` | `/tokbook/pricing` | — | `PricingView`(含 `providerRows`) |
 | `PUT` | `/tokbook/pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
-| `GET` | `/tokbook/provider-pricing` | — | `{ providerRows: ProviderPricingViewRow[], dataDir }`(provider 覆盖层视图) |
+| `GET` | `/tokbook/provider-pricing` | — | `{ providerRows: ProviderPricingViewRow[], providerRoutes: ProviderAliasMap, providerNames: string[], modelNames: string[], dataDir }`(provider 覆盖层视图;`modelNames` 供「跟随官方价」的候选列表) |
 | `PUT` | `/tokbook/provider-pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
 
 Wire 形状要点(权威字段清单见 `src/types.ts`):
@@ -60,12 +60,30 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   `records` 的行是账本真正记过的模型串(不只未定价行);`overlayPriced` = 模型层无条目但
   Provider 覆盖层已定价——此时 `now` 就是覆盖层解析出的价,`provider` 是该覆盖所在的路由键
   (UI 用它跳到那条覆盖;给这类串写模型层手工条目不会被读取)。
+- `GET /tokbook/pricing` 里**云端 feed 命名的行**还带 `family`(厂商/家族,如 `deepseek` /
+  `claude` / `qwen`;别名行带其所属模型的 `family`);feed 没命名的串(如覆盖层定价的前缀串)
+  没有该字段。它只是展示分组元数据,**不参与计价链**,UI 用它把云端参考表按厂商折叠分组。
+- `GET /tokbook/pricing` 还带 **`channelRows`**——每一条账本计费过的 (provider, model) 一行
+  (`provider` / `model` / `records` / `billing` / `overlay` / `now?` / `unpriced?`),
+  与 **`providerLabels`**(镜像 feed 的 `providers[].label`,路由键 → 人类标签)。「在用」视图
+  按 `channelRows` 分通道分组、用 `providerLabels` 把路由键显示成人话。两者都是**增量**字段:
+  旧 host 不发送时,「在用」退回平铺模型列表(按用量降序)。注意**模型层价仍是全局的**——
+  `channelRows` 只表达"这条通道记了多少、按什么性质计费",可编辑的条目仍只有 `rows` 里那份
+  (UI 只在一条"主通道"行上给出编辑器,其余通道行只读并标「全局价」)。
 - `PUT /tokbook/provider-pricing` body:两层级
   `{ "<provider路由键>": { "<精确模型串>": { "billing"?: "metered"|"subscription",
   "inheritBase"?: "<基准modelId>"| "segments"?: [{ "from"?: seconds, "to"?: seconds,
   "rate": { inputPerMillion, outputPerMillion, … }, "note"?: string }], "note"?: string } } }`。
   `segments` 是完整的自定时间轴(可多段);整表解析、校验后**整体替换** `provider-pricing.json`;
   缺失的 (provider, model) = 删除该手工覆盖(回到镜像行)。
+- `PUT /tokbook/provider-pricing` body 还可带保留顶层键 `$routes`(`pricing.ts`
+  `PROVIDER_ROUTES_KEY`)声明**同价通道**(一跳别名):
+  `{ "$routes": { "<路由>": "<被跟随的路由>" } }` —— 该路由的价格与 `billing` 跟随目标路由的
+  条目,但**它自己的条目仍然优先**(显式条目是"单独给这条路由调价"的逃逸舱)。只允许一跳:
+  目标自身不能又是别名的源;指向自己、非字符串、链式一律拒绝。镜像 feed **不携带**这个键。
+  视图里被跟随而来的行带 `via`(目标路由),是只读行,编辑去目标路由那条。
+  `providerNames` 是 tab 能作为别名目标/来源的全部路由:镜像键 ∪ 手工键 ∪ 别名两端 ∪
+  账本计费过的路由(新导入的 key 只有账本知道它)。
 - 镜像 feed(`provider_pricing.json` → `provider-pricing.ccsa.json`)的 `providers[]` 是
   `{ provider, label?, billing?, entries[] }`:**通道级 `billing`** 是该通道所有条目的
   缺省计费性质(条目自带 `billing` 时条目赢),解析时下发给条目;通道级 `billing` 非法 →
@@ -124,7 +142,7 @@ host 请指向自己的 `path`,不要共享目录。
 | `owner.json` | 单写者标记 `{ pid, start }` | host 启动 | 崩溃进程留下的陈旧标记被静默接管 |
 | `pricing.json`(+ `.tmp`) | 手编手工价覆盖(整表替换;条目永远优先于云) | `PUT /tokbook/pricing` | 条目可以是 flat 价或带 `timeRules`/`dailySlots` 的规则集;缺失 = 无手工层;畸形条目只把对应模型降级为未定价 |
 | `pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的云定价镜像(`pricing.ts`) | host 启动 | 只读参考;region/URL 按配置 |
-| `provider-pricing.json`(+ `.tmp`) | 手编 provider 覆盖层(整表替换;条目覆盖对应 (provider, model) 的镜像行) | `PUT /tokbook/provider-pricing` | 缺失 = 无手工 provider 层 |
+| `provider-pricing.json`(+ `.tmp`) | 手编 provider 覆盖层(整表替换;条目覆盖对应 (provider, model) 的镜像行;保留键 `$routes` 存同价通道别名) | `PUT /tokbook/provider-pricing` | 缺失 = 无手工 provider 层 |
 | `provider-pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的 provider 覆盖镜像(`pricing.ts`) | host 启动 | 只读参考;URL 按 `pricingProviderUrl` 配置 |
 | `quota-<provider>.json`(+ `.tmp`) | 最近一次官方额度卡快照 `{ savedAt, card }` | host 额度拉取 | 只持久化 `ok` 卡;缺失/撕裂/畸形读作 null |
 
@@ -138,6 +156,8 @@ unlink 目标)。日文件只追加、绝不重写。
   同一个去重集与同一条串行追加队列。
 - 价格改动在**读取时**重新计价历史——不重写账本/折叠;计价入口是 (provider, model)
   双维解析(`resolvePriced`):provider 覆盖层(手工 > 镜像)先命中,再回落到基准模型价。
+  同价通道别名在读取合并时**物化**进表(别名路由继承目标条目、自己的条目优先),所以解析
+  链本身只看到 (provider, model);别名变化同样只影响后续读取的金额。
 - 金额分双桶:`spend` 只含 `billing: metered` 行(实际支出),`subscriptionValue` 只含
   `billing: subscription` 行(订阅价值,非现金);UI 不得把后者当作支出展示。
 - 计费性质以**通道**为单位:镜像的 `providers[].billing` 覆盖其全部条目,条目级 `billing`

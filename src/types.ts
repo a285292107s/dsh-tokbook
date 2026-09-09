@@ -147,6 +147,12 @@ export interface ProviderPricingEntry {
 /** provider route key → exact model string → override entry. */
 export type ProviderPricingTable = Record<string, Record<string, ProviderPricingEntry>>
 
+/** Hand-edited route aliases: one provider route follows another route's
+ *  overlay entries — the case of buying the same plan several times, where
+ *  each imported key is its own route but they all price the same. One hop
+ *  only; the mirror feed never carries this. */
+export type ProviderAliasMap = Record<string, string>
+
 
 /** One peak window of a day, half-open [startMinute, endMinute) in local minutes. */
 export interface RateWindow {
@@ -249,6 +255,10 @@ export interface PricingViewRow {
   /** The provider route whose overlay entry prices this string (present with
    * `overlayPriced`, so the UI can send the user to that exact override). */
   provider?: string
+  /** Model vendor / family the cloud feed groups this string under
+   *  (`deepseek`, `claude`, `qwen`, …). Display metadata for the cloud
+   *  reference list; absent on strings the cloud feed does not name. */
+  family?: string
   /** Number of ledger records naming this model; present on ANY row the
    * ledger billed (not just unpriced ones), so the tab can surface the models
    * actually in use. */
@@ -258,15 +268,52 @@ export interface PricingViewRow {
   now?: PricingNow
 }
 
+/** One (provider, model) CHANNEL the ledger billed — the 在用 view's channel
+ *  dimension. A model string billed by two routes yields two channel rows, so
+ *  the view can show what each route actually paid, while the editable price
+ *  stays the one model-layer entry shared by all of them. */
+export interface ChannelUsageRow {
+  /** Provider route key as recorded in the ledger ('' = unknown route). */
+  provider: string
+  /** The exact model string billed under that route. */
+  model: string
+  /** Ledger records for this exact channel. */
+  records: number
+  /** Billing nature of this channel for this string (`metered` = real spend,
+   *  `subscription` = plan value at the resolved price). */
+  billing: BillingNature
+  /** True when this channel has its own provider-overlay entry, so its price
+   *  is channel-specific rather than the model layer's. */
+  overlay: boolean
+  /** The channel's effective price now; absent when nothing prices it. */
+  now?: PricingNow
+  /** True when nothing prices this channel (its records bill ¥0). */
+  unpriced?: boolean
+}
+
 /** The wire payload of the pricing-table view (价格表 tab). */
 export interface PricingView {
   /** One row per exact model string in the merged table, manual rows first
    * then cloud models/aliases (both alphabetical within each group). */
   rows: PricingViewRow[]
+  /** One row per (provider, model) the ledger billed — the 在用 view's channel
+   *  dimension. Absent on hosts that predate it; the tab then falls back to a
+   *  flat model list. */
+  channelRows?: ChannelUsageRow[]
+  /** Human label per provider route (the mirror feed's `providers[].label`),
+   *  so a channel group reads "DeepSeek 官方 API" instead of its route key. */
+  providerLabels?: Record<string, string>
   /** One row per (provider, model) in the EFFECTIVE provider overlay (cloud
-   * mirror + hand edits), the read/display side of the provider dimension.
-   * Absent on hosts that predate the provider layer. */
+   *  mirror + hand edits), the read/display side of the provider dimension.
+   *  Absent on hosts that predate the provider layer. */
   providerRows?: ProviderPricingViewRow[]
+  /** Route → canonical route aliases of the hand-edited overlay (a route
+   *  priced by another route's entries). */
+  providerRoutes?: ProviderAliasMap
+  /** Every provider route the tab knows: the mirror's keys, the hand file's
+   *  keys and alias targets, and the routes the ledger billed. The tab offers
+   *  these as alias targets. */
+  providerNames?: string[]
   /** The data directory the pricing files live in (informational). */
   dataDir: string
 }
@@ -289,6 +336,10 @@ export interface ProviderPricingViewRow {
   placeholder?: boolean
   /** Hand-edited `provider-pricing.json` entry wins over the mirror row. */
   manual: boolean
+  /** Set when this row inherits its price through a route alias: the canonical
+   *  route it follows (the row itself has no entry of its own). Such a row is
+   *  read-only — editing happens on the canonical route. */
+  via?: string
   /** Human note (mirror or hand). */
   note?: string
   /** The EFFECTIVE rule container this row prices through (the inherited

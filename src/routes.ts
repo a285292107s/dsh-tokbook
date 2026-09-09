@@ -295,7 +295,15 @@ export function registerTokBookProviderPricingRoutes(
       try {
         const snapshot = await pricingView()
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-        res.end(JSON.stringify({ providerRows: snapshot.providerRows ?? [], dataDir: snapshot.dataDir }))
+        res.end(JSON.stringify({
+          providerRows: snapshot.providerRows ?? [],
+          providerRoutes: snapshot.providerRoutes ?? {},
+          providerNames: snapshot.providerNames ?? [],
+          // Every model id the merged base table knows: the 跟随官方价 field
+          // offers these so the user picks instead of typing a model id.
+          modelNames: (snapshot.rows ?? []).map(row => row.model),
+          dataDir: snapshot.dataDir,
+        }))
       } catch (error) {
         res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
