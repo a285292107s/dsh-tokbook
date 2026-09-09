@@ -42,14 +42,30 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
 - `range` id 是以本地日历天命名的窗口,与它们读取的日文件对应。
 - 从未见过 provider 头的行归入 `'(未知)'` 组。
 - 未定价模型计 ¥0,并在 `unpricedModels` 中列出。
-- `PUT /tokbook/pricing` body:`{ "<精确模型串>": { "inputPerMillion": number, "outputPerMillion": number, "cacheReadPerMillion"?: number, "cacheWritePerMillion"?: number } }`。
-  缺失的键 = 删除该手工覆盖;整表解析、校验后**整体替换** `pricing.json`(手工条目把该
-  模型的云规则整体替换为 flat 价)。
+- `PUT /tokbook/pricing` body:`{ "<精确模型串>": 条目 }`,条目二选一:
+  - **flat 价**(旧格式,仍完全支持):`{ "inputPerMillion": number, "outputPerMillion": number, "cacheReadPerMillion"?: number, "cacheWritePerMillion"?: number }`;
+  - **规则集**:`{ "base": <flat 价>, "timeRules"?: [{ "startTime": seconds, "endTime"?: seconds,
+    "label"?: string, "rates": <flat 价>, "dailySlots"?: [slot] }], "dailySlots"?: [slot] }`,
+    其中 `slot` = `{ "windows": [{ "startMinute": 0–1440, "endMinute": 0–1440 }], "rates": <flat 价>,
+    "daysOfWeek"?: [1–7], "label"?: string }`(本地分钟窗口,周一=1;`daysOfWeek` 省略 = 每天)。
+
+  缺失的键 = 删除该手工覆盖;整表解析、校验后**整体替换** `pricing.json`。手工条目**整体
+  替换**该模型的云规则集(云端调价史/峰谷一起被替换);手工层**不支持上下文档位**
+  (`contextTiers` 会被忽略)。`timeRules` 的 `endTime` 省略 = 永久。同一模型的 `timeRules`
+  **不得在时间上重叠**(同一时刻只能有一段价)——写路径拒绝并给出具体是哪两段;读路径按
+  `startTime` 排序,所以文件顺序、展示顺序与引擎的「首个命中」顺序一致。
+- `GET /tokbook/pricing` 每行都带**当前生效价** `now`(`{ rates, label?, peak }`,按读取时刻
+  走「时间规则 → 峰谷」链)与完整规则集(模型行 `manualRules` / `cloudRules`、provider 行
+  `rules`);`cloudRates` / `manualRates` 只是各自 `base` 的平铺简写(旧客户端兼容)。带
+  `records` 的行是账本真正记过的模型串(不只未定价行);`overlayPriced` = 模型层无条目但
+  Provider 覆盖层已定价——此时 `now` 就是覆盖层解析出的价,`provider` 是该覆盖所在的路由键
+  (UI 用它跳到那条覆盖;给这类串写模型层手工条目不会被读取)。
 - `PUT /tokbook/provider-pricing` body:两层级
   `{ "<provider路由键>": { "<精确模型串>": { "billing"?: "metered"|"subscription",
   "inheritBase"?: "<基准modelId>"| "segments"?: [{ "from"?: seconds, "to"?: seconds,
-  "rate": { inputPerMillion, outputPerMillion, … } }], "note"?: string } } }`。整表解析、校验后
-  **整体替换** `provider-pricing.json`;缺失的 (provider, model) = 删除该手工覆盖(回到镜像行)。
+  "rate": { inputPerMillion, outputPerMillion, … }, "note"?: string }], "note"?: string } } }`。
+  `segments` 是完整的自定时间轴(可多段);整表解析、校验后**整体替换** `provider-pricing.json`;
+  缺失的 (provider, model) = 删除该手工覆盖(回到镜像行)。
 - wire 上的金额已拆双桶:`spend`(metered 行,实际支出)与 `subscriptionValue`(subscription 行,
   订阅价值、非现金);`totalCost` 保留为两者之和以兼容旧客户端。
 - `byDay` 每行除 token 汇总外还带该日 `spend` / `subscriptionValue`(`attachCosts` 从
@@ -101,7 +117,7 @@ host 请指向自己的 `path`,不要共享目录。
 | `rollup.json`(+ `.tmp`) | 冻结日的派生统计折叠,截至 `upto` 日 | host stats 读路径 | 缺失/损坏 → 由日文件重建;同步追加行后删除重建 |
 | `sync-progress.json`(+ `.tmp`) | 持久化的逐会话 `revision` 基线,供增量新鲜度探测 | host sync | 严格在同步成功后写;读不到的会话被排除 |
 | `owner.json` | 单写者标记 `{ pid, start }` | host 启动 | 崩溃进程留下的陈旧标记被静默接管 |
-| `pricing.json`(+ `.tmp`) | 手编手工价覆盖(整表替换;条目永远优先于云) | `PUT /tokbook/pricing` | 缺失 = 无手工层;畸形条目只把对应模型降级为未定价 |
+| `pricing.json`(+ `.tmp`) | 手编手工价覆盖(整表替换;条目永远优先于云) | `PUT /tokbook/pricing` | 条目可以是 flat 价或带 `timeRules`/`dailySlots` 的规则集;缺失 = 无手工层;畸形条目只把对应模型降级为未定价 |
 | `pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的云定价镜像(`pricing.ts`) | host 启动 | 只读参考;region/URL 按配置 |
 | `provider-pricing.json`(+ `.tmp`) | 手编 provider 覆盖层(整表替换;条目覆盖对应 (provider, model) 的镜像行) | `PUT /tokbook/provider-pricing` | 缺失 = 无手工 provider 层 |
 | `provider-pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的 provider 覆盖镜像(`pricing.ts`) | host 启动 | 只读参考;URL 按 `pricingProviderUrl` 配置 |

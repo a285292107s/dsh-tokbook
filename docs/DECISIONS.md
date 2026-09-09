@@ -1,6 +1,6 @@
 # 决策记录(ADR 日志)— dsh-tokbook
 
-> **Doc meta** · role: decisions · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: decisions · language: zh-CN · status: current · last-reviewed: 2026-09-09 · supersedes: —
 
 持久架构决策,最新的在最后。每条记录:决策本身、迫使它成立的背景、以及它取代了什么。
 像维护契约一样维护本日志:**落地的决策与代码在同一个 commit 追加条目**。完整推理见
@@ -102,6 +102,44 @@ Typert Remote。
 - 镜像仓库(dsh-model-pricing)只负责云端两层数据;tokbook 只消费 + 本地覆盖,不做社区化维护。
 
 落地:`PLAN.provider-pricing.md`(Phase 1–4)。完整推理见该计划与 `docs/DESIGN.md`。
+
+---
+
+### D-005 · 2026-09-09 · 手工价带时间维度;价格表 tab 显示"当前生效价"
+
+**Status: current。Supersedes:** D-004 中"价格表 tab 只维护 flat 手工价"的 UI 部分
+(双维计价与双桶语义不变)。
+
+**背景。** 厂商会调价:期限内/永久降价(云 feed 里 `deepseek-v4-pro` 的
+"原价 → 第一次长期降价"、`glm-5.3-flash` 的"限时 5 折")与峰谷价(`deepseek-*` 的
+"工作日高峰时段")。引擎一直支持 `timeRules` / `dailySlots`,但手工层只能写 flat 价,
+价格表 tab 只显示云端的 `base`——于是带规则的模型在 UI 上显示的是**并不生效的价**
+(如限时 5 折期间显示原价),而一次"自定义"保存就把整套调价史/峰谷静默抹平。
+
+**决策。**
+
+- `pricing.json` 条目允许两种形状:flat 价(旧格式)或规则集
+  `{ base, timeRules?, dailySlots? }`。写回时无规则的条目仍序列化为 flat,保持文件可读、
+  向后兼容。**整体替换语义不变**:手工条目替换该模型整套云规则。
+- 手工层**不做上下文档位**(`contextTiers` 被忽略、UI 不编辑):需求只有调价史与峰谷,
+  分档是云端 feed 的概念;云端带分档的模型在手工覆盖时会提示分档不再生效。
+- 价格表 tab 的每行显示**当前生效价**(`PricingViewRow.now`,host 按读取时刻走
+  「时间规则 → 峰谷」链算出),行可展开看完整时间轴;手工行可就地编辑调价时段与峰谷
+  时段(含"该时段自己的峰谷"),保存前不生效、保存后全部历史按新价重算。
+- Provider 覆盖层:`segments` 支持**多段**时间轴(UI 逐段编辑),`inheritBase` 行显示
+  跟随后的实际价;新增「新增覆盖」表单,可为镜像里没有的 (provider, model) 建立覆盖。
+- 保存按钮由**脏状态**(暂存草稿签名 vs 载入基线)驱动,而不是行数——删除最后一条手工
+  覆盖是合法编辑(空表 = 清空手工层);脏草稿跨挂载存活(切 tab / 关浮窗不丢)。
+- **入口按用户的问题组织**:默认视图是「在用」——账本记过的模型串平铺一张表(按用量降序),
+  每行给当前生效价与来源,编辑时不会跳分组;「手工价 / 未定价 / 云端」是显式筛选。模型层
+  没有条目但覆盖层定价的串,直接显示覆盖层解析出的价,动作是「到覆盖层编辑」(深链到那条
+  覆盖)——给这类串写模型层条目永远不会被读取。保存被拒时滚动定位到错误条与出错行。
+- 同一模型的 `timeRules` **不得重叠**(写路径拒绝、读路径按 `startTime` 排序):引擎取首个
+  命中,重叠会让"看到的"与"生效的"不一致。未保存草稿在价格表 tab 上以小圆点提示,
+  Ctrl/Cmd+S 在可见的那一面保存;窄屏(≤640px)价格表行改为堆叠布局,四档价各自带标签。
+
+落地:`src/pricing.ts`、`src/types.ts`、`src/client/PricingPanel.tsx`、`src/client/store.ts`、
+`scripts/smoke.ts`;契约见 `docs/CONTRACTS.md`,推理见 `docs/DESIGN.md` §3。
 
 ---
 

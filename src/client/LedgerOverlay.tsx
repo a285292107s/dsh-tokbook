@@ -32,7 +32,7 @@ import type {
 } from '../types.ts'
 import type { TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
-import { PricingPanel } from './PricingPanel.tsx'
+import { PricingPanel, type ModelScope } from './PricingPanel.tsx'
 import { QuotaPanel } from './QuotaPanel.tsx'
 import { CloseGlyph, RefreshGlyph, UsageGlyph } from './icons.tsx'
 
@@ -43,7 +43,7 @@ export interface LedgerOverlayProps {
 
 export function LedgerOverlay({ view }: LedgerOverlayProps) {
   useEffect(() => injectStyles(), [])
-  const { open, overview, error } = useSyncExternalStore(view.subscribe, view.getSnapshot)
+  const { open, overview, error, pricingDirty } = useSyncExternalStore(view.subscribe, view.getSnapshot)
   const [scanning, setScanning] = useState(false)
 
   const fetchOverview = useCallback((signal?: AbortSignal): Promise<void> => {
@@ -86,6 +86,8 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       overview={overview}
       error={error}
       scanning={scanning}
+      pricingDirty={pricingDirty}
+      onDirtyChange={view.setPricingDirty}
       onRescan={onRescan}
       onRetry={() => { view.setError(null); void fetchOverview() }}
       onRefresh={fetchOverview}
@@ -116,18 +118,24 @@ const RANGE_DAY_LABELS: Record<ProviderRange, string> = {
   last30: '近 30 天',
 }
 
-function OverviewCard({ overview, error, scanning, onRescan, onRetry, onRefresh, onClose }: {
+function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onClose }: {
   overview: TokBookOverview | null
   error: string | null
   scanning: boolean
+  pricingDirty: boolean
+  onDirtyChange: (dirty: boolean) => void
   onRescan: () => void
   onRetry: () => void
   onRefresh: () => void
   onClose: () => void
 }) {
   const [tab, setTab] = useState<OverlayTab>('ledger')
+  // A cross-tab jump (the overview's 未定价 note) asks the pricing tab to open
+  // on a specific scope; the request is cleared once the panel applied it.
+  const [pricingScope, setPricingScope] = useState<ModelScope | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const openPricing = (scope: ModelScope): void => { setPricingScope(scope); setTab('pricing') }
 
   // Focus the card on open, restore focus to the trigger on close.
   useEffect(() => {
@@ -253,6 +261,7 @@ function OverviewCard({ overview, error, scanning, onRescan, onRetry, onRefresh,
             onClick={() => setTab('pricing')}
           >
             价格表
+            {pricingDirty && <i className="dtpl-tab-dot" role="img" aria-label="有未保存的改动" title="有未保存的改动" />}
           </button>
           <button
             type="button"
@@ -282,7 +291,14 @@ function OverviewCard({ overview, error, scanning, onRescan, onRetry, onRefresh,
               : tab === 'quota'
                 ? <QuotaPanel />
                 : tab === 'pricing'
-                  ? <PricingPanel onChanged={onRefresh} />
+                  ? (
+                    <PricingPanel
+                      onChanged={onRefresh}
+                      onDirtyChange={onDirtyChange}
+                      focusScope={pricingScope}
+                      onFocusScopeHandled={() => setPricingScope(null)}
+                    />
+                  )
                   : (
                   <>
                     {error !== null && (
@@ -293,7 +309,7 @@ function OverviewCard({ overview, error, scanning, onRescan, onRetry, onRefresh,
                     )}
                     {overview === null
                       ? <LedgerSkeleton />
-                      : <LedgerView overview={overview} />}
+                      : <LedgerView overview={overview} onOpenPricing={openPricing} />}
                   </>
                   )}
         </div>
@@ -324,8 +340,9 @@ function OverviewCard({ overview, error, scanning, onRescan, onRetry, onRefresh,
   )
 }
 
-function LedgerView({ overview }: {
+function LedgerView({ overview, onOpenPricing }: {
   overview: TokBookOverview
+  onOpenPricing: (scope: ModelScope) => void
 }) {
   const money = (value: number): string => formatMoney(value, overview.currency, overview.usdExchangeRate)
   const empty = overview.records === 0
@@ -416,7 +433,10 @@ function LedgerView({ overview }: {
             <p className="dtpl-note">其中包含 {overview.total.compactions} 次上下文压缩 summarize 调用。</p>
           )}
           {overview.unpricedModels.length > 0 && (
-            <p className="dtpl-note">未定价模型（按 ¥0 计）：{overview.unpricedModels.join('、')}</p>
+            <p className="dtpl-note">
+              未定价模型（按 ¥0 计）：{overview.unpricedModels.join('、')}
+              <button type="button" className="dtpl-pricing-empty-link" onClick={() => onOpenPricing('unpriced')}>去定价</button>
+            </p>
           )}
 
           {overview.recent.length > 0 && (

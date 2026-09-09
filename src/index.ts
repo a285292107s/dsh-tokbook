@@ -49,8 +49,8 @@ import {
 } from './stats.ts'
 import {
   parseManualPricingInput, parseManualProviderPricingInput, readPricingTable, readPricingView, readProviderPricing, readProviderPricingView, readUsdExchangeRate, resolvePricingUrl, resolveProviderPricingUrl,
-  resolvePriced, effectiveRatesOf, syncCloudPricing, syncProviderPricing, writeManualPricing, writeManualProviderPricing,
-  type ManualPricingParse, type ManualProviderPricingParse, type PricingSourceInput, type PricingRegion,
+  resolvePriced, effectiveRatesOf, nowOf, syncCloudPricing, syncProviderPricing, writeManualPricing, writeManualProviderPricing,
+  type ManualPricingParse, type ManualProviderPricingParse, type PricingSourceInput, type PricingRegion, type UsedModelHint,
 } from './pricing.ts'
 import { providerCards } from './by-provider.ts'
 import { registerTokBookPricingRoutes, registerTokBookProviderPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
@@ -661,26 +661,36 @@ export class TokenUsageBook extends Service {
   }
 
   /** The pricing-table view for the 价格表 tab. The merged table is the
-   *  content; the ledger's own distinct model strings are folded in so models
-   *  that actually billed but have NO table entry (neither manual nor cloud —
-   *  they cost ¥0 today) surface at the top of the list as one-click manual
-   *  seeds. The model count reuses `buildSummary`'s rollup + hot-file read,
-   *  the same cost path an overview read already pays. */
+   *  content; the ledger's own distinct model strings are folded in so the tab
+   *  can filter to the models actually in use and surface the ones with no
+   *  model-layer entry — either unpriced (¥0 today) or priced only by a
+   *  provider-overlay entry. The model counts reuse `buildSummary`'s rollup +
+   *  hot-file read, the same cost path an overview read already pays. */
   async pricingView(): Promise<PricingView> {
-    const used = new Map<string, number>()
+    const used = new Map<string, UsedModelHint>()
     try {
       const pricing = await readPricingTable(this.dir, this.logger)
       const providers = await readProviderPricing(this.dir, this.logger)
       const summary = await buildSummary(this.dir, () => new Date(), () => UNPRICED_KEY, this.logger)
-      // Seeds must reflect the FULL dual-dimension table: a model string the
-      // provider overlay already prices (e.g. commandcode's prefixed strings)
-      // is not "unpriced" — it is managed in the overlay layer below. Only
-      // (provider, model) rows with NO effective pricing become model-tab
-      // seeds (a model-level manual flat entry can then actually price them).
       for (const row of summary.byModel) {
         if (row.model === '') continue
-        if (effectiveRatesOf(pricing, providers, row.provider, row.model) !== null) continue
-        used.set(row.model, (used.get(row.model) ?? 0) + row.totals.requests)
+        const previous = used.get(row.model)
+        // A string the model layer does NOT price but a provider-overlay entry
+        // does is "overlay-priced": resolve its price now so the row can show
+        // the number and the route the user has to edit.
+        const overlayOnly = pricing[row.model] === undefined
+          && row.provider !== undefined && row.provider !== ''
+          && providers[row.provider]?.[row.model] !== undefined
+        const rules = overlayOnly ? effectiveRatesOf(pricing, providers, row.provider, row.model) : null
+        used.set(row.model, {
+          records: (previous?.records ?? 0) + row.totals.requests,
+          overlayPriced: (previous?.overlayPriced ?? false) || overlayOnly,
+          ...(previous?.overlayNow !== undefined ? { overlayNow: previous.overlayNow } : {}),
+          ...(previous?.overlayProvider !== undefined ? { overlayProvider: previous.overlayProvider } : {}),
+          ...(previous?.overlayNow === undefined && rules !== null
+            ? { overlayNow: nowOf(rules), overlayProvider: row.provider }
+            : {}),
+        })
       }
     } catch (error) {
       // A failing summary must not block the tab — the price list is still

@@ -28,7 +28,7 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
-  BillingNature, ContextTier, DailySlot, ModelPricing, ModelRates, PricingSegment, PricingTable, PricingViewRow, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, TimeRule, UsageTotals,
+  BillingNature, ContextTier, DailySlot, ModelPricing, ModelRates, PricingNow, PricingSegment, PricingTable, PricingViewRow, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, RateWindow, TimeRule, UsageTotals,
 } from './types.ts'
 
 /** The hand-maintained pricing file inside the data directory. */
@@ -455,31 +455,43 @@ async function readSyncedProviderPricing(dir: string, logger: { error(...args: u
  *  dimension: every (provider, model) of the hand-edited layer first (they are
  *  the ones the user maintains, and a hand row wins over a mirror row of the
  *  same pair), then every mirror (provider, model) not shadowed. Groups are
- *  alphabetical by provider, hand rows before mirror rows within one provider. */
+ *  alphabetical by provider, hand rows before mirror rows within one provider.
+ *  Each row also carries the EFFECTIVE rule container it prices through and
+ *  the price that container resolves to now, so a 跟随基准 row shows the
+ *  number it inherits instead of only naming the model it follows. */
 export async function readProviderPricingView(
   dir: string,
   logger: { error(...args: unknown[]): void } = console,
 ): Promise<{ rows: ProviderPricingViewRow[]; dataDir: string }> {
   const rows: ProviderPricingViewRow[] = []
   const seen = new Set<string>()
-  const toRow = (provider: string, model: string, entry: ProviderPricingEntry, manual: boolean): ProviderPricingViewRow => ({
-    provider,
-    model,
-    manual,
-    ...(entry.billing !== undefined ? { billing: entry.billing } : {}),
-    ...(entry.inheritBase !== undefined ? { inheritBase: entry.inheritBase } : {}),
-    ...(entry.segments !== undefined ? { segments: entry.segments } : {}),
-    ...(entry.placeholder === true ? { placeholder: true } : {}),
-    ...(entry.note !== undefined ? { note: entry.note } : {}),
-  })
   const manual = await readManualProviderPricing(dir, logger)
+  const synced = await readSyncedProviderPricing(dir, logger)
+  // The merged overlay + merged base table price every row through the same
+  // dual-dimension chain the cost layer uses.
+  const overlay: ProviderPricingTable = { ...synced }
+  for (const [provider, entries] of Object.entries(manual)) overlay[provider] = { ...overlay[provider], ...entries }
+  const base = await readPricingTable(dir, logger)
+  const toRow = (provider: string, model: string, entry: ProviderPricingEntry, manualRow: boolean): ProviderPricingViewRow => {
+    const rules = effectiveRatesOf(base, overlay, provider, model)
+    return {
+      provider,
+      model,
+      manual: manualRow,
+      ...(entry.billing !== undefined ? { billing: entry.billing } : {}),
+      ...(entry.inheritBase !== undefined ? { inheritBase: entry.inheritBase } : {}),
+      ...(entry.segments !== undefined ? { segments: entry.segments } : {}),
+      ...(entry.placeholder === true ? { placeholder: true } : {}),
+      ...(entry.note !== undefined ? { note: entry.note } : {}),
+      ...(rules !== null ? { rules, now: nowOf(rules) } : {}),
+    }
+  }
   for (const [provider, entries] of Object.entries(manual)) {
     for (const [model, entry] of Object.entries(entries)) {
       rows.push(toRow(provider, model, entry, true))
       seen.add(`${provider}\n${model}`)
     }
   }
-  const synced = await readSyncedProviderPricing(dir, logger)
   for (const [provider, entries] of Object.entries(synced)) {
     for (const [model, entry] of Object.entries(entries)) {
       if (seen.has(`${provider}\n${model}`)) continue // hand row shadows the mirror row
@@ -692,6 +704,30 @@ export function ratesForKey(rates: ModelRates, key: RateKey): ModelPricing {
   return key.slot >= 0 ? node.slots[key.slot]?.rates ?? node.rates : node.rates
 }
 
+/** Which container (time rule) or peak slot decided one resolved rate, for
+ *  display: the slot's label wins over its container's. */
+export function describeRate(rules: ModelRates, key: RateKey): { label?: string; peak: boolean } {
+  const rule = key.ruleStart !== 0 || key.ruleEnd !== 0
+    ? rules.timeRules.find(r => r.startTime === key.ruleStart && r.endTime === key.ruleEnd) ?? null
+    : null
+  const slots = rule !== null ? rule.dailySlots ?? [] : rules.dailySlots
+  const label = key.slot >= 0 ? slots[key.slot]?.label : rule?.label
+  return { ...(label !== undefined ? { label } : {}), peak: key.slot >= 0 }
+}
+
+/** The price one rule set resolves to at `timeMs` (default: now), plus which
+ *  rule/slot produced it. Context tiers are resolved at context 0, i.e. the
+ *  price a request below every threshold pays — the honest headline number
+ *  for a table whose tiers we do not model per request here. */
+export function nowOf(
+  rules: ModelRates,
+  timeMs: number = Date.now(),
+  tzOffsetHours: number = -new Date().getTimezoneOffset() / 60,
+): PricingNow {
+  const { prices, key } = resolveRate(rules, timeMs, 0, tzOffsetHours)
+  return { rates: prices, ...describeRate(rules, key) }
+}
+
 /** The largest epoch-second boundary an open-ended provider segment maps to
  * (Year ~292M; JSON-safe, comfortably beyond any real timestamp). */
 const OPEN_SEGMENT_END = Number.MAX_SAFE_INTEGER
@@ -741,6 +777,7 @@ export function effectiveRatesOf(
       startTime: segment.from ?? 0,
       endTime: segment.to === undefined ? OPEN_SEGMENT_END : Math.max(segment.to - 1, segment.from ?? 0),
       rates: segment.rate,
+      ...(segment.note !== undefined ? { label: segment.note } : {}),
     }))
     return { base: fallback, contextTiers: [], dailySlots: [], timeRules }
   }
@@ -857,57 +894,343 @@ export function coercePricingTable(value: unknown): Record<string, ModelPricing>
   return table
 }
 
-/** Read the hand-edited `pricing.json` into a flat table (entries with
- *  invalid rates are dropped, never fatal). */
-export async function readManualPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<Record<string, ModelPricing>> {
-  return coercePricingTable(await readJsonFile(dir, PRICING_FILE, logger))
+// ---------------------------------------------------------------------------
+// Hand-edited rule entries (`pricing.json`)
+// ---------------------------------------------------------------------------
+
+/** One hand-edited `pricing.json` entry as STORED in the file: the original
+ *  flat rate slate, or a rule set — `base` plus an optional price timeline
+ *  (`timeRules`, epoch-second windows) and recurring peak windows
+ *  (`dailySlots`, local minute-of-day windows). Context tiers are deliberately
+ *  NOT part of the manual layer. */
+export type ManualPricingFileEntry = ModelPricing | ManualRulesFile
+
+/** The layered (rule-set) shape of one hand-edited entry. */
+export interface ManualRulesFile {
+  base: ModelPricing
+  timeRules?: ManualRuleFile[]
+  dailySlots?: DailySlot[]
+}
+
+/** One price window as STORED in the file: an omitted `endTime` means
+ *  permanent (the engine reads it as open-ended). */
+export interface ManualRuleFile {
+  label?: string
+  startTime: number
+  endTime?: number
+  rates: ModelPricing
+  dailySlots?: DailySlot[]
+}
+
+const MINUTES_PER_DAY = 1440
+
+function isMinute(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= MINUTES_PER_DAY
+}
+
+/** Coerce one peak window of the manual shape (lenient read path). */
+function coerceManualWindow(value: unknown): RateWindow | null {
+  if (typeof value !== 'object' || value === null) return null
+  const window = value as Record<string, unknown>
+  if (!isMinute(window.startMinute) || !isMinute(window.endMinute) || window.startMinute >= window.endMinute) return null
+  return { startMinute: window.startMinute, endMinute: window.endMinute }
+}
+
+function coerceManualDays(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const days = [...new Set(value.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 1 && day <= 7))]
+  return days.length > 0 ? days : undefined
+}
+
+function coerceManualSlot(value: unknown): DailySlot | null {
+  if (typeof value !== 'object' || value === null) return null
+  const slot = value as Record<string, unknown>
+  if (!isModelPricing(slot.rates) || !Array.isArray(slot.windows)) return null
+  const windows = (slot.windows as unknown[]).map(coerceManualWindow).filter((window): window is RateWindow => window !== null)
+  if (windows.length === 0) return null
+  const days = coerceManualDays(slot.daysOfWeek)
+  return {
+    windows,
+    rates: slot.rates,
+    ...(days !== undefined ? { daysOfWeek: days } : {}),
+    ...(typeof slot.label === 'string' && slot.label !== '' ? { label: slot.label } : {}),
+  }
+}
+
+function coerceManualRule(value: unknown): TimeRule | null {
+  if (typeof value !== 'object' || value === null) return null
+  const rule = value as Record<string, unknown>
+  if (typeof rule.startTime !== 'number' || !Number.isFinite(rule.startTime) || rule.startTime < 0) return null
+  const endTime = rule.endTime === undefined ? OPEN_SEGMENT_END : rule.endTime
+  if (typeof endTime !== 'number' || !Number.isFinite(endTime) || endTime < rule.startTime) return null
+  if (!isModelPricing(rule.rates)) return null
+  const slots = Array.isArray(rule.dailySlots)
+    ? (rule.dailySlots as unknown[]).map(coerceManualSlot).filter((slot): slot is DailySlot => slot !== null)
+    : []
+  return {
+    startTime: rule.startTime,
+    endTime,
+    rates: rule.rates,
+    ...(slots.length > 0 ? { dailySlots: slots } : {}),
+    ...(typeof rule.label === 'string' && rule.label !== '' ? { label: rule.label } : {}),
+  }
+}
+
+/** Coerce ONE hand-edited entry into the engine rule shape: a bare rate slate
+ *  (flat, the original format) or `{base, timeRules?, dailySlots?}`. Null when
+ *  neither shape holds — the entry is then dropped, never fatal. */
+export function coerceManualPricingEntry(value: unknown): ModelRates | null {
+  if (isModelPricing(value)) return { base: value, contextTiers: [], dailySlots: [], timeRules: [] }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (!isModelPricing(raw.base)) return null
+  const timeRules = Array.isArray(raw.timeRules)
+    ? (raw.timeRules as unknown[]).map(coerceManualRule).filter((rule): rule is TimeRule => rule !== null)
+    : []
+  const dailySlots = Array.isArray(raw.dailySlots)
+    ? (raw.dailySlots as unknown[]).map(coerceManualSlot).filter((slot): slot is DailySlot => slot !== null)
+    : []
+  return { base: raw.base, contextTiers: [], dailySlots, timeRules }
+}
+
+/** Serialize one rule set back to its file shape: a bare rate slate when the
+ *  entry has no timeline and no peak windows (the original, most readable
+ *  form), else the layered object. */
+export function manualFileEntryOf(rates: ModelRates): ManualPricingFileEntry {
+  if (rates.timeRules.length === 0 && rates.dailySlots.length === 0) return rates.base
+  const out: ManualRulesFile = { base: rates.base }
+  if (rates.timeRules.length > 0) {
+    out.timeRules = rates.timeRules.map(rule => ({
+      startTime: rule.startTime,
+      ...(rule.endTime < OPEN_SEGMENT_END ? { endTime: rule.endTime } : {}),
+      rates: rule.rates,
+      ...(rule.dailySlots !== undefined && rule.dailySlots.length > 0 ? { dailySlots: rule.dailySlots } : {}),
+      ...(rule.label !== undefined ? { label: rule.label } : {}),
+    }))
+  }
+  if (rates.dailySlots.length > 0) out.dailySlots = rates.dailySlots
+  return out
+}
+
+/** What the ledger knows about one model string, for the pricing view. */
+export interface UsedModelHint {
+  /** Ledger records naming this string. */
+  records: number
+  /** True when some provider-overlay entry already prices it — it is then NOT
+   *  an unpriced model-layer seed (its money lives in the overlay layer). */
+  overlayPriced: boolean
+  /** The overlay-resolved price at view time, when the model layer does not
+   *  price the string and an overlay entry does (so the row can show it). */
+  overlayNow?: PricingNow
+  /** The provider route that price came from. */
+  overlayProvider?: string
+}
+
+/** Whether a rule set carries anything beyond its flat base rate. */
+export function isLayeredRules(rates: ModelRates | undefined): boolean {
+  return rates !== undefined
+    && (rates.timeRules.length > 0 || rates.dailySlots.length > 0 || rates.contextTiers.length > 0)
+}
+
+type ManualEntryParse = { ok: true; rates: ModelRates } | { ok: false; error: string }
+type RatesParse = { ok: true; rates: ModelPricing } | { ok: false; error: string }
+type RulesParse = { ok: true; rules: TimeRule[] } | { ok: false; error: string }
+type SlotsParse = { ok: true; slots: DailySlot[] } | { ok: false; error: string }
+
+function parseManualEntry(raw: Record<string, unknown>, model: string): ManualEntryParse {
+  const where = `「${model}」`
+  if (!('base' in raw)) {
+    const base = parseRatesObject(raw, where)
+    if (!base.ok) return base
+    return { ok: true, rates: { base: base.rates, contextTiers: [], dailySlots: [], timeRules: [] } }
+  }
+  const extra = Object.keys(raw).filter(key => key !== 'base' && key !== 'timeRules' && key !== 'dailySlots')
+  if (extra.length > 0) {
+    return { ok: false, error: `${where}的规则集含未知字段「${extra[0]!}」（只支持 base / timeRules / dailySlots）` }
+  }
+  const base = parseRatesObject(raw.base, `${where}的 base`)
+  if (!base.ok) return base
+  const rules = parseRulesList(raw.timeRules, where)
+  if (!rules.ok) return rules
+  const slots = parseSlotsList(raw.dailySlots, where)
+  if (!slots.ok) return slots
+  return {
+    ok: true,
+    rates: { base: base.rates, contextTiers: [], dailySlots: slots.slots, timeRules: rules.rules },
+  }
+}
+
+function parseRatesObject(value: unknown, where: string): RatesParse {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: `${where}必须是对象（inputPerMillion / outputPerMillion …）` }
+  }
+  const prices = value as Record<string, unknown>
+  const readRate = (key: string): number | undefined => {
+    const raw = prices[key]
+    if (raw === undefined) return undefined
+    return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : NaN
+  }
+  const inputPerMillion = readRate('inputPerMillion')
+  const outputPerMillion = readRate('outputPerMillion')
+  if (inputPerMillion === undefined || outputPerMillion === undefined || Number.isNaN(inputPerMillion) || Number.isNaN(outputPerMillion)) {
+    return { ok: false, error: `${where}缺少合法的 inputPerMillion / outputPerMillion（非负数字）` }
+  }
+  const out: ModelPricing = { inputPerMillion, outputPerMillion }
+  const cacheReadPerMillion = readRate('cacheReadPerMillion')
+  const cacheWritePerMillion = readRate('cacheWritePerMillion')
+  if (cacheReadPerMillion !== undefined && Number.isNaN(cacheReadPerMillion)) {
+    return { ok: false, error: `${where}的 cacheReadPerMillion 必须是非负数字` }
+  }
+  if (cacheWritePerMillion !== undefined && Number.isNaN(cacheWritePerMillion)) {
+    return { ok: false, error: `${where}的 cacheWritePerMillion 必须是非负数字` }
+  }
+  if (cacheReadPerMillion !== undefined) out.cacheReadPerMillion = cacheReadPerMillion
+  if (cacheWritePerMillion !== undefined) out.cacheWritePerMillion = cacheWritePerMillion
+  return { ok: true, rates: out }
+}
+
+function parseRulesList(value: unknown, model: string): RulesParse {
+  if (value === undefined) return { ok: true, rules: [] }
+  if (!Array.isArray(value)) return { ok: false, error: `「${model}」的 timeRules 必须是数组` }
+  const rules: TimeRule[] = []
+  let index = 0
+  for (const raw of value as unknown[]) {
+    index += 1
+    const where = `「${model}」第 ${String(index)} 个调价段`
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { ok: false, error: `${where}必须是对象` }
+    const rule = raw as Record<string, unknown>
+    const extra = Object.keys(rule).filter(key => key !== 'startTime' && key !== 'endTime' && key !== 'rates' && key !== 'label' && key !== 'dailySlots')
+    if (extra.length > 0) return { ok: false, error: `${where}含未知字段「${extra[0]!}」` }
+    const startTime = rule.startTime
+    const endTime = rule.endTime === undefined ? OPEN_SEGMENT_END : rule.endTime
+    if (typeof startTime !== 'number' || !Number.isFinite(startTime) || startTime < 0) {
+      return { ok: false, error: `${where}的 startTime 必须是非负秒级时间戳` }
+    }
+    if (typeof endTime !== 'number' || !Number.isFinite(endTime) || endTime < startTime) {
+      return { ok: false, error: `${where}的 endTime 必须 ≥ startTime（省略 = 永久）` }
+    }
+    const rates = parseRatesObject(rule.rates, where)
+    if (!rates.ok) return rates
+    const slots = parseSlotsList(rule.dailySlots, where)
+    if (!slots.ok) return slots
+    if (rule.label !== undefined && typeof rule.label !== 'string') return { ok: false, error: `${where}的 label 必须是字符串` }
+    rules.push({
+      startTime,
+      endTime,
+      rates: rates.rates,
+      ...(slots.slots.length > 0 ? { dailySlots: slots.slots } : {}),
+      ...(typeof rule.label === 'string' && rule.label !== '' ? { label: rule.label } : {}),
+    })
+  }
+  // Overlapping windows are ambiguous (the engine takes the FIRST match) —
+  // reject them so one instant can never have two prices. Then sort by start
+  // so the stored order is the resolution order.
+  for (let i = 0; i < rules.length; i++) {
+    for (let j = i + 1; j < rules.length; j++) {
+      const a = rules[i]!
+      const b = rules[j]!
+      if (a.startTime <= b.endTime && b.startTime <= a.endTime) {
+        return { ok: false, error: `「${model}」第 ${String(i + 1)} 与第 ${String(j + 1)} 个调价段在时间上重叠（同一时刻只能有一段价）` }
+      }
+    }
+  }
+  rules.sort((a, b) => a.startTime - b.startTime)
+  return { ok: true, rules }
+}
+
+function parseSlotsList(value: unknown, where: string): SlotsParse {
+  if (value === undefined) return { ok: true, slots: [] }
+  if (!Array.isArray(value)) return { ok: false, error: `${where}的 dailySlots 必须是数组` }
+  const slots: DailySlot[] = []
+  let index = 0
+  for (const raw of value as unknown[]) {
+    index += 1
+    const label = `${where}第 ${String(index)} 个峰谷时段`
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { ok: false, error: `${label}必须是对象` }
+    const slot = raw as Record<string, unknown>
+    const extra = Object.keys(slot).filter(key => key !== 'windows' && key !== 'rates' && key !== 'label' && key !== 'daysOfWeek')
+    if (extra.length > 0) return { ok: false, error: `${label}含未知字段「${extra[0]!}」` }
+    const rates = parseRatesObject(slot.rates, label)
+    if (!rates.ok) return rates
+    if (!Array.isArray(slot.windows) || slot.windows.length === 0) return { ok: false, error: `${label}至少需要一个时间窗口` }
+    const windows: RateWindow[] = []
+    for (const rawWindow of slot.windows as unknown[]) {
+      if (typeof rawWindow !== 'object' || rawWindow === null || Array.isArray(rawWindow)) {
+        return { ok: false, error: `${label}的时间窗口必须是对象` }
+      }
+      const window = rawWindow as Record<string, unknown>
+      if (!isMinute(window.startMinute) || !isMinute(window.endMinute) || window.startMinute >= window.endMinute) {
+        return { ok: false, error: `${label}的时间窗口需要 0–1440 的整数 startMinute < endMinute` }
+      }
+      windows.push({ startMinute: window.startMinute, endMinute: window.endMinute })
+    }
+    let days: number[] | undefined
+    if (slot.daysOfWeek !== undefined) {
+      if (!Array.isArray(slot.daysOfWeek)) return { ok: false, error: `${label}的 daysOfWeek 必须是 1–7 的整数数组` }
+      const rawDays = slot.daysOfWeek as unknown[]
+      const unique = [...new Set(rawDays.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 1 && day <= 7))]
+      if (unique.length !== rawDays.length) return { ok: false, error: `${label}的 daysOfWeek 只能是 1–7 的整数` }
+      if (unique.length > 0) days = unique
+    }
+    if (slot.label !== undefined && typeof slot.label !== 'string') return { ok: false, error: `${label}的 label 必须是字符串` }
+    slots.push({
+      windows,
+      rates: rates.rates,
+      ...(days !== undefined ? { daysOfWeek: days } : {}),
+      ...(typeof slot.label === 'string' && slot.label !== '' ? { label: slot.label } : {}),
+    })
+  }
+  return { ok: true, slots }
+}
+
+/** Read the hand-edited `pricing.json` into the engine rule table (entries
+ *  whose rates/rules are malformed are dropped, never fatal). */
+export async function readManualPricing(
+  dir: string,
+  logger: { error(...args: unknown[]): void } = console,
+): Promise<PricingTable> {
+  const raw = await readJsonFile(dir, PRICING_FILE, logger)
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  const table: PricingTable = {}
+  for (const [model, entry] of Object.entries(raw as Record<string, unknown>)) {
+    if (model === '') continue
+    const rates = coerceManualPricingEntry(entry)
+    if (rates === null) continue
+    // Sort the hand timeline by start: the engine takes the first matching
+    // window, so a stable order makes resolution deterministic (the write path
+    // already refuses overlapping windows).
+    table[model] = rates.timeRules.length > 1
+      ? { ...rates, timeRules: [...rates.timeRules].sort((a, b) => a.startTime - b.startTime) }
+      : rates
+  }
+  return table
 }
 
 /** Outcome of validating a client-submitted manual pricing body. */
 export type ManualPricingParse =
-  | { ok: true; table: Record<string, ModelPricing> }
+  | { ok: true; table: PricingTable }
   | { ok: false; error: string }
 
-/** Validate a manual pricing body (as sent by the 价格表 tab) into a flat
- *  table. Unlike {@link coercePricingTable}, a malformed body is REJECTED with
- *  a reason instead of silently dropping rows — this is the write path, where
- *  a typo must surface rather than disappear. The empty table is valid: it
- *  removes every manual override. */
+/** Validate a manual pricing body (as sent by the 价格表 tab) into the engine
+ *  rule table. Each entry is either a flat rate slate or a rule set
+ *  (`{base, timeRules?, dailySlots?}`). Unlike {@link coerceManualPricingEntry},
+ *  a malformed body is REJECTED with a reason instead of silently dropping rows
+ *  — this is the write path, where a typo must surface rather than disappear.
+ *  The empty table is valid: it removes every manual override. */
 export function parseManualPricingInput(value: unknown): ManualPricingParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { ok: false, error: '手工价格表必须是 JSON 对象（模型 → 单价）' }
+    return { ok: false, error: '手工价格表必须是 JSON 对象（模型 → 单价或规则集）' }
   }
-  const raw = value as Record<string, unknown>
-  const table: Record<string, ModelPricing> = {}
-  for (const [model, entry] of Object.entries(raw)) {
+  const table: PricingTable = {}
+  for (const [model, entry] of Object.entries(value as Record<string, unknown>)) {
     if (model === '') return { ok: false, error: '存在空模型名' }
     if (model.length > 256) return { ok: false, error: `模型名过长：${model.slice(0, 40)}…` }
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-      return { ok: false, error: `「${model}」的单价必须是对象` }
+      return { ok: false, error: `「${model}」的条目必须是对象` }
     }
-    const prices = entry as Record<string, unknown>
-    const readRate = (key: string): number | undefined => {
-      const v = prices[key]
-      if (v === undefined) return undefined
-      return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : NaN
-    }
-    const inputPerMillion = readRate('inputPerMillion')
-    const outputPerMillion = readRate('outputPerMillion')
-    if (inputPerMillion === undefined || outputPerMillion === undefined || Number.isNaN(inputPerMillion) || Number.isNaN(outputPerMillion)) {
-      return { ok: false, error: `「${model}」缺少合法的 inputPerMillion / outputPerMillion（非负数字）` }
-    }
-    const out: ModelPricing = { inputPerMillion, outputPerMillion }
-    const cacheReadPerMillion = readRate('cacheReadPerMillion')
-    const cacheWritePerMillion = readRate('cacheWritePerMillion')
-    if (cacheReadPerMillion !== undefined && Number.isNaN(cacheReadPerMillion)) {
-      return { ok: false, error: `「${model}」的 cacheReadPerMillion 必须是非负数字` }
-    }
-    if (cacheWritePerMillion !== undefined && Number.isNaN(cacheWritePerMillion)) {
-      return { ok: false, error: `「${model}」的 cacheWritePerMillion 必须是非负数字` }
-    }
-    if (cacheReadPerMillion !== undefined) out.cacheReadPerMillion = cacheReadPerMillion
-    if (cacheWritePerMillion !== undefined) out.cacheWritePerMillion = cacheWritePerMillion
-    table[model] = out
+    const parsed = parseManualEntry(entry as Record<string, unknown>, model)
+    if (!parsed.ok) return parsed
+    table[model] = parsed.rates
   }
   return { ok: true, table }
 }
@@ -918,14 +1241,16 @@ export function parseManualPricingInput(value: unknown): ManualPricingParse {
  *  use). Replaces the whole file; an absent cloud mirror is unaffected. */
 export async function writeManualPricing(
   dir: string,
-  table: Record<string, ModelPricing>,
+  table: PricingTable,
   logger: { error(...args: unknown[]): void } = console,
 ): Promise<void> {
+  const file: Record<string, ManualPricingFileEntry> = {}
+  for (const [model, rates] of Object.entries(table)) file[model] = manualFileEntryOf(rates)
   const target = join(dir, PRICING_FILE)
   const tmp = join(dir, `${PRICING_FILE}.tmp`)
   try {
     await mkdir(dirname(target), { recursive: true })
-    await writeFile(tmp, `${JSON.stringify(table, null, 2)}\n`, 'utf8')
+    await writeFile(tmp, `${JSON.stringify(file, null, 2)}\n`, 'utf8')
     await unlink(target).catch(() => undefined)
     await rename(tmp, target)
   } catch (error) {
@@ -936,52 +1261,81 @@ export async function writeManualPricing(
 
 /** Assemble the pricing-table view the 价格表 tab renders: one row per exact
  *  model string a record can be billed under. Manual (`pricing.json`) entries
- *  come first — they are the ones the user maintains — then every cloud model
- *  id and alias from the synced mirror, each group alphabetical. A manual row
- *  that shadows a cloud string keeps its cloud base rates alongside (as a
- *  "参考" reference for the edit form); a manual-only row (a model the cloud
- *  never named) has no cloud side. Cloud rows expose their flat base rates
- *  plus a `layered` flag when the cloud entry also carries time rules /
- *  context tiers / peak slots: the billed rate then varies by time/context,
- *  and a manual entry replaces the whole rule set with flat prices.
+ *  come first — they are the ones the user maintains — then ledger-billed
+ *  strings with no model-layer entry, then every cloud model id and alias from
+ *  the synced mirror (each group alphabetical). Every row carries the FULL
+ *  rule set of its layer(s) plus `now`, the price the effective rule set
+ *  resolves to at view time, so a model with a discount window or peak windows
+ *  never advertises a base rate that is not in force.
  *
- *  `usedModels` (model string → ledger record count) marks models the ledger
- *  actually billed that neither the cloud feed nor a manual entry names —
- *  they currently bill ¥0, and surface at the top of the list as one-click
- *  manual seeds. */
+ *  `usedModels` carries what the ledger billed: `records` surfaces on every row
+ *  the ledger named (so the tab can filter to the models actually in use), and
+ *  a string with no model-layer entry but an overlay-priced channel shows as
+ *  `overlayPriced` rather than a ¥0 seed. */
 export async function readPricingView(
   dir: string,
-  usedModels: ReadonlyMap<string, number> = new Map(),
+  usedModels: ReadonlyMap<string, UsedModelHint> = new Map(),
   logger: { error(...args: unknown[]): void } = console,
 ): Promise<{ rows: PricingViewRow[]; dataDir: string }> {
   const synced = await readSyncedPricing(dir, logger)
   const manual = await readManualPricing(dir, logger)
   const rows: PricingViewRow[] = []
   const seen = new Set<string>()
-  const manualModels = Object.keys(manual).sort((a, b) => a.localeCompare(b))
-  for (const model of manualModels) {
-    const cloudRates = synced[model]?.base
-    rows.push({ model, manual: true, manualRates: manual[model], cloudRates })
+  const recordsOf = (model: string): { records?: number } => {
+    const hint = usedModels.get(model)
+    return hint !== undefined && hint.records > 0 ? { records: hint.records } : {}
+  }
+  for (const model of Object.keys(manual).sort((a, b) => a.localeCompare(b))) {
+    const manualRules = manual[model]!
+    const cloudRules = synced[model]
+    rows.push({
+      model,
+      manual: true,
+      manualRules,
+      manualRates: manualRules.base,
+      ...(cloudRules !== undefined ? { cloudRules, cloudRates: cloudRules.base } : {}),
+      ...(isLayeredRules(manualRules) || isLayeredRules(cloudRules) ? { layered: true } : {}),
+      ...recordsOf(model),
+      now: nowOf(manualRules),
+    })
     seen.add(model)
   }
-  // Ledger-billed strings with NO entry at all (neither manual nor cloud):
-  // these bill ¥0 today, listed right under the manual rows as seeds.
-  const unpriced = [...usedModels.keys()]
+  // Ledger-billed strings with no model-layer entry. One the provider overlay
+  // already prices is NOT unpriced (its money lives in the overlay layer), but
+  // it still belongs in the "in use" view.
+  const ledgerOnly = [...usedModels.keys()]
     .filter(model => !(model in synced) && !(model in manual))
     .sort((a, b) => a.localeCompare(b))
-  for (const model of unpriced) {
-    rows.push({ model, manual: false, unpriced: true, records: usedModels.get(model), cloudRates: undefined })
+  for (const model of ledgerOnly) {
+    const hint = usedModels.get(model)!
+    rows.push({
+      model,
+      manual: false,
+      ...(hint.overlayPriced
+        ? {
+            overlayPriced: true,
+            // The overlay IS this row's price: show it, and name the route so
+            // the UI can send the user to that override instead of offering a
+            // model-layer edit that could never take effect.
+            ...(hint.overlayNow !== undefined ? { now: hint.overlayNow } : {}),
+            ...(hint.overlayProvider !== undefined ? { provider: hint.overlayProvider } : {}),
+          }
+        : { unpriced: true, now: { rates: { inputPerMillion: 0, outputPerMillion: 0 }, peak: false } }),
+      records: hint.records,
+    })
     seen.add(model)
   }
-  const cloudModels = Object.keys(synced).sort((a, b) => a.localeCompare(b))
-  for (const model of cloudModels) {
+  for (const model of Object.keys(synced).sort((a, b) => a.localeCompare(b))) {
     if (seen.has(model)) continue
     const rates = synced[model]!
     rows.push({
       model,
       manual: false,
+      cloudRules: rates,
       cloudRates: rates.base,
-      layered: rates.timeRules.length > 0 || rates.contextTiers.length > 0 || rates.dailySlots.length > 0,
+      ...(isLayeredRules(rates) ? { layered: true } : {}),
+      ...recordsOf(model),
+      now: nowOf(rates),
     })
   }
   return { rows, dataDir: dir }
@@ -996,9 +1350,7 @@ async function readSyncedPricing(dir: string, logger: { error(...args: unknown[]
  * hand-edited `pricing.json` layered on top — a manual entry wins wholesale. */
 export async function readPricingTable(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<PricingTable> {
   const merged: PricingTable = { ...await readSyncedPricing(dir, logger) }
-  for (const [model, base] of Object.entries(await readManualPricing(dir, logger))) {
-    merged[model] = { base, contextTiers: [], dailySlots: [], timeRules: [] }
-  }
+  for (const [model, rates] of Object.entries(await readManualPricing(dir, logger))) merged[model] = rates
   return merged
 }
 

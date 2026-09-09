@@ -201,32 +201,59 @@ export const UNPRICED_KEY: RateKey = { ruleStart: 0, ruleEnd: 0, tier: 0, slot: 
 /** The merged pricing table: model id → full rule set. */
 export type PricingTable = Record<string, ModelRates>
 
+/** The price one (provider, model) resolves to at a single instant — the
+ * answer to "what does this cost right now", through the whole
+ * time-rule → context-tier → peak-slot chain. */
+export interface PricingNow {
+  /** The rates that apply now (¥/M). */
+  rates: ModelPricing
+  /** Label of the winning container or peak slot (`限时5折`, `工作日高峰时段`);
+   * absent when the base slate decided the price. */
+  label?: string
+  /** True when a peak/off-peak slot decided this price. */
+  peak: boolean
+}
+
 /** One model row of the pricing-table view: an exact model string records can
- * be billed under. `cloudRates` is the synced feed's flat base price for that
+ * be billed under. `cloudRules` is the synced feed's FULL rule set for that
  * string (absent = manual-only row, i.e. a model the cloud never named);
- * `manualRates` is the hand-edited `pricing.json` entry, which — when present
- * — replaces the cloud rules wholesale. `layered` marks a cloud entry that
- * also carries time rules / context tiers / peak slots: its billed rate then
- * varies, and writing a manual entry replaces the whole rule set with flat
- * prices. */
+ * `manualRules` is the hand-edited `pricing.json` entry, which — when present
+ * — replaces the cloud rules wholesale. `cloudRates` / `manualRates` are the
+ * flat base-rate shorthands of those two (kept for older clients). `now` is
+ * the price the EFFECTIVE rule set (manual over cloud) resolves to at view
+ * time, so a row never advertises a base rate that is not in force. */
 export interface PricingViewRow {
   /** The exact model string (modelId or alias) records may use. */
   model: string
   /** Whether a manual `pricing.json` entry exists for this exact string. */
   manual: boolean
-  /** Manual entry rates (¥/M); present when `manual` is true. */
+  /** Full manual rule set; present when `manual` is true. */
+  manualRules?: ModelRates
+  /** Manual base rates (¥/M) shorthand = `manualRules.base`. */
   manualRates?: ModelPricing
-  /** Cloud base rates (¥/M) behind this string; absent on manual-only rows. */
+  /** Full cloud rule set behind this string; absent on manual-only rows. */
+  cloudRules?: ModelRates
+  /** Cloud base rates (¥/M) shorthand = `cloudRules.base`. */
   cloudRates?: ModelPricing
-  /** Cloud entry carries time/context/peak rules (its flat base is not the
-   * whole story; a manual entry would replace those rules). */
+  /** Cloud entry carries time rules / context tiers / peak slots (its flat
+   * base is not the whole story; a manual entry would replace those rules). */
   layered?: boolean
   /** True when the ledger recorded this model string but neither the cloud
    * feed nor a manual entry names it — it is currently billed ¥0. */
   unpriced?: boolean
-  /** Number of ledger records naming this model (present on unpriced rows,
-   *  so the hint can show how much usage is at stake). */
+  /** True when the model has no model-layer entry but some provider-overlay
+   * entry prices it (its money lives in the overlay layer, not as ¥0). */
+  overlayPriced?: boolean
+  /** The provider route whose overlay entry prices this string (present with
+   * `overlayPriced`, so the UI can send the user to that exact override). */
+  provider?: string
+  /** Number of ledger records naming this model; present on ANY row the
+   * ledger billed (not just unpriced ones), so the tab can surface the models
+   * actually in use. */
   records?: number
+  /** Price of the effective rule set at view time. For an `overlayPriced` row
+   * that is the provider overlay's price (model layer has no entry). */
+  now?: PricingNow
 }
 
 /** The wire payload of the pricing-table view (价格表 tab). */
@@ -262,6 +289,12 @@ export interface ProviderPricingViewRow {
   manual: boolean
   /** Human note (mirror or hand). */
   note?: string
+  /** The EFFECTIVE rule container this row prices through (the inherited
+   * base model's full rules, or the flat container built from `segments`).
+   * Absent when nothing can price the string. */
+  rules?: ModelRates
+  /** Price of `rules` at view time, so a 跟随基准 row can show the number. */
+  now?: PricingNow
 }
 
 /**

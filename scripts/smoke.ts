@@ -1,10 +1,10 @@
 // Smoke test of the pure aggregation + pricing math (no DSH runtime needed).
 // Run with: node --experimental-strip-types scripts/smoke.ts
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
-import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, coerceProviderPricing, readProviderPricing, resolvePriced, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE } from '../src/pricing.ts'
+import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, PRICING_FILE, coerceProviderPricing, readProviderPricing, resolvePriced, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE } from '../src/pricing.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
@@ -106,12 +106,12 @@ console.log('manual pricing file write/read/merge/view')
     if (parsed.ok) {
       await writeManualPricing(dir, parsed.table, { error: () => {} })
       const manual = await readManualPricing(dir, { error: () => {} })
-      check('manual file round-trips', manual['deepseek-reasoner']?.inputPerMillion === 4.5 && manual['brand-new-x']?.cacheReadPerMillion === 1)
+      check('manual file round-trips', manual['deepseek-reasoner']?.base.inputPerMillion === 4.5 && manual['brand-new-x']?.base.cacheReadPerMillion === 1)
       const merged = await readPricingTable(dir, { error: () => {} })
       check('manual wins wholesale', merged['deepseek-reasoner']?.base.inputPerMillion === 4.5 && merged['deepseek-reasoner']?.timeRules.length === 0)
       check('manual-only model added', merged['brand-new-x']?.base.inputPerMillion === 9)
       check('cloud model still present', merged['deepseek-chat']?.base.inputPerMillion === 2)
-      const view1 = await readPricingView(dir, new Map([['deepseek-v4-pro', 3]]), { error: () => {} })
+      const view1 = await readPricingView(dir, new Map([['deepseek-v4-pro', { records: 3, overlayPriced: false }]]), { error: () => {} })
       // 6 = manual-only brand-new-x + deepseek-reasoner (manual now covers a
       //     cloud row, merged view still lists it once) + 3 remaining cloud rows
       //     + 1 unpriced ledger model (deepseek-v4-pro).
@@ -119,8 +119,10 @@ console.log('manual pricing file write/read/merge/view')
       check('unpriced ledger model surfaces', view1.rows.some(r => r.model === 'deepseek-v4-pro' && r.unpriced === true && r.records === 3))
       const manualRow = view1.rows.find(r => r.model === 'deepseek-reasoner')
       check('manual row flagged with both rates', manualRow?.manual === true && manualRow.manualRates?.inputPerMillion === 4.5 && manualRow.cloudRates?.inputPerMillion === 4)
+      check('manual row carries full rules + now', manualRow?.manualRules?.base.inputPerMillion === 4.5 && manualRow.now?.rates.inputPerMillion === 4.5)
       const cloudRow = view1.rows.find(r => r.model === 'deepseek-chat')
       check('layered cloud row flagged', cloudRow?.manual === false && cloudRow.layered === true)
+      check('layered cloud row carries rules + now', cloudRow?.cloudRules?.dailySlots.length === 1 && cloudRow.now !== undefined)
       // Manual entry for a layered model replaces the whole rule set (flat).
       const parse2 = parseManualPricingInput({ 'deepseek-chat': { inputPerMillion: 1.9, outputPerMillion: 7.6 } })
       check('parse replaces layered', parse2.ok === true)
@@ -133,6 +135,108 @@ console.log('manual pricing file write/read/merge/view')
     check('parse rejects junk', parseManualPricingInput([1, 2]).ok === false)
     check('parse rejects missing output', (() => { const r = parseManualPricingInput({ m: { inputPerMillion: 1 } }); return r.ok === false && 'error' in r && (r as { error: string }).error !== '' })())
     check('parse rejects negative', parseManualPricingInput({ m: { inputPerMillion: -1, outputPerMillion: 2 } }).ok === false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+console.log('manual rule sets: price timeline + peak windows')
+{
+  const dir = await mkdtemp(join(tmpdir(), 'tokbook-manual-rules-'))
+  try {
+    const body = {
+      'deepseek-v4-flash': {
+        base: { inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.05 },
+        dailySlots: [{
+          label: '工作日高峰',
+          daysOfWeek: [1, 2, 3, 4, 5],
+          windows: [{ startMinute: 540, endMinute: 720 }],
+          rates: { inputPerMillion: 3, outputPerMillion: 9 },
+        }],
+        timeRules: [
+          { label: '原价', startTime: 0, endTime: 1786895999, rates: { inputPerMillion: 1, outputPerMillion: 2 } },
+          { label: '限时5折', startTime: 1787760000, endTime: 1788969599, rates: { inputPerMillion: 0.4, outputPerMillion: 1.4 } },
+        ],
+      },
+    }
+    const parsed = parseManualPricingInput(body)
+    check('parse layered ok', parsed.ok === true, parsed.ok ? '' : (parsed as { error: string }).error)
+    if (parsed.ok) {
+      await writeManualPricing(dir, parsed.table, { error: () => {} })
+      const fileText = await readFile(join(dir, 'pricing.json'), 'utf8')
+      check('layered file keeps both rule lists', fileText.includes('"timeRules"') && fileText.includes('"dailySlots"'))
+      const reread = await readManualPricing(dir, { error: () => {} })
+      check('layered round-trips', reread['deepseek-v4-flash']?.timeRules.length === 2
+        && reread['deepseek-v4-flash']?.dailySlots.length === 1
+        && reread['deepseek-v4-flash']?.timeRules[1]?.label === '限时5折'
+        && reread['deepseek-v4-flash']?.base.inputPerMillion === 1.5)
+      const merged = await readPricingTable(dir, { error: () => {} })
+      // Inside the discount window the rule's flat rate wins — even on a
+      // weekday morning, because a rule without its own slots replaces the
+      // root slots (the engine's documented chain).
+      const discount = resolvePriced(merged, {}, undefined, 'deepseek-v4-flash', dayMillis('2026-08-28', 10), 0)
+      check('timeline wins inside its window', discount.prices.inputPerMillion === 0.4 && discount.key.ruleStart === 1787760000, JSON.stringify(discount.prices))
+      // Outside every rule the base container applies, and its peak window
+      // still bites on a weekday morning.
+      const peak = resolvePriced(merged, {}, undefined, 'deepseek-v4-flash', dayMillis('2026-09-15', 10), 0)
+      check('peak window applies outside the timeline', peak.prices.inputPerMillion === 3 && peak.key.slot === 0, JSON.stringify(peak.key))
+      const offPeak = resolvePriced(merged, {}, undefined, 'deepseek-v4-flash', dayMillis('2026-09-15', 13), 0)
+      check('off-peak falls back to base', offPeak.prices.inputPerMillion === 1.5 && offPeak.key.slot === -1)
+      const weekend = resolvePriced(merged, {}, undefined, 'deepseek-v4-flash', dayMillis('2026-09-19', 10), 0)
+      check('weekend is never peak', weekend.prices.inputPerMillion === 1.5 && weekend.key.slot === -1)
+      const view = await readPricingView(dir, new Map(), { error: () => {} })
+      const row = view.rows.find(r => r.model === 'deepseek-v4-flash')
+      check('view carries rules + now', row?.manualRules?.timeRules.length === 2 && row.now !== undefined && row.layered === true)
+      // Flat entries stay flat on disk (backward-compatible file shape).
+      const flat = parseManualPricingInput({ m: { inputPerMillion: 1, outputPerMillion: 2 } })
+      if (flat.ok) {
+        await writeManualPricing(dir, flat.table, { error: () => {} })
+        check('flat entry stays a bare slate', (await readFile(join(dir, 'pricing.json'), 'utf8')).trim() === '{\n  "m": {\n    "inputPerMillion": 1,\n    "outputPerMillion": 2\n  }\n}')
+      }
+    }
+    check('parse rejects unknown rule field', parseManualPricingInput({ m: { base: { inputPerMillion: 1, outputPerMillion: 2 }, tiers: [] } }).ok === false)
+    check('parse rejects missing base', parseManualPricingInput({ m: { timeRules: [] } }).ok === false)
+    check('parse rejects inverted window', parseManualPricingInput({ m: { base: { inputPerMillion: 1, outputPerMillion: 2 }, dailySlots: [{ windows: [{ startMinute: 720, endMinute: 540 }], rates: { inputPerMillion: 1, outputPerMillion: 2 } }] } }).ok === false)
+    check('parse rejects empty windows', parseManualPricingInput({ m: { base: { inputPerMillion: 1, outputPerMillion: 2 }, dailySlots: [{ windows: [], rates: { inputPerMillion: 1, outputPerMillion: 2 } }] } }).ok === false)
+    check('parse rejects inverted rule', parseManualPricingInput({ m: { base: { inputPerMillion: 1, outputPerMillion: 2 }, timeRules: [{ startTime: 10, endTime: 5, rates: { inputPerMillion: 1, outputPerMillion: 2 } }] } }).ok === false)
+    check('parse rejects bad weekday', parseManualPricingInput({ m: { base: { inputPerMillion: 1, outputPerMillion: 2 }, dailySlots: [{ windows: [{ startMinute: 0, endMinute: 60 }], daysOfWeek: [0], rates: { inputPerMillion: 1, outputPerMillion: 2 } }] } }).ok === false)
+    check('empty table clears everything', (() => { const r = parseManualPricingInput({}); return r.ok === true && Object.keys(r.table).length === 0 })())
+    // Overlapping price windows are ambiguous (the engine takes the first
+    // match) — the write path refuses them.
+    check('parse rejects overlapping rules', parseManualPricingInput({
+      m: {
+        base: { inputPerMillion: 1, outputPerMillion: 2 },
+        timeRules: [
+          { startTime: 0, endTime: 100, rates: { inputPerMillion: 1, outputPerMillion: 2 } },
+          { startTime: 50, endTime: 200, rates: { inputPerMillion: 3, outputPerMillion: 6 } },
+        ],
+      },
+    }).ok === false)
+    // A hand-written file with out-of-order windows is read sorted, so the
+    // resolution order (first match) is deterministic.
+    await writeFile(join(dir, PRICING_FILE), JSON.stringify({
+      m: {
+        base: { inputPerMillion: 1, outputPerMillion: 2 },
+        timeRules: [
+          { startTime: 200, endTime: 300, rates: { inputPerMillion: 3, outputPerMillion: 6 }, label: 'late' },
+          { startTime: 100, endTime: 150, rates: { inputPerMillion: 4, outputPerMillion: 8 }, label: 'early' },
+        ],
+      },
+    }), 'utf8')
+    const sortedRead = await readManualPricing(dir, { error: () => {} })
+    check('read sorts the hand timeline by start', sortedRead['m']?.timeRules[0]?.label === 'early' && sortedRead['m']?.timeRules[1]?.label === 'late')
+    // An omitted endTime means "permanent": it resolves far in the future and
+    // is written back without an endTime (so the file stays readable).
+    const openEnded = parseManualPricingInput({
+      m: { base: { inputPerMillion: 1, outputPerMillion: 2 }, timeRules: [{ startTime: 0, rates: { inputPerMillion: 3, outputPerMillion: 6 }, label: '永久价' }] },
+    })
+    check('parse accepts omitted endTime', openEnded.ok === true)
+    if (openEnded.ok) {
+      check('open-ended rule still applies in 2030', resolvePriced(openEnded.table, {}, undefined, 'm', dayMillis('2030-01-01', 10), 0).prices.inputPerMillion === 3)
+      await writeManualPricing(dir, openEnded.table, { error: () => {} })
+      const text = await readFile(join(dir, 'pricing.json'), 'utf8')
+      check('open-ended rule writes no endTime', text.includes('"startTime"') && !text.includes('"endTime"'), text)
+    }
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
