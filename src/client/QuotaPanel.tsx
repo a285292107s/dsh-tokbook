@@ -99,7 +99,7 @@ export function QuotaPanel() {
   return (
     <section className="dtpl-quota-sec" aria-label="订阅额度">
       <p className="dtpl-quota-intro">
-        各订阅的<b>官方账户用量</b>（由插件用你配置的 key 直接查询服务商）。
+        各订阅的<b>官方账户用量</b>（由插件用你配置的 key 直接向该通道方查询）。
       </p>
 
       {hasProviders && (
