@@ -590,8 +590,8 @@ function ProviderCard({ card, money, labels }: {
   const billingTitle = billings.size > 1
     ? '该通道内既有按量扣费的模型，也有套餐内按官方价折算的模型'
     : billings.has('subscription')
-      ? '订阅通道：金额是按官方价折算的订阅价值，不是现金支出'
-      : '按量通道：金额是真实支出口径'
+      ? '订阅通道：金额是按官方价折算的订阅价值，不是实际支出'
+      : '按量通道：金额是实际支出口径'
   return (
     <article className="dtpl-provider-card" data-provider={card.provider}>
       <header className="dtpl-provider-head">
