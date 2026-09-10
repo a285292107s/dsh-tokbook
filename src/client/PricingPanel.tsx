@@ -32,7 +32,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { BillingNature, ChannelUsageRow, DailySlot, ModelPricing, ModelRates, PricingNow, PricingView, PricingViewRow, ProviderAliasMap, ProviderPricingTable, ProviderPricingViewRow, TimeRule } from '../types.ts'
+import type { BillingNature, ChannelForm, ChannelUsageRow, DailySlot, ModelPricing, ModelRates, PricingNow, PricingView, PricingViewRow, ProviderAliasMap, ProviderPricingTable, ProviderPricingViewRow, TimeRule } from '../types.ts'
 
 /** Blank editable rate slate (undefined = leave the field out on save). */
 interface DraftRates {
@@ -122,6 +122,10 @@ interface StagedProviderDrafts {
   names: readonly string[]
   /** Every model id the base table knows, offered by the 跟随官方价 field. */
   modelNames: readonly string[]
+  /** Human channel names + the channel FORM the mirror names, so a rehydrated
+   *  panel still heads its groups the way the fresh view did. */
+  labels: Record<string, string>
+  forms: Record<string, ChannelForm>
 }
 let stagedProviderDrafts: StagedProviderDrafts | null = null
 
@@ -140,6 +144,18 @@ const OPEN_END = Number.MAX_SAFE_INTEGER
 const FIELD_LABELS = { input: '输入', output: '输出', cacheRead: '缓存读', cacheWrite: '缓存写' } as const
 const FIELD_ORDER: ReadonlyArray<keyof DraftRates> = ['input', 'cacheRead', 'cacheWrite', 'output']
 const WEEKDAY_LABELS: ReadonlyArray<[number, string]> = [[1, '一'], [2, '二'], [3, '三'], [4, '四'], [5, '五'], [6, '六'], [7, '日']]
+
+/** The four channel forms the mirror feed names, in the order the overlay tab
+ *  lists them: 直连 → 中转 → 订阅 → 包装. `form` is the feed's own fact — never
+ *  guessed from billing or the price source, since a first-party metered channel
+ *  may price with segments just as a relay may follow the official table. */
+const FORM_ORDER: ReadonlyArray<ChannelForm> = ['official', 'relay', 'subscription', 'wrapper']
+const FORM_LABELS: Record<ChannelForm, string> = {
+  official: '官方通道',
+  relay: '中转转售',
+  subscription: '订阅套餐',
+  wrapper: '包装路由',
+}
 
 let uidCounter = 0
 const nextId = (): string => `d${++uidCounter}`
@@ -1952,6 +1968,11 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
   const [aliasBaseline, setAliasBaseline] = useState(() => stagedProviderDrafts?.aliasBaseline ?? aliasSignature(new Map()))
   const [names, setNames] = useState<readonly string[]>(() => stagedProviderDrafts?.names ?? [])
   const [modelNames, setModelNames] = useState<readonly string[]>(() => stagedProviderDrafts?.modelNames ?? [])
+  const [labels, setLabels] = useState<Record<string, string>>(() => stagedProviderDrafts?.labels ?? {})
+  const [forms, setForms] = useState<Record<string, ChannelForm>>(() => stagedProviderDrafts?.forms ?? {})
+  // Which channel form the list is narrowed to (null = 全部). A filter over the
+  // route groups, not a nesting level: the route stays the unit being read.
+  const [formFilter, setFormFilter] = useState<ChannelForm | null>(null)
   const [aliasSource, setAliasSource] = useState('')
   const [aliasTarget, setAliasTarget] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -1962,13 +1983,15 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
   const [savedFlash, setSavedFlash] = useState(false)
   const activeRef = useRef(0)
 
-  const seed = useCallback((providerRows: readonly ProviderPricingViewRow[], routes: ProviderAliasMap) => {
+  const seed = useCallback((providerRows: readonly ProviderPricingViewRow[], routes: ProviderAliasMap, channelLabels: Record<string, string>, channelForms: Record<string, ChannelForm>) => {
     const next = new Map(providerRows.filter(row => row.manual).map(row => [providerKeyOf(row.provider, row.model), providerDraftOf(row)]))
     const aliasMap = new Map(Object.entries(routes))
     setDrafts(next)
     setBaseline(providerBaseline(next))
     setAliases(aliasMap)
     setAliasBaseline(aliasSignature(aliasMap))
+    setLabels(channelLabels)
+    setForms(channelForms)
   }, [])
 
   const load = useCallback(async () => {
@@ -1982,13 +2005,15 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
         providerRoutes?: ProviderAliasMap
         providerNames?: string[]
         modelNames?: string[]
+        providerLabels?: Record<string, string>
+        providerForms?: Record<string, ChannelForm>
       }
       if (token !== activeRef.current) return
       const providerRows = payload.providerRows ?? []
       setRows(providerRows)
       setNames(payload.providerNames ?? [])
       setModelNames(payload.modelNames ?? [])
-      seed(providerRows, payload.providerRoutes ?? {})
+      seed(providerRows, payload.providerRoutes ?? {}, payload.providerLabels ?? {}, payload.providerForms ?? {})
       setCollapsed(new Set())
       setEditingKey(null)
     } catch (err) {
@@ -2101,10 +2126,10 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
   // Cache only dirty state; a clean view is re-fetched on the next mount.
   useEffect(() => {
     stagedProviderDrafts = dirty && rows !== null
-      ? { rows, drafts, baseline, aliases, aliasBaseline, names, modelNames }
+      ? { rows, drafts, baseline, aliases, aliasBaseline, names, modelNames, labels, forms }
       : null
     onDirtyChange(dirty)
-  }, [rows, drafts, baseline, aliases, aliasBaseline, names, modelNames, dirty, onDirtyChange])
+  }, [rows, drafts, baseline, aliases, aliasBaseline, names, modelNames, labels, forms, dirty, onDirtyChange])
 
   const save = useCallback(async () => {
     const result = composeProviderTable(drafts)
@@ -2154,6 +2179,9 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
 
   // Group rows by provider; hand rows first within each group. Hand rows the
   // mirror never named are synthesized so a new override is visible at once.
+  // Groups are ordered by the channel FORM the mirror declares (直连 → 中转 →
+  // 订阅 → 包装), then by route key, so the taxonomy reads as blocks; a route
+  // the feed does not name a form for sorts last.
   const grouped = useMemo(() => {
     const byProvider = new Map<string, ProviderPricingViewRow[]>()
     const known = new Set<string>()
@@ -2177,9 +2205,28 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
       })
       out.push([provider, list])
     }
-    out.sort((a, b) => a[0].localeCompare(b[0]))
+    const rankOf = (provider: string): number => {
+      const form = forms[provider]
+      const index = form === undefined ? -1 : FORM_ORDER.indexOf(form)
+      return index < 0 ? FORM_ORDER.length : index
+    }
+    out.sort(([a], [b]) => rankOf(a) - rankOf(b) || a.localeCompare(b))
     return out
-  }, [rows, drafts])
+  }, [rows, drafts, forms])
+
+  // The form filter's counts: one per form the mirror actually names, over the
+  // route groups (the unit the list renders).
+  const formCounts = useMemo(() => {
+    const counts = new Map<ChannelForm, number>()
+    for (const [provider] of grouped) {
+      const form = forms[provider]
+      if (form === undefined) continue
+      counts.set(form, (counts.get(form) ?? 0) + 1)
+    }
+    return counts
+  }, [grouped, forms])
+
+  const visibleGroups = formFilter === null ? grouped : grouped.filter(([provider]) => forms[provider] === formFilter)
 
   const providerNames = useMemo(
     () => [...new Set([...(rows ?? []).map(row => row.provider), ...names])].filter(name => name !== '').sort((a, b) => a.localeCompare(b)),
@@ -2187,13 +2234,18 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
   )
   // Alias pickers: a route can follow one other route, one hop only — so a
   // route already following something is not a source, and a route someone
-  // already follows is not a source either (that would make a chain).
+  // already follows is not a source either (that would make a chain). A mirror
+  // wrapper is excluded from both sides: it already follows its target, and it
+  // owns no entries of its own for a hand route to inherit.
   const aliasTargeted = useMemo(() => new Set(aliases.values()), [aliases])
   const aliasSourceCandidates = useMemo(
-    () => names.filter(name => !aliases.has(name) && !aliasTargeted.has(name)),
-    [names, aliases, aliasTargeted],
+    () => names.filter(name => !aliases.has(name) && !aliasTargeted.has(name) && forms[name] !== 'wrapper'),
+    [names, aliases, aliasTargeted, forms],
   )
-  const aliasTargetCandidates = useMemo(() => names.filter(name => !aliases.has(name)), [names, aliases])
+  const aliasTargetCandidates = useMemo(
+    () => names.filter(name => !aliases.has(name) && forms[name] !== 'wrapper'),
+    [names, aliases, forms],
+  )
 
   const addAlias = useCallback((route: string, target: string) => {
     if (route === '' || target === '' || route === target) return
@@ -2251,16 +2303,48 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
       <p className="dtpl-pricing-provider-intro">
         按「通道 + 精确模型串」定价：订阅通道算<b>订阅价值</b>、跟随官方价的写「跟随官方价」、
         中转自定价用「自己填价」逐段填。前缀串（如 <code>deepseek/deepseek-v4-flash</code>）在这里命中。
+        列表按镜像声明的<b>通道形态</b>排列（官方通道 / 中转转售 / 订阅套餐 / 包装路由）；
+        <b>包装路由</b>是插件 mint 的孪生，沿用被包装通道的价格与计费性质，只读。
       </p>
 
       {rows === null ? (
         <div className="dtpl-pricing-skeleton dtpl-sk" />
       ) : (
         <div className="dtpl-pricing-provider-list">
+          {formCounts.size > 0 && (
+            <div className="dtpl-pricing-formbar" role="group" aria-label="按通道形态筛选">
+              <button
+                type="button"
+                className="dtpl-pricing-formfilter"
+                aria-pressed={formFilter === null}
+                onClick={() => setFormFilter(null)}
+              >
+                全部<span className="dtpl-pricing-formfilter-count">{grouped.length}</span>
+              </button>
+              {FORM_ORDER.filter(form => formCounts.has(form)).map(form => (
+                <button
+                  key={form}
+                  type="button"
+                  className={`dtpl-pricing-formfilter dtpl-pricing-formfilter-${form}`}
+                  aria-pressed={formFilter === form}
+                  onClick={() => setFormFilter(current => current === form ? null : form)}
+                >
+                  {FORM_LABELS[form]}<span className="dtpl-pricing-formfilter-count">{formCounts.get(form)}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {grouped.length === 0 && <p className="dtpl-pricing-empty">通道覆盖层为空（云端镜像可能尚未同步）。用下方「新增覆盖」为你的通道手工定价。</p>}
-          {grouped.map(([provider, list]) => {
+          {grouped.length > 0 && visibleGroups.length === 0 && (
+            <p className="dtpl-pricing-empty">这个形态下没有通道。<button type="button" className="dtpl-pricing-empty-link" onClick={() => setFormFilter(null)}>显示全部</button></p>
+          )}
+          {visibleGroups.map(([provider, list]) => {
             const isCollapsed = collapsed.has(provider)
             const handCount = list.filter(row => drafts.has(providerKeyOf(row.provider, row.model))).length
+            const form = forms[provider]
+            // Which route this one follows: the hand alias map when the user
+            // declared one, else the target a wrapper's inherited rows name.
+            const follows = aliases.get(provider) ?? list.find(row => row.via !== undefined)?.via
             return (
               <section className="dtpl-pricing-provider-group" key={provider} data-provider={provider}>
                 <button
@@ -2270,10 +2354,14 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
                   aria-controls={`dtpl-prov-${cssId(provider)}`}
                   onClick={() => toggleGroup(provider)}
                 >
-                  <span className="dtpl-pricing-provider-head-name">{provider}</span>
+                  <span className="dtpl-pricing-provider-head-name">{labels[provider] ?? provider}</span>
+                  {labels[provider] !== undefined && <span className="dtpl-pricing-provider-head-route">{provider}</span>}
+                  {form !== undefined && (
+                    <span className={`dtpl-pricing-provider-form dtpl-pricing-provider-form-${form}`}>{FORM_LABELS[form]}</span>
+                  )}
                   <span className="dtpl-pricing-provider-head-meta">
                     {list.length} 条{handCount > 0 ? ` · 手工 ${String(handCount)}` : ''}
-                    {aliases.has(provider) ? ` · 跟随 ${aliases.get(provider)!}` : ''}
+                    {follows !== undefined ? ` · 跟随 ${follows}` : ''}
                   </span>
                   <span className="dtpl-pricing-provider-head-caret" aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
                 </button>

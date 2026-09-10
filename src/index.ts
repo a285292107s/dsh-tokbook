@@ -657,7 +657,7 @@ export class TokenUsageBook extends Service {
     const providerUrl = resolveProviderPricingUrl(this.pricing)
     void syncProviderPricing(this.dir, providerUrl)
       .then((result) => {
-        this.logger.info?.(`[tokbook] provider-pricing sync (${providerUrl}): version ${String(result.version)} (${String(result.providers)} providers, ${String(result.entries)} entries)`)
+        this.logger.info?.(`[tokbook] provider-pricing sync (${providerUrl}): version ${String(result.version)} (${String(result.providers)} providers — ${String(result.wrappers)} wrapper route(s), ${String(result.entries)} entries)`)
       })
       .catch((error: unknown) => {
         this.logger.warn?.('[tokbook] provider-pricing sync failed (overlay disabled):', error)
@@ -733,6 +733,7 @@ export class TokenUsageBook extends Service {
       providerRoutes: provider.routes,
       providerNames: provider.names,
       providerLabels: provider.labels,
+      providerForms: provider.forms,
       dataDir,
     }
   }

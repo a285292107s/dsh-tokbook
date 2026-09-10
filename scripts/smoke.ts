@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
-import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, PRICING_FILE, coerceProviderPricing, coerceProviderLabels, readProviderPricing, resolvePriced, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE, PROVIDER_PRICING_FILE, PROVIDER_ROUTES_KEY, applyProviderAliases, coerceProviderAliases, parseManualProviderPricingInput, readManualProviderOverlay, readProviderPricingView, writeManualProviderOverlay } from '../src/pricing.ts'
+import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, PRICING_FILE, coerceProviderFeed, coerceProviderLabels, readProviderPricing, resolvePriced, billingOf, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE, PROVIDER_PRICING_FILE, PROVIDER_ROUTES_KEY, applyProviderAliases, mergeProviderAliases, coerceProviderAliases, parseManualProviderPricingInput, readManualProviderOverlay, readProviderPricingView, writeManualProviderOverlay } from '../src/pricing.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
@@ -688,32 +688,39 @@ console.log('dual-dimension pricing: provider overlay resolution')
   // Provider overlay mirrors the real dsh-model-pricing shape: a channel-level
   // `billing` covering its entries (a metered official channel, subscription
   // channels, a relay placeholder with an explicit ¥0 segments timeline), plus
-  // an entry-level override for a mixed channel and a malformed channel billing.
-  const overlay = coerceProviderPricing({
+  // an entry-level override for a mixed channel, a malformed channel billing,
+  // the channel `form` each group declares, and a wrapper route that declares
+  // only `aliasOf`.
+  const feed = coerceProviderFeed({
     currency: 'RMB',
     providers: [
       {
         provider: 'deepseek-official',
+        form: 'official',
         billing: 'metered',
         entries: [{ model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }],
       },
       {
         provider: 'opencode-go',
+        form: 'subscription',
         billing: 'subscription',
         entries: [{ model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }],
       },
       {
         provider: 'commandcode',
+        form: 'subscription',
         billing: 'subscription',
         entries: [{ model: 'deepseek/deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }],
       },
       {
         provider: 'relay',
+        form: 'relay',
         billing: 'metered',
         entries: [{ model: 'unknown-relay-model', segments: [{ from: 0, rate: { inputPerMillion: 0, outputPerMillion: 0 } }] }],
       },
       {
         provider: 'mixed',
+        form: 'subscription',
         billing: 'subscription',
         entries: [
           { model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' },
@@ -722,16 +729,30 @@ console.log('dual-dimension pricing: provider overlay resolution')
       },
       {
         provider: 'broken',
+        form: 'official',
         billing: 'free',
         entries: [{ model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }],
       },
+      // A wrapper: no billing, no entries of its own — it names the route it is
+      // a synthetic twin of. The coerce step keeps it as an alias.
+      { provider: 'modlens-commandcode', label: 'Command Code（modlens 包装）', form: 'wrapper', aliasOf: 'commandcode' },
+      // Display metadata is lenient: an unknown form is ignored, not fatal.
+      { provider: 'odd-form', form: 'quantum', billing: 'metered', entries: [{ model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' }] },
+      // A wrapper naming a route the feed does not have: no-op, never fatal.
+      { provider: 'orphan-wrapper', form: 'wrapper', aliasOf: 'not-here' },
     ],
   })
-  check('provider overlay coerces', overlay !== null && overlay!['commandcode']!['deepseek/deepseek-v4-flash']?.billing === 'subscription')
-  if (overlay === null) throw new Error('overlay coerce failed')
+  if (feed === null) throw new Error('provider feed coerce failed')
+  const overlay = applyProviderAliases(feed.table, feed.routes)
+  check('provider overlay coerces', feed.table['commandcode']?.['deepseek/deepseek-v4-flash']?.billing === 'subscription')
   check('channel-level billing covers its entries', overlay['opencode-go']?.['deepseek-v4-flash']?.billing === 'subscription' && overlay['deepseek-official']?.['deepseek-v4-flash']?.billing === 'metered')
   check('entry-level billing overrides the channel default', overlay['mixed']?.['deepseek-v4-flash']?.billing === 'subscription' && overlay['mixed']?.['deepseek-v4-flash-metered']?.billing === 'metered')
   check('malformed channel billing drops the group', overlay['broken'] === undefined)
+  check('channel forms are read', feed.forms['deepseek-official'] === 'official' && feed.forms['relay'] === 'relay' && feed.forms['opencode-go'] === 'subscription')
+  check('an unknown channel form is ignored, not fatal', feed.forms['odd-form'] === undefined && overlay['odd-form']?.['deepseek-v4-flash'] !== undefined)
+  check('a wrapper group keeps no entries of its own and reads as an alias', feed.table['modlens-commandcode'] === undefined && feed.routes['modlens-commandcode'] === 'commandcode' && feed.forms['modlens-commandcode'] === 'wrapper')
+  check('a wrapper alias materializes its target entries', overlay['modlens-commandcode']?.['deepseek/deepseek-v4-flash']?.billing === 'subscription')
+  check('a wrapper naming an absent route is a harmless no-op', feed.routes['orphan-wrapper'] === 'not-here' && overlay['orphan-wrapper'] === undefined)
   const baseTable = base as never as Record<string, { base: Record<string, number>; contextTiers: unknown[]; dailySlots: unknown[]; timeRules: unknown[] }>
 
   // inheritBase follows the base model's full rule set (time rules included).
@@ -766,19 +787,20 @@ console.log('dual-bucket cost: spend vs subscriptionValue')
     const base: Record<string, { base: Record<string, number>; contextTiers: unknown[]; dailySlots: unknown[]; timeRules: unknown[] }> = {
       'deepseek-v4-flash': { base: { inputPerMillion: 2, outputPerMillion: 8 }, contextTiers: [], dailySlots: [], timeRules: [] },
     }
-    const overlay = coerceProviderPricing({
+    const overlay = coerceProviderFeed({
       currency: 'RMB',
       providers: [
-        { provider: 'deepseek-official', entries: [{ model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash' }] },
-        { provider: 'opencode-go', entries: [{ model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }] },
-        { provider: 'commandcode', entries: [{ model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }] },
+        { provider: 'deepseek-official', form: 'official', entries: [{ model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash' }] },
+        { provider: 'opencode-go', form: 'subscription', entries: [{ model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }] },
+        { provider: 'commandcode', form: 'subscription', entries: [{ model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash' }] },
       ],
     })
     if (overlay === null) throw new Error('overlay coerce failed')
+    const overlayTable = overlay.table
     const resolve: (r: UsageRecord) => { ruleStart: number; ruleEnd: number; tier: number; slot: number } = (r) => {
       const usage = r.usage
       const ctx = usage === undefined ? 0 : usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
-      return resolvePriced(base, overlay, r.provider, r.model, r.time, ctx).key
+      return resolvePriced(base, overlayTable, r.provider, r.model, r.time, ctx).key
     }
     const t = dayMillis('2026-08-17', 9)
     const recs: UsageRecord[] = [
@@ -792,7 +814,7 @@ console.log('dual-bucket cost: spend vs subscriptionValue')
       { requestId: 'direct-1', time: t, sessionId: 's4', model: 'deepseek-v4-flash', usage: { inputTokens: 500_000, outputTokens: 0 } },
     ]
     const summary = summarizeRecords(recs, resolve)
-    const costed = attachCosts({ dataDir: dir, ...summary }, base, overlay)
+    const costed = attachCosts({ dataDir: dir, ...summary }, base, overlayTable)
     check('totalCost = 2 + 2 + 1 + 1 = ¥6', Math.abs(costed.totalCost - 6) < 1e-9, `got ${costed.totalCost}`)
     check('spend = official 2 + direct 1 = ¥3', Math.abs(costed.spend - 3) < 1e-9, `got ${costed.spend}`)
     check('subscriptionValue = opencode 2 + commandcode 1 = ¥3', Math.abs(costed.subscriptionValue - 3) < 1e-9, `got ${costed.subscriptionValue}`)
@@ -812,7 +834,7 @@ console.log('dual-bucket cost: spend vs subscriptionValue')
     check('byDay value sums to subscriptionValue', Math.abs(dayValue - costed.subscriptionValue) < 1e-9, `got ${dayValue}`)
     check('the day row carries ¥3 / ¥3', costed.byDay.length === 1 && costed.byDay[0]!.spend === 3 && costed.byDay[0]!.subscriptionValue === 3)
     // recent entries split too
-    const recent = costRecentEntries(recs, base, overlay)
+    const recent = costRecentEntries(recs, base, overlayTable)
     const officialRecent = recent.find(r => r.requestId === 'official-1')
     const opencodeRecent = recent.find(r => r.requestId === 'opencode-1')
     check('recent official: spend', officialRecent?.cost === 2 && officialRecent?.spend === 2 && officialRecent?.subscriptionValue === 0)
@@ -845,8 +867,8 @@ console.log('provider overlay file round-trip')
     check('readProviderPricing loads the mirror', table['commandcode']?.['deepseek/deepseek-v4-flash']?.billing === 'subscription' && table['dots-ai']?.['dots3-note-prev']?.segments?.[0]?.rate.inputPerMillion === 0)
     check('unknown provider absent', table['nope'] === undefined)
     // A provider entry with neither inheritBase nor segments is dropped.
-    const junk = coerceProviderPricing({ currency: 'RMB', providers: [{ provider: 'p', entries: [{ model: 'm', note: 'nothing' }] }] })
-    check('bare provider entry rejected', junk !== null && junk['p'] === undefined)
+    const junk = coerceProviderFeed({ currency: 'RMB', providers: [{ provider: 'p', form: 'relay', billing: 'metered', entries: [{ model: 'm', note: 'nothing' }] }] })
+    check('bare provider entry rejected', junk !== null && junk.table['p'] === undefined)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -934,6 +956,63 @@ console.log('provider route aliases (同价通道)')
     check('inherited row carries via + a resolved price', inherited?.via === 'opencode-go' && inherited.now?.rates.inputPerMillion === 0.8, JSON.stringify(inherited))
     const ownRow = view.rows.find(row => row.provider === 'opencode-go-3' && row.model === 'deepseek-v4-flash')
     check('own row is not marked via', ownRow !== undefined && ownRow.via === undefined)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+console.log('wrapper routes (镜像别名)')
+{
+  const dir = await mkdtemp(join(tmpdir(), 'tokbook-wrapper-'))
+  try {
+    await writeFile(join(dir, PRICING_CCSA_FILE), JSON.stringify({
+      version: 1,
+      updatedAt: 0,
+      currency: 'RMB',
+      models: [
+        { modelId: 'deepseek-v4-flash', inputCostPerMillion: 1, outputCostPerMillion: 4 },
+        { modelId: 'deepseek-v4-pro', inputCostPerMillion: 2, outputCostPerMillion: 8 },
+      ],
+    }), 'utf8')
+    // The mirror declares a wrapper as ONE alias line: no billing, no entries.
+    await writeFile(join(dir, PROVIDER_PRICING_CCSA_FILE), JSON.stringify({
+      version: 6,
+      updatedAt: 0,
+      currency: 'RMB',
+      providers: [
+        {
+          provider: 'commandcode',
+          label: 'Command Code GOAT 订阅',
+          form: 'subscription',
+          billing: 'subscription',
+          entries: [
+            { model: 'deepseek/deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' },
+            { model: 'deepseek/deepseek-v4-pro', inheritBase: 'deepseek-v4-pro' },
+          ],
+        },
+        { provider: 'modlens-commandcode', label: 'Command Code（modlens 包装）', form: 'wrapper', aliasOf: 'commandcode' },
+      ],
+    }), 'utf8')
+
+    const effective = await readProviderPricing(dir, { error: () => {} })
+    const wrapperEntry = effective['modlens-commandcode']?.['deepseek/deepseek-v4-flash']
+    check('mirror wrapper inherits the target entries', wrapperEntry?.inheritBase === 'deepseek-v4-flash' && wrapperEntry?.billing === 'subscription', JSON.stringify(wrapperEntry))
+    const priced = resolvePriced(await readPricingTable(dir, { error: () => {} }), effective, 'modlens-commandcode', 'deepseek/deepseek-v4-flash', dayMillis('2026-08-17', 9), 0)
+    check('a wrapper bills exactly like its target', priced.source === 'inheritBase' && priced.billing === 'subscription' && priced.prices.inputPerMillion === 1, JSON.stringify(priced))
+    check('wrapper records land in the subscription bucket', billingOf(effective, 'modlens-commandcode', 'deepseek/deepseek-v4-flash') === 'subscription')
+
+    // View: a wrapper route is made of inherited (via) rows — read-only, with a
+    // pointer at the canonical route that owns the price.
+    const view = await readProviderPricingView(dir, ['modlens-commandcode'], { error: () => {} })
+    check('view reports the channel forms', view.forms['modlens-commandcode'] === 'wrapper' && view.forms['commandcode'] === 'subscription')
+    check('view keeps hand routes separate from mirror wrappers', view.routes['modlens-commandcode'] === undefined && view.names.includes('modlens-commandcode') && view.names.includes('commandcode'))
+    const inheritedRow = view.rows.find(row => row.provider === 'modlens-commandcode' && row.model === 'deepseek/deepseek-v4-flash')
+    check('wrapper rows are inherited rows', inheritedRow?.via === 'commandcode' && inheritedRow.now?.rates.inputPerMillion === 1 && inheritedRow.manual === false, JSON.stringify(inheritedRow))
+
+    // The hand layer still wins for a route it names: a hand $routes entry for
+    // the same wrapper overrides the mirror alias (its own entries also win).
+    check('hand alias wins over the mirror alias', mergeProviderAliases({ 'modlens-commandcode': 'opencode-go' }, { 'modlens-commandcode': 'commandcode' })['modlens-commandcode'] === 'opencode-go')
+    check('merge keeps unshadowed mirror aliases', mergeProviderAliases({}, { w: 'c' })['w'] === 'c')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

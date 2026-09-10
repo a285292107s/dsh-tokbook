@@ -221,6 +221,55 @@ Typert Remote。
 
 ---
 
+### D-008 · 2026-09-10 · 通道形态显式化;包装路由改由镜像别名承载,不单独定价
+
+**Status: current。**
+
+**背景。** 维护者问:价格表 tab 的两个子视图(模型价 / 通道覆盖层)是否应按通道的四种形态
+(官方通道 / 中转转售商 / 订阅套餐 / 包装路由)重新拆分?从第一性原理看**不该**:两个视图
+切的是**计价层**(模型串的全局基准价 vs (通道,模型) 覆盖层),对应两个文件、两个写回路由、
+两种条目形状,正是 `resolvePriced` 的两级;而四种形态是**通道覆盖层这一层内部**的分类,且
+按形态拆会把它整成跨层——同一个模型串常被多种形态的通道同时计费(本机:`deepseek-v4-flash`
+同时在 deepseek-official、opencode-go、modlens-commandcode),那行全局价无家可归。而「在用 /
+价格未知 / 手工价 / 云端参考表」这些范围也落不进任何单一形态。真问题在别处:
+
+1. 形态在覆盖层里**不可扫**:组头只印裸路由键,连镜像 `label` 都没显示;`modlens-commandcode`
+   与 `commandcode` 都只显示「订阅价值」,二元芯片区分不出包装;
+2. **形态推不出来**:`dots-ai` 是官方通道(小红书自家接口)却用 `segments`,`staryears` 是
+   中转却用 `inheritBase`+`placeholder` —— 从 `(billing, 取价方式)` 反推会把 `dots-ai`
+   误标成中转;
+3. **包装路由被当成一等可编辑通道**:`modlens-commandcode` 有自己的组、行上有「设为覆盖」,
+   能改 `billing`、能填 `segments`,正面违反「绝不单独定价」;而镜像侧靠**复制上游条目**
+   表达包装(镜像 README/AGENTS 早已预留:「条目多到复制不划算时再考虑加别名字段(需消费方
+   配合)」),`modlens-commandcode` 41 条要抄、新插件 mint 一个孪生就得再抄一遍。
+
+**决策(经维护者逐项确认)。**
+
+- **顶层两个子视图不拆**,保持按计价层切分。形态降级为**通道覆盖层内部的展示与筛选维度**:
+  组头 = 镜像 `label` + 路由键 + **形态芯片**,组**按形态排序**(官方 → 中转 → 订阅 → 包装),
+  列表上方一行**形态筛选 chips**(带组数)。模型价视图不动(它的「在用」已按通道分组 + 计费
+  芯片表达了金额性质)。
+- **形态是镜像声明的显式事实**:镜像 feed 新增 `providers[].form`
+  (`official` / `relay` / `subscription` / `wrapper`),与 `billing` 由镜像 build 强制一致;
+  消费方**只透传显示**,绝不从 `billing`/取价方式猜(见背景 2)。读路径对未知/缺失的 `form`
+  宽容(忽略该值),因为形态写错不会算错金额——与 `billing` 非法即丢组的处理刻意不同。
+- **包装路由 = 镜像层一跳别名**:镜像 feed 新增 `providers[].aliasOf`(仅 `form: wrapper`),
+  包装组**不写 `billing`、不写 `entries`**;消费方把它与手工层「同价通道」`$routes` 合进同一张
+  一跳别名表后物化(手工层对同名路由优先)。于是包装路由的价格与计费性质完全来自被包装通道,
+  新插件 mint 孪生只需在镜像加一行;覆盖层里包装组的行全部是 `via` 行(只读,动作「去编辑」
+  指向目标)。`providerRoutes` 仍只回手工层那半边(客户端拥有并写回它),镜像别名以
+  `providerForms` + `via` 行表达。
+- 跨仓库落地:**dsh-model-pricing**(镜像 `providers.source.json` 加 `form`/`aliasOf`、
+  schema、build 校验、README/AGENTS,`version` 5 → 6)与**本仓库**(`src/pricing.ts` 的
+  `coerceProviderFeed` / `mergeProviderAliases`、`src/types.ts` 的 `ChannelForm` 与
+  `providerForms`、`src/routes.ts`、`PricingPanel.tsx`、`styles.ts`)同批改动。
+
+**取代/影响。** 不取代 D-006/D-007(它们关于模型价/在用视图的分组,语义不变);镜像
+README「包装路由靠复制上游条目表达」一段及其 AGENTS 判据被本次改动取代(镜像侧同 commit
+更新)。契约见 [`docs/CONTRACTS.md`](CONTRACTS.md),落地清单见那次 commit。
+
+---
+
 ## 如何追加条目
 
 1. 给下一个 `D-NNN`,今天的日期(或 commit 日期),以及状态。

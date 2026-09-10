@@ -48,6 +48,11 @@
 
 ### 1.2 需求结论（已与用户确认）
 
+> 后续修订(2026-09-10):下表把 `modlens-commandcode` 归在订阅一类;通道类型此后被显式化为
+> 镜像的 `providers[].form`(官方通道 / 中转转售 / 订阅套餐 / **包装路由**四种),包装路由
+> 由镜像的 `aliasOf` 一跳别名承载、绝不单独定价。见 [`DECISIONS.md`](DECISIONS.md) D-008
+> 与 [`CONTRACTS.md`](CONTRACTS.md) 的「术语」段。
+
 | 通道类型 | billing | 计价取价 | 统计归属 |
 |---|---|---|---|
 | 官方/直连（deepseek-official、zai） | `metered` | 跟随官方基准价（含调价史） | 实际支出 |

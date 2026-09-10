@@ -27,7 +27,19 @@
 | 价格未知 | `unpriced`,`unpricedModels`(暂按 ¥0,**不是免费**;已知的 ¥0 是免费) |
 | 按量 / 订阅 / 混合 | 卡片计费芯片,由条目各自的 `billing` 推出 |
 | 同价通道 | 手工层的 `$routes` 一跳路由别名(**不是**镜像层的包装路由) |
-| 包装路由 | 插件为上游通道 mint 的 `<插件>-<provider>` 合成 id(镜像 feed 的一条通道) |
+| 包装路由 | 镜像 feed 的 `providers[].form: wrapper` + `providers[].aliasOf`:插件为上游通道 mint 的 `<插件>-<provider>` 合成 id,沿用目标的价格与计费性质 |
+| 通道形态 | `providers[].form`,`official` / `relay` / `subscription` / `wrapper`;UI 词见下 |
+
+四种形态的界面词与 wire 值(镜像 feed 自己声明的展示事实,消费方**不猜**——同一条
+`(billing, 取价方式)` 可以是两种形态,例如 `dots-ai` 是官方通道却用 `segments`、
+`staryears` 是中转却用 `inheritBase`):
+
+| 界面词 | `form` |
+|---|---|
+| 官方通道 | `official` |
+| 中转转售 | `relay` |
+| 订阅套餐 | `subscription` |
+| 包装路由 | `wrapper` |
 
 ## Host 路由
 
@@ -49,7 +61,7 @@
 | `GET` | `/tokbook/quota` | `provider=<路由键>`;可选 `refresh=1` 跳过 TTL 缓存 | 该通道的 `QuotaCard` |
 | `GET` | `/tokbook/pricing` | — | `PricingView`(含 `providerRows`) |
 | `PUT` | `/tokbook/pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
-| `GET` | `/tokbook/provider-pricing` | — | `{ providerRows: ProviderPricingViewRow[], providerRoutes: ProviderAliasMap, providerNames: string[], modelNames: string[], dataDir }`(通道覆盖层视图;`modelNames` 供「跟随官方价」的候选列表) |
+| `GET` | `/tokbook/provider-pricing` | — | `{ providerRows: ProviderPricingViewRow[], providerRoutes: ProviderAliasMap, providerNames: string[], providerLabels: Record<string,string>, providerForms: Record<string,ChannelForm>, modelNames: string[], dataDir }`(通道覆盖层视图;`modelNames` 供「跟随官方价」的候选列表,`providerLabels` / `providerForms` 供分组头命名与形态筛选) |
 | `PUT` | `/tokbook/provider-pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
 
 Wire 形状要点(权威字段清单见 `src/types.ts`):
@@ -64,6 +76,9 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
 - `GET /tokbook/usage` 的载荷同样带 `providerLabels`(与 `pricing` 同源),卡片头因此用镜像
   feed 的通道标签做主标题、路由键做次要小字,与价格表 tab 命名一致;卡片的计费芯片(按量 /
   订阅 / 混合)由卡内模型各自的 `billing` 推出,说明该卡的金额是实际支出（现金）还是订阅价值（折算）。
+- `GET /tokbook/pricing` / `GET /tokbook/provider-pricing` 还带 **`providerForms`**(镜像
+  `providers[].form` → 路由键的形态),是**增量**展示字段:旧 host 不发时通道覆盖层不显示
+  形态芯片、也不按形态排序。它只影响分组/标注/筛选,不参与计价链。
 - `PUT /tokbook/pricing` body:`{ "<精确模型串>": 条目 }`,条目二选一:
   - **flat 价**(旧格式,仍完全支持):`{ "inputPerMillion": number, "outputPerMillion": number, "cacheReadPerMillion"?: number, "cacheWritePerMillion"?: number }`;
   - **规则集**:`{ "base": <flat 价>, "timeRules"?: [{ "startTime": seconds, "endTime"?: seconds,
@@ -102,15 +117,26 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   `PROVIDER_ROUTES_KEY`)声明**同价通道**(一跳别名):
   `{ "$routes": { "<路由>": "<被跟随的路由>" } }` —— 该路由的价格与 `billing` 跟随目标路由的
   条目,但**它自己的条目仍然优先**(显式条目是"单独给这条路由调价"的逃逸舱)。只允许一跳:
-  目标自身不能又是别名的源;指向自己、非字符串、链式一律拒绝。镜像 feed **不携带**这个键。
-  视图里被跟随而来的行带 `via`(目标路由),是只读行,编辑去目标路由那条。
-  `providerNames` 是 tab 能作为别名目标/来源的全部路由:镜像键 ∪ 手工键 ∪ 别名两端 ∪
-  账本计费过的路由(新导入的 key 只有账本知道它)。
+  目标自身不能又是别名的源;指向自己、非字符串、链式一律拒绝。镜像 feed **不携带**这个键
+  ——它用 `providers[].aliasOf` 声明自己的包装别名,两者在读取时并进同一张一跳表
+  (手工层对同名路由优先)。视图里被跟随而来的行带 `via`(目标路由),是只读行,编辑去
+  目标路由那条;`providerRoutes` 只回手工层的那半边(客户端拥有并写回它)。
+  `providerNames` 是 tab 能作为别名目标/来源的全部路由:镜像键 ∪ 手工键 ∪ 别名两端
+  (镜像与手工)∪ 账本计费过的路由(新导入的 key 只有账本知道它)。
 - 镜像 feed(`provider_pricing.json` → `provider-pricing.ccsa.json`)的 `providers[]` 是
-  `{ provider, label?, billing?, entries[] }`:**通道级 `billing`** 是该通道所有条目的
-  缺省计费性质(条目自带 `billing` 时条目赢),解析时下发给条目;通道级 `billing` 非法 →
-  整组丢弃(绝不静默回落 metered)。手工层的 body 仍是条目级 `billing`(无通道级字段),
-  省略按 metered。
+  `{ provider, label?, form, billing?, aliasOf?, entries? }`:**通道级 `billing`** 是该通道
+  所有条目的缺省计费性质(条目自带 `billing` 时条目赢),解析时下发给条目;通道级 `billing`
+  非法 → 整组丢弃(绝不静默回落 metered)。手工层的 body 仍是条目级 `billing`(无通道级
+  字段),省略按 metered。
+- 镜像的 **`providers[].form`**(`official` / `relay` / `subscription` / `wrapper`)是该通道
+  路由的运行形态,与 `billing` 必须一致(镜像 build 强制)。它**只作展示**:读路径对未知/缺失的
+  `form` 是宽容的(忽略该值,组照常解析),因为形态写错不会算错金额——这与 `billing` 的处理
+  刻意不同。
+- 镜像的 **`providers[].aliasOf`**(仅 `form: wrapper`)声明**包装路由**:插件为上游通道 mint
+  的合成孪生。它自己的组**不带** `billing`、**不带** `entries`(镜像 build 强制),消费方把它
+  与手工层的 `$routes` 合进同一张一跳别名表再物化(手工层对同名路由优先)。于是包装路由的价格
+  与计费性质完全来自被包装通道,包装自己永远不单独定价。别名目标缺失时是**无害的 no-op**
+  (该路由不获得任何条目),绝不致命。
 - wire 上的金额已拆双桶:`spend`(metered 行,实际支出)与 `subscriptionValue`(subscription 行,
   订阅价值、非现金);`totalCost` 保留为两者之和以兼容旧客户端。
 - `byDay` 每行除 token 汇总外还带该日 `spend` / `subscriptionValue`(`attachCosts` 从
@@ -178,8 +204,10 @@ unlink 目标)。日文件只追加、绝不重写。
   同一个去重集与同一条串行追加队列。
 - 价格改动在**读取时**重新计价历史——不重写账本/折叠;计价入口是 （通道，模型）
   双维解析(`resolvePriced`):通道覆盖层(手工 > 镜像)先命中,再回落到基准模型价。
-  同价通道别名在读取合并时**物化**进表(别名路由继承目标条目、自己的条目优先),所以解析
-  链本身只看到 （通道，模型）;别名变化同样只影响后续读取的金额。
+  别名(**镜像的包装路由**与**手工的同价通道**)在读取合并时**物化**进表(别名路由继承目标
+  条目、自己的条目优先),所以解析链本身只看到 （通道，模型）;别名变化同样只影响后续读取的
+  金额。别名只允许一跳:包装路由的 `aliasOf` 目标不能又是包装(镜像 build 与 `$routes` 的
+  写路径各自强制)。
 - 金额分双桶:`spend` 只含 `billing: metered` 行(实际支出),`subscriptionValue` 只含
   `billing: subscription` 行(订阅价值,非现金);UI 不得把后者当作支出展示。
 - 计费性质以**通道**为单位:镜像的 `providers[].billing` 覆盖其全部条目,条目级 `billing`

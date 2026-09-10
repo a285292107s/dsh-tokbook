@@ -299,6 +299,8 @@ export function registerTokBookProviderPricingRoutes(
           providerRows: snapshot.providerRows ?? [],
           providerRoutes: snapshot.providerRoutes ?? {},
           providerNames: snapshot.providerNames ?? [],
+          providerLabels: snapshot.providerLabels ?? {},
+          providerForms: snapshot.providerForms ?? {},
           // Every model id the merged base table knows: the 跟随官方价 field
           // offers these so the user picks instead of typing a model id.
           modelNames: (snapshot.rows ?? []).map(row => row.model),

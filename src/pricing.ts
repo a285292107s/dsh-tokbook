@@ -28,7 +28,7 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
-  BillingNature, ContextTier, DailySlot, ModelPricing, ModelRates, PricingNow, PricingSegment, PricingTable, PricingViewRow, ProviderAliasMap, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, RateWindow, TimeRule, UsageTotals,
+  BillingNature, ChannelForm, ContextTier, DailySlot, ModelPricing, ModelRates, PricingNow, PricingSegment, PricingTable, PricingViewRow, ProviderAliasMap, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, RateWindow, TimeRule, UsageTotals,
 } from './types.ts'
 
 /** The hand-maintained pricing file inside the data directory. */
@@ -348,8 +348,12 @@ interface CloudProviderEntry {
 interface CloudProviderGroup {
   provider?: unknown
   label?: unknown
+  /** Channel form (official / relay / subscription / wrapper). */
+  form?: unknown
   /** Channel-level billing nature; the default for every entry of the group. */
   billing?: unknown
+  /** Set on a wrapper group: the route it is a synthetic twin of. */
+  aliasOf?: unknown
   entries?: unknown
 }
 
@@ -360,6 +364,13 @@ interface CloudProviderData {
 
 function isBillingNature(value: unknown): value is BillingNature {
   return value === 'metered' || value === 'subscription'
+}
+
+/** The four channel forms the mirror names (display metadata; unknown values
+ *  are ignored rather than dropping the channel — unlike `billing`, a wrong
+ *  form cannot corrupt a sum). */
+function isChannelForm(value: unknown): value is ChannelForm {
+  return value === 'official' || value === 'relay' || value === 'subscription' || value === 'wrapper'
 }
 
 function coerceSegment(value: unknown): PricingSegment | null {
@@ -400,42 +411,87 @@ function coerceProviderEntry(value: unknown, defaultBilling?: BillingNature): Pr
   return out
 }
 
-function coerceProviderGroup(value: unknown): { provider: string; entries: Record<string, ProviderPricingEntry> } | null {
+/** One coerced feed group: its entries, plus the display/structural facts the
+ *  group itself carries. */
+interface CoercedProviderGroup {
+  provider: string
+  entries: Record<string, ProviderPricingEntry>
+  /** Channel form; absent when the feed does not name a usable one. */
+  form?: ChannelForm
+  /** Wrapper only: the route whose entries and billing nature this one follows. */
+  aliasOf?: string
+}
+
+function coerceProviderGroup(value: unknown): CoercedProviderGroup | null {
   if (typeof value !== 'object' || value === null) return null
   const group = value as CloudProviderGroup
-  if (typeof group.provider !== 'string' || group.provider === '' || !Array.isArray(group.entries)) return null
+  if (typeof group.provider !== 'string' || group.provider === '') return null
   // A malformed channel-level billing is a malformed group, not a silent
   // fall-through to the metered default (that would mislabel a subscription
   // channel as real spend).
   if (group.billing !== undefined && !isBillingNature(group.billing)) return null
   const defaultBilling = group.billing === undefined ? undefined : group.billing
   const entries: Record<string, ProviderPricingEntry> = {}
-  for (const raw of group.entries as unknown[]) {
-    if (typeof raw !== 'object' || raw === null) continue
-    const model = (raw as CloudProviderEntry).model
-    if (typeof model !== 'string' || model === '') continue
-    const entry = coerceProviderEntry(raw, defaultBilling)
-    if (entry !== null) entries[model] = entry
+  if (Array.isArray(group.entries)) {
+    for (const raw of group.entries as unknown[]) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const model = (raw as CloudProviderEntry).model
+      if (typeof model !== 'string' || model === '') continue
+      const entry = coerceProviderEntry(raw, defaultBilling)
+      if (entry !== null) entries[model] = entry
+    }
   }
-  if (Object.keys(entries).length === 0) return null
-  return { provider: group.provider, entries }
+  // A mirror wrapper declares no entries of its own: it names the route it is a
+  // synthetic twin of, and inherits that route's entries and billing nature.
+  const aliasOf = typeof group.aliasOf === 'string' && group.aliasOf !== '' && group.aliasOf !== group.provider
+    ? group.aliasOf
+    : undefined
+  // A group with neither entries nor a wrapper target prices nothing — drop it
+  // (the pre-existing rule for a table of bare/no-op groups).
+  if (Object.keys(entries).length === 0 && aliasOf === undefined) return null
+  return {
+    provider: group.provider,
+    entries,
+    ...(isChannelForm(group.form) ? { form: group.form } : {}),
+    ...(aliasOf !== undefined ? { aliasOf } : {}),
+  }
 }
 
-/** Coerce the provider-overlay feed into the two-level table. Null when the
- *  feed is not the expected shape. */
-export function coerceProviderPricing(value: unknown): ProviderPricingTable | null {
+/** The provider overlay as coerced from one feed: the (provider, model) entries
+ *  plus the feed's own wrapper aliases, channel forms and labels. */
+export interface CoercedProviderFeed {
+  table: ProviderPricingTable
+  /** Wrapper routes the feed declares: route → the route it is a twin of. */
+  routes: ProviderAliasMap
+  /** Channel form per route, for the routes the feed names one for. */
+  forms: Record<string, ChannelForm>
+  /** Human label per route. */
+  labels: Record<string, string>
+}
+
+/** Coerce the provider-overlay feed (mirror shape) into its entries plus the
+ *  display/alias facts it carries. Null when the feed is not the expected
+ *  shape — an RMB provider overlay. */
+export function coerceProviderFeed(value: unknown): CoercedProviderFeed | null {
   if (typeof value !== 'object' || value === null) return null
   const feed = value as CloudProviderData
   if (!Array.isArray(feed.providers)) return null
   if (typeof feed.currency !== 'string' || feed.currency !== 'RMB') return null
   const table: ProviderPricingTable = {}
+  const routes: ProviderAliasMap = {}
+  const forms: Record<string, ChannelForm> = {}
   for (const raw of feed.providers as unknown[]) {
     const group = coerceProviderGroup(raw)
     if (group === null) continue
-    table[group.provider] = group.entries
+    if (Object.keys(group.entries).length > 0) table[group.provider] = group.entries
+    if (group.aliasOf !== undefined) routes[group.provider] = group.aliasOf
+    if (group.form !== undefined) forms[group.provider] = group.form
   }
-  return table
+  return { table, routes, forms, labels: coerceProviderLabels(value) }
 }
+
+/** The empty feed an absent or malformed mirror reads as. */
+const EMPTY_PROVIDER_FEED: CoercedProviderFeed = { table: {}, routes: {}, forms: {}, labels: {} }
 
 /** The mirror feed's provider labels (`providers[].label`), route → label.
  *  Display-only: a route the feed does not label is simply absent, and a
@@ -524,32 +580,46 @@ export function applyProviderAliases(table: ProviderPricingTable, routes: Provid
   return out
 }
 
+/** The one-hop alias map an effective overlay is materialized with: the mirror's
+ *  wrapper routes plus the hand-declared 同价通道. The hand file wins for a
+ *  route it names (the user's escape hatch); a hand route pointing at a wrapper
+ *  inherits nothing, since a wrapper holds no entries of its own. */
+export function mergeProviderAliases(manual: ProviderAliasMap, mirror: ProviderAliasMap): ProviderAliasMap {
+  const merged: ProviderAliasMap = { ...mirror }
+  for (const [route, target] of Object.entries(manual)) {
+    if (route !== '' && route !== target) merged[route] = target
+  }
+  return merged
+}
+
 /** Read the EFFECTIVE provider overlay: the synced cloud mirror as the base,
  * the hand-edited `provider-pricing.json` layered on top — a manual entry
  * wins wholesale for that exact (provider, model) — then route aliases
- * materialized, so every lookup can stay a plain `providers[route][model]`.
- * Absent files read as empty, so a broken table never blocks the route. */
+ * (mirror wrappers + hand 同价通道) materialized, so every lookup can stay a
+ * plain `providers[route][model]`. Absent files read as empty, so a broken
+ * table never blocks the route. */
 export async function readProviderPricing(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ProviderPricingTable> {
-  const merged: ProviderPricingTable = { ...(await readSyncedProviderPricing(dir, logger)).table }
+  const synced = await readSyncedProviderPricing(dir, logger)
+  const merged: ProviderPricingTable = { ...synced.table }
   const manual = await readManualProviderOverlay(dir, logger)
   for (const [provider, entries] of Object.entries(manual.table)) {
     merged[provider] = { ...merged[provider], ...entries }
   }
-  return applyProviderAliases(merged, manual.routes)
+  return applyProviderAliases(merged, mergeProviderAliases(manual.routes, synced.routes))
 }
 
 async function readSyncedProviderPricing(
   dir: string,
   logger: { error(...args: unknown[]): void } = console,
-): Promise<{ table: ProviderPricingTable; labels: Record<string, string> }> {
+): Promise<CoercedProviderFeed> {
   const raw = await readJsonFile(dir, PROVIDER_PRICING_CCSA_FILE, logger)
-  if (raw === null) return { table: {}, labels: {} }
-  const coerced = coerceProviderPricing(raw)
+  if (raw === null) return EMPTY_PROVIDER_FEED
+  const coerced = coerceProviderFeed(raw)
   if (coerced === null) {
     logger.error(`[tokbook] ${PROVIDER_PRICING_CCSA_FILE} is not a valid RMB provider overlay; treating as absent`)
-    return { table: {}, labels: {} }
+    return EMPTY_PROVIDER_FEED
   }
-  return { table: coerced, labels: coerceProviderLabels(raw) }
+  return coerced
 }
 
 /** The mirror feed's provider labels alone — the light read for a surface that
@@ -570,22 +640,29 @@ export async function readProviderLabels(
  *  alphabetical by provider, hand rows before mirror rows within one provider.
  *  Each row also carries the EFFECTIVE rule container it prices through and
  *  the price that container resolves to now, so a 跟随基准 row shows the
- *  number it inherits instead of only naming the model it follows. */
+ *  number it inherits instead of only naming the model it follows.
+ *
+ *  `routes` is the HAND-layer alias map alone (what the tab owns and writes
+ *  back); the mirror's own wrapper aliases are returned as `forms` +
+ *  synthesized `via` rows, so a wrapper route reads as what it pays without
+ *  ever being editable on its own. */
 export async function readProviderPricingView(
   dir: string,
   usedProviders: Iterable<string> = [],
   logger: { error(...args: unknown[]): void } = console,
-): Promise<{ rows: ProviderPricingViewRow[]; dataDir: string; routes: ProviderAliasMap; names: string[]; labels: Record<string, string> }> {
+): Promise<{ rows: ProviderPricingViewRow[]; dataDir: string; routes: ProviderAliasMap; names: string[]; labels: Record<string, string>; forms: Record<string, ChannelForm> }> {
   const rows: ProviderPricingViewRow[] = []
   const seen = new Set<string>()
   const manual = await readManualProviderOverlay(dir, logger)
-  const { table: synced, labels } = await readSyncedProviderPricing(dir, logger)
+  const synced = await readSyncedProviderPricing(dir, logger)
+  const { table: syncedTable, labels, forms } = synced
   // The merged overlay + merged base table price every row through the same
   // dual-dimension chain the cost layer uses; aliases are materialized so an
   // inherited row prices exactly like the canonical row it follows.
-  const merged: ProviderPricingTable = { ...synced }
+  const merged: ProviderPricingTable = { ...syncedTable }
   for (const [provider, entries] of Object.entries(manual.table)) merged[provider] = { ...merged[provider], ...entries }
-  const overlay = applyProviderAliases(merged, manual.routes)
+  const aliases = mergeProviderAliases(manual.routes, synced.routes)
+  const overlay = applyProviderAliases(merged, aliases)
   const base = await readPricingTable(dir, logger)
   const toRow = (
     provider: string,
@@ -614,17 +691,18 @@ export async function readProviderPricingView(
       seen.add(`${provider}\n${model}`)
     }
   }
-  for (const [provider, entries] of Object.entries(synced)) {
+  for (const [provider, entries] of Object.entries(syncedTable)) {
     for (const [model, entry] of Object.entries(entries)) {
       if (seen.has(`${provider}\n${model}`)) continue // hand row shadows the mirror row
       rows.push(toRow(provider, model, entry, false))
       seen.add(`${provider}\n${model}`)
     }
   }
-  // A route following another: synthesize the rows it inherits, so the tab
-  // shows what that route actually pays and where to go edit it. A model the
-  // route defines itself was already emitted above and is left alone.
-  for (const [route, target] of Object.entries(manual.routes)) {
+  // A route following another (a hand 同价通道, or a mirror wrapper): synthesize
+  // the rows it inherits, so the tab shows what that route actually pays and
+  // where to go edit it. A model the route defines itself was already emitted
+  // above and is left alone.
+  for (const [route, target] of Object.entries(aliases)) {
     if (route === target) continue
     const inherited = merged[target]
     if (inherited === undefined) continue
@@ -638,15 +716,16 @@ export async function readProviderPricingView(
     a.provider < b.provider ? -1 : a.provider > b.provider ? 1
       : a.model < b.model ? -1 : a.model > b.model ? 1 : 0)
   // Every route the tab can offer as an alias target: mirror/hand keys, alias
-  // sources and targets, and the routes the ledger billed (a brand-new key has
-  // no entries yet, so the ledger is the only place it appears).
+  // sources and targets (both layers), and the routes the ledger billed (a
+  // brand-new key has no entries yet, so the ledger is the only place it
+  // appears).
   const names = [...new Set([
     ...Object.keys(merged),
-    ...Object.keys(manual.routes),
-    ...Object.values(manual.routes),
+    ...Object.keys(aliases),
+    ...Object.values(aliases),
     ...usedProviders,
   ])].filter(name => name !== '').sort((a, b) => a.localeCompare(b))
-  return { rows, dataDir: dir, routes: manual.routes, names, labels }
+  return { rows, dataDir: dir, routes: manual.routes, names, labels, forms }
 }
 
 /** Outcome of validating a client-submitted manual provider-overlay body. */
@@ -1559,6 +1638,8 @@ export interface ProviderSyncResult {
   updatedAt: number
   providers: number
   entries: number
+  /** Mirror-declared wrapper routes (each inherits its target's entries). */
+  wrappers: number
 }
 
 /** Fetch the provider-overlay pricing feed and mirror it verbatim into
@@ -1575,8 +1656,8 @@ export async function syncProviderPricing(dir: string, url: string): Promise<Pro
   } catch {
     throw new Error('feed is not valid JSON')
   }
-  const table = coerceProviderPricing(value)
-  if (table === null) throw new Error('feed is not a valid RMB provider overlay')
+  const feed = coerceProviderFeed(value)
+  if (feed === null) throw new Error('feed is not a valid RMB provider overlay')
   const raw = value as { version?: unknown; updatedAt?: unknown }
   const version = typeof raw.version === 'number' ? raw.version : 0
   const updatedAt = typeof raw.updatedAt === 'number' ? raw.updatedAt : 0
@@ -1590,8 +1671,9 @@ export async function syncProviderPricing(dir: string, url: string): Promise<Pro
   return {
     version,
     updatedAt,
-    providers: Object.keys(table).length,
-    entries: Object.values(table).reduce((sum, models) => sum + Object.keys(models).length, 0),
+    providers: Object.keys(feed.table).length + Object.keys(feed.routes).length,
+    entries: Object.values(feed.table).reduce((sum, models) => sum + Object.keys(models).length, 0),
+    wrappers: Object.keys(feed.routes).length,
   }
 }
 

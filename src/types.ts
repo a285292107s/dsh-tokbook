@@ -113,6 +113,15 @@ export interface ModelPricing {
 /** Billing nature of one provider channel, decided per (provider, model). */
 export type BillingNature = 'metered' | 'subscription'
 
+/** How a channel is operated and priced — the mirror feed's `providers[].form`.
+ *  Four forms: a vendor's own metered API (`official`), a third party's metered
+ *  channel at its own rate (`relay`), a plan whose models are not billed per
+ *  token (`subscription`), and a client plugin's synthetic twin of another
+ *  route (`wrapper`). Display metadata (grouping/annotation); the one pricing
+ *  rule riding on it is that a wrapper prices nothing of its own — it inherits
+ *  its target's entries and billing nature. */
+export type ChannelForm = 'official' | 'relay' | 'subscription' | 'wrapper'
+
 /** One self-priced time segment of a provider entry: applies while
  * `from ≤ seconds < to` (epoch seconds; `from`/`to` absent = unbounded on
  * that side). The segment rate *is* the price during the window — it never
@@ -150,7 +159,8 @@ export type ProviderPricingTable = Record<string, Record<string, ProviderPricing
 /** Hand-edited route aliases: one provider route follows another route's
  *  overlay entries — the case of buying the same plan several times, where
  *  each imported key is its own route but they all price the same. One hop
- *  only; the mirror feed never carries this. */
+ *  only. The mirror feed declares its OWN alias source (`providers[].aliasOf`,
+ *  the wrapper routes) separately from this hand-layer map. */
 export type ProviderAliasMap = Record<string, string>
 
 
@@ -303,6 +313,11 @@ export interface PricingView {
   /** Human label per provider route (the mirror feed's `providers[].label`),
    *  so a channel group reads "DeepSeek 官方 API" instead of its route key. */
   providerLabels?: Record<string, string>
+  /** The mirror feed's channel form per provider route (`providers[].form`):
+   *  official / relay / subscription / wrapper. Display metadata — the tab
+   *  groups, sorts and filters the overlay by it. Routes the feed does not name
+   *  (a hand-only or brand-new route) are simply absent. */
+  providerForms?: Record<string, ChannelForm>
   /** One row per (provider, model) in the EFFECTIVE provider overlay (cloud
    *  mirror + hand edits), the read/display side of the provider dimension.
    *  Absent on hosts that predate the provider layer. */

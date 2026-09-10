@@ -1595,6 +1595,62 @@ const CSS = `
 [data-plugin="dsh-tokbook"] .dtpl-pricing-family-head-name{
   font-size:12px;line-height:18px;font-weight:650;
 }
+/* The route key stays visible as the secondary name (the primary is the feed's
+   label), exactly like the 在用 view's channel head. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-head-route{
+  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
+}
+/* Which of the four channel forms the mirror declares for this route. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form{
+  font-size:9px;line-height:14px;font-weight:600;white-space:nowrap;
+  padding:0 6px;border-radius:999px;corner-shape:round;
+  color:var(--dtpl-fg-2);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form-official{
+  color:var(--dtpl-accent);background:color-mix(in srgb,var(--dtpl-accent) 15%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form-relay{
+  color:var(--dtpl-warn);background:color-mix(in srgb,var(--dtpl-warn) 15%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form-subscription{
+  color:var(--dtpl-ok);background:color-mix(in srgb,var(--dtpl-ok) 15%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form-wrapper{
+  color:var(--dtpl-fg-3);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
+}
+/* The form filter above the overlay list: the same segmented-pill language as
+   the model view's scope chips. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-formbar{
+  display:flex;align-items:center;gap:4px;flex-wrap:wrap;
+  margin:0 0 6px;padding:2px;border-radius:9px;corner-shape:round;
+  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter{
+  appearance:none;border:0;background:transparent;
+  display:inline-flex;align-items:center;gap:6px;
+  height:24px;padding:0 9px;
+  font:inherit;font-size:12px;line-height:18px;font-weight:500;
+  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
+  border-radius:7px;corner-shape:round;
+  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter:hover{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter[aria-pressed="true"]{
+  color:var(--dtpl-fg);
+  background:var(--dtpl-surface);
+  box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter-count{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;padding:0 5px;
+  border-radius:999px;corner-shape:round;
+  font-size:10px;line-height:1;font-weight:600;color:var(--dtpl-fg-2);
+  background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter[aria-pressed="true"] .dtpl-pricing-formfilter-count{
+  color:var(--dtpl-on-accent);
+  background:var(--dtpl-accent);
+}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-provider-head-meta,
 [data-plugin="dsh-tokbook"] .dtpl-pricing-family-head-meta{
   color:var(--dtpl-fg-3);font-size:11px;line-height:16px;

@@ -164,10 +164,23 @@ const PRICING_FIXTURE = {
   providerLabels: {
     'deepseek-official': 'DeepSeek 官方 API',
     'opencode-go': 'OpenCode Go 订阅',
-    'commandcode': 'Command Code GOAT 订阅',
-    'modlens-commandcode': 'modlens 经 Command Code',
+    commandcode: 'Command Code GOAT 订阅',
+    'modlens-commandcode': 'Command Code（modlens 包装）',
+    'deepseek-modlens': 'DeepSeek 官方 API（modlens 包装）',
     zai: 'Z.ai（智谱直连）',
     staryears: 'StarYears 中转',
+    'dots-ai': '小红书（dots-ai）',
+  },
+  /** The mirror's channel forms — the axis the overlay list groups by. */
+  providerForms: {
+    'deepseek-official': 'official',
+    'opencode-go': 'subscription',
+    commandcode: 'subscription',
+    'modlens-commandcode': 'wrapper',
+    'deepseek-modlens': 'wrapper',
+    zai: 'official',
+    staryears: 'relay',
+    'dots-ai': 'official',
   },
   providerRows: [
     { provider: 'deepseek-official', model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash', manual: false, note: '官方按量' },
@@ -180,10 +193,14 @@ const PRICING_FIXTURE = {
     { provider: 'staryears', model: 'gpt-5.6-luna', billing: 'metered', inheritBase: 'gpt-5.6-luna', placeholder: true, manual: false, note: '中转占位' },
     { provider: 'staryears', model: 'grok-4.6', billing: 'metered', inheritBase: 'grok-4.6', placeholder: true, manual: false },
     { provider: 'zai', model: 'glm-5.3-flash', billing: 'metered', inheritBase: 'glm-5.3-flash', manual: false },
+    { provider: 'dots-ai', model: 'dots3-note-prev', billing: 'metered', segments: [{ rate: { inputPerMillion: 0, outputPerMillion: 0 }, note: '免费测试阶段' }], manual: false },
     { provider: 'opencode-go-2', model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: false, via: 'opencode-go', note: '同款套餐的第二份' },
+    // Mirror wrappers: no entries of their own — inherited rows, read-only.
+    { provider: 'modlens-commandcode', model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: false, via: 'commandcode' },
+    { provider: 'deepseek-modlens', model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash', manual: false, via: 'deepseek-official' },
   ],
   providerRoutes: { 'opencode-go-2': 'opencode-go' },
-  providerNames: ['commandcode', 'deepseek-official', 'dots-ai', 'opencode-go', 'opencode-go-2', 'opencode-go-3', 'staryears', 'zai'],
+  providerNames: ['commandcode', 'deepseek-modlens', 'deepseek-official', 'dots-ai', 'modlens-commandcode', 'opencode-go', 'opencode-go-2', 'opencode-go-3', 'staryears', 'zai'],
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
 }
 
@@ -298,6 +315,8 @@ const server = createServer((req, res) => {
       providerRows: PRICING_FIXTURE.providerRows,
       providerRoutes: PRICING_FIXTURE.providerRoutes,
       providerNames: PRICING_FIXTURE.providerNames,
+      providerLabels: PRICING_FIXTURE.providerLabels,
+      providerForms: PRICING_FIXTURE.providerForms,
       dataDir: PRICING_FIXTURE.dataDir,
     }
     res.writeHead(200, { 'content-type': 'application/json' })
