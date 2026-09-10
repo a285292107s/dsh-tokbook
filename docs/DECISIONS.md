@@ -1,6 +1,6 @@
 # 决策记录(ADR 日志)— dsh-tokbook
 
-> **Doc meta** · role: decisions · language: zh-CN · status: current · last-reviewed: 2026-09-09 · supersedes: —
+> **Doc meta** · role: decisions · language: zh-CN · status: current · last-reviewed: 2026-09-10 · supersedes: —
 
 持久架构决策,最新的在最后。每条记录:决策本身、迫使它成立的背景、以及它取代了什么。
 像维护契约一样维护本日志:**落地的决策与代码在同一个 commit 追加条目**。完整推理见
@@ -42,7 +42,7 @@ Typert Remote。
 
 **决策。**
 
-- 每条 **provider 计费模型调用记一行 JSONL**——`assistant/message` 行以 message id 为
+- 每条 **通道计费模型调用记一行 JSONL**——`assistant/message` 行以 message id 为
   去重键,外加 `compaction/summary` 与失败尝试(`turn/end` error、`llm/retry`)记成
   `kind: failure`(只计数、不计费)。
 - 按**本地日历日**持久化:`usage-YYYY-MM-DD.jsonl`,追加 + 串行队列 + 进程级
@@ -72,33 +72,33 @@ Typert Remote。
   cacheRead + cacheWrite)解析成 `RateKey`——只存身份、不存价格——所以改价在读取时
   重计价历史,无需重建账本/折叠。
 - 价格表 tab 经 `GET/PUT /tokbook/pricing` 编辑手工层。
-- 额度卡拉取各 provider 的**官方账户用量**(Command Code 的 CLI account 端点;OpenCode
+- 额度卡拉取各通道的**官方账户用量**(Command Code 的 CLI account 端点;OpenCode
   Go 的 `/zen/go/v1/usage`)——绝不本地估算;`quota-<provider>.json` 持久化最近已知
   `ok` 卡;`unconfigured`/`error` 卡即时重推、从不持久化。
 
-落地:provider 用量 + 额度的 commit `5e2c86f`(2026-09-07);pricing 手工编辑 tab 截至
+落地:通道用量 + 额度的 commit `5e2c86f`(2026-09-07);pricing 手工编辑 tab 截至
 2026-09-08 在工作区。
 
-### D-004 · 2026-09-08 · (provider, model) 双维计价 + 时间维度 + 双桶统计
+### D-004 · 2026-09-08 · （通道，模型） 双维计价 + 时间维度 + 双桶统计
 
-**Status: current。Supersedes:** D-003 的"单 model 计价"部分(provider 用量/额度与手工
+**Status: current。Supersedes:** D-003 的"单 model 计价"部分(通道用量/额度与手工
 价格表本体仍在,承接其成本层语义)。
 
 **背景。** 同一 model 串可能同时出现在官方 API 通道与订阅通道,计费性质与价格都不同;
 前缀串(`deepseek/deepseek-v4-flash`)在基准价表查不到;厂商按记录时间调价。旧聚合身份
-`(day, model, rate)` 会把两个 provider 的相同 (model, rate) 错并。
+`(day, model, rate)` 会把两个通道的相同 (model, rate) 错并。
 
 **决策。**
 
 - 计价入口改为 `resolvePriced(provider, model, timeMs, context)`:
-  该 record 的 provider 精确串在 provider 覆盖层命中(镜像 `provider-pricing.ccsa.json` +
+  该 record 的通道精确串在通道覆盖层命中(镜像 `provider-pricing.ccsa.json` +
   手工 `provider-pricing.json`,手工赢)→ `inheritBase` 走基准价表该 modelId 完整规则链,
   或 `segments` 按时间取段;否则回落基准价表 model 行;再没有 → unpriced(¥0)。
 - 金额分双桶:`spend`(仅 `billing: 'metered'`,实际支出)与 `subscriptionValue`(仅
   `'subscription'`,订阅价值,非现金);`totalCost` 保留 = 两者之和,兼容旧 wire/旧 client。
-- 聚合身份升级为 `(day, model, provider, rate)`;`byModel` 键改为 (provider, model);
+- 聚合身份升级为 `(day, model, provider, rate)`;`byModel` 键改为 （通道，模型）;
   rollup 带 `schemaVersion: 2`,旧 v1 读作缺失 → 由日文件重建(不静默误并)。
-- 价格表 tab 增加 provider 维度:查看 + 手工覆盖写回(PUT `/tokbook/provider-pricing`)。
+- 价格表 tab 增加通道维度:查看 + 手工覆盖写回(PUT `/tokbook/provider-pricing`)。
 - 镜像仓库(dsh-model-pricing)只负责云端两层数据;tokbook 只消费 + 本地覆盖,不做社区化维护。
 
 落地:`PLAN.provider-pricing.md`(Phase 1–4)。完整推理见该计划与 `docs/DESIGN.md`。
@@ -126,14 +126,14 @@ Typert Remote。
 - 价格表 tab 的每行显示**当前生效价**(`PricingViewRow.now`,host 按读取时刻走
   「时间规则 → 峰谷」链算出),行可展开看完整时间轴;手工行可就地编辑调价时段与峰谷
   时段(含"该时段自己的峰谷"),保存前不生效、保存后全部历史按新价重算。
-- Provider 覆盖层:`segments` 支持**多段**时间轴(UI 逐段编辑),`inheritBase` 行显示
-  跟随后的实际价;新增「新增覆盖」表单,可为镜像里没有的 (provider, model) 建立覆盖。
+- 通道覆盖层:`segments` 支持**多段**时间轴(UI 逐段编辑),`inheritBase` 行显示
+  跟随后的实际价;新增「新增覆盖」表单,可为镜像里没有的 （通道，模型） 建立覆盖。
 - **同价通道(一跳路由别名)**:同一个套餐买多份时,每把 key 是独立路由(用量/额度必须
   分开),但价格与 `billing` 相同——复制 N 份条目会漂移,所以在 `provider-pricing.json` 的
   保留键 `$routes` 里声明一次 `{ "<路由>": "<被跟随路由>" }`。语义:**别名路由继承目标条目,
   自己的条目仍然优先**(显式条目 = 单独给这条路由调价的逃逸舱);只允许一跳,目标不能再是
   别名源(链/环在写路径拒绝),镜像 feed 不携带该键。实现上别名在读取合并时**物化**进表
-  (`applyProviderAliases`),所以解析链仍是纯 (provider, model),UI 里继承行带 `via` 且只读。
+  (`applyProviderAliases`),所以解析链仍是纯 （通道，模型）,UI 里继承行带 `via` 且只读。
   别名与条目共用同一次整表 PUT 与同一份脏状态。
 - 保存按钮由**脏状态**(暂存草稿签名 vs 载入基线)驱动,而不是行数——删除最后一条手工
   覆盖是合法编辑(空表 = 清空手工层);脏草稿跨挂载存活(切 tab / 关浮窗不丢)。
@@ -144,7 +144,7 @@ Typert Remote。
   保存被拒时滚动定位到错误条与出错行。
 - **默认只读,改价是显式动作**:这个 tab 主要被用来"看",改价是低频事件——所以手工行平时是
   只读摘要(价格 + 来源 + 生效窗口),点「编辑」才把四档单价变成输入框并展开规则编辑器,
-  同一时刻只有一行可写(与 Provider 面一致);删价收进编辑态的「删除手工价」。同时把低频的
+  同一时刻只有一行可写(与通道面一致);删价收进编辑态的「删除手工价」。同时把低频的
   「同价通道」「新增覆盖」收进列表下方的「高级」折叠。目的:首屏只剩「搜索 + 一张表」,
   而不是"报表与表单同屏"。术语也向用户语言收敛(跟随基准/自定时间轴/占位 → 跟随官方价/
   自己填价/先按官方价),「跟随官方价」的模型 id 改为带候选列表的输入(可手填,但不必凭记忆)。
@@ -159,7 +159,7 @@ Typert Remote。
 
 ---
 
-### D-006 · 2026-09-09 · 价格表云端参考表按厂商分组;provider 维度留在覆盖层
+### D-006 · 2026-09-09 · 价格表云端参考表按厂商分组;通道维度留在覆盖层
 
 **Status: current。Supersedes:** D-005 中「全部」视图里云端基准价表平铺展示的 UI 部分
 （双维计价、双桶统计与编辑语义都不变）。
@@ -176,12 +176,12 @@ Typert Remote。
 - 「全部」的云端参考表按 `family` 折叠分组：模型数降序、未标注厂商的串最后，组默认折叠，
   搜索自动展开命中的组。分组只是折叠一层，不改变任何行的定价与编辑动作。（未标注桶刻意叫
   「未标注厂商」而不是「其他」——`other` 是 feed 里一个真实的 `family` 值。）
-- 两个"供应商"轴**不混进同一棵树**：厂商（`family`）用于云端参考表的浏览分组；provider
-  路由（通道）的展示与编辑归属留在既有的 **Provider 覆盖层**与 Provider 用量 tab。原因：
+- 两个"供应商"轴**不混进同一棵树**：厂商（`family`）用于云端参考表的浏览分组；通道
+  路由的展示与编辑归属留在既有的 **通道覆盖层**与通道用量 tab。原因：
   模型层价格是**全局**的（`pricing.json` 是 `Record<model, 规则集>`），同一个串可能被多条
   路由计费（本机：`deepseek-v4-flash` 在 deepseek-official 与 opencode-go、`glm-5.3-flash`
   在 opencode-go 与 zai），按路由分组会让同一行在多组里重复出现、而编辑只影响那份全局价。
-- 「在用」列表按 provider 路由分组是**紧随其后的第二步**（已与维护者确认：共享串只在主通道
+- 「在用」列表按通道路由分组是**紧随其后的第二步**（已与维护者确认：共享串只在主通道
   可编辑，其余通道只读并标「全局价」）。它需要先把 `pricingView()` 的 `UsedModelHint`
   键从模型串改成 `(provider, model)`，所以与本次展示分组分开落地。
 
@@ -190,23 +190,23 @@ Typert Remote。
 
 ---
 
-### D-007 · 2026-09-09 · 在用视图按 provider 通道分组;全局价只在一条"主通道"行可编辑
+### D-007 · 2026-09-09 · 在用视图按通道分组;全局价只在一条"主通道"行可编辑
 
 **Status: current。Supersedes:** D-006 中「在用按通道分组是紧随其后的第二步」的过渡安排
 （云端参考表按厂商分组不变）。
 
 **背景。** D-006 把「全部」的云端参考表按厂商折叠了,但默认视图「在用」仍是模型串平铺——
 同一条串被多条通道计费时（本机：`deepseek-v4-flash` 在 deepseek-official 与 opencode-go、
-`glm-5.3-flash` 在 opencode-go 与 zai），行里看不出"哪条通道花的钱",provider 信息在
+`glm-5.3-flash` 在 opencode-go 与 zai），行里看不出"哪条通道花的钱",通道信息在
 `used`（按模型串键控）里被结构性丢掉。
 
 **决策。**
 
-- host 新增 **`channelRows`**（每条账本计费过的 (provider, model)：记录数、通道计费性质、
+- host 新增 **`channelRows`**（每条账本计费过的 （通道，模型）：记录数、通道计费性质、
   该通道自己的解析价 `now`、是否 `overlay` 定价 / `unpriced`）与 **`providerLabels`**
   （镜像 feed 的 `providers[].label`）。两者都是**增量** wire 字段;旧 host 不发时客户端
   退回平铺模型列表。
-- 「在用」按 provider 路由分组：组头 = 标签 + 路由键 + 计费性质 + 模型数/条数;通道按用量
+- 「在用」按通道路由分组：组头 = 标签 + 路由键 + 计费性质 + 模型数/条数;通道按用量
   降序,组内模型按用量降序。**组不可折叠**——它是主内容,不是参考表。
 - **模型层价是全局的**（`pricing.json` 一条串一份）,所以一条被多条通道计费的串**只有一行
   可编辑**。主通道 = 优先 `metered`（实际支出,价格在这里是真金白银）,其次记录数最多,

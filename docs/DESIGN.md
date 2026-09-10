@@ -1,6 +1,6 @@
 # dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-09 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-10 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。
 > 本文档是第一期的**调研结论 + 技术选型 + 框架设计**。调研依据仅两个权威来源：
@@ -15,9 +15,9 @@
 >
 > - §1–§11 主体描述**第一期**框架(外置插件 + 浮窗 + 每会话聚合,不折算成本);
 > - 「重构说明」(自 §428「重构说明:从「每会话聚合」改为「逐请求账本 + 成本」」起)描述
->   **第二期 = 当前代码形态**(逐请求 JSONL 账本 + 成本计价 + provider/额度)。**以此段为准**;
+>   **第二期 = 当前代码形态**(逐请求 JSONL 账本 + 成本计价 + 通道/额度)。**以此段为准**;
 > - §1 的「本期不做成本」与 §11 的「成本折算…后续二期或独立 costbook」预判**已被二期推翻并落地**;
->   provider/额度/pricing 升级的原始计划见 [`archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md)(已归档,superseded)。
+>   通道/额度/pricing 升级的原始计划见 [`archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md)(已归档,superseded)。
 >
 > **精确接口**(路由/配置/事件/数据文件)→ [`CONTRACTS.md`](CONTRACTS.md);**持久决策** →
 > [`DECISIONS.md`](DECISIONS.md);实现/操作现状 → [`../README.md`](../README.md)。
@@ -40,7 +40,7 @@ DSH 本身**已经内置**了逐会话、逐 turn 的 token 计量与展示（`@
 - 建立 `dsh-tokbook` 独立外置插件框架（host 半区 + client 半区）。
 - host 半区：监听持久化 `session/event`，聚合每个会话的 `TokenUsage`，落一条可持久化的账本。
 - client 半区：在 Web UI 左下角（设置按钮上方）加一个入口按钮；点击弹出独立浮窗，展示账本内容。
-- 数据可跨重启累计，能按会话 / 模型 / provider / 时间维度汇总。
+- 数据可跨重启累计，能按会话 / 模型 / 通道 / 时间维度汇总。
 
 **范围边界**（第一期不做）：
 
@@ -57,7 +57,7 @@ DSH 本身**已经内置**了逐会话、逐 turn 的 token 计量与展示（`@
 | 插件形态 | Cordis 插件，一个 host 包 + 可选 client 半区 | DSH 所有功能都是 Cordis 插件（`docs/cordis-primer.md`） |
 | 语言 / 构建 | TypeScript，Node，`tsconfig` + 自建 bundle | 外置包无法使用单仓 `clientBundle()` 预设（见 §7） |
 | 插件位置 | 独立外置包（`dsh-tokbook`），挂进 `web` profile | 你已选定；运行时完全支持外置（见 §7） |
-| 数据捕获 | 监听 `session/event` 的 `assistant/message` `usage`；挂载时重放既有会话做回填 | `usage` 是 provider 上报、持久化、可重放的权威来源 |
+| 数据捕获 | 监听 `session/event` 的 `assistant/message` `usage`；挂载时重放既有会话做回填 | `usage` 是通道上报、持久化、可重放的权威来源 |
 | 持久化 | `@deepseek-ai/dsh-storage` 的 `storage-domain`（JSON 后端） | base 层默认挂载；schema 校验、可查询、稳定 |
 | host→浏览器数据通路 | `ctx.webServer.register({ kind:'exact', path, handler })` 的精确 HTTP 路由 | 外置插件无法方便地贡献生成的 Typert Remote；这是官方「feature-owned 精确 Fetch 路由」的路径（`docs/subsystems/web-client.md`） |
 | UI 入口 | `sidebar.footer.action`（list / root，owner `{ wide }`） | `packages/client/ui-sidebar/src/client/contract/slots.ts`；外置插件可 `slots.inject+register` 填入 |
@@ -123,7 +123,7 @@ DSH 本身**已经内置**了逐会话、逐 turn 的 token 计量与展示（`@
 
 ## 5. 数据模型与持久化
 
-### 5.1 数据来源：权威 = provider 上报的 `usage`
+### 5.1 数据来源：权威 = 通道上报的 `usage`
 
 看 `packages/llm/token-meter/src/usage-projection.ts`：
 
@@ -152,7 +152,7 @@ interface TokBookEntry {
 }
 ```
 
-上层再按需聚合（可按 session / model / provider / 天）。
+上层再按需聚合（可按 session / model / 通道 / 天）。
 
 ### 5.3 持久化：`storage-domain`
 
@@ -174,7 +174,7 @@ base 层默认挂载了 `storage` / `storage-json` / `storage-domain`，且 `sto
   投影（turn 数），经 `ctx.sessionProjections.snapshot(session, ['tokenUsage','sessionStats'])` 读取；
   账本**不重复实现折叠、不会重复计数**。
 - **实时**：订阅 `sessionProjections.onChanged`（`tokenUsage`/`sessionStats` key 变化时重读该会话），
-  并监听 `session/event` 的 `request/header` 更新 provider/model（best-effort）。
+  并监听 `session/event` 的 `request/header` 更新 `provider`/`model`（best-effort）。
 - **回填**：挂载初始化遍历 `ctx.sessions.list()`，对每个会话 `_refresh` 一次，把挂载前历史即刻补进账本。
 - **持久化**：`LedgerStore`（当前 `JsonLedgerStore` → `$DSH_HOME/storages/tokbook.json`），生产期望换
   `@deepseek-ai/dsh-storage-domain`。
@@ -406,7 +406,7 @@ dsh-tokbook/
    若未来需要大量 UI 复用 DSH 内部模块或走生成 Remote，in-repo 会明显省力；本方案默认外置。
 2. **host→浏览器数据通路**：用 `ctx.webServer.register({ kind:'exact', path, handler })`，不用生成 Typert
    Remote（外置插件难以贡献生成式 remote namespace）。实时可用 SSE（handler 可 `res.write` 保持长连接）。
-3. **记账权威源**：`assistant/message` 的 `usage`（provider 上报、持久、可重放、exactly-once）；
+3. **记账权威源**：`assistant/message` 的 `usage`（通道上报、持久、可重放、exactly-once）；
    不用 `session-telemetry`（可能丢/重）。
 4. **UI 槽位**：只填已声明的 `sidebar.footer.action` + `shell.overlay`，**无需改 DSH 仓库**（路线 A，见 §6.0）。
 5. **不要看 `dsh-costbook`**（已废弃/有问题的实现），不要照抄它。
@@ -455,7 +455,7 @@ dsh-tokbook/
   模型调用记**一行** JSONL（`requestId` = assistant message id，去重键）；并额外记录
   `compaction/summary`（压缩 summarize 调用）、`turn/end`(error) 与 `llm/retry`
   （失败尝试，计入 `failures` 维度）。`request/context` / `assistant/message` 用来
-  维护会话最后已知的 model/provider，给失败行归属。
+  维护会话最后已知的 `model`/`provider`，给失败行归属。
 - 存储：**按本地日期的 `usage-YYYY-MM-DD.jsonl`**（`~/.dsh/tokbook/` 可配 `path`），
   追加式 + 串行队列 + 进程级 request-id 去重；`refileByEventDay()` 修正放错日的行。
 - 回填：首次启动经 `ctx.sessionPersistence` 回放既有会话日志（幂等，注入缺失则优雅
@@ -486,30 +486,30 @@ dsh-tokbook/
   且价格更新无需重建聚合即可重新计价历史。
 - **价格维护 UI**（价格表 tab）：浮窗内新增第 5 个 tab，`GET/PUT /tokbook/pricing`。
   入口按「用户的问题」组织，而不是按文件组织：**在用**是默认视图，也是唯一的日常入口——
-  账本真正记过的模型**按 provider 通道分组**（组头 = 镜像标签 + 路由键 + 计费性质 + 条数，
+  账本真正记过的模型**按通道分组**（组头 = 镜像标签 + 路由键 + 计费性质 + 条数，
   通道按用量降序、组内模型按用量降序），每行直接给出**当前生效价**与来源（手工价 / 云端
   分时 / 覆盖层定价）。这里有一个绕不开的事实：**模型层价是全局的**——`pricing.json` 是
-  `Record<model, 规则集>`，没有 provider 维度，同一条串（如 `deepseek-v4-flash`）可能同时被
+  `Record<model, 规则集>`，没有通道维度，同一条串（如 `deepseek-v4-flash`）可能同时被
   按量通道与订阅通道计费。所以按通道分组后**一条串只能有一行可编辑**：优先给按量
   （`metered`，真金白银）通道，其次用量最多的一条，再其次路由键序——其余通道行只读、标
   「全局价」，动作是「改全局价」跳到那条可编辑的行。这样既给了"哪条通道花了多少"的分组，
   又不会让用户在订阅通道里改价、以为只影响这一条通道。
-  其余范围是显式筛选：**账本未定价**（记过但两表都没有，计 ¥0，一键转
-  手工价）与**全部**（手工价分组 + 未定价 + 折叠的**云端基准价表**，限高滚动，几百条参考
+  其余范围是显式筛选：**价格未知**（记过但两表都没有，不知价、暂按 ¥0 计，一键转
+  手工价）与**全部**（手工价分组 + 价格未知 + 折叠的**云端基准价表**，限高滚动，几百条参考
   行不撑开浮窗；云端表本身再按 feed 的 `family`（厂商）折叠成组——185 行平铺是这一屏最
   不可扫的形态，而 feed 每个模型本来就带厂商，`coerceCloudPricing` 之前把它丢掉了）。
-  账本的通道事实来自 `pricingView()` 的 `channelRows`（每条 (provider, model) 的记录数 +
+  账本的通道事实来自 `pricingView()` 的 `channelRows`（每条 （通道，模型） 的记录数 +
   计费性质 + 该通道自己的解析价），模型串事实来自 `UsedModelHint`（记录数 + 覆盖层是否已
   定价 + 该覆盖所在的路由）；镜像的 `providers[].label` 经 `providerLabels` 下发，让组头
   显示「DeepSeek 官方 API」而不是路由键。
 - **默认只读，改价是一次显式动作**：这个 tab 绝大多数时候被用来"看"，改价是低频事件，所以
   手工行平时是只读摘要（价格 + 来源 + 生效窗口），点「编辑」才把四档单价变成输入框、展开规则
-  编辑器——同一时刻只有一行可写，与 Provider 面一致。这条把"常驻表单"从首屏移除：以前每有
+  编辑器——同一时刻只有一行可写，与通道面一致。这条把"常驻表单"从首屏移除：以前每有
   一条手工价，页面上就多 4 个输入框和一组时段控件。删价也收进编辑态（编辑区的「删除手工价」），
   避免误触。
-- **一处编辑，一个入口**：模型层没有条目、但 provider 覆盖层定价的串（如
+- **一处编辑，一个入口**：模型层没有条目、但通道覆盖层定价的串（如
   `deepseek/deepseek-v4-flash`）**不能**在模型层编辑——覆盖层优先级更高，写下去也不会被
-  读取。这类行因此直接显示覆盖层解析出的当前价，动作是「去覆盖层」：切到 Provider 面
+  读取。这类行因此直接显示覆盖层解析出的当前价，动作是「去覆盖层」：切到通道面
   并展开那条覆盖。用户不需要先判断"该在哪一层改"。
 - **时间维度是这套 UI 的主角**：厂商会调价——期限内/永久降价（`timeRules`）与峰谷价
   （`dailySlots`）。引擎一直支持这两层，缺的只是出口。因此：
@@ -539,10 +539,10 @@ dsh-tokbook/
     所以"哪一条没保存"不用展开行、也不用靠记忆；脏状态按行签名与逐行基线比对得出（行序
     变化不算改动）。Ctrl/Cmd+S 在可见的那一面直接保存。
   - **窄屏不是缩小的宽屏**：≤640px 时价格表行改为堆叠（模型名 / 2×2 四档价带自解释标签 /
-    操作），列头隐藏，时间轴与 provider 行同样纵向排列，tab 栏横向滚动。
-  - Provider 覆盖层同理：`segments` 是可多段的自定时间轴（逐段编辑，不再只保留第一段），
+    操作），列头隐藏，时间轴与通道行同样纵向排列，tab 栏横向滚动。
+  - 通道覆盖层同理：`segments` 是可多段的自定时间轴（逐段编辑，不再只保留第一段），
     `inheritBase` 行显示跟随后的实际价，并新增「新增覆盖」表单为镜像没有的
-    (provider, model) 建覆盖。
+    （通道，模型） 建覆盖。
   - **同款套餐买多份 = 一条别名**：每把 key 都是独立路由（用量、额度必须分开），价格却相同。
     与其复制 N 份条目（改一次价要改 N 处），`provider-pricing.json` 的保留键 `$routes` 声明
     「谁跟随谁」；跟随而来的行在 UI 里只读、带 `via`，点「去编辑」跳到那条真正被维护的覆盖。
@@ -558,7 +558,7 @@ dsh-tokbook/
 仍走 `sidebar.footer.action` 按钮 + `shell.overlay` 浮窗（纯 slot 注册，不受允许列表
 限制），但浮窗内容升级为：汇总卡（**今日词元** + 较近 7 天日均涨跌参照 + **今日支出**）、
 **今日词元构成**（四桶 + 缓存命中率）、
-**按天词元趋势图**、**按模型拆分（词元 + 费用 + 占比条）**、最近记录与未定价模型提示。
+**按天词元趋势图**、**按模型拆分（词元 + 费用 + 占比条）**、最近记录与价格未知模型提示。
 费用显示跟随 `pricingRegion`（domestic=CNY，overseas=USD，按 feed 汇率换算，线上金额
 恒为 RMB）。
 
@@ -580,7 +580,7 @@ dsh-tokbook/
 必填数字，聚合已无法区分「厂商报了 0」与「厂商没上报」（单条记录的
 `UsageFields.cacheWriteTokens` 才是可选的），所以 UI 只该问「这个账本里缓存写入是不是一个
 维度」——`byDay.some(cacheWriteTokens > 0)`。按天判定会让同时用多通道的网格随当日通道
-反复变形；账本判定只在新增会报该字段的 provider 时变一次，而那一次变化本身有信号。不是
+反复变形；账本判定只在新增会报该字段的通道时变一次，而那一次变化本身有信号。不是
 维度时用 3 列网格排成一行，不留半格。另给一个**缓存命中率**（缓存读取 ÷（缓存读取 +
 输入））——四桶原始计数与成本权重相反（缓存读占词元 98% 却是最低费率），命中率才是能改变
 动作的派生量。
