@@ -279,16 +279,17 @@ const CSS = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak{background:var(--dtpl-accent);}
 [data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-fill{background:var(--dtpl-accent);}
-/* Every column carries its own value: the chart reads without hovering. */
+/* Every column carries its own value: the chart reads without hovering. The
+   vertical offset is inline — it repeats the expression that sizes the fill, so
+   the number sits directly above its own bar instead of on a shared top line. */
 [data-plugin="dsh-tokbook"] .dtpl-bar-label{
-  position:absolute;bottom:calc(100% + 2px);left:50%;transform:translateX(-50%);
+  position:absolute;left:50%;transform:translateX(-50%);
   font-size:11px;line-height:14px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
   white-space:nowrap;pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:650;}
-/* A zero day has no column, so its label sits on the baseline instead of
-   floating at the top of the plot. */
-[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-zero{bottom:2px;color:var(--dtpl-fg-3);}
+/* A zero day has no column, so its label sits on the baseline instead. */
+[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-zero{color:var(--dtpl-fg-3);}
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-start{left:0;transform:none;}
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-end{left:auto;right:0;transform:none;}
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis{
@@ -909,7 +910,6 @@ const CSS = `
   animation:dtpl-refresh-pop .35s cubic-bezier(.34,1.56,.64,1);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-ico{width:15px;height:15px;display:block;}
-[data-plugin="dsh-tokbook"] .dtpl-quota-refresh-ico.dtpl-spin{animation:dtpl-rotate 1s linear infinite;}
 /* State chips (unconfigured / fetch error). */
 [data-plugin="dsh-tokbook"] .dtpl-quota-chip{
   flex:none;display:inline-flex;align-items:center;gap:6px;
@@ -965,9 +965,6 @@ const CSS = `
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-cap{
   font-size:8px;line-height:1;font-weight:600;color:var(--dtpl-fg-3);
 }
-[data-plugin="dsh-tokbook"] .dtpl-quota-gauge.dtpl-quota-tone-ok{color:var(--dtpl-ok);}
-[data-plugin="dsh-tokbook"] .dtpl-quota-gauge.dtpl-quota-tone-warn{color:var(--dtpl-warn);}
-[data-plugin="dsh-tokbook"] .dtpl-quota-gauge.dtpl-quota-tone-danger{color:var(--dtpl-err);}
 /* In-card message panel (load failure / unconfigured / fetch error). */
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg{
   display:flex;flex-direction:column;align-items:flex-start;gap:2px;
@@ -1075,727 +1072,280 @@ const CSS = `
   margin:10px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
 }
 
-/* ── pricing tab (价格表) ───────────────────────────────────────────────── */
-/* ONE list on ONE axis: every row is a (通道路由, 精确模型串) pair, and the layer
-   that prices it is a badge plus an in-row choice. Everything below reuses the
-   modal's tokens; the intent is data-dense but navigable — the shell IS the
-   table, the cloud catalogue sits behind one button, and the deep-water forms
-   (新增 / 同价通道) sit behind one disclosure. */
-
-[data-plugin="dsh-tokbook"] .dtpl-pricing-sec{display:flex;flex-direction:column;gap:10px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-intro{
-  margin:0;font-size:12px;line-height:20px;color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-intro b{color:var(--dtpl-fg);font-weight:600;}
-
-/* Toolbar: scope chips (with live counts) + search. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-bar{
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scopes{
-  display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;
-  padding:2px;border-radius:9px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scope{
-  appearance:none;border:0;background:transparent;
-  display:inline-flex;align-items:center;gap:6px;
-  height:24px;padding:0 9px;
-  font:inherit;font-size:12px;line-height:18px;font-weight:500;
-  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
-  border-radius:7px;corner-shape:round;
-  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scope:hover{color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scope[aria-pressed="true"]{
-  color:var(--dtpl-fg);
-  background:var(--dtpl-surface);
-  box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scope-count{
-  display:inline-flex;align-items:center;justify-content:center;
-  min-width:16px;height:16px;padding:0 5px;
-  border-radius:999px;corner-shape:round;
-  font-size:10px;line-height:1;font-weight:600;color:var(--dtpl-fg-2);
-  background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scope[aria-pressed="true"] .dtpl-pricing-scope-count{
-  color:var(--dtpl-on-accent);
-  background:var(--dtpl-accent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scope-reset{
-  appearance:none;border:0;background:transparent;
-  height:24px;padding:0 8px;
-  font:inherit;font-size:11px;line-height:16px;cursor:pointer;
-  color:var(--dtpl-accent);border-radius:7px;corner-shape:round;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scope-reset:hover{background:color-mix(in srgb,var(--dtpl-accent) 10%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-scope:disabled{opacity:.5;cursor:default;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-filter{flex:1;min-width:160px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-search{
-  width:100%;box-sizing:border-box;
-  height:30px;padding:0 10px;
-  border:1px solid var(--dtpl-hairline);border-radius:8px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
-  color:var(--dtpl-fg);font:inherit;font-size:12px;line-height:18px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-search::placeholder{color:var(--dtpl-fg-3);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-search:focus{outline:none;border-color:var(--dtpl-accent);}
-/* The 参考价表 entry: a secondary button, deliberately NOT a peer of the
-   filter chips — the catalogue is a read-only dictionary, not a second view. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-refbtn{
-  appearance:none;flex:none;
-  height:26px;padding:0 11px;
-  border:1px solid var(--dtpl-hairline);border-radius:999px;corner-shape:round;
-  background:transparent;color:var(--dtpl-fg-2);
-  font:inherit;font-size:11px;line-height:16px;cursor:pointer;
-  transition:background .15s ease,color .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-refbtn:hover{
-  color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-refbtn[aria-pressed="true"]{
-  color:var(--dtpl-accent);
-  border-color:color-mix(in srgb,var(--dtpl-accent) 40%,transparent);
-  background:color-mix(in srgb,var(--dtpl-accent) 10%,transparent);
-}
-
-/* Column header + rows share one grid: model (grows) | 4 rates (fixed) |
-   actions (fixed). Both right-hand tracks are FIXED lengths, never "auto":
-   each row is its own grid, so a content-sized track would let one row's longer
-   button decide that row's geometry — its numbers would shift sideways and its
-   model name would be squeezed. --dtpl-actions-w is the column's copy budget:
-   the longest label any row uses must fit it, and anything longer truncates
-   instead of pushing (see .dtpl-pricing-btn). Header and rows must also share
-   the same horizontal padding, or the sticky header names the wrong columns. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-col-header,
-[data-plugin="dsh-tokbook"] .dtpl-pricing-row{
-  --dtpl-rate-w:56px;
-  --dtpl-rate-gap:6px;
-  --dtpl-rates-w:calc(4 * var(--dtpl-rate-w) + 3 * var(--dtpl-rate-gap));
-  --dtpl-actions-w:68px;
-  display:grid;
-  grid-template-columns:minmax(0,1fr) var(--dtpl-rates-w) var(--dtpl-actions-w);
-  align-items:center;column-gap:12px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-col-header{
-  padding:0 10px 2px;
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-3);letter-spacing:.02em;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-rates{
-  display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
-  gap:var(--dtpl-rate-gap);min-width:0;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
-  font-variant-numeric:tabular-nums;white-space:nowrap;
-  text-align:right;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-col-header .dtpl-pricing-rates{text-align:right;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-col-actions{
-  text-align:right;
-}
-
-/* The list itself: rows separated by hairlines. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-list{
-  display:flex;flex-direction:column;
-  border-top:.5px solid var(--dtpl-hairline);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-item{border-bottom:.5px solid var(--dtpl-hairline);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-item:last-child{border-bottom:none;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-row{
-  min-height:40px;padding:6px 10px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-row-manual{
-  background:color-mix(in srgb,var(--dtpl-accent) 5%,transparent);
-  box-shadow:inset 2px 0 0 var(--dtpl-accent);
-  border-radius:4px 0 0 4px;corner-shape:round;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-row-layered{opacity:.88;}
-
-/* Model identity: expand caret + name + source tag, with the "price in force"
-   line underneath when a window/peak decides it. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model{
-  display:flex;flex-direction:column;gap:2px;min-width:0;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model-head{
-  display:flex;align-items:center;gap:7px;min-width:0;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-expand{
-  appearance:none;flex:none;width:18px;height:18px;padding:0;
-  border:0;border-radius:5px;corner-shape:round;background:transparent;
-  color:var(--dtpl-fg-3);font:inherit;font-size:10px;line-height:18px;cursor:pointer;
-  transition:background .15s ease,color .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-expand:hover{
-  color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-used{
-  flex:none;font-size:10px;line-height:16px;color:var(--dtpl-fg-3);
-  font-variant-numeric:tabular-nums;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-now{
-  font-size:10px;line-height:15px;color:var(--dtpl-fg-3);
-  font-variant-numeric:tabular-nums;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-now b{color:var(--dtpl-fg-2);font-weight:600;}
-/* One-shot highlight after a row is promoted (去定价 / 自定义 / 新增) or reached
-   by a deep link, so the eye can follow where it went. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-item-flash{
-  animation:dtpl-pricing-flash 1.4s ease-out;
-}
-@keyframes dtpl-pricing-flash{
-  0%{background:color-mix(in srgb,var(--dtpl-accent) 20%,transparent);}
-  100%{background:transparent;}
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model-name{
-  flex:1 1 auto;min-width:0;
-  font-size:12px;line-height:18px;font-weight:500;color:var(--dtpl-fg);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model-tag{
-  flex:none;height:16px;padding:0 6px;
-  display:inline-flex;align-items:center;
-  border-radius:999px;corner-shape:round;
-  font-size:9px;line-height:1;font-weight:600;white-space:nowrap;
-  color:var(--dtpl-fg-3);
-  background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-row-manual .dtpl-pricing-model-tag{
-  color:var(--dtpl-accent);
-  background:color-mix(in srgb,var(--dtpl-accent) 14%,transparent);
-}
-/* Source badges: which layer prices this row. One vocabulary, four tones —
-   手工 (accent), 覆盖层 / 跟随 (muted), 云端 (plain, no extra rule), 价格未知
-   (warning). The badge is the ONLY place the layer is named on a collapsed row. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model-tag-hand{
-  color:var(--dtpl-accent);
-  background:color-mix(in srgb,var(--dtpl-accent) 14%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model-tag-overlay{
-  color:var(--dtpl-fg-2);
-  background:color-mix(in srgb,var(--dtpl-fg) 12%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model-tag-follow{
-  color:var(--dtpl-fg-3);
-  background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model-tag-unknown{
-  color:var(--dtpl-warn);
-  background:color-mix(in srgb,var(--dtpl-warn) 15%,transparent);
-}
-/* A row carrying staged changes (未保存 / 待删除): it must stay visible while
-   the row is collapsed, and must not be tinted like the 手工 tag it sits next
-   to — hence the doubled class, which outranks .dtpl-pricing-row-manual .tag. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-model-tag.dtpl-pricing-model-tag-staged{
-  color:var(--dtpl-warn);
-  background:color-mix(in srgb,var(--dtpl-warn) 16%,transparent);
-}
-
-/* Rate cells: values are right-aligned tabular text; manual rows swap in
-   small number inputs with the same geometry (their width is 100% of the
-   fixed 56px track above). */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-rate{
-  justify-self:end;color:var(--dtpl-fg);font-size:11px;line-height:18px;
-  font-variant-numeric:tabular-nums;
-}
-/* One rate cell. The label is hidden while the four columns are named by the
-   sticky column header, and shown when the row stacks on a narrow screen. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-cell{
-  display:flex;flex-direction:column;gap:1px;min-width:0;text-align:right;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-cell-label{
-  display:none;font-size:9px;line-height:12px;color:var(--dtpl-fg-3);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-input{
-  width:100%;box-sizing:border-box;justify-self:end;
-  height:26px;padding:0 6px;
-  border:1px solid var(--dtpl-hairline);border-radius:6px;corner-shape:round;
-  background:var(--dtpl-surface);
-  color:var(--dtpl-fg);font:inherit;font-size:11px;line-height:16px;
-  font-variant-numeric:tabular-nums;text-align:right;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-input:focus{outline:none;border-color:var(--dtpl-accent);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-input::placeholder{color:var(--dtpl-fg-dim);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-select{
-  appearance:auto;text-align:left;cursor:pointer;
-}
-
-/* Actions column: one compact secondary/ghost button, bounded by the fixed
-   track above. A label longer than the budget ellipsizes (the title attribute
-   still carries it) instead of widening the column. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-actions{
-  display:flex;justify-content:flex-end;gap:6px;align-items:center;min-width:0;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-btn{
-  flex:none;max-width:100%;height:24px;padding:0 10px;
-  border:none;border-radius:999px;corner-shape:round;
-  font:inherit;font-size:11px;line-height:16px;cursor:pointer;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-custom{
-  color:var(--dtpl-accent);
-  background:color-mix(in srgb,var(--dtpl-accent) 10%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-custom:hover:not(:disabled){
-  background:color-mix(in srgb,var(--dtpl-accent) 18%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-custom:disabled{opacity:.45;cursor:default;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-remove{
-  color:var(--dtpl-err);
-  background:transparent;
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dtpl-err) 40%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-remove:hover{
-  background:color-mix(in srgb,var(--dtpl-err) 12%,transparent);
-}
-
-/* A row whose price belongs to another route or to the global model-layer
-   entry: readable, but visibly not the one you edit here. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-item-shared{opacity:.86;}
-
-/* Empty + skeleton states. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-empty{
-  margin:12px 0;text-align:center;font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-skeleton{height:60px;border-radius:var(--dtpl-radius-sm);}
-/* Unpriced (ledger-billed, no table entry) rows: warning-tinted so the ¥0 gap
-   is visible, with a dashed leading edge distinct from manual's solid accent. */
+/* 价格未知 note's cross-tab link (overview → 价格表 with that filter on). */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-empty-link{
-  appearance:none;border:0;background:transparent;
-  margin-left:8px;padding:0;
-  font:inherit;font-size:12px;line-height:18px;cursor:pointer;
-  color:var(--dtpl-accent);text-decoration:underline;text-underline-offset:2px;
+  appearance:none;border:0;background:transparent;padding:0;
+  font:inherit;font-size:inherit;color:var(--dtpl-accent);
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-pricing-empty-link:hover{color:var(--dtpl-accent-hover,var(--dtpl-accent));}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-row-unpriced{
-  background:color-mix(in srgb,var(--dtpl-warn) 7%,transparent);
-  box-shadow:inset 2px 0 0 var(--dtpl-warn);
-  border-radius:4px 0 0 4px;corner-shape:round;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-row-unpriced .dtpl-pricing-model-tag{
-  color:var(--dtpl-warn);
-  background:color-mix(in srgb,var(--dtpl-warn) 15%,transparent);
-}
 
-/* Footer: save state + primary save button (mirrors the rescan pill). The
-   button names the layers it will write, so ONE save never hides its scope. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-foot{
-  display:flex;align-items:center;justify-content:flex-end;gap:10px;
-  margin-top:2px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-save-state{
-  color:var(--dtpl-ok);font-size:11px;line-height:16px;font-weight:600;
-  visibility:hidden;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-saved{visibility:visible;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-save{
-  height:32px;padding:0 14px;
-  border:none;border-radius:999px;corner-shape:round;
-  background:var(--dtpl-accent-fill);color:var(--dtpl-on-accent);
-  font:inherit;font-size:12px;line-height:18px;font-weight:500;cursor:pointer;
-  transition:background .15s ease,opacity .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-save:hover:not(:disabled){background:var(--dtpl-accent-hover);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-save:disabled{opacity:.45;cursor:default;}
+/* ── pricing tab (价格表) ───────────────────────────────────────────────── */
+/* The tab is a TABLE, not a form: one card per route, one row per model, the
+   four ¥/M buckets as fixed right-aligned columns so numbers compare down the
+   list. Cells read as text and become inputs on focus, the row's own line
+   carries its issue, and the drawer behind ▸ holds the 调价史. */
 
-/* ── pricing tab · overlay / reference / editors ────────────────────────── */
-/* ── 同价通道 (route aliases) ──────────────────────────────────────────────
-   One plan bought several times is several provider routes that price the
-   same; this box declares the following once instead of editing each route. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias{
-  display:flex;flex-direction:column;gap:8px;
-  padding:8px 10px 10px;
-  border:1px solid var(--dtpl-hairline);
-  border-radius:var(--dtpl-radius-sm);corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
+[data-plugin="dsh-tokbook"] .dtpl-price-sec{display:flex;flex-direction:column;gap:8px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+[data-plugin="dsh-tokbook"] .dtpl-price-search{
+  flex:1;min-width:0;height:28px;padding:0 10px;
+  border-radius:8px;corner-shape:round;
+  border:.5px solid var(--dtpl-border);background:transparent;color:var(--dtpl-fg);
+  font:inherit;font-size:12px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-head{
-  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-title{
-  font-size:12px;line-height:18px;font-weight:650;color:var(--dtpl-fg);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-hint{
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-list{display:flex;flex-wrap:wrap;gap:6px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-item{
+[data-plugin="dsh-tokbook"] .dtpl-price-search::placeholder{color:var(--dtpl-fg-3);}
+[data-plugin="dsh-tokbook"] .dtpl-price-chip{
+  appearance:none;flex:none;height:28px;padding:0 10px;
   display:inline-flex;align-items:center;gap:6px;
-  padding:2px 4px 2px 8px;
-  border-radius:999px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-accent) 9%,transparent);
-  box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--dtpl-accent) 30%,transparent);
+  border-radius:8px;corner-shape:round;
+  border:.5px solid var(--dtpl-border);background:transparent;
+  color:var(--dtpl-fg-2);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-route{
-  font-size:11px;line-height:16px;font-weight:600;color:var(--dtpl-fg);
-  max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+[data-plugin="dsh-tokbook"] .dtpl-price-chip:hover{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-chip.is-on{
+  color:var(--dtpl-warn);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
+  background:color-mix(in srgb,var(--dtpl-warn) 10%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-arrow{
-  color:var(--dtpl-fg-3);font-size:10px;line-height:14px;white-space:nowrap;
+/* The one-time legend: what 「—」 means, said once instead of on every row. */
+[data-plugin="dsh-tokbook"] .dtpl-price-legend{
+  margin:0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-remove{
-  appearance:none;border:0;background:transparent;cursor:pointer;
-  color:var(--dtpl-fg-3);font-size:10px;line-height:1;
-  padding:2px 4px;border-radius:999px;corner-shape:round;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-remove:hover{
-  color:var(--dtpl-err);background:color-mix(in srgb,var(--dtpl-err) 12%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-add{
-  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-alias-add .dtpl-pricing-input{max-width:220px;}
-/* 高级 fold: the provider tab's first screen stays "one table"; the alias map
-   and the add-override form live behind one disclosure. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-advanced{display:flex;flex-direction:column;gap:10px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-advanced-bar{
-  appearance:none;border:1px solid var(--dtpl-hairline);background:transparent;
-  display:flex;align-items:center;gap:8px;width:100%;
-  padding:7px 10px;font:inherit;cursor:pointer;color:var(--dtpl-fg-3);
-  border-radius:var(--dtpl-radius-sm);corner-shape:round;
-  transition:background .15s ease,color .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-advanced-bar:hover{
-  color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-advanced-title{font-size:11px;line-height:16px;font-weight:600;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-advanced-count{
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-3);
-  padding:0 6px;border-radius:999px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-advanced-cue{margin-left:auto;font-size:11px;line-height:16px;}
-/* The rule editor's own footer (删除手工价 lives here, not on the row). */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-detail-actions{
-  display:flex;justify-content:flex-end;gap:6px;margin-top:8px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-group,
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-group{
-  border:1px solid var(--dtpl-hairline);
-  border-radius:var(--dtpl-radius-sm);corner-shape:round;
+[data-plugin="dsh-tokbook"] .dtpl-price-legend b{color:var(--dtpl-warn);font-weight:600;}
+
+[data-plugin="dsh-tokbook"] .dtpl-price-cards{display:flex;flex-direction:column;gap:8px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-card{
+  border:.5px solid var(--dtpl-border);border-radius:12px;corner-shape:round;
+  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
   overflow:hidden;
 }
-/* 我的价格: one static (non-collapsible) header per channel route — this is the
-   tab's primary content, so it is read, not folded away. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-groups{display:flex;flex-direction:column;gap:6px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-head{
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  padding:8px 10px;
-  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+[data-plugin="dsh-tokbook"] .dtpl-price-head{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px 6px 6px;border-bottom:.5px solid var(--dtpl-border);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-name{font-size:12px;line-height:18px;font-weight:650;color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-route{color:var(--dtpl-fg-3);font-size:11px;line-height:16px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-billing{
-  font-size:9px;line-height:14px;font-weight:600;
-  padding:0 6px;border-radius:999px;corner-shape:round;
+[data-plugin="dsh-tokbook"] .dtpl-price-card[data-collapsed="true"] .dtpl-price-head{border-bottom:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-fold{
+  appearance:none;border:0;background:transparent;text-align:left;
+  flex:1;min-width:0;display:flex;align-items:center;gap:8px;
+  padding:3px 4px;border-radius:7px;corner-shape:round;
+  font:inherit;color:inherit;cursor:pointer;
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-billing-subscription{
-  color:var(--dtpl-ok);background:color-mix(in srgb,var(--dtpl-ok) 15%,transparent);
+[data-plugin="dsh-tokbook"] .dtpl-price-fold:hover{background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-caret{flex:none;width:10px;color:var(--dtpl-fg-3);font-size:9px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-label{flex:none;font-size:13px;line-height:20px;font-weight:600;color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-key{
+  flex:none;font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-billing-metered{
-  color:var(--dtpl-accent);background:color-mix(in srgb,var(--dtpl-accent) 15%,transparent);
+[data-plugin="dsh-tokbook"] .dtpl-price-count{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-billing-mixed{
-  color:var(--dtpl-fg-2);background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-billing-unpriced{
-  color:var(--dtpl-warn);background:color-mix(in srgb,var(--dtpl-warn) 15%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-meta{margin-left:auto;color:var(--dtpl-fg-3);font-size:11px;line-height:16px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-rows{display:flex;flex-direction:column;}
-/* The chip that says a row's price is the model-layer (global) one: shared by
-   every channel billing the same string. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-global-chip{
-  font-size:9px;line-height:14px;font-weight:600;white-space:nowrap;
-  padding:0 6px;border-radius:999px;corner-shape:round;
-  color:var(--dtpl-fg-3);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
-}
-/* The cloud reference list stacks one collapsible group per vendor inside its
-   bounded scroll region. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-group{margin:6px 6px 0;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-group:last-child{margin-bottom:6px;}
-/* Group head is a full-width button: name + meta counts + caret. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-head{
-  appearance:none;border:0;background:transparent;
-  display:flex;align-items:center;gap:10px;width:100%;
-  padding:8px 10px;font:inherit;cursor:pointer;color:var(--dtpl-fg);
-  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
-  transition:background .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-head:hover{background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-head-name{
-  font-size:12px;line-height:18px;font-weight:650;
-}
-/* Which of the four channel forms the mirror declares for this route. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form{
-  font-size:9px;line-height:14px;font-weight:600;white-space:nowrap;
-  padding:0 6px;border-radius:999px;corner-shape:round;
-  color:var(--dtpl-fg-2);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form-official{
-  color:var(--dtpl-accent);background:color-mix(in srgb,var(--dtpl-accent) 15%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form-relay{
-  color:var(--dtpl-warn);background:color-mix(in srgb,var(--dtpl-warn) 15%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form-subscription{
-  color:var(--dtpl-ok);background:color-mix(in srgb,var(--dtpl-ok) 15%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-form-wrapper{
-  color:var(--dtpl-fg-3);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
-}
-/* The form filter sits in the toolbar's chip row, the same segmented-pill
-   language as the 价格未知 chip beside it. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter{
-  appearance:none;border:0;background:transparent;
-  display:inline-flex;align-items:center;gap:6px;
-  height:24px;padding:0 9px;
-  font:inherit;font-size:12px;line-height:18px;font-weight:500;
-  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
-  border-radius:7px;corner-shape:round;
-  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter:hover{color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter[aria-pressed="true"]{
-  color:var(--dtpl-fg);
-  background:var(--dtpl-surface);
-  box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter-count{
-  display:inline-flex;align-items:center;justify-content:center;
-  min-width:16px;height:16px;padding:0 5px;
-  border-radius:999px;corner-shape:round;
-  font-size:10px;line-height:1;font-weight:600;color:var(--dtpl-fg-2);
-  background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-formfilter[aria-pressed="true"] .dtpl-pricing-formfilter-count{
-  color:var(--dtpl-on-accent);
-  background:var(--dtpl-accent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-head-meta{
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-head-caret{
-  margin-left:auto;color:var(--dtpl-fg-3);font-size:10px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-family-rows{display:flex;flex-direction:column;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-provider-summary{
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;
-}
-
-/* The one-row-at-a-time editor: the layer choice first, then that layer's
-   common fields (deep-water rules sit behind a Fold inside it). */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-editor{display:flex;flex-direction:column;gap:10px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-layer{
-  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
-  padding:2px;border-radius:9px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-layer-lead{
-  padding:0 6px;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-layer-opt{
-  appearance:none;border:0;background:transparent;
-  height:24px;padding:0 10px;
-  font:inherit;font-size:11px;line-height:16px;font-weight:500;
-  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
-  border-radius:7px;corner-shape:round;
-  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-layer-opt:hover:not(:disabled){color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-layer-opt[aria-checked="true"]{
-  color:var(--dtpl-fg);
-  background:var(--dtpl-surface);
-  box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-layer-opt:disabled{opacity:.45;cursor:default;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-layer-note{
-  margin-left:auto;padding:0 6px;
-  font-size:10px;line-height:15px;color:var(--dtpl-fg-3);
-}
-
-/* Fold: a disclosure that keeps the common fields up front. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fold{
-  border:1px solid var(--dtpl-hairline);border-radius:9px;corner-shape:round;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fold-bar{
-  appearance:none;border:0;background:transparent;
-  display:flex;align-items:center;gap:8px;width:100%;
-  padding:7px 10px;font:inherit;cursor:pointer;color:var(--dtpl-fg-2);
+[data-plugin="dsh-tokbook"] .dtpl-price-switch{
+  flex:none;display:inline-flex;align-items:center;gap:2px;padding:2px;
   border-radius:9px;corner-shape:round;
-  transition:background .15s ease,color .15s ease;
+  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fold-bar:hover{
-  color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+[data-plugin="dsh-tokbook"] .dtpl-price-switch button{
+  appearance:none;border:0;background:transparent;
+  height:24px;padding:0 9px;border-radius:7px;corner-shape:round;
+  color:var(--dtpl-fg-3);font:inherit;font-size:11px;cursor:pointer;
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fold-cue{font-size:10px;color:var(--dtpl-fg-3);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fold-label{font-size:11px;line-height:16px;font-weight:600;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fold-count{
-  font-size:10px;line-height:14px;font-weight:600;color:var(--dtpl-fg-2);
-  padding:0 6px;border-radius:999px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 9%,transparent);
+[data-plugin="dsh-tokbook"] .dtpl-price-switch button:hover{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-switch button[aria-pressed="true"]{
+  background:var(--dtpl-card);color:var(--dtpl-fg);font-weight:600;
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fold-hint{margin-left:auto;font-size:10px;line-height:15px;color:var(--dtpl-fg-3);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fold-body{
-  padding:8px 10px 10px;border-top:.5px dashed var(--dtpl-border);
+[data-plugin="dsh-tokbook"] .dtpl-price-empty{
+  margin:0;padding:10px 11px;font-size:12px;line-height:18px;color:var(--dtpl-fg-3);
 }
-/* Inline "start writing a price" line: hint + the one button that stages it. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-start{
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-}
-/* 通道名称与形态: the hand declaration of a route the mirror does not name (or a
-   local rename). Display-only, so the box is deliberately plainer than the
-   pricing rules around it. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-routemeta{
-  display:flex;flex-direction:column;gap:8px;
-  padding:8px 10px 10px;
-  border:1px solid var(--dtpl-hairline);border-radius:9px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-routemeta-grid{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-routemeta .dtpl-pricing-detail-hint{margin:0;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-routemeta code{
-  font-size:10px;color:var(--dtpl-fg-2);
-}
-/* The route chip of an 未计费 row doubles as the entry point for naming it. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-route-btn{
-  appearance:none;border:0;background:transparent;padding:0;
-  font:inherit;font-size:11px;line-height:16px;cursor:pointer;
-  color:var(--dtpl-fg-3);border-radius:4px;corner-shape:round;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-route-btn:hover{
-  color:var(--dtpl-accent);text-decoration:underline;text-underline-offset:2px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-metaedit{
-  padding:0 10px 10px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-prov-editor-grid{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
-  gap:8px;
-}
+[data-plugin="dsh-tokbook"] .dtpl-price-rows{display:flex;flex-direction:column;}
 
-/* ── pricing tab · expanded row body (timeline + staged rule editor) ────── */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-detail{
-  padding:8px 10px 12px 28px;
-  background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
-  border-top:.5px dashed var(--dtpl-border);
+/* Every row is its own grid on the SAME tracks as the column header above it:
+   identity (grows) | four fixed rate columns | one disclosure slot. */
+[data-plugin="dsh-tokbook"] .dtpl-price-cols,
+[data-plugin="dsh-tokbook"] .dtpl-price-row{
+  --dtpl-rate-w:84px;
+  --dtpl-rate-gap:6px;
+  --dtpl-rates-w:calc(4 * var(--dtpl-rate-w) + 3 * var(--dtpl-rate-gap));
+  display:grid;
+  grid-template-columns:minmax(0,1fr) var(--dtpl-rates-w) 26px;
+  column-gap:10px;align-items:center;
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-detail-hint{
-  margin:0 0 8px;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
+[data-plugin="dsh-tokbook"] .dtpl-price-cols{
+  padding:5px 10px 3px;
+  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-detail-hint b{color:var(--dtpl-fg);font-weight:600;}
-
-/* Read-only price timeline: one card per window, the live one outlined. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-timeline{display:flex;flex-direction:column;gap:4px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-row{
-  display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 10px;
-  padding:5px 8px;border-radius:7px;corner-shape:round;
-  font-size:11px;line-height:17px;
-  background:var(--dtpl-surface);
-  box-shadow:inset 0 0 0 1px var(--dtpl-hairline);
+[data-plugin="dsh-tokbook"] .dtpl-price-col-id{padding-left:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-cols .dtpl-price-rates{
+  display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
+  column-gap:var(--dtpl-rate-gap);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-active{box-shadow:inset 0 0 0 1px var(--dtpl-accent);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-label{font-weight:600;color:var(--dtpl-fg);white-space:nowrap;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-span{
-  color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
+[data-plugin="dsh-tokbook"] .dtpl-price-col-rate{text-align:right;}
+[data-plugin="dsh-tokbook"] .dtpl-price-row{
+  min-height:36px;padding:2px 10px;border-top:.5px solid var(--dtpl-border);
+  scroll-margin-block:56px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-row:first-child{border-top:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-row[data-dirty="true"],
+[data-plugin="dsh-tokbook"] .dtpl-price-row:focus-within{
+  background:color-mix(in srgb,var(--dtpl-accent) 7%,transparent);
+  box-shadow:inset 2px 0 0 var(--dtpl-accent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-row[data-open="true"]{
+  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-id{display:flex;flex-direction:column;gap:1px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-name{display:flex;align-items:center;gap:5px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-model{
+  min-width:0;flex:0 1 auto;
+  font-family:var(--dtpl-mono);font-size:12px;line-height:16px;color:var(--dtpl-fg);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-rates{
-  color:var(--dtpl-fg);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;
+[data-plugin="dsh-tokbook"] .dtpl-price-badge{
+  flex:none;
+  display:inline-flex;align-items:center;height:15px;padding:0 5px;
+  border-radius:5px;corner-shape:round;
+  font-size:10px;line-height:15px;font-weight:600;white-space:nowrap;
+  color:var(--dtpl-fg-3);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-badge{
-  grid-column:1/-1;justify-self:start;
-  font-size:9px;line-height:14px;font-weight:700;color:var(--dtpl-accent);
+[data-plugin="dsh-tokbook"] .dtpl-price-badge-unknown{
+  color:var(--dtpl-warn);background:color-mix(in srgb,var(--dtpl-warn) 14%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-note,
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-slot{
-  grid-column:1/-1;color:var(--dtpl-fg-3);font-size:10px;line-height:16px;
-  font-variant-numeric:tabular-nums;
+[data-plugin="dsh-tokbook"] .dtpl-price-badge-dirty{
+  color:var(--dtpl-accent);background:color-mix(in srgb,var(--dtpl-accent) 15%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-tl-base{
-  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);box-shadow:none;
+[data-plugin="dsh-tokbook"] .dtpl-price-meta{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
+}
+/* What is wrong with THIS row, right under its own cells. */
+[data-plugin="dsh-tokbook"] .dtpl-price-issue{
+  margin:0;padding:2px 10px 4px 10px;
+  font-size:10px;line-height:15px;color:var(--dtpl-err);
 }
 
-/* Staged rule editor: price windows, their peak windows, and the root peaks. */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-rules,
-[data-plugin="dsh-tokbook"] .dtpl-pricing-rule-list,
-[data-plugin="dsh-tokbook"] .dtpl-pricing-segments{display:flex;flex-direction:column;gap:8px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-rule,
-[data-plugin="dsh-tokbook"] .dtpl-pricing-slot{
-  display:flex;flex-direction:column;gap:8px;
-  padding:8px;border-radius:9px;corner-shape:round;
+/* The four cells: text until focused, real inputs always (so Tab walks them).
+   Right-aligned tabular figures keep a column comparable down the whole list. */
+[data-plugin="dsh-tokbook"] .dtpl-price-rates{
+  display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
+  column-gap:var(--dtpl-rate-gap);min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-cell{display:flex;flex-direction:column;gap:1px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-cell-k{
+  display:none;font-size:9px;line-height:12px;color:var(--dtpl-fg-3);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-input{
+  width:100%;box-sizing:border-box;
+  height:26px;padding:0 7px;
+  border:.5px solid transparent;border-radius:6px;corner-shape:round;
+  background:transparent;color:var(--dtpl-fg);
+  font:inherit;font-size:12px;line-height:16px;
+  font-variant-numeric:tabular-nums;text-align:right;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-input::placeholder{color:var(--dtpl-fg-dim);}
+[data-plugin="dsh-tokbook"] .dtpl-price-input:hover{border-color:var(--dtpl-border);}
+[data-plugin="dsh-tokbook"] .dtpl-price-input:focus{
+  outline:none;border-color:var(--dtpl-accent);
   background:var(--dtpl-surface);
-  box-shadow:inset 0 0 0 1px var(--dtpl-hairline);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-slot{background:color-mix(in srgb,var(--dtpl-fg) 3%,var(--dtpl-surface));}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-rule-head{display:flex;align-items:center;gap:8px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-rule-index{
-  flex:none;font-size:11px;line-height:16px;font-weight:600;color:var(--dtpl-fg-2);
+[data-plugin="dsh-tokbook"] .dtpl-price-cell[data-state="bad"] .dtpl-price-input{
+  color:var(--dtpl-err);border-color:color-mix(in srgb,var(--dtpl-err) 55%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-label-input{flex:1 1 auto;min-width:0;text-align:left;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-rule-grid{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;
+[data-plugin="dsh-tokbook"] .dtpl-price-cell-err{
+  font-size:9px;line-height:13px;color:var(--dtpl-err);text-align:right;
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-fields{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;
+[data-plugin="dsh-tokbook"] .dtpl-price-more{
+  appearance:none;border:0;background:transparent;
+  width:26px;height:26px;padding:0;border-radius:7px;corner-shape:round;
+  color:var(--dtpl-fg-3);font:inherit;font-size:10px;cursor:pointer;
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-field{display:flex;flex-direction:column;gap:3px;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-field > span{font-size:10px;line-height:14px;color:var(--dtpl-fg-3);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-field .dtpl-pricing-input{text-align:left;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-field-wide{grid-column:1/-1;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-slot-block{display:flex;flex-direction:column;gap:6px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-slot-block-nested{
-  padding-top:6px;border-top:.5px dashed var(--dtpl-border);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-slot-title{font-size:10px;line-height:15px;color:var(--dtpl-fg-3);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-days{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-day{
-  appearance:none;width:24px;height:22px;padding:0;
-  border:0;border-radius:6px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);
-  color:var(--dtpl-fg-2);font:inherit;font-size:11px;line-height:22px;cursor:pointer;
-  transition:background .15s ease,color .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-day[aria-pressed="true"]{
-  background:var(--dtpl-accent-fill);color:var(--dtpl-on-accent);font-weight:600;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-days-hint{margin-left:4px;font-size:10px;color:var(--dtpl-fg-3);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-day-preset{
-  width:auto;padding:0 8px;font-size:10px;
-  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
-  box-shadow:inset 0 0 0 1px var(--dtpl-hairline);
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-day-preset:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 9%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-days-gap{width:6px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-windows{display:flex;flex-direction:column;gap:5px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-window{display:flex;align-items:center;gap:6px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-clock{width:auto;flex:none;text-align:left;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-window-sep{color:var(--dtpl-fg-3);font-size:11px;}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-add{
-  appearance:none;align-self:flex-start;
-  height:24px;padding:0 10px;
-  border:0;border-radius:999px;corner-shape:round;
-  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
-  color:var(--dtpl-fg-2);font:inherit;font-size:11px;line-height:24px;cursor:pointer;
-  transition:background .15s ease,color .15s ease;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-add:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 11%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-more:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-more[aria-expanded="true"]{color:var(--dtpl-accent);background:color-mix(in srgb,var(--dtpl-accent) 12%,transparent);}
 
-/* New hand-price / override forms (both live behind the 高级 disclosure). */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-add-model,
-[data-plugin="dsh-tokbook"] .dtpl-pricing-add-override{
+[data-plugin="dsh-tokbook"] .dtpl-price-add{
+  appearance:none;border:.5px solid var(--dtpl-border);background:transparent;
+  display:inline-flex;align-items:center;justify-content:center;
+  height:26px;padding:0 10px;border-radius:8px;corner-shape:round;
+  color:var(--dtpl-fg-2);font:inherit;font-size:11px;cursor:pointer;white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-add:hover{color:var(--dtpl-fg);border-color:color-mix(in srgb,var(--dtpl-fg) 25%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-ghost:disabled{opacity:.45;cursor:not-allowed;}
+[data-plugin="dsh-tokbook"] .dtpl-price-ghost{
+  appearance:none;border:0;background:transparent;
+  height:24px;padding:0 8px;border-radius:7px;corner-shape:round;
+  color:var(--dtpl-fg-3);font:inherit;font-size:11px;cursor:pointer;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-ghost:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-ghost-danger:hover{color:var(--dtpl-err);background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);}
+
+/* The 调价史 drawer behind ▸: the row's own model string, then one block per
+   segment (date + four labelled rates + note). Segment actions stay reachable
+   by keyboard and appear on hover/focus, so a long history reads as data. */
+[data-plugin="dsh-tokbook"] .dtpl-price-history{
   display:flex;flex-direction:column;gap:6px;
-  padding:8px;border-radius:9px;corner-shape:round;
-  border:.5px dashed var(--dtpl-border);
+  padding:8px 10px 10px;
+  border-top:.5px dashed var(--dtpl-border);
+  background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-add-override-row{
-  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;gap:8px;align-items:center;
+[data-plugin="dsh-tokbook"] .dtpl-price-history-head{
+  display:flex;justify-content:space-between;gap:10px;
+  font-size:10px;line-height:14px;color:var(--dtpl-fg-3);
 }
-[data-plugin="dsh-tokbook"] .dtpl-pricing-add-override-row .dtpl-pricing-input{text-align:left;}
+[data-plugin="dsh-tokbook"] .dtpl-price-history-model{
+  min-width:0;font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);
+  overflow-wrap:anywhere;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-history-colid{flex:none;font-variant-numeric:tabular-nums;}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg{
+  display:flex;flex-direction:column;gap:5px;
+  padding:6px 8px;border-radius:9px;corner-shape:round;
+  background:var(--dtpl-surface);
+  box-shadow:inset 0 0 0 .5px var(--dtpl-hairline);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg[data-active="true"]{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dtpl-accent) 45%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-head{display:flex;align-items:center;gap:8px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-date{display:flex;align-items:center;gap:6px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-date-k{font-size:10px;line-height:14px;color:var(--dtpl-fg-2);white-space:nowrap;}
+[data-plugin="dsh-tokbook"] .dtpl-price-input-date{
+  width:auto;min-width:132px;text-align:left;border-color:var(--dtpl-border);
+  background:var(--dtpl-card);padding:0 6px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-tag{
+  display:inline-flex;align-items:center;gap:5px;min-width:0;
+  font-size:10px;line-height:15px;color:var(--dtpl-fg-3);white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-live{
+  font-style:normal;font-weight:600;color:var(--dtpl-accent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{
+  margin-left:auto;display:inline-flex;align-items:center;gap:2px;
+  opacity:0;transition:opacity .12s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg:hover .dtpl-price-seg-actions,
+[data-plugin="dsh-tokbook"] .dtpl-price-seg:focus-within .dtpl-price-seg-actions{opacity:1;}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-rates{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-rates .dtpl-price-cell-k{display:block;}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg .dtpl-price-input{
+  text-align:left;border-color:var(--dtpl-border);background:var(--dtpl-card);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-note{display:block;}
+[data-plugin="dsh-tokbook"] .dtpl-price-input-note{text-align:left;font-variant-numeric:normal;}
+[data-plugin="dsh-tokbook"] .dtpl-price-history-foot{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-history-hint{margin:0;font-size:10px;line-height:15px;color:var(--dtpl-fg-2);}
+
+/* The save state of the file, in the toolbar: it is the whole feedback loop for
+   a table that writes itself, so a failure wraps instead of being clipped. */
+[data-plugin="dsh-tokbook"] .dtpl-price-state{
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);overflow-wrap:anywhere;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-state.is-saved{color:var(--dtpl-ok);}
+[data-plugin="dsh-tokbook"] .dtpl-price-state.is-saving{color:var(--dtpl-accent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-state.is-invalid{color:var(--dtpl-warn);}
+[data-plugin="dsh-tokbook"] .dtpl-price-state.is-error{color:var(--dtpl-err);font-weight:600;}
 
 /* ── dark-skin fallback tuning ──────────────────────────────────────────── */
 /* Tokens carry most of the load; these only adjust fallback-adjacent washes
@@ -1848,28 +1398,27 @@ body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
   [data-plugin="dsh-tokbook"] .dtpl-doc-buckets{grid-template-columns:1fr;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-gap{grid-template-columns:1fr;}
 
-  /* Pricing: the four fixed 56px rate columns leave no room for the model name
-     on a phone. Stack each row instead — name, then a 2×2 rate grid with its
-     own visible labels, then the actions. The column header goes away because
-     it no longer lines up with anything. */
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-col-header{display:none;}
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-row{
-    grid-template-columns:minmax(0,1fr);row-gap:8px;padding:8px 10px;
+  /* Pricing: four rate columns plus the model identity do not fit a phone.
+     Stack the row — identity, then a 2×2 grid of labelled cells, then the
+     disclosure — and drop the column header, which no longer lines up. */
+  [data-plugin="dsh-tokbook"] .dtpl-price-cols{display:none;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-row{
+    grid-template-columns:minmax(0,1fr) auto;row-gap:4px;
   }
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-rates{
-    grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;width:100%;
+  [data-plugin="dsh-tokbook"] .dtpl-price-id{grid-column:1;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-more{grid-column:2;grid-row:1;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-rates{
+    grid-column:1 / -1;
+    grid-template-columns:repeat(2,minmax(0,1fr));row-gap:4px;
+    margin-top:2px;
   }
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-cell-label{display:block;}
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-model-name{white-space:normal;overflow:visible;}
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-actions{width:auto;justify-content:flex-end;}
-  /* Timeline rows: three columns do not fit either. */
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-tl-row{grid-template-columns:minmax(0,1fr);}
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-tl-rates{text-align:left;white-space:normal;}
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-tl-span{white-space:normal;}
-  /* The editor's controls, the layer switch and the 新增 forms stack too. */
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-layer-note{margin-left:0;width:100%;}
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-detail{padding:8px 10px 12px 16px;}
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-add-override-row{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-price-cell-k{display:block;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-input{text-align:left;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  [data-plugin="dsh-tokbook"] .dtpl-price-seg-head{flex-wrap:wrap;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{opacity:1;}
 }
 
 /* ── motion (shared tokens; respect reduced motion) ─────────────────────── */
@@ -1899,8 +1448,8 @@ body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
 @media (prefers-reduced-motion:reduce){
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
-  [data-plugin="dsh-tokbook"] .dtpl-pricing-item-flash,
-  [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim.dtpl-quota-refresh-pop{animation:none;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions,
+  [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim.dtpl-quota-refresh-pop{animation:none;transition:none;}
 }
 `
 

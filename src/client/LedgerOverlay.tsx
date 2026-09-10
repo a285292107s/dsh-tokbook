@@ -345,7 +345,7 @@ function LedgerView({ overview, onOpenPricing }: {
   overview: TokBookOverview
   onOpenPricing: (scope: PricingFocus) => void
 }) {
-  const money = (value: number): string => formatMoney(value, overview.currency, overview.usdExchangeRate)
+  const money = (value: number): string => formatMoney(value)
   const empty = overview.records === 0
   const hero = todayHero(overview)
   const today = hero.totals
@@ -519,8 +519,7 @@ function ProviderPanel() {
   useEffect(() => () => { activeRef.current += 1 }, [])
 
   const view = views.get(range)
-  const moneyOf = (value: number): string =>
-    view === undefined ? '¥0.00' : formatMoney(value, view.currency, view.usdExchangeRate)
+  const moneyOf = (value: number): string => formatMoney(value)
 
   return (
     <section className="dtpl-provider-sec" aria-label="按通道查看用量">
@@ -571,12 +570,11 @@ function ProviderPanel() {
 /**
  * One provider card: header (channel + totals) over its model rows.
  *
- * The header names the channel the way the 价格表 tab does — the mirror feed's
- * `label` first, with the route key beneath it, so a wrapper route
- * (`modlens-commandcode` → "Command Code（modlens 包装）") reads as the channel
- * it really is instead of as a separate vendor. The billing chip states what
- * the card's money means: 按量 = cash spend, 订阅 = value folded at official
- * rates, 混合 = the route records both.
+ * The header names the channel the way the 价格表 tab does — the settings
+ * profile's `displayName` first (else the adapter's provider name), with the
+ * route key beneath it. The billing chip states what the card's money means:
+ * 按量 = cash spend, 订阅 = value folded at hand-written rates. Billing is a
+ * route fact (`$billing`), so every model on the card agrees.
  */
 function ProviderCard({ card, money, labels }: {
   card: ProviderUsageCard
@@ -585,15 +583,13 @@ function ProviderCard({ card, money, labels }: {
 }) {
   const cardTokens = card.tokens
   const label = labels[card.provider]
-  // Read off the card's own models; an entry the feed left unclassified counts
-  // as metered, the same default `billingOf` applies server-side.
-  const billings = new Set(card.models.map((model) => model.billing ?? 'metered'))
-  const billingTag = billings.size > 1 ? '混合' : billings.has('subscription') ? '订阅' : '按量'
-  const billingTitle = billings.size > 1
-    ? '该通道内既有按量扣费的模型，也有套餐内按官方价折算的模型'
-    : billings.has('subscription')
-      ? '订阅通道：金额是按官方价折算的订阅价值，不是实际支出'
-      : '按量通道：金额是实际支出口径'
+  // Billing is a ROUTE fact (the price table's `$billing`), so every model of a
+  // card agrees; a route nothing declares is metered, like `billingOf` reads it.
+  const subscription = card.models.some(model => model.billing === 'subscription')
+  const billingTag = subscription ? '订阅' : '按量'
+  const billingTitle = subscription
+    ? '订阅通道：金额是按官方价折算的订阅价值，不是实际支出'
+    : '按量通道：金额是实际支出口径'
   return (
     <article className="dtpl-provider-card" data-provider={card.provider}>
       <header className="dtpl-provider-head">
@@ -602,7 +598,7 @@ function ProviderCard({ card, money, labels }: {
             <span className="dtpl-provider-name">{label ?? card.provider}</span>
             <span
               className="dtpl-provider-bill"
-              data-billing={billings.size > 1 ? 'mixed' : billings.has('subscription') ? 'subscription' : 'metered'}
+              data-billing={subscription ? 'subscription' : 'metered'}
               title={billingTitle}
             >
               {billingTag}
@@ -1039,15 +1035,22 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
           const tokens = values[index]!
           const isPeak = index === peakIndex
           const edge = index === 0 ? ' is-start' : index === slots.length - 1 ? ' is-end' : ''
+          // The label rides the column, not the plot: its offset is the same
+          // expression that sizes the fill, so the number always sits 2px above
+          // its own bar (and on the baseline for a zero day, which has none).
+          const columnH = tokens > 0 ? `max(2px, ${String(Math.round((tokens / max) * 100))}%)` : '0px'
           return (
             <div className="dtpl-bar" key={day} title={`${day}\n${formatTokens(tokens)}`}>
-              <span className={`dtpl-bar-label${isPeak ? ' is-peak' : ''}${tokens === 0 ? ' is-zero' : ''}${edge}`}>
+              <span
+                className={`dtpl-bar-label${isPeak ? ' is-peak' : ''}${tokens === 0 ? ' is-zero' : ''}${edge}`}
+                style={{ bottom: `calc(${columnH} + 2px)` }}
+              >
                 {formatTokens(tokens)}
               </span>
               {tokens > 0 && (
                 <div
                   className={`dtpl-bar-fill${isPeak ? ' is-peak' : ''}`}
-                  style={{ height: `max(2px, ${Math.round((tokens / max) * 100)}%)` }}
+                  style={{ height: columnH }}
                 />
               )}
             </div>
@@ -1285,12 +1288,8 @@ function formatTokens(value: number): string {
   return `${Math.round((value / 1_000_000) * 10) / 10}M`
 }
 
-/** Currency-aware money: wire amounts are RMB; USD just divides by the rate. */
-function formatMoney(value: number, currency: 'CNY' | 'USD', usdExchangeRate: number): string {
-  if (currency === 'USD') {
-    const usd = value / (usdExchangeRate > 0 ? usdExchangeRate : 1)
-    return `$${usd.toFixed(2)}`
-  }
+/** Money on the wire is always RMB; the one display convention is ¥. */
+function formatMoney(value: number): string {
   return `¥${value.toFixed(2)}`
 }
 

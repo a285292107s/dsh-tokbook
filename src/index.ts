@@ -34,9 +34,9 @@ import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  ChannelUsageRow, PlanConfig, PricingTable, PricingView, ProviderPricingTable, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, UsageRecord,
+  BillingMap, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, TokenSummary, UsageRecord,
 } from './types.ts'
-import { currencyOfRegion, UNPRICED_KEY, totalsTokens } from './types.ts'
+import { UNPRICED_KEY, totalsTokens } from './types.ts'
 import { defaultDataDir, warnIfForeignOwner, writeOwnerMarker } from './ledger.ts'
 import { UsageLog } from './usage-log.ts'
 import { modelOfEvent, providerOfEvent, recordOfEvent, type SessionEventLike } from './usage-record.ts'
@@ -48,12 +48,12 @@ import {
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import {
-  parseManualPricingInput, parseManualProviderPricingInput, readPricingTable, readPricingView, readProviderLabels, readProviderPricing, readProviderPricingView, readUsdExchangeRate, resolvePricingUrl, resolveProviderPricingUrl,
-  resolvePriced, effectiveRatesOf, nowOf, billingOf, syncCloudPricing, syncProviderPricing, writeManualPricing, writeManualProviderOverlay,
-  type ManualPricingParse, type ManualProviderPricingParse, type PricingSourceInput, type PricingRegion, type UsedModelHint,
+  parsePriceInput, rateKeyAt, readPriceFile, readPricingView, writePriceFile,
+  type LedgerUsage, type PriceParse,
 } from './pricing.ts'
+import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'
 import { providerCards } from './by-provider.ts'
-import { registerTokBookPricingRoutes, registerTokBookProviderPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
+import { registerTokBookPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
 import { isBuiltinQuotaPlan, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
 import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
 import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
@@ -81,21 +81,12 @@ export const name = 'dsh-tokbook'
 /** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: TokBookConfig): void {
   const unknown = Object.keys(config).find(key =>
-    key !== 'path' && key !== 'pricingUrl' && key !== 'pricingProviderUrl' && key !== 'pricingRegion' && key !== 'recordCompaction' && key !== 'plans')
+    key !== 'path' && key !== 'recordCompaction' && key !== 'plans')
   if (unknown !== undefined) {
     throw new Error(`TokBookConfig: unknown key "${unknown}"`)
   }
   if (config.path !== undefined && typeof config.path !== 'string') {
     throw new Error('TokBookConfig: "path" must be a string')
-  }
-  if (config.pricingUrl !== undefined && (typeof config.pricingUrl !== 'string' || config.pricingUrl.length === 0)) {
-    throw new Error('TokBookConfig: "pricingUrl" must be a non-empty string')
-  }
-  if (config.pricingProviderUrl !== undefined && (typeof config.pricingProviderUrl !== 'string' || config.pricingProviderUrl.length === 0)) {
-    throw new Error('TokBookConfig: "pricingProviderUrl" must be a non-empty string')
-  }
-  if (config.pricingRegion !== undefined && config.pricingRegion !== 'domestic' && config.pricingRegion !== 'overseas') {
-    throw new Error('TokBookConfig: "pricingRegion" must be "domestic" or "overseas"')
   }
   if (config.recordCompaction !== undefined && typeof config.recordCompaction !== 'boolean') {
     throw new Error('TokBookConfig: "recordCompaction" must be a boolean')
@@ -146,7 +137,10 @@ export class TokenUsageBook extends Service {
   private readonly dir: string
   private readonly log: UsageLog
   private readonly recordCompaction: boolean
-  private readonly pricing: PricingSourceInput
+  /** The host context, kept for the two optional seams the 价格表 tab reads:
+   *  the settings document (which routes/profiles exist) and the live LLM
+   *  registry (which routes are actually serving). */
+  private readonly hostCtx: Context
   /** User-configured quota-plan overrides keyed by provider route (coerced). */
   private readonly planConfig: Record<string, PlanConfig>
   /** In-process official quota card cache (see {@link QUOTA_TTL_MS}), so a
@@ -213,11 +207,7 @@ export class TokenUsageBook extends Service {
     this.recordCompaction = config.recordCompaction !== false
     this.dir = defaultDataDir(config.path)
     this.log = new UsageLog(this.dir, this.logger)
-    this.pricing = {
-      pricingUrl: config.pricingUrl,
-      pricingProviderUrl: config.pricingProviderUrl,
-      pricingRegion: config.pricingRegion as PricingRegion | undefined,
-    }
+    this.hostCtx = ctx
     this.planConfig = coercePlansConfig(config.plans)
 
     // "One data directory, one writing process" guard: warn when a live
@@ -308,9 +298,6 @@ export class TokenUsageBook extends Service {
         })
     })
 
-    // Refresh the cloud pricing mirror at the resolved feed URL (best-effort;
-    // a failed fetch keeps the previous mirror). Then the routes.
-    this.syncPricing()
     // The quota tab resolves provider keys through the DSH credentials seam
     // (`ctx.credentials`), the same place the Models/settings page stores a
     // provider's API key. Wire it when the host mounts the service; without
@@ -344,12 +331,7 @@ export class TokenUsageBook extends Service {
       ctx.effect(() => registerTokBookPricingRoutes(
         webServer,
         () => this.pricingView(),
-        (table) => this.savePricing(table),
-      ))
-      ctx.effect(() => registerTokBookProviderPricingRoutes(
-        webServer,
-        () => this.pricingView(),
-        (table) => this.saveProviderPricing(table),
+        (body) => this.savePricing(body),
       ))
     })
   }
@@ -451,11 +433,10 @@ export class TokenUsageBook extends Service {
   async overview(): Promise<TokBookOverview> {
     // Authoritative refresh first, so the ledger reflects persisted sessions.
     await this.ensureFresh()
-    const pricing = await readPricingTable(this.dir, this.logger)
-    const providers = await readProviderPricing(this.dir, this.logger)
-    const resolve: RateResolver = (record) => this.resolveRate(record, pricing, providers)
-    const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger)
-    const costed = attachCosts(summary, pricing, providers)
+    const { table, billing, revision } = await readPriceFile(this.dir, this.logger)
+    const resolve: RateResolver = (record) => rateKeyAt(table, record.provider, record.model, record.time)
+    const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger, { pricingRevision: revision })
+    const costed = attachCosts(summary, table, billing)
     const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
     const files = (await listDayFiles(this.dir)).length
     let sessions = 0
@@ -468,26 +449,22 @@ export class TokenUsageBook extends Service {
       }
       if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
     }
-    const region = this.pricing.pricingRegion ?? 'domestic'
-    const rate = await readUsdExchangeRate(this.dir, this.logger)
-    // The recent window is billed through the same dual-dimension chain as the
-    // totals, so a single row's ¥ in the 最近记录 list is exactly the amount
-    // the aggregates folded in, split into its spend / subscription buckets.
-    // Read-time + additive: no ledger/rollup change, and a price table update
-    // re-prices the list on the next overview read.
-    const recent = costRecentEntries(costed.recent, pricing, providers)
-    // Slim wire payload: the pricing tables / rateRows / byHour rows are host-
-    // side concerns the floating window never renders, and a cloud mirror can
-    // be large — the cost layer has already been folded into the cost fields.
-    const { pricing: _pricing, providerPricing: _providerPricing, rateRows: _rateRows, byHour: _byHour, recent: _recent, ...slim } = costed
-    void _pricing; void _providerPricing; void _rateRows; void _byHour; void _recent
+    // The recent window resolves each row at its own timestamp, the same rule
+    // the totals folded in, so a single row's ¥ in the 最近记录 list is exactly
+    // the amount the aggregates counted — split into its two buckets.
+    // Read-time + additive: no ledger/rollup change, and a price edit re-prices
+    // the list on the next overview read.
+    const recent = costRecentEntries(costed.recent, table, billing)
+    // Slim wire payload: the price table, the rateRows and the byHour rows are
+    // host-side concerns the floating window never renders; the cost layer has
+    // already been folded into the cost fields.
+    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, recent: _recent, ...slim } = costed
+    void _pricing; void _rateRows; void _byHour; void _recent
     return {
       ...slim,
       sessions,
       recent,
       totalTokens: totalsTokens(costed.total),
-      currency: currencyOfRegion(region),
-      usdExchangeRate: rate,
       updatedAt: Date.now(),
       records: records.length,
       files,
@@ -503,27 +480,34 @@ export class TokenUsageBook extends Service {
    * and pricing; only the window's day files are read. */
   async usageByRange(range: ProviderRange): Promise<ProviderUsageView> {
     await this.ensureFresh()
-    const pricing = await readPricingTable(this.dir, this.logger)
-    const providers = await readProviderPricing(this.dir, this.logger)
-    const resolve: RateResolver = (record) => this.resolveRate(record, pricing, providers)
+    const { table, billing } = await readPriceFile(this.dir, this.logger)
+    const resolve: RateResolver = (record) => rateKeyAt(table, record.provider, record.model, record.time)
     const { fromDay, toDay } = rangeDayWindow(range)
     const records = await readRecordsByDayRange(this.dir, fromDay, toDay, () => new Date(), this.logger)
-    const cards = providerCards(records, pricing, resolve, providers)
-    const region = this.pricing.pricingRegion ?? 'domestic'
-    const rate = await readUsdExchangeRate(this.dir, this.logger)
-    // Channel names for the cards: the mirror's labels, so a route reads the way
-    // the 价格表 tab names it (wrapper routes and plan labels included).
-    const providerLabels = await readProviderLabels(this.dir, this.logger)
+    const cards = providerCards(records, table, resolve, billing)
+    // Channel names for the cards: the settings profile's displayName, else the
+    // adapter's provider name, so a route reads the way the 价格表 tab names it.
+    const providerLabels = routeLabels(this.settings(), this.llm(), this.logger)
     return {
       range,
       fromDay,
       toDay,
-      currency: currencyOfRegion(region),
-      usdExchangeRate: rate,
       updatedAt: Date.now(),
       providerLabels,
       providers: cards,
     }
+  }
+
+  /** The host settings seam (`ctx.settings`), or undefined when unmounted.
+   *  `ctx.get` is the reflective accessor: reading an unmounted service as a
+   *  property throws ("without inject"), which a read-only view must not do. */
+  private settings(): SettingsLike | undefined {
+    return this.hostCtx.get('settings') as SettingsLike | undefined
+  }
+
+  /** The host LLM seam (`ctx.llm`), or undefined when unmounted. */
+  private llm(): LlmLike | undefined {
+    return this.hostCtx.get('llm') as LlmLike | undefined
   }
 
   /**
@@ -632,143 +616,77 @@ export class TokenUsageBook extends Service {
     return { status: already ? 'skipped' : 'running', lastSyncAt: this.lastSyncAt > 0 ? this.lastSyncAt : null }
   }
 
-  /** Resolve the rate identity one record was billed at, through the
-   * dual-dimension chain: the provider overlay for the record's own provider
-   * string wins (its `inheritBase`/`segments`), then the base model. */
-  private resolveRate(record: UsageRecord, pricing: PricingTable, providers: ProviderPricingTable): RateKey {
-    const usage = record.usage
-    const contextTokens = usage === undefined ? 0
-      : usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
-    return resolvePriced(pricing, providers, record.provider, record.model, record.time, contextTokens).key
-  }
-
-  /** Refresh the cloud pricing mirrors (base + provider overlay;
-   * fire-and-forget, never fatal). A provider-mirror failure only degrades to
-   * "no provider overlay" — the base table still prices model strings. */
-  private syncPricing(): void {
-    const url = resolvePricingUrl(this.pricing)
-    void syncCloudPricing(this.dir, url)
-      .then((result) => {
-        this.logger.info?.(`[tokbook] pricing sync (${url}): version ${String(result.version)} (${String(result.models)} models, ${String(result.aliases)} aliases, USD rate ${String(result.usdExchangeRate)})`)
-      })
-      .catch((error: unknown) => {
-        this.logger.warn?.('[tokbook] pricing sync failed:', error)
-      })
-    const providerUrl = resolveProviderPricingUrl(this.pricing)
-    void syncProviderPricing(this.dir, providerUrl)
-      .then((result) => {
-        this.logger.info?.(`[tokbook] provider-pricing sync (${providerUrl}): version ${String(result.version)} (${String(result.providers)} providers — ${String(result.wrappers)} wrapper route(s), ${String(result.entries)} entries)`)
-      })
-      .catch((error: unknown) => {
-        this.logger.warn?.('[tokbook] provider-pricing sync failed (overlay disabled):', error)
-      })
-  }
-
-  /** The pricing-table view for the 价格表 tab. The merged table is the
-   *  content; the ledger's own distinct model strings are folded in so the tab
-   *  can filter to the models actually in use and surface the ones with no
-   *  model-layer entry — either unpriced (¥0 today) or priced only by a
-   *  provider-overlay entry. `channelRows` is the same usage seen per
-   *  (provider, model) channel, which is what the 在用 view groups by. The
-   *  model counts reuse `buildSummary`'s rollup + hot-file read, the same cost
-   *  path an overview read already pays. */
+  /**
+   * The 价格表 view: one card per provider route, one row per model the route
+   * can be billed for.
+   *
+   * The route set is the route catalog (the settings document's profiles ∪ the
+   * live adapter registry) merged by `readPricingView` with every route the
+   * ledger billed and every route the price file names — so a route that left
+   * the configuration, or that only carries a hand-written price, stays visible
+   * and editable. Model rows come from the same catalog plus each route's own
+   * ledger strings, so a 仅账本 string keeps an editable price.
+   *
+   * The ledger lens reads the record cache (counts only), so this tab never
+   * stages rate rows of its own for the costed paths to trust. `ensureFresh`
+   * still runs first — the same freshness the overview / usage tabs pay — so
+   * 「账本 N 次」 is not stuck on a stale cache when the overlay opens here first.
+   */
   async pricingView(): Promise<PricingView> {
-    const used = new Map<string, UsedModelHint>()
-    const channelRows: ChannelUsageRow[] = []
-    // The ledger's provider routes: a brand-new key has no overlay entry yet,
-    // so this is the only place the tab can learn about it (it offers these as
-    // alias targets).
-    const billedProviders = new Set<string>()
+    await this.ensureFresh()
+    let ledger: LedgerUsage = { byRouteModel: new Map(), byRoute: new Map() }
     try {
-      const pricing = await readPricingTable(this.dir, this.logger)
-      const providers = await readProviderPricing(this.dir, this.logger)
-      const summary = await buildSummary(this.dir, () => new Date(), () => UNPRICED_KEY, this.logger)
-      for (const row of summary.byModel) {
-        if (row.model === '') continue
-        if (row.provider !== undefined && row.provider !== '') billedProviders.add(row.provider)
-        const previous = used.get(row.model)
-        // A string the model layer does NOT price but a provider-overlay entry
-        // does is "overlay-priced": resolve its price now so the row can show
-        // the number and the route the user has to edit.
-        const overlayOnly = pricing[row.model] === undefined
-          && row.provider !== undefined && row.provider !== ''
-          && providers[row.provider]?.[row.model] !== undefined
-        const rules = overlayOnly ? effectiveRatesOf(pricing, providers, row.provider, row.model) : null
-        used.set(row.model, {
-          records: (previous?.records ?? 0) + row.totals.requests,
-          overlayPriced: (previous?.overlayPriced ?? false) || overlayOnly,
-          ...(previous?.overlayNow !== undefined ? { overlayNow: previous.overlayNow } : {}),
-          ...(previous?.overlayProvider !== undefined ? { overlayProvider: previous.overlayProvider } : {}),
-          ...(previous?.overlayNow === undefined && rules !== null
-            ? { overlayNow: nowOf(rules), overlayProvider: row.provider }
-            : {}),
-        })
-        // The channel lens: what THIS route paid for this exact string. The
-        // price is the route's own resolution (overlay entry first, base row
-        // otherwise), so a channel-specific segments entry shows its number.
-        const provider = row.provider ?? ''
-        const channelRules = effectiveRatesOf(pricing, providers, provider, row.model)
-        channelRows.push({
-          provider,
-          model: row.model,
-          records: row.totals.requests,
-          billing: billingOf(providers, provider, row.model),
-          overlay: provider !== '' && providers[provider]?.[row.model] !== undefined,
-          ...(channelRules !== null ? { now: nowOf(channelRules) } : { unpriced: true }),
-        })
-      }
+      // The ledger lens needs record counts, not prices: read the warmed record
+      // cache rather than folding a rollup, so this tab never stages rate rows
+      // of its own for the costed paths to trust.
+      const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
+      ledger = ledgerUsageOf(records)
     } catch (error) {
-      // A failing summary must not block the tab — the price list is still
-      // useful without the unpriced hints.
-      this.logger.warn?.('[tokbook] cannot read ledger models for pricing view:', error)
+      // A failing read must not block the tab: the price file is still editable
+      // without the ledger's usage lens.
+      this.logger.warn?.('[tokbook] cannot read ledger usage for pricing view:', error)
     }
-    const [{ rows, dataDir }, provider] = await Promise.all([
-      readPricingView(this.dir, used, this.logger),
-      readProviderPricingView(this.dir, billedProviders, this.logger),
-    ])
-    return {
-      rows,
-      channelRows,
-      providerRows: provider.rows,
-      providerRoutes: provider.routes,
-      providerMeta: provider.meta,
-      providerNames: provider.names,
-      providerLabels: provider.labels,
-      providerForms: provider.forms,
-      dataDir,
-    }
+    const catalog = await collectRoutes(this.settings(), this.llm(), this.logger)
+    return readPricingView(this.dir, catalog, ledger, this.logger)
   }
 
-  /** Validate + persist a manual provider-overlay body from the 价格表 tab. The
-   *  body is the COMPLETE desired manual overlay (`provider` → `model` →
-   *  entry, plus the reserved `$routes` alias map and `$providers` name/form
-   *  map) — the write replaces
-   *  `provider-pricing.json` wholesale, so an omitted (provider, model)
-   *  removes its override (back to the mirror row), an omitted alias stops
-   *  following and an omitted name/form falls back to the mirror's. Only the
-   *  manual file is written; the read-time merged table
-   *  re-prices history on the next overview read. */
-  async saveProviderPricing(table: unknown): Promise<ManualProviderPricingParse & { view: PricingView }> {
-    const parsed = parseManualProviderPricingInput(table)
+  /**
+   * Validate + persist a complete price table from the 价格表 tab. The body is
+   * the COMPLETE desired file (`$billing` + route → model → price segments), so
+   * the write replaces `pricing.json` wholesale and an omitted (route, model)
+   * stops being priced (its records fall to 价格未知). The read-time cost layer
+   * re-prices history on the next read — no ledger or rollup rewrite.
+   */
+  async savePricing(body: unknown): Promise<PriceParse & { view: PricingView }> {
+    const parsed = parsePriceInput(body)
     if (!parsed.ok) return { ok: false, error: parsed.error, view: await this.pricingView() }
-    await writeManualProviderOverlay(this.dir, { table: parsed.table, routes: parsed.routes, meta: parsed.meta }, this.logger)
-    return { ok: true, table: parsed.table, routes: parsed.routes, meta: parsed.meta, view: await this.pricingView() }
+    await writePriceFile(this.dir, parsed.file, this.logger)
+    return { ok: true, file: parsed.file, view: await this.pricingView() }
   }
 
-  /** Validate + persist a manual pricing body from the 价格表 tab. The body is
-   *  the COMPLETE desired manual table (every model the user maintains, with
-   *  its four rates) — the write replaces `pricing.json` wholesale, so an
-   *  omitted entry is removed. Always answers a parse verdict plus the fresh
-   *  view, so the client can apply the result (success or validation error)
-   *  and refresh from one response. Only the manual file is written — the
-   *  cloud mirror is never touched, and the merged read-time table re-prices
-   *  history on the next overview read (no rollup/ledger change). */
-  async savePricing(table: unknown): Promise<ManualPricingParse & { view: PricingView }> {
-    const parsed = parseManualPricingInput(table)
-    if (!parsed.ok) return { ok: false, error: parsed.error, view: await this.pricingView() }
-    await writeManualPricing(this.dir, parsed.table, this.logger)
-    return { ok: true, table: parsed.table, view: await this.pricingView() }
+}
+
+/** Fold the ledger's rows into the pricing view's usage lens: recorded requests
+ *  per (route, model). Failed attempts name a route but no billed call, so they
+ *  stay out — the card's 「账本 N 次」 means the same thing the 通道用量 tab's
+ *  request count does. Unattributed rows (no route header was ever seen) cannot
+ *  be priced and stay out of the 价格表 cards. */
+function ledgerUsageOf(records: readonly UsageRecord[]): LedgerUsage {
+  const byRouteModel = new Map<string, Map<string, number>>()
+  const byRoute = new Map<string, number>()
+  for (const record of records) {
+    if (record.kind === 'failure') continue
+    const route = record.provider ?? ''
+    if (route === '' || record.model === '') continue
+    let models = byRouteModel.get(route)
+    if (models === undefined) {
+      models = new Map()
+      byRouteModel.set(route, models)
+    }
+    models.set(record.model, (models.get(record.model) ?? 0) + 1)
+    byRoute.set(route, (byRoute.get(route) ?? 0) + 1)
   }
+  return { byRouteModel, byRoute }
 }
 
 /** Drop the derived stats state after a sync appended rows (a rollup whose

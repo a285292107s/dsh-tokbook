@@ -16,7 +16,7 @@
  */
 
 import type {
-  PricingTable, ProviderModelUsage, ProviderPricingTable, ProviderUsageCard, UsageRecord,
+  BillingMap, PricingTable, ProviderModelUsage, ProviderUsageCard, UsageRecord,
 } from './types.ts'
 import { totalsTokens } from './types.ts'
 import type { RateResolver } from './stats.ts'
@@ -55,7 +55,7 @@ export function providerCards(
   records: readonly UsageRecord[],
   pricing: PricingTable,
   resolve: RateResolver,
-  providers: ProviderPricingTable = {},
+  billing: BillingMap = {},
 ): ProviderUsageCard[] {
   const groups = splitByProvider(records)
   const cards: ProviderUsageCard[] = []
@@ -65,7 +65,7 @@ export function providerCards(
     // consumption to show — skip the empty card instead of rendering 0s.
     if (summary.total.requests === 0) continue
     // `dataDir` is only echoed through CostedSummary; the card never renders it.
-    const costed = attachCosts({ dataDir: '', ...summary }, pricing, providers)
+    const costed = attachCosts({ dataDir: '', ...summary }, pricing, billing)
     const models: ProviderModelUsage[] = costed.byModel
       .map((row) => ({
         model: row.model,
@@ -74,7 +74,7 @@ export function providerCards(
         cost: row.cost,
         spend: row.spend,
         subscriptionValue: row.subscriptionValue,
-        billing: billingOf(providers, row.provider, row.model),
+        billing: billingOf(billing, row.provider),
       }))
       .sort((left, right) =>
         right.tokens - left.tokens || right.totals.requests - left.totals.requests

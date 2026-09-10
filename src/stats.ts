@@ -2,8 +2,8 @@
  * Stats computation of the token-book: read the per-day files and fold the
  * records into totals, per-day rows, per-hour rows, per-(provider, model)
  * rows, and a bounded recent window — keeping one row per (day, model,
- * provider, rate identity) so every record is billed at the rate its own
- * timestamp resolved through the dual-dimension chain (see pricing.resolvePriced).
+ * provider, rate identity) so every record is billed at the price its own
+ * timestamp resolved to (see pricing.priceAt).
  * Frozen (pre-today) day files are served from the on-disk rollup; only
  * today's file is read on every call. Parsed day files are cached in process
  * memory (frozen files stay resident; today's file is re-read when its
@@ -16,11 +16,11 @@ import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/prom
 import { join } from 'node:path'
 import { coerceRecord, parseRecord } from './usage-record.ts'
 import {
-  type CostedSummary, type CostedModelRow, type PricingTable, type ProviderPricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type TokenSummary,
+  type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type TokenSummary,
   type UsageDayRow, type UsageHourRow, type UsageModelRow, type UsageRateRow, type UsageRecord,
   type UsageTotals, UNPRICED_KEY, totalsTokens,
 } from './types.ts'
-import { billingOf, costOf, effectiveRatesOf, ratesForKey, resolvePriced, resolveRate } from './pricing.ts'
+import { billingOf, costOf, priceAt, priceOfKey } from './pricing.ts'
 
 /** Bounded recent window length: only the newest records cross the wire. */
 export const RECENT_LIMIT = 20
@@ -309,15 +309,20 @@ export async function warmRecordCache(dir: string, now?: () => Date, logger?: St
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
-/** Rollup format version. v2 adds the provider dimension to the aggregation
- * identity (rateRows/byModel carry `provider`) and dual-bucket cost inputs;
- * a v1 rollup (no provider) is treated as absent and rebuilt from the day
- * files, so a format change can never silently mis-merge rows. */
-export const ROLLUP_SCHEMA_VERSION = 2
+/** Rollup format version. v3 keys every rate row by the effective date of the
+ *  price segment that applied (the v2 rule/tier/slot identity is gone); a
+ *  rollup of any other version is treated as absent and rebuilt from the day
+ *  files, so a format change can never silently mis-merge rows. */
+export const ROLLUP_SCHEMA_VERSION = 3
 
 export interface RollupFile {
   schemaVersion: number
   upto: string
+  /** Signature of the price file these rate rows were folded under. A rate row
+   *  is keyed by a value derived FROM the price table, so a different price file
+   *  makes every frozen row meaningless — the rollup is then rebuilt from the
+   *  day files. Empty = no price file. */
+  pricingRevision: string
   total: UsageTotals
   byDay: UsageDayRow[]
   byHour: UsageHourRow[]
@@ -340,7 +345,7 @@ const HOUR_KEY = /^\d{4}-\d{2}-\d{2}T\d{2}$/u
 function isRateKey(value: unknown): value is RateKey {
   if (typeof value !== 'object' || value === null) return false
   const key = value as Record<string, unknown>
-  return ['ruleStart', 'ruleEnd', 'tier', 'slot'].every(field => typeof key[field] === 'number' && Number.isFinite(key[field]))
+  return typeof key.from === 'number' && Number.isFinite(key.from)
 }
 
 function isRollupFile(value: unknown): value is RollupFile {
@@ -348,6 +353,7 @@ function isRollupFile(value: unknown): value is RollupFile {
   const rollup = value as Record<string, unknown>
   return rollup.schemaVersion === ROLLUP_SCHEMA_VERSION
     && typeof rollup.upto === 'string' && DAY_KEY.test(rollup.upto)
+    && typeof rollup.pricingRevision === 'string'
     && isTotals(rollup.total)
     && Array.isArray(rollup.byDay)
     && Array.isArray(rollup.byHour)
@@ -357,8 +363,14 @@ function isRollupFile(value: unknown): value is RollupFile {
 }
 
 /** Load the rollup of one data directory. A missing, malformed, or invalid
- * rollup reads as null — the caller then rebuilds it from the day files. */
-export async function readRollup(dir: string, logger: StatsLogger = consoleLogger): Promise<RollupFile | null> {
+ * rollup reads as null — the caller then rebuilds it from the day files. A
+ * rollup folded under a DIFFERENT price file is invalid too: its rate rows name
+ * segments of a table that no longer exists. */
+export async function readRollup(
+  dir: string,
+  logger: StatsLogger = consoleLogger,
+  pricingRevision: string = '',
+): Promise<RollupFile | null> {
   let text: string
   try {
     text = await readFile(join(dir, ROLLUP_FILE_NAME), 'utf8')
@@ -374,6 +386,7 @@ export async function readRollup(dir: string, logger: StatsLogger = consoleLogge
     return null
   }
   if (!isRollupFile(value)) return null
+  if (value.pricingRevision !== pricingRevision) return null
   const recent = (value.recent as unknown[])
     .map(coerceRecord)
     .filter((record): record is UsageRecord => record !== null)
@@ -451,8 +464,7 @@ function hourRows(hours: Map<string, UsageTotals>): UsageHourRow[] {
 }
 
 function compareKeys(left: RateKey, right: RateKey): number {
-  return left.ruleStart - right.ruleStart || left.ruleEnd - right.ruleEnd
-    || left.tier - right.tier || left.slot - right.slot
+  return left.from - right.from
 }
 
 function rateRowsSorted(rows: Iterable<UsageRateRow>): UsageRateRow[] {
@@ -474,7 +486,7 @@ function modelMapKey(provider: string | undefined, model: string): string {
 }
 
 function rateRowKey(day: string, model: string, provider: string | undefined, rate: RateKey): string {
-  return `${day}\n${model}\n${providerKey(provider)}\n${rate.ruleStart}-${rate.ruleEnd}-${rate.tier}-${rate.slot}`
+  return `${day}\n${model}\n${providerKey(provider)}\n${String(rate.from)}`
 }
 
 function hourRowKey(hour: string, model: string): string {
@@ -508,7 +520,7 @@ function addUsage(totals: UsageTotals, record: UsageRecord): void {
  * provider, rate identity) the resolver assigns, and one model row per
  * (provider, model) pair — the same model string billed by two providers must
  * NOT merge, because the price and billing nature are provider-specific. */
-export function summarizeRecords(records: readonly UsageRecord[], resolve: RateResolver = () => ({ ruleStart: 0, ruleEnd: 0, tier: 0, slot: -1 })): TokenSummary {
+export function summarizeRecords(records: readonly UsageRecord[], resolve: RateResolver = () => UNPRICED_KEY): TokenSummary {
   const total = emptyTotals()
   const days = new Map<string, UsageTotals>()
   const hours = new Map<string, UsageTotals>()
@@ -604,18 +616,18 @@ export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSu
   }
 }
 
-/** Attach the cost layer to a token-only summary: each rate row is priced at
- * the prices its rate identity resolves to under the current dual-dimension
- * tables — the provider overlay first (via its effective rule container),
- * then the base model. Each row's amount lands in the bucket its (provider,
- * model) billing names: `metered` rows accumulate into `spend`, `subscription`
- * rows into `subscriptionValue`; `totalCost` stays the sum of both so older
- * callers keep seeing the book's total. Rows with no effective pricing at all
- * cost ¥0 and their model strings surface in `unpricedModels`. */
+/** Attach the cost layer to a token-only summary: every rate row is priced by
+ * looking its (route, model, rate identity) back up in the current price table
+ * — the row's identity is the effective date of the segment that applied, so a
+ * rate edit re-prices history without a rebuild. Each row's amount lands in the
+ * bucket its ROUTE's billing names: `metered` routes accumulate into `spend`,
+ * `subscription` routes into `subscriptionValue`; `totalCost` stays the sum of
+ * both. Rows nothing prices cost ¥0 and their model strings surface in
+ * `unpricedModels`. */
 export function attachCosts(
   summary: TokenSummary & { dataDir: string },
   pricing: PricingTable,
-  providers: ProviderPricingTable = {},
+  billing: BillingMap = {},
 ): CostedSummary {
   const costs = new Map<string, number>()
   const spend = new Map<string, number>()
@@ -626,13 +638,12 @@ export function attachCosts(
   let totalSpend = 0
   let totalValue = 0
   for (const row of summary.rateRows) {
-    const effective = effectiveRatesOf(pricing, providers, row.provider, row.model)
-    if (effective === null) continue
-    const prices = ratesForKey(effective, row.rate)
+    const prices = priceOfKey(pricing, row.provider, row.model, row.rate)
+    if (prices === null) continue
     const cost = costOf(row.totals, prices)
     const key = modelMapKey(row.provider, row.model)
     costs.set(key, (costs.get(key) ?? 0) + cost)
-    if (billingOf(providers, row.provider, row.model) === 'subscription') {
+    if (billingOf(billing, row.provider) === 'subscription') {
       value.set(key, (value.get(key) ?? 0) + cost)
       dayValue.set(row.day, (dayValue.get(row.day) ?? 0) + cost)
       totalValue += cost
@@ -657,7 +668,7 @@ export function attachCosts(
   })
   const unpricedModels = [...new Set(
     summary.byModel
-      .filter(row => effectiveRatesOf(pricing, providers, row.provider, row.model) === null)
+      .filter(row => priceAt(pricing, row.provider, row.model, Date.now()) === null)
       .map(row => row.model),
   )]
   const byDay: UsageDayRow[] = summary.byDay.map(row => ({
@@ -674,7 +685,6 @@ export function attachCosts(
     subscriptionValue: totalValue,
     unpricedModels,
     pricing,
-    providerPricing: providers,
     byDay,
     byHour: summary.byHour,
     byModel,
@@ -684,30 +694,25 @@ export function attachCosts(
 }
 
 /**
- * Price the recent-window ledger rows for the floating window's 最近记录
- * list: each request is billed at the rate its own timestamp and context
- * resolved to through the dual-dimension chain (provider overlay first), so a
+ * Price the recent-window ledger rows for the floating window's 最近记录 list:
+ * each request is billed at the segment in force at its own timestamp, so a
  * single row's ¥ is exactly the amount the totals folded in — and its two
- * buckets (`spend` / `subscriptionValue`) show which side of the ledger it
- * sits on. Deliberately read-time and additive: nothing is persisted, and a
- * price table change re-prices the list on the next read. Rows that bill
- * nothing carry 0 — a failed attempt (no tokens ever billed), a request with
- * no provider-reported usage, or a string absent from every pricing source.
+ * buckets (`spend` / `subscriptionValue`) show which side of the ledger it sits
+ * on. Deliberately read-time and additive: nothing is persisted, and a price
+ * table change re-prices the list on the next read. Rows that bill nothing
+ * carry 0 — a failed attempt (no tokens ever billed), a request with no
+ * provider-reported usage, or a (route, model) nothing prices.
  */
 export function costRecentEntries(
   recent: readonly UsageRecord[],
   pricing: PricingTable,
-  providers: ProviderPricingTable = {},
-  resolve: RateResolver = () => UNPRICED_KEY,
+  billing: BillingMap = {},
 ): RecentLedgerEntry[] {
-  void resolve
   return recent.map((record) => {
     const usage = record.usage
     if (usage === undefined) return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
-    const contextTokens = usage.inputTokens
-      + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
-    const resolved = resolvePriced(pricing, providers, record.provider, record.model, record.time, contextTokens)
-    if (resolved.source === 'unpriced') return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
+    const hit = priceAt(pricing, record.provider, record.model, record.time)
+    if (hit === null) return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
     // Cost the four buckets as the totals layer would (absent cache buckets
     // read as 0, never NaN).
     const amount = costOf({
@@ -716,8 +721,8 @@ export function costRecentEntries(
       outputTokens: usage.outputTokens,
       cacheReadTokens: usage.cacheReadTokens ?? 0,
       cacheWriteTokens: usage.cacheWriteTokens ?? 0,
-    }, resolved.prices)
-    const subscription = billingOf(providers, record.provider, record.model) === 'subscription'
+    }, hit.rates)
+    const subscription = billingOf(billing, record.provider) === 'subscription'
     return {
       ...record,
       cost: amount,
@@ -728,15 +733,22 @@ export function costRecentEntries(
 }
 
 /** Build the full stats payload for one data directory: the rollup over every
- * frozen day file merged with a fresh read of today's file. */
+ * frozen day file merged with a fresh read of today's file.
+ *
+ * `pricingRevision` is the price file signature the caller resolved rates
+ * against; a rollup folded under a different one is discarded and rebuilt, so a
+ * price edit re-prices every frozen day. */
 export async function buildSummary(
   dir: string,
   now: () => Date = () => new Date(),
-  resolve: RateResolver = () => ({ ruleStart: 0, ruleEnd: 0, tier: 0, slot: -1 }),
+  resolve: RateResolver = () => UNPRICED_KEY,
   logger: StatsLogger = consoleLogger,
+  options: { pricingRevision?: string } = {},
 ): Promise<TokenSummary & { dataDir: string }> {
+  const pricingRevision = options.pricingRevision ?? ''
   const today = dayKey(now().getTime())
-  const rollup = (await readRollup(dir, logger)) ?? { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [], recent: [] }
+  const rollup = (await readRollup(dir, logger, pricingRevision))
+    ?? { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', pricingRevision, total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [], recent: [] }
   const cold: string[] = []
   const hot: string[] = []
   for (const name of await listDayFiles(dir)) {
@@ -752,6 +764,7 @@ export async function buildSummary(
     absorbed = {
       upto: fileDay(cold[cold.length - 1]!)!,
       schemaVersion: ROLLUP_SCHEMA_VERSION,
+      pricingRevision,
       ...mergeSummaries(rollup, summarizeRecords(records, resolve)),
     }
     await writeRollup(dir, absorbed).catch((error: unknown) => {

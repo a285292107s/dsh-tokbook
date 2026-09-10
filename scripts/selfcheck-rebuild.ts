@@ -27,6 +27,7 @@ import {
   type RateResolver,
 } from '../src/stats.ts'
 import type { UsageRecord } from '../src/types.ts'
+import { UNPRICED_KEY } from '../src/types.ts'
 
 let failures = 0
 function check(label: string, ok: boolean, detail?: unknown): void {
@@ -61,7 +62,7 @@ const quiet = { error: () => {} } as const
 const never = () => new Date('2099-01-01T00:00:00')
 // Match the unpriced default resolver `buildSummary`/`summarizeRecords` share
 // when no resolver is given, so both paths agree on rateRows.
-const resolve: RateResolver = () => ({ ruleStart: 0, ruleEnd: 0, tier: 0, slot: -1 })
+const resolve: RateResolver = () => UNPRICED_KEY
 
 const cleanDir = async (): Promise<string> => {
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-rebuild-'))
@@ -116,8 +117,9 @@ console.log('rollup: derived-state lossless rebuild')
     check('corrupt rollup rebuilds losslessly', key(first) === key(fromCorrupt))
 
     // A v1 rollup (no `schemaVersion`) is a format-change migration: it must
-    // read as absent and rebuild under the v2 shape (rate rows now carry the
-    // provider dimension), never silently merge rows across providers.
+    // read as absent and rebuild under the current shape (v3 rate rows carry
+    // the effective date of the segment that applied), never silently merge
+    // rows across providers.
     const v1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
     delete v1.schemaVersion
     // The stored rateRows lack `provider`; strip it to simulate a real v1 file.
@@ -131,10 +133,10 @@ console.log('rollup: derived-state lossless rebuild')
     })
     await writeFile(join(dir, 'rollup.json'), JSON.stringify(v1), 'utf8')
     const fromV1 = await buildSummary(dir, never, resolve, quiet)
-    check('v1 rollup rebuilds losslessly to v2', key(first) === key(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined))
-    // The rebuilt file carries the v2 schema version.
+    check('v1 rollup rebuilds losslessly to the current shape', key(first) === key(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined))
+    // The rebuilt file carries the current schema version.
     const afterV1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
-    check('rebuilt rollup is stamped schemaVersion 2', afterV1.schemaVersion === 2)
+    check('rebuilt rollup is stamped schemaVersion 3', afterV1.schemaVersion === 3)
 
     // And both agree with a direct full aggregation of the raw day files.
     const all = await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', never, quiet)

@@ -19,7 +19,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { PROVIDER_RANGES, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type TokBookOverview } from './types.ts'
-import type { ManualPricingParse, ManualProviderPricingParse } from './pricing.ts'
+import type { PriceParse } from './pricing.ts'
 
 /** The subset of the host webserver this plugin uses. */
 export interface WebServerLike {
@@ -187,8 +187,8 @@ export function registerTokBookQuotaRoute(
 
 /** Read a small JSON request body (the pricing write path sends one). Bound
  *  so a malicious or broken client cannot make the host buffer unboundedly;
- *  answers null on any transport/parse error. */
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
+ *  answers a `{ ok, body }` / `{ ok: false, tooLarge }` verdict. */
+function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown } | { ok: false; tooLarge: boolean }> {
   return new Promise((resolveBody) => {
     const chunks: Buffer[] = []
     let size = 0
@@ -198,8 +198,10 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
       size += chunk.length
       if (size > 256 * 1024) {
         settled = true
-        resolveBody(null)
-        req.destroy()
+        // Drain the rest so the handler can still write a 413; destroy would
+        // kill the socket before the response lands.
+        req.resume()
+        resolveBody({ ok: false, tooLarge: true })
         return
       }
       chunks.push(chunk)
@@ -207,32 +209,32 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     req.on('end', () => {
       if (settled) return
       settled = true
-      if (chunks.length === 0) { resolveBody(null); return }
+      if (chunks.length === 0) { resolveBody({ ok: false, tooLarge: false }); return }
       try {
-        resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+        resolveBody({ ok: true, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) })
       } catch {
-        resolveBody(null)
+        resolveBody({ ok: false, tooLarge: false })
       }
     })
     req.on('error', () => {
       if (settled) return
       settled = true
-      resolveBody(null)
+      resolveBody({ ok: false, tooLarge: false })
     })
   })
 }
 
-/** Bind the pricing-table routes to snapshot/parse/save providers. Returns the
- *  combined disposer. One exact route on `/tokbook/pricing` dispatches by
- *  method (exact routes match on pathname, so registering the same path twice
- *  would collide): GET answers the read-only view; PUT accepts a manual
- *  pricing body `{ "model": { inputPerMillion… } }`, persists it, and returns
- *  the parse verdict plus the fresh view so the client can refresh its list
- *  from one response. */
+/** Bind the pricing-table route to a view provider and a save path. Returns
+ *  the disposer. One exact route on `/tokbook/pricing` dispatches by method
+ *  (exact routes match on pathname, so registering the same path twice would
+ *  collide): GET answers the read-only route-card view; PUT accepts the
+ *  COMPLETE desired price file (`$billing` + route → model → price segments),
+ *  persists it, and returns the parse verdict plus the fresh view so the client
+ *  can refresh its list from one response. */
 export function registerTokBookPricingRoutes(
   webServer: WebServerLike | undefined,
   pricingView: () => PricingView | Promise<PricingView>,
-  savePricing: (table: unknown) => Promise<ManualPricingParse & { view: PricingView }>,
+  savePricing: (body: unknown) => Promise<PriceParse & { view: PricingView }>,
 ): () => void {
   if (webServer === undefined) return () => {}
 
@@ -250,7 +252,13 @@ export function registerTokBookPricingRoutes(
       return
     }
     if (req.method === 'PUT') {
-      const body = await readJsonBody(req)
+      const read = await readJsonBody(req)
+      if (!read.ok && read.tooLarge) {
+        res.writeHead(413, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: 'body 超过 256 KiB' }))
+        return
+      }
+      const body = read.ok ? read.body : null
       try {
         const result = await savePricing(body)
         if (!result.ok) {
@@ -272,70 +280,6 @@ export function registerTokBookPricingRoutes(
   return webServer.register({
     kind: 'exact',
     path: '/tokbook/pricing',
-    handler: handle,
-  })
-}
-
-/** Bind the provider-overlay pricing routes (价格表 tab's provider dimension):
- * GET answers the read-only provider-overlay view (merged mirror + hand rows);
- * PUT accepts the COMPLETE desired manual overlay
- * `{ "<provider>": { "<model>": { inheritBase | segments, billing?, note } } }`,
- * persists `provider-pricing.json`, and returns the parse verdict plus the
- * fresh model-level + provider views. */
-export function registerTokBookProviderPricingRoutes(
-  webServer: WebServerLike | undefined,
-  pricingView: () => PricingView | Promise<PricingView>,
-  saveProviderPricing: (table: unknown) => Promise<ManualProviderPricingParse & { view: PricingView }>,
-): () => void {
-  if (webServer === undefined) return () => {}
-
-  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
-    if (req.method === 'GET') {
-      try {
-        const snapshot = await pricingView()
-        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-        res.end(JSON.stringify({
-          providerRows: snapshot.providerRows ?? [],
-          providerRoutes: snapshot.providerRoutes ?? {},
-          providerMeta: snapshot.providerMeta ?? {},
-          providerNames: snapshot.providerNames ?? [],
-          providerLabels: snapshot.providerLabels ?? {},
-          providerForms: snapshot.providerForms ?? {},
-          // Every model id the merged base table knows: the 跟随官方价 field
-          // offers these so the user picks instead of typing a model id.
-          modelNames: (snapshot.rows ?? []).map(row => row.model),
-          dataDir: snapshot.dataDir,
-        }))
-      } catch (error) {
-        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
-        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
-      }
-      return
-    }
-    if (req.method === 'PUT') {
-      const body = await readJsonBody(req)
-      try {
-        const result = await saveProviderPricing(body)
-        if (!result.ok) {
-          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ error: result.error, view: result.view }))
-          return
-        }
-        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-        res.end(JSON.stringify({ ok: true, view: result.view }))
-      } catch (error) {
-        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
-        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
-      }
-      return
-    }
-    return refuse(res, 405, 'method not allowed')
-  }
-
-  return webServer.register({
-    kind: 'exact',
-    path: '/tokbook/provider-pricing',
     handler: handle,
   })
 }

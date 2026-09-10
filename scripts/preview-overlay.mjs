@@ -120,224 +120,151 @@ const emptyOverview = {
   lastEventAt: null, lastSyncAt: null, syncStatus: 'idle', sessions: 0,
 }
 
-/* ── pricing-tab fixtures (model layer + provider overlay + channel lens) ── */
-/** Small but representative pricing view: hand override, unpriced seed, a few
- *  cloud rows (one layered), the provider overlay rows the Provider 覆盖 mode
- *  renders, and `channelRows` — the per-route usage the 在用 view groups by,
- *  including strings billed by two routes (deepseek-v4-flash, glm-5.3-flash,
- *  deepseek/deepseek-v4-flash). */
+/* ── pricing-tab fixtures ── */
+/** Pricing-tab fixture: the route cards the 价格表 tab renders. One card per
+ *  route, one row per model, each carrying its price segments (四档价 + 生效
+ *  日期). The states worth looking at are all here: a priced row, a 调价史,
+ *  价格未知, a 仅账本 string (the config no longer lists it), a 订阅 route, and
+ *  a route that only exists because the price file names it. */
 const PRICING_FIXTURE = {
-  rows: [
-    { model: 'deepseek-reasoner', manual: true, manualRates: { inputPerMillion: 3.2, outputPerMillion: 12.8, cacheReadPerMillion: 0.8 }, cloudRates: { inputPerMillion: 4, outputPerMillion: 16 } },
-    { model: 'deepseek/deepseek-v4-flash', manual: false, overlayPriced: true, provider: 'commandcode', records: 2979, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
-    { model: 'z-ai/glm-5.3-flash', manual: false, overlayPriced: true, provider: 'commandcode', records: 276, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
-    { model: 'mimo-v2.5', manual: false, overlayPriced: true, provider: 'opencode-go', records: 83, now: { rates: { inputPerMillion: 0.6, outputPerMillion: 2.4 }, peak: false } },
-    { model: 'dots3-note-prev', manual: false, unpriced: true, records: 644 },
-    { model: 'dots-unpriced-prev', manual: false, unpriced: true, records: 12 },
-    { model: 'deepseek-chat', manual: false, cloudRates: { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5 }, layered: true, family: 'deepseek' },
-    { model: 'deepseek-v4-flash', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, family: 'deepseek', records: 2913 },
-    { model: 'deepseek-v4-flash-vision-exp', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, layered: true, family: 'deepseek', records: 3092 },
-    { model: 'deepseek-v4-pro', manual: false, cloudRates: { inputPerMillion: 8, outputPerMillion: 32 }, layered: true, family: 'deepseek' },
-    { model: 'glm-5.3-flash', manual: false, cloudRates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, family: 'glm', records: 626 },
-    { model: 'gpt-5.6-luna', manual: false, cloudRates: { inputPerMillion: 1.4, outputPerMillion: 8.4 }, layered: true, family: 'gpt', records: 784 },
-    { model: 'gpt-5.6-luna-fast', manual: false, cloudRates: { inputPerMillion: 2.8, outputPerMillion: 16.8 }, family: 'gpt' },
-    { model: 'grok-4.6', manual: false, cloudRates: { inputPerMillion: 3, outputPerMillion: 12 }, family: 'spacex-ai', records: 322 },
-    { model: 'MiniMax-M3', manual: false, cloudRates: { inputPerMillion: 2.1, outputPerMillion: 8.4 }, layered: true, family: 'minimax' },
-    { model: 'claude-3-5-sonnet-20241022', manual: false, cloudRates: { inputPerMillion: 22.4, outputPerMillion: 112, cacheReadPerMillion: 2.24 }, family: 'claude' },
-    { model: 'claude-3-5-haiku-20241022', manual: false, cloudRates: { inputPerMillion: 5.6, outputPerMillion: 28, cacheReadPerMillion: 0.56 }, family: 'claude' },
-    { model: 'gpt-5.6-cyber', manual: false, cloudRates: { inputPerMillion: 87.5, outputPerMillion: 525 }, family: 'gpt' },
-    { model: 'commandcode/some-prefixed', manual: false, overlayPriced: true, provider: 'commandcode', cloudRates: { inputPerMillion: 1, outputPerMillion: 2 } },
+  routes: [
+    {
+      route: 'deepseek-official', label: 'DeepSeek', billing: 'metered', records: 6159,
+      models: [
+        { model: 'deepseek-v4-flash', configured: true, records: 322, segments: [
+          { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
+          { from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 6, note: '官方调价' },
+        ] },
+        { model: 'deepseek-v4-flash-vision-exp', configured: true, records: 3092, segments: [
+          { from: null, inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
+        ] },
+        { model: 'deepseek-v4-pro', configured: true, records: 0, segments: [] },
+      ],
+    },
+    {
+      route: 'commandcode', label: 'commandcode', billing: 'subscription', records: 3232,
+      models: [
+        { model: 'deepseek/deepseek-v4-flash', configured: true, records: 2964, segments: [
+          { from: null, inputPerMillion: 1.5, outputPerMillion: 4.5 },
+        ] },
+        { model: 'z-ai/glm-5.3-flash', configured: true, records: 276, segments: [] },
+      ],
+    },
+    {
+      route: 'opencode-go', label: 'OpenCode Go', billing: 'subscription', records: 2935,
+      models: [
+        { model: 'glm-5.3-flash', configured: true, records: 243, segments: [
+          { from: null, inputPerMillion: 0.8, outputPerMillion: 2.8 },
+        ] },
+        { model: 'mimo-v2.5', configured: true, records: 83, segments: [] },
+        // 配置里已经没有这条串了,只有账本记得它:标「仅账本」,照样可定价。
+        { model: 'retired-model', configured: false, records: 41, segments: [] },
+      ],
+    },
+    {
+      route: 'dots-ai', label: '小红书', billing: 'metered', records: 560,
+      models: [
+        { model: 'dots3-note-prev', configured: true, records: 644, segments: [] },
+      ],
+    },
+    {
+      // 配置里已删掉、但账本/价格文件还记得的路由。
+      route: 'private-relay', label: 'private-relay', billing: 'metered', records: 42,
+      models: [
+        { model: 'deepseek-v4-flash', configured: false, records: 42, segments: [
+          { from: null, inputPerMillion: 1.2, outputPerMillion: 3.6, note: '自己填的中转价' },
+        ] },
+      ],
+    },
   ],
-  channelRows: [
-    { provider: 'deepseek-official', model: 'deepseek-v4-flash', records: 323, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
-    { provider: 'deepseek-official', model: 'deepseek-v4-flash-vision-exp', records: 3092, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
-    { provider: 'opencode-go', model: 'deepseek-v4-flash', records: 2590, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
-    { provider: 'opencode-go', model: 'glm-5.3-flash', records: 243, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
-    { provider: 'opencode-go', model: 'mimo-v2.5', records: 83, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 0.6, outputPerMillion: 2.4 }, peak: false } },
-    { provider: 'commandcode', model: 'deepseek/deepseek-v4-flash', records: 2964, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
-    { provider: 'commandcode', model: 'z-ai/glm-5.3-flash', records: 276, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
-    { provider: 'modlens-commandcode', model: 'deepseek/deepseek-v4-flash', records: 15, billing: 'subscription', overlay: true, now: { rates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, peak: false } },
-    { provider: 'zai', model: 'glm-5.3-flash', records: 383, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
-    { provider: 'staryears', model: 'gpt-5.6-luna', records: 784, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 1.4, outputPerMillion: 8.4 }, peak: false } },
-    { provider: 'staryears', model: 'grok-4.6', records: 322, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 3, outputPerMillion: 12 }, peak: false } },
-    { provider: 'dots-ai', model: 'dots3-note-prev', records: 644, billing: 'metered', overlay: false, unpriced: true },
-    { provider: 'dots-ai', model: 'dots-unpriced-prev', records: 12, billing: 'metered', overlay: false, unpriced: true },
-    // A route the mirror feed does NOT name: the 价格表 tab must offer to name
-    // and form it by hand (the ＋ 名称/形态 affordance on its group head).
-    { provider: 'private-relay', model: 'deepseek-v4-flash', records: 42, billing: 'metered', overlay: false, now: { rates: { inputPerMillion: 1.2, outputPerMillion: 3.6 }, peak: false } },
-  ],
-  providerLabels: {
-    'deepseek-official': 'DeepSeek 官方 API',
-    'opencode-go': 'OpenCode Go 订阅',
-    commandcode: 'Command Code GOAT 订阅',
-    'modlens-commandcode': 'Command Code（modlens 包装）',
-    'deepseek-modlens': 'DeepSeek 官方 API（modlens 包装）',
-    zai: 'Z.ai（智谱直连）',
-    staryears: 'StarYears 中转',
-    'dots-ai': '小红书（dots-ai）',
-  },
-  /** The mirror's channel forms — the axis the overlay list groups by. */
-  providerForms: {
-    'deepseek-official': 'official',
-    'opencode-go': 'subscription',
-    commandcode: 'subscription',
-    'modlens-commandcode': 'wrapper',
-    'deepseek-modlens': 'wrapper',
-    zai: 'official',
-    staryears: 'relay',
-    'dots-ai': 'official',
-  },
-  providerRows: [
-    { provider: 'deepseek-official', model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash', manual: false, note: '官方按量' },
-    { provider: 'opencode-go', model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: true, note: '订阅价值' },
-    { provider: 'opencode-go', model: 'deepseek-v4-flash-vision-exp', billing: 'subscription', inheritBase: 'deepseek-v4-flash-vision-exp', manual: false },
-    { provider: 'opencode-go', model: 'glm-5.3-flash', billing: 'subscription', inheritBase: 'glm-5.3-flash', manual: false },
-    { provider: 'opencode-go', model: 'mimo-v2.5', billing: 'subscription', inheritBase: 'mimo-v2.5', manual: false },
-    { provider: 'commandcode', model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: true, note: '前缀串' },
-    { provider: 'commandcode', model: 'z-ai/glm-5.3-flash', billing: 'subscription', inheritBase: 'glm-5.3-flash', manual: false },
-    { provider: 'staryears', model: 'gpt-5.6-luna', billing: 'metered', inheritBase: 'gpt-5.6-luna', placeholder: true, manual: false, note: '中转占位' },
-    { provider: 'staryears', model: 'grok-4.6', billing: 'metered', inheritBase: 'grok-4.6', placeholder: true, manual: false },
-    { provider: 'zai', model: 'glm-5.3-flash', billing: 'metered', inheritBase: 'glm-5.3-flash', manual: false },
-    { provider: 'dots-ai', model: 'dots3-note-prev', billing: 'metered', segments: [{ rate: { inputPerMillion: 0, outputPerMillion: 0 }, note: '免费测试阶段' }], manual: false },
-    { provider: 'opencode-go-2', model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: false, via: 'opencode-go', note: '同款套餐的第二份' },
-    // A hand-priced route the mirror never named and the ledger never billed:
-    // it lands in the 未计费 bucket, where the route chip is the only place to
-    // name it (no channel group head exists).
-    { provider: 'new-relay', model: 'deepseek-v4-flash', billing: 'metered', segments: [{ rate: { inputPerMillion: 0.9, outputPerMillion: 2.7 } }], manual: true, note: '自己填的中转价' },
-    // Mirror wrappers: no entries of their own — inherited rows, read-only.
-    { provider: 'modlens-commandcode', model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: false, via: 'commandcode' },
-    { provider: 'deepseek-modlens', model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash', manual: false, via: 'deepseek-official' },
-  ],
-  providerRoutes: { 'opencode-go-2': 'opencode-go' },
-  providerNames: ['commandcode', 'deepseek-modlens', 'deepseek-official', 'dots-ai', 'modlens-commandcode', 'opencode-go', 'opencode-go-2', 'opencode-go-3', 'staryears', 'zai'],
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
+  updatedAt: Date.now(),
 }
 
-/* The host always sends `manualRules` on a hand row and `rules` + `now` on every
-   overlay row; the fixture above abbreviates them, so fill them in here — the
-   preview is meant to show the real numbers, not dashes. */
-for (const row of PRICING_FIXTURE.rows) {
-  if (row.manual !== true || row.manualRules !== undefined) continue
-  const base = row.manualRates
-  if (base === undefined) continue
-  row.manualRules = { base, timeRules: [], dailySlots: [], contextTiers: [] }
-  row.now = nowOfRules(row.manualRules)
-}
-for (const row of PRICING_FIXTURE.rows) {
-  if (row.manual === true || row.cloudRules !== undefined || row.cloudRates === undefined) continue
-  row.cloudRules = {
-    base: row.cloudRates,
-    // A 分时 row carries a real window so the timeline and the 当前生效 line
-    // have something to show (the mirror's own labels, approximated).
-    timeRules: row.layered === true
-      ? [{ startTime: 0, endTime: Number.MAX_SAFE_INTEGER, label: '限时5折', rates: { ...row.cloudRates, outputPerMillion: row.cloudRates.outputPerMillion / 2 } }]
-      : [],
-    dailySlots: [],
-    contextTiers: [],
+/* The host sends each row's `now` (the segment in force at read time); the
+   fixture above only writes segments, so derive it here — the preview is meant
+   to show real numbers, not dashes. */
+for (const card of PRICING_FIXTURE.routes) {
+  for (const row of card.models) {
+    const hit = nowOfSegments(row.segments)
+    if (hit !== null) {
+      row.now = ratesOfSegment(hit)
+      row.nowFrom = hit.from
+    }
   }
-}
-for (const row of PRICING_FIXTURE.providerRows) {
-  if (row.rules !== undefined) continue
-  const rates = row.segments !== undefined
-    ? row.segments[0]?.rate
-    : PRICING_FIXTURE.rows.find(candidate => candidate.model === (row.inheritBase ?? row.model))?.cloudRates
-  if (rates === undefined) continue
-  row.rules = { base: rates, timeRules: [], dailySlots: [], contextTiers: [] }
-  row.now = { rates, peak: false }
 }
 
 /* ── pricing writes (fixture-level) ─────────────────────────────────────── */
 /**
- * The preview accepts the 价格表 tab's two whole-file PUTs and merges them into
- * the fixture, so the two-layer save and its re-seed can be exercised in the
- * browser (nothing is persisted, and the merge is a fixture approximation of
- * the host's own read path — not a reimplementation of it).
+ * The preview accepts the 价格表 tab's whole-file PUT and merges it into the
+ * fixture, so the staged save and its re-seed can be exercised in the browser
+ * (nothing is persisted, and the merge is a fixture approximation of the host's
+ * own read path — not a reimplementation of it).
  */
-const pricingState = {
-  rows: PRICING_FIXTURE.rows,
-  providerRows: PRICING_FIXTURE.providerRows,
-  providerRoutes: PRICING_FIXTURE.providerRoutes,
-  providerMeta: {},
+const pricingState = { routes: PRICING_FIXTURE.routes }
+
+/** The ¥/M numbers of one wire-shape segment, as the row's `now` payload. */
+function ratesOfSegment(segment) {
+  return {
+    inputPerMillion: segment.inputPerMillion,
+    outputPerMillion: segment.outputPerMillion,
+    ...(segment.cacheReadPerMillion !== undefined ? { cacheReadPerMillion: segment.cacheReadPerMillion } : {}),
+    ...(segment.cacheWritePerMillion !== undefined ? { cacheWritePerMillion: segment.cacheWritePerMillion } : {}),
+  }
 }
 
-/** The price a rule set applies right now (time rule first, then base). */
-function nowOfRules(rules) {
-  const seconds = Math.floor(Date.now() / 1000)
-  const covering = [...(rules.timeRules ?? [])]
-    .sort((a, b) => a.startTime - b.startTime)
-    .find(rule => rule.startTime <= seconds && seconds <= (rule.endTime ?? Number.MAX_SAFE_INTEGER))
-  const rates = covering?.rates ?? rules.base
-  return { rates, ...(covering?.label !== undefined ? { label: covering.label } : {}), peak: false }
+/** The price segment in force right now for one row, or null for 价格未知. */
+function nowOfSegments(segments) {
+  const today = new Date()
+  const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  let hit = null
+  for (const segment of [...segments].sort((a, b) => String(a.from ?? '').localeCompare(String(b.from ?? '')))) {
+    if (segment.from === null || segment.from === undefined || segment.from <= key) hit = segment
+    else break
+  }
+  return hit
 }
 
 function pricingView() {
-  // Display facts merge hand-wins-over-mirror in the host, so the preview does
-  // the same: `$providers` overrides a label/form the fixture declares.
-  const labels = { ...PRICING_FIXTURE.providerLabels }
-  const forms = { ...PRICING_FIXTURE.providerForms }
-  for (const [route, meta] of Object.entries(pricingState.providerMeta)) {
-    if (meta.label !== undefined) labels[route] = meta.label
-    if (meta.form !== undefined) forms[route] = meta.form
-  }
-  return {
-    ...PRICING_FIXTURE,
-    rows: pricingState.rows,
-    providerRows: pricingState.providerRows,
-    providerRoutes: pricingState.providerRoutes,
-    providerMeta: pricingState.providerMeta,
-    providerLabels: labels,
-    providerForms: forms,
-  }
+  return { ...PRICING_FIXTURE, routes: pricingState.routes, updatedAt: Date.now() }
 }
 
-/** Merge a `PUT /tokbook/pricing` body (the WHOLE hand model table). */
-function withModelWrite(body) {
-  const written = new Map(Object.entries(body))
-  const rows = []
-  for (const [model, entry] of written) {
-    const flat = entry.base !== undefined
-    const base = flat ? entry.base : entry
-    const manualRules = { base, timeRules: entry.timeRules ?? [], dailySlots: entry.dailySlots ?? [], contextTiers: [] }
-    rows.push({ model, manual: true, manualRules, manualRates: base, now: nowOfRules(manualRules) })
+/** Merge a `PUT /tokbook/pricing` body (the WHOLE price file). */
+function withPricingWrite(body) {
+  const billing = body.$billing ?? {}
+  const routes = []
+  const seen = new Set()
+  for (const card of pricingState.routes) {
+    const models = card.models.map((row) => {
+      const segments = body[card.route]?.[row.model]
+      const next = segments === undefined ? [] : segments
+      const hit = nowOfSegments(next)
+      return {
+        ...row,
+        segments: next,
+        now: hit === null ? undefined : ratesOfSegment(hit),
+        nowFrom: hit?.from ?? null,
+      }
+    })
+    routes.push({ ...card, billing: billing[card.route] ?? 'metered', models })
+    seen.add(card.route)
   }
-  for (const row of pricingState.rows) {
-    if (row.manual || written.has(row.model)) continue
-    rows.push(row)
+  // A route the catalog does not carry but the body prices: it becomes a card
+  // of its own, the way the host's own view union does it.
+  for (const [route, models] of Object.entries(body)) {
+    if (route.startsWith('$') || seen.has(route)) continue
+    routes.push({
+      route,
+      label: route,
+      billing: billing[route] ?? 'metered',
+      records: 0,
+      models: Object.entries(models).map(([model, segments]) => {
+        const hit = nowOfSegments(segments)
+        return { model, configured: false, records: 0, segments, now: hit === null ? undefined : ratesOfSegment(hit), nowFrom: hit?.from ?? null }
+      }),
+    })
   }
-  pricingState.rows = rows
-}
-
-/** Merge a `PUT /tokbook/provider-pricing` body (the WHOLE hand overlay). */
-function withOverlayWrite(body) {
-  const hand = []
-  for (const [provider, models] of Object.entries(body)) {
-    if (provider === '$routes' || provider === '$providers') continue
-    if (models === null || typeof models !== 'object') continue
-    for (const [model, entry] of Object.entries(models)) {
-      const segments = entry.segments
-      const rules = segments !== undefined
-        ? { base: segments[0]?.rate ?? { inputPerMillion: 0, outputPerMillion: 0 }, timeRules: [], dailySlots: [], contextTiers: [] }
-        : null
-      hand.push({
-        provider,
-        model,
-        billing: entry.billing,
-        manual: true,
-        ...(entry.inheritBase !== undefined ? { inheritBase: entry.inheritBase } : {}),
-        ...(segments !== undefined ? { segments } : {}),
-        ...(entry.placeholder !== undefined ? { placeholder: entry.placeholder } : {}),
-        ...(entry.note !== undefined ? { note: entry.note } : {}),
-        ...(rules !== null ? { rules, now: nowOfRules(rules) } : {}),
-      })
-    }
-  }
-  const keys = new Set(hand.map(row => `${row.provider}\n${row.model}`))
-  pricingState.providerRows = [
-    ...hand,
-    ...pricingState.providerRows.filter(row => !row.manual && !keys.has(`${row.provider}\n${row.model}`)),
-  ]
-  pricingState.providerRoutes = body.$routes ?? {}
-  pricingState.providerMeta = body.$providers ?? {}
+  pricingState.routes = routes
 }
 
 /* ── quota-tab fixtures ─────────────────────────────────────────────────── */
@@ -440,16 +367,15 @@ const server = createServer((req, res) => {
     res.end('{}')
     return
   }
-  // Pricing tab: the merged view (GET) + the two whole-file writes (PUT).
-  if (url.pathname === '/tokbook/pricing' || url.pathname === '/tokbook/provider-pricing') {
+  // Pricing tab: the route-card view (GET) + the whole-file write (PUT).
+  if (url.pathname === '/tokbook/pricing') {
     if (req.method === 'PUT') {
       let body = ''
       req.on('data', chunk => { body += chunk })
       req.on('end', () => {
         try {
           const parsed = JSON.parse(body === '' ? '{}' : body)
-          if (url.pathname === '/tokbook/pricing') withModelWrite(parsed)
-          else withOverlayWrite(parsed)
+          withPricingWrite(parsed)
           res.writeHead(200, { 'content-type': 'application/json' })
           res.end(JSON.stringify({ ok: true, view: pricingView() }))
         } catch (error) {

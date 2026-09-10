@@ -5,11 +5,11 @@
  * `assistant/message` provider `usage`, plus compaction summarize calls and
  * failed attempts), then aggregates the rows into totals, per-day, per-hour,
  * per-model and per-(day, model, provider, rate) cells. Cost is an additive
- * layer computed through a (provider, model) price resolution — a per-model
- * price table (¥ per million tokens) with a provider overlay, resolved by the
- * "time rule → context tier → peak slot" chain — so a price update re-prices
- * history without rebuilding the aggregation. Amounts split into real spend
- * (metered channels) and subscription value (subscription channels).
+ * layer computed through a (route, model) price resolution — a hand-written
+ * price table (¥ per million tokens) whose only key is the effective date —
+ * so a price update re-prices history without rebuilding the aggregation.
+ * Amounts split into real spend (metered channels) and subscription value
+ * (subscription channels).
  *
  * @module dsh-tokbook/types
  */
@@ -102,7 +102,8 @@ export interface UsageModelRow {
   totals: UsageTotals
 }
 
-/** Per-million-token prices of one rate node, in ¥ (RMB). */
+/** Per-million-token prices of one price segment, in ¥ (RMB). The cache
+ *  buckets fall back to the plain input rate when omitted. */
 export interface ModelPricing {
   inputPerMillion: number
   outputPerMillion: number
@@ -110,282 +111,93 @@ export interface ModelPricing {
   cacheWritePerMillion?: number
 }
 
-/** Billing nature of one provider channel, decided per (provider, model). */
+/** How one provider channel's amount is counted: real spend vs subscription
+ *  value. A route-level fact (`$billing` in the price file); absent = metered. */
 export type BillingNature = 'metered' | 'subscription'
 
-/** How a channel is operated and priced — the mirror feed's `providers[].form`.
- *  Four forms: a vendor's own metered API (`official`), a third party's metered
- *  channel at its own rate (`relay`), a plan whose models are not billed per
- *  token (`subscription`), and a client plugin's synthetic twin of another
- *  route (`wrapper`). Display metadata (grouping/annotation); the one pricing
- *  rule riding on it is that a wrapper prices nothing of its own — it inherits
- *  its target's entries and billing nature. */
-export type ChannelForm = 'official' | 'relay' | 'subscription' | 'wrapper'
-
-/** One self-priced time segment of a provider entry: applies while
- * `from ≤ seconds < to` (epoch seconds; `from`/`to` absent = unbounded on
- * that side). The segment rate *is* the price during the window — it never
- * inherits rules. */
-export interface PricingSegment {
-  /** Window start, epoch seconds; absent = the beginning of time. */
-  from?: number
-  /** Window end (exclusive), epoch seconds; absent = open-ended. */
-  to?: number
-  /** The flat price applied during the window. */
-  rate: ModelPricing
-  /** Human note. */
+/** One price segment of one (route, model): the price in force from `from`
+ *  (epoch ms; 0 = 最早一段, i.e. since the beginning of time) until the next
+ *  segment of the same (route, model) starts. The list stays ascending by
+ *  `from`, so "the price at time T" is the last segment with `from ≤ T`. */
+export interface PriceSegment {
+  from: number
+  rates: ModelPricing
   note?: string
 }
 
-/** One provider-layer override for an exact ledger model string. */
-export interface ProviderPricingEntry {
-  /** How this channel's amount is counted: real spend vs subscription value.
-   * In the mirror feed this is normally the channel-level `billing` inherited
-   * at parse time; an entry may override it (mixed channels, hand edits). */
-  billing?: BillingNature
-  /** Follow the base table's FULL rule set (incl. timeRules) of this modelId. */
-  inheritBase?: string
-  /** Explicit user timeline of flat prices; wins over `inheritBase` when present. */
-  segments?: PricingSegment[]
-  /** Relay placeholder: base prices stand in until the user fills real segments. */
-  placeholder?: boolean
-  /** Human note. */
-  note?: string
-}
+/** The hand-written price table: provider route key → exact model string →
+ *  that (route, model)'s price timeline. An empty/absent list = 价格未知. */
+export type PricingTable = Record<string, Record<string, PriceSegment[]>>
 
-/** provider route key → exact model string → override entry. */
-export type ProviderPricingTable = Record<string, Record<string, ProviderPricingEntry>>
+/** route → its billing nature. The price file's reserved `$billing` section. */
+export type BillingMap = Record<string, BillingNature>
 
-/** Hand-edited route aliases: one provider route follows another route's
- *  overlay entries — the case of buying the same plan several times, where
- *  each imported key is its own route but they all price the same. One hop
- *  only. The mirror feed declares its OWN alias source (`providers[].aliasOf`,
- *  the wrapper routes) separately from this hand-layer map. */
-export type ProviderAliasMap = Record<string, string>
-
-/** Hand-declared display facts of ONE provider route: the human name and the
- *  operation form, for routes the mirror feed does not name (a private relay, a
- *  brand-new subscription) — or to rename one it does. Display-only: it groups,
- *  sorts and filters, and never enters the pricing chain. `wrapper` is NOT a
- *  hand-declarable form: a wrapper is a synthetic twin the mirror mints for
- *  another route, and the hand layer expresses following with `$routes`
- *  instead. */
-export interface ProviderMeta {
-  /** Human name shown instead of the route key. */
-  label?: string
-  /** Operation form (`official` / `relay` / `subscription`). */
-  form?: ChannelForm
-}
-
-/** Hand-layer route metadata: provider route key → its hand-declared facts. */
-export type ProviderMetaMap = Record<string, ProviderMeta>
-
-
-/** One peak window of a day, half-open [startMinute, endMinute) in local minutes. */
-export interface RateWindow {
-  startMinute: number
-  endMinute: number
-}
-
-/** A peak-pricing slot: the rates that apply inside its windows. */
-export interface DailySlot {
-  label?: string
-  windows: RateWindow[]
-  /** ISO weekdays (1=Monday … 7=Sunday); absent or empty = every day. */
-  daysOfWeek?: number[]
-  rates: ModelPricing
-}
-
-/** A context tier: the rates that apply once the context reaches the threshold. */
-export interface ContextTier {
-  threshold: number
-  rates: ModelPricing
-  dailySlots?: DailySlot[]
-}
-
-/** A time rule: the container whose rates (and tiers/slots) apply inside its window. */
-export interface TimeRule {
-  label?: string
-  startTime: number
-  endTime: number
-  rates: ModelPricing
-  contextTiers?: ContextTier[]
-  dailySlots?: DailySlot[]
-}
-
-/** The full pricing of one model (base rates + the rule chain). */
-export interface ModelRates {
-  base: ModelPricing
-  contextTiers: ContextTier[]
-  dailySlots: DailySlot[]
-  timeRules: TimeRule[]
-}
-
-/** The identity of the rate one record was billed at. Holds rule identity,
- * never price numbers, so a price update re-prices history without a rebuild. */
+/** The identity of the price segment one record was billed under: the start
+ *  instant of the segment that applied. Holds identity, never numbers, so a
+ *  price edit re-prices history on the next read. */
 export interface RateKey {
-  ruleStart: number
-  ruleEnd: number
-  tier: number
-  slot: number
+  from: number
 }
 
-/** The neutral key of an unpriced model's rows. */
-export const UNPRICED_KEY: RateKey = { ruleStart: 0, ruleEnd: 0, tier: 0, slot: -1 }
+/** The neutral key of an unpriced record's rows. */
+export const UNPRICED_KEY: RateKey = { from: -1 }
 
-/** The merged pricing table: model id → full rule set. */
-export type PricingTable = Record<string, ModelRates>
-
-/** The price one (provider, model) resolves to at a single instant — the
- * answer to "what does this cost right now", through the whole
- * time-rule → context-tier → peak-slot chain. */
-export interface PricingNow {
-  /** The rates that apply now (¥/M). */
-  rates: ModelPricing
-  /** Label of the winning container or peak slot (`限时5折`, `工作日高峰时段`);
-   * absent when the base slate decided the price. */
-  label?: string
-  /** True when a peak/off-peak slot decided this price. */
-  peak: boolean
+/** One price segment as it travels on the wire and lives in `pricing.json`:
+ *  `from` is a local calendar date (`YYYY-MM-DD`) or null for 最早一段. Flat
+ *  on purpose — the file is hand-written, so a segment is one object carrying
+ *  its four rates, not a nested `rates` node. */
+export interface PricingSegmentInput {
+  from: string | null
+  inputPerMillion: number
+  outputPerMillion: number
+  cacheReadPerMillion?: number
+  cacheWritePerMillion?: number
+  note?: string
 }
 
-/** One model row of the pricing-table view: an exact model string records can
- * be billed under. `cloudRules` is the synced feed's FULL rule set for that
- * string (absent = manual-only row, i.e. a model the cloud never named);
- * `manualRules` is the hand-edited `pricing.json` entry, which — when present
- * — replaces the cloud rules wholesale. `cloudRates` / `manualRates` are the
- * flat base-rate shorthands of those two (kept for older clients). `now` is
- * the price the EFFECTIVE rule set (manual over cloud) resolves to at view
- * time, so a row never advertises a base rate that is not in force. */
-export interface PricingViewRow {
-  /** The exact model string (modelId or alias) records may use. */
+/** One model row of one route card: the exact model string, where the route
+ *  knows it from, and its price timeline. */
+export interface PricingModelView {
+  /** The exact model string records are billed under. */
   model: string
-  /** Whether a manual `pricing.json` entry exists for this exact string. */
-  manual: boolean
-  /** Full manual rule set; present when `manual` is true. */
-  manualRules?: ModelRates
-  /** Manual base rates (¥/M) shorthand = `manualRules.base`. */
-  manualRates?: ModelPricing
-  /** Full cloud rule set behind this string; absent on manual-only rows. */
-  cloudRules?: ModelRates
-  /** Cloud base rates (¥/M) shorthand = `cloudRules.base`. */
-  cloudRates?: ModelPricing
-  /** Cloud entry carries time rules / context tiers / peak slots (its flat
-   * base is not the whole story; a manual entry would replace those rules). */
-  layered?: boolean
-  /** True when the ledger recorded this model string but neither the cloud
-   * feed nor a manual entry names it — it is currently billed ¥0. */
-  unpriced?: boolean
-  /** True when the model has no model-layer entry but some provider-overlay
-   * entry prices it (its money lives in the overlay layer, not as ¥0). */
-  overlayPriced?: boolean
-  /** The provider route whose overlay entry prices this string (present with
-   * `overlayPriced`, so the UI can send the user to that exact override). */
-  provider?: string
-  /** Model vendor / family the cloud feed groups this string under
-   *  (`deepseek`, `claude`, `qwen`, …). Display metadata for the cloud
-   *  reference list; absent on strings the cloud feed does not name. */
-  family?: string
-  /** Number of ledger records naming this model; present on ANY row the
-   * ledger billed (not just unpriced ones), so the tab can surface the models
-   * actually in use. */
-  records?: number
-  /** Price of the effective rule set at view time. For an `overlayPriced` row
-   * that is the provider overlay's price (model layer has no entry). */
-  now?: PricingNow
-}
-
-/** One (provider, model) CHANNEL the ledger billed — the 在用 view's channel
- *  dimension. A model string billed by two routes yields two channel rows, so
- *  the view can show what each route actually paid, while the editable price
- *  stays the one model-layer entry shared by all of them. */
-export interface ChannelUsageRow {
-  /** Provider route key as recorded in the ledger ('' = unknown route). */
-  provider: string
-  /** The exact model string billed under that route. */
-  model: string
-  /** Ledger records for this exact channel. */
+  /** True when settings / the adapter catalog lists this string for the route
+   *  (i.e. it is callable there); false = a 仅账本 row the configuration no
+   *  longer lists, or a string that only carries a hand-written price. */
+  configured: boolean
+  /** Ledger records naming this (route, model); 0 when never billed. */
   records: number
-  /** Billing nature of this channel for this string (`metered` = real spend,
-   *  `subscription` = plan value at the resolved price). */
+  /** Price segments in force order (empty = 价格未知, billed ¥0). */
+  segments: PricingSegmentInput[]
+  /** The price in force at view time; absent = nothing prices this row. */
+  now?: ModelPricing
+  /** Effective date of the segment that governs `now` (null = 最早一段). */
+  nowFrom?: string | null
+}
+
+/** One route card of the 价格表 tab: one provider route key, its display name,
+ *  its billing nature, and every model it can be billed for. */
+export interface PricingRouteView {
+  /** Provider route key (the ledger's channel identity). */
+  route: string
+  /** Display name: the settings profile's `displayName`, else the adapter's
+   *  provider name, else the route key itself. */
+  label: string
+  /** Billing nature of this route (its `$billing` entry; default metered). */
   billing: BillingNature
-  /** True when this channel has its own provider-overlay entry, so its price
-   *  is channel-specific rather than the model layer's. */
-  overlay: boolean
-  /** The channel's effective price now; absent when nothing prices it. */
-  now?: PricingNow
-  /** True when nothing prices this channel (its records bill ¥0). */
-  unpriced?: boolean
+  /** Ledger records over the whole route (drives card order). */
+  records: number
+  models: PricingModelView[]
 }
 
 /** The wire payload of the pricing-table view (价格表 tab). */
 export interface PricingView {
-  /** One row per exact model string in the merged table, manual rows first
-   * then cloud models/aliases (both alphabetical within each group). */
-  rows: PricingViewRow[]
-  /** One row per (provider, model) the ledger billed — the 在用 view's channel
-   *  dimension. Absent on hosts that predate it; the tab then falls back to a
-   *  flat model list. */
-  channelRows?: ChannelUsageRow[]
-  /** Human label per provider route (the mirror feed's `providers[].label`),
-   *  so a channel group reads "DeepSeek 官方 API" instead of its route key. */
-  providerLabels?: Record<string, string>
-  /** The mirror feed's channel form per provider route (`providers[].form`):
-   *  official / relay / subscription / wrapper. Display metadata — the tab
-   *  groups, sorts and filters the overlay by it. Routes the feed does not name
-   *  (a hand-only or brand-new route) are simply absent. */
-  providerForms?: Record<string, ChannelForm>
-  /** One row per (provider, model) in the EFFECTIVE provider overlay (cloud
-   *  mirror + hand edits), the read/display side of the provider dimension.
-   *  Absent on hosts that predate the provider layer. */
-  providerRows?: ProviderPricingViewRow[]
-  /** Route → canonical route aliases of the hand-edited overlay (a route
-   *  priced by another route's entries). */
-  providerRoutes?: ProviderAliasMap
-  /** Hand-declared names / forms of the routes the user labelled himself
-   *  (`provider-pricing.json`'s reserved `$providers` section). The hand half
-   *  only, like `providerRoutes`: the tab owns and writes it back.
-   *  `providerLabels` / `providerForms` above are the MERGED (hand wins over
-   *  mirror) view the tab renders. */
-  providerMeta?: ProviderMetaMap
-  /** Every provider route the tab knows: the mirror's keys, the hand file's
-   *  keys and alias targets, and the routes the ledger billed. The tab offers
-   *  these as alias targets. */
-  providerNames?: string[]
-  /** The data directory the pricing files live in (informational). */
+  /** One card per provider route: routes with ledger usage first (most-used
+   *  first), then the rest by route key. */
+  routes: PricingRouteView[]
+  /** The data directory the price file lives in (informational). */
   dataDir: string
-}
-
-/** One (provider, model) row of the provider-overlay view: the exact ledger
- * string the mirror (or a hand edit) overrides for one provider route, how it
- * bills, and where its price comes from. */
-export interface ProviderPricingViewRow {
-  /** Provider route key ('' groups unknown rows, which never have entries). */
-  provider: string
-  /** The exact model string the entry overrides. */
-  model: string
-  /** Billing nature; absent when the mirror left it unset. */
-  billing?: BillingNature
-  /** Price source: follow this base model's full rule set. */
-  inheritBase?: string
-  /** Price source: an explicit user timeline of flat segments. */
-  segments?: PricingSegment[]
-  /** Relay placeholder: base prices stand in until real segments are filled. */
-  placeholder?: boolean
-  /** Hand-edited `provider-pricing.json` entry wins over the mirror row. */
-  manual: boolean
-  /** Set when this row inherits its price through a route alias: the canonical
-   *  route it follows (the row itself has no entry of its own). Such a row is
-   *  read-only — editing happens on the canonical route. */
-  via?: string
-  /** Human note (mirror or hand). */
-  note?: string
-  /** The EFFECTIVE rule container this row prices through (the inherited
-   * base model's full rules, or the flat container built from `segments`).
-   * Absent when nothing can price the string. */
-  rules?: ModelRates
-  /** Price of `rules` at view time, so a 跟随基准 row can show the number. */
-  now?: PricingNow
+  /** When the view was computed, epoch ms. */
+  updatedAt: number
 }
 
 /**
@@ -442,15 +254,6 @@ export type CostedModelRow = UsageModelRow & {
   subscriptionValue: number
 }
 
-/** The currency the stats page renders cost figures in. Amounts on the wire
- * stay RMB; this only names the display convention. */
-export type DisplayCurrency = 'CNY' | 'USD'
-
-/** The display currency a mirror region implies. */
-export function currencyOfRegion(region: 'domestic' | 'overseas' | undefined): DisplayCurrency {
-  return region === 'overseas' ? 'USD' : 'CNY'
-}
-
 /** The token aggregation plus the cost layer. */
 export interface CostedSummary extends TokenSummary {
   /** Absolute data directory the summary was computed from. */
@@ -465,10 +268,8 @@ export interface CostedSummary extends TokenSummary {
   subscriptionValue: number
   /** Models with usage but no entry in the pricing table. */
   unpricedModels: string[]
-  /** The active pricing table (user-maintained; empty when none is configured). */
+  /** The active price table (hand-written; empty when nothing is priced). */
   pricing: PricingTable
-  /** The active provider overlay table (empty when the mirror never synced). */
-  providerPricing: ProviderPricingTable
   /** Per-model rows with their billed amounts attached. */
   byModel: CostedModelRow[]
 }
@@ -497,7 +298,8 @@ export interface ProviderModelUsage {
   spend: number
   /** Subscription value (¥, non-cash) of this model inside the window. */
   subscriptionValue: number
-  /** How this model's channel bills; undefined when unpriced. */
+  /** The route's billing nature (`$billing`); independent of whether this
+   *  model is priced. Unattributed routes read as metered. */
   billing?: BillingNature
 }
 
@@ -536,16 +338,12 @@ export interface ProviderUsageView {
   fromDay: string
   /** Local date key of the window's last day (inclusive). */
   toDay: string
-  /** The display currency the page converts cost figures into. */
-  currency: DisplayCurrency
-  /** Effective RMB-per-USD rate (feed value, else a built-in default). */
-  usdExchangeRate: number
   /** When the snapshot was computed, epoch ms. */
   updatedAt: number
-  /** Human label per provider route (the mirror feed's `providers[].label`),
-   *  so a card heads with "Command Code（modlens 包装）" and shows the route key
-   *  beneath it, the same way the 价格表 tab names a channel. Absent or empty
-   *  when the feed carries no labels; the card then shows the key alone. */
+  /** Human label per provider route: the route's display name (settings
+   *  `displayName`, else the adapter's provider name), so a card heads with
+   *  "DeepSeek" and shows the route key beneath it. Absent when nothing names
+   *  the route; the card then shows the key alone. */
   providerLabels?: Record<string, string>
   /** One card per provider with recorded usage inside the window, largest
    * token total first; empty when the window holds no records. */
@@ -554,20 +352,16 @@ export interface ProviderUsageView {
 
 /**
  * The aggregated snapshot the browser floating window reads. Deliberately
- * slimmed from {@link CostedSummary}: the pricing table (a cloud mirror can be
- * hundreds of models), the rateRows, and the byHour rows are dropped — the
- * floating window renders none of them, and the cost layer has already been
- * folded into `spend` / `subscriptionValue` / `totalCost` / `byModel[].*`.
+ * slimmed from {@link CostedSummary}: the price table, the rateRows and the
+ * byHour rows are dropped — the floating window renders none of them, and the
+ * cost layer has already been folded into `spend` / `subscriptionValue` /
+ * `totalCost` / `byModel[].*`.
  */
-export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'providerPricing' | 'rateRows' | 'byHour' | 'recent'> {
+export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour' | 'recent'> {
   /** Distinct sessions that contributed records. */
   sessions: number
   /** Sum of the four provider buckets (input + cacheRead + cacheWrite + output). */
   totalTokens: number
-  /** The display currency the page converts cost figures into. */
-  currency: DisplayCurrency
-  /** Effective RMB-per-USD rate (feed value, else a built-in default). */
-  usdExchangeRate: number
   /** When the snapshot was computed, epoch ms. */
   updatedAt: number
   /** Newest ledger rows (newest first), each carrying its own billed ¥. */
@@ -590,13 +384,6 @@ export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'provid
 export interface TokBookConfig {
   /** Data directory; defaults to `$DSH_HOME/tokbook` (`~/.dsh/tokbook`). */
   path?: string
-  /** Explicit cloud pricing feed URL; wins over every region/mirror setting. */
-  pricingUrl?: string
-  /** Explicit provider-overlay pricing feed URL; wins over the mirror default. */
-  pricingProviderUrl?: string
-  /** Which cloud mirror to pull when `pricingUrl` is unset: `domestic`
-   * (default) or `overseas`. */
-  pricingRegion?: 'domestic' | 'overseas'
   /** Whether compaction summarize requests are recorded and billed (default true). */
   recordCompaction?: boolean
   /** Quota plans keyed by provider route (`opencode-go`, `commandcode`). A

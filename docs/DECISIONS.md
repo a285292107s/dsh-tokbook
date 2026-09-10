@@ -58,7 +58,8 @@ Typert Remote。
 
 ### D-003 · 2026-09-07/08 · 成本层 + 价格表;额度只从官方 API 取
 
-**Status: current**(部分在工作区)。**Supersedes:** `docs/DESIGN.md` §1 与 §11 中第一期的
+**Status: partially superseded by D-011**(云端合并计价与规则链部分;**额度只从官方
+API 取**仍 current)。**Supersedes:** `docs/DESIGN.md` §1 与 §11 中第一期的
 "不做成本 / 成本属后续阶段"(「成本折算」风险行)。
 
 **背景。** 账本要回答"这花了多少钱"——DSH 从不算钱;订阅额度 tab 要反映跨工具共享的
@@ -81,7 +82,9 @@ Typert Remote。
 
 ### D-004 · 2026-09-08 · （通道，模型） 双维计价 + 时间维度 + 双桶统计
 
-**Status: current。Supersedes:** D-003 的"单 model 计价"部分(通道用量/额度与手工
+**Status: superseded** by D-011(价格表整体重构:双维/覆盖层/云端全部作废;**双桶统计**
+(`spend` / `subscriptionValue`)继续有效,只是计费性质改为路由级手工声明)。
+**Supersedes:** D-003 的"单 model 计价"部分(通道用量/额度与手工
 价格表本体仍在,承接其成本层语义)。
 
 **背景。** 同一 model 串可能同时出现在官方 API 通道与订阅通道,计费性质与价格都不同;
@@ -107,7 +110,8 @@ Typert Remote。
 
 ### D-005 · 2026-09-09 · 手工价带时间维度;价格表 tab 显示"当前生效价"
 
-**Status: current。Supersedes:** D-004 中"价格表 tab 只维护 flat 手工价"的 UI 部分
+**Status: superseded** by D-011(价格表不再有"手工层时间规则/峰谷"与层级概念;剩下的正是本条
+想要的**生效日期**,只是简化为一条价段数组)。**Supersedes:** D-004 中"价格表 tab 只维护 flat 手工价"的 UI 部分
 (双维计价与双桶语义不变)。
 
 **背景。** 厂商会调价:期限内/永久降价(云 feed 里 `deepseek-v4-pro` 的
@@ -161,7 +165,8 @@ Typert Remote。
 
 ### D-006 · 2026-09-09 · 价格表云端参考表按厂商分组;通道维度留在覆盖层
 
-**Status: current。Supersedes:** D-005 中「全部」视图里云端基准价表平铺展示的 UI 部分
+**Status: superseded** by D-011(云端参考表与厂商分组随云端一并删除)。
+**Supersedes:** D-005 中「全部」视图里云端基准价表平铺展示的 UI 部分
 （双维计价、双桶统计与编辑语义都不变）。
 
 **背景。** 「全部」里的云端基准价表是 185 行平铺的模型串（真实数据），是这个 tab 最不可扫的
@@ -192,7 +197,8 @@ Typert Remote。
 
 ### D-007 · 2026-09-09 · 在用视图按通道分组;全局价只在一条"主通道"行可编辑
 
-**Status: current。Supersedes:** D-006 中「在用按通道分组是紧随其后的第二步」的过渡安排
+**Status: superseded** by D-011(「在用 / 全局价」的层级区分消失:一个 (路由, 模型) 一份价)。
+**Supersedes:** D-006 中「在用按通道分组是紧随其后的第二步」的过渡安排
 （云端参考表按厂商分组不变）。
 
 **背景。** D-006 把「全部」的云端参考表按厂商折叠了,但默认视图「在用」仍是模型串平铺——
@@ -223,8 +229,8 @@ Typert Remote。
 
 ### D-008 · 2026-09-10 · 通道形态显式化;包装路由改由镜像别名承载,不单独定价
 
-**Status: current。**（其第 1 条的**视图切分**部分已由下面的 D-009 取代——两个子视图合为一张表;
-形态维度与包装路由别名那两条决策继续有效。）
+**Status: superseded** by D-011(形态维度与镜像承载的包装路由别名随云端一起删除;通道用量
+卡片的名字改由设置里的 `displayName` 提供)。
 
 **背景。** 维护者问:价格表 tab 的两个子视图(模型价 / 通道覆盖层)是否应按通道的四种形态
 (官方通道 / 中转转售商 / 订阅套餐 / 包装路由)重新拆分?从第一性原理看**不该**:两个视图
@@ -273,7 +279,8 @@ README「包装路由靠复制上游条目表达」一段及其 AGENTS 判据被
 
 ### D-009 · 2026-09-10 · 价格表 tab 收敛为单表:层级降为行属性,参考价表独立,两层共享一条保存条
 
-**Status: current。Supersedes:** D-008 第 1 条里「顶层两个子视图不拆,保持按计价层切分」的
+**Status: superseded** by D-011(层级概念、参考价表、共享保存条的对象都随重构改变;保住的是
+「一屏看清、一次保存」这条体验)。**Supersedes:** D-008 第 1 条里「顶层两个子视图不拆,保持按计价层切分」的
 **视图切分本身**(形态维度与包装路由别名那两条决策继续有效);继承 D-006/D-007 的
 「(通道, 模型) 分组 + 全局价单一编辑入口」。
 
@@ -319,8 +326,8 @@ fixture 合并(写入在预览里内存生效),便于在浏览器里核对整条
 
 ### D-010 · 2026-09-10 · 手工层可自己声明通道名称与形态(`$providers`),补上镜像没命名的通道
 
-**Status: current。Supersedes:** —（延伸 D-008「形态由镜像声明、消费方不猜」:不猜,但允许
-**用户自己声明**。)
+**Status: superseded**(价格表的形态/云端部分) by D-011。(其在用视图与手工声明通道名称的
+诉求仍在,只是改由设置里的 `displayName` 提供。)
 
 **背景。** 维护者问:导入了一个云端镜像没有数据的通道方,怎么给它打「中转转售」这类标签?
 现状是**没有任何入口**:`providerLabels` / `providerForms` 只来自镜像 feed
@@ -349,6 +356,55 @@ fixture 合并(写入在预览里内存生效),便于在浏览器里核对整条
 决策不给**推断**开口子,只给**用户声明**开口子。契约见 [`docs/CONTRACTS.md`](CONTRACTS.md)
 的 `$providers` 段与界面词表;`providerMeta` 作为增量 wire 字段与新 `$providers` 键同 commit
 落地。
+
+---
+
+### D-011 · 2026-09-10 · 价格表破坏性重构:删掉云端,一张手工表,每路由一卡
+
+**Status: current。Supersedes:** D-008 与 D-010 的镜像形态部分、以及全部
+provider-overlay(通道覆盖层 / `$routes` / `$providers` / `inheritBase` / `segments` /
+峰谷 / 上下文档位)相关决策。
+
+**背景(维护者原话)。** 「破坏性重构价格表。首先是精简,先移除云端数据读取功能,后期作为一个
+独立任务重构。现在以本地 `~/.dsh/settings.yaml` 为核心,编排价格表页面内容。每个路由键一张
+卡片,显示当前可调用模型。定价完全由用户自行编写,主要填写 4 桶价格以及生效日期。」
+
+**决策(经维护者逐项确认)。**
+
+- **云端定价整体删除**,不留半吊子:不再拉取 / 解析 / 回落 `pricing.ccsa.json` 与
+  `provider-pricing.ccsa.json`,删掉配置键 `pricingUrl` / `pricingProviderUrl` /
+  `pricingRegion`、参考价表、`family` 厂商分组、镜像 label / form / `aliasOf`(包装路由)。
+  后期任务的两个镜像地址(留档在此,便于重做时取回):
+  `https://gitee.com/oyw125/model-price-table/raw/master/model_pricing.json`、
+  `https://raw.githubusercontent.com/LaoYueHanNi/model-price-table/master/model_pricing.json`、
+  `https://raw.githubusercontent.com/a285292107s/dsh-model-pricing/master/provider_pricing.json`。
+- **唯一价格文件 `pricing.json`**:路由 → 精确模型串 → **价段数组**。价段 = 四档 ¥/M 单价
+  (`inputPerMillion` / `outputPerMillion` / `cacheReadPerMillion` / `cacheWritePerMillion`)
+  + **生效日期**(`YYYY-MM-DD`,省略 = 最早一段)。保留键只有一个 **`$billing`**:路由 →
+  `metered` / `subscription`(省略 = metered)。写路径严格并整表替换,读路径宽容。
+- **计价只看记录自己的时间戳**:取最后一段 `from ≤ 记录时刻` 的价;早于最早一段或没有价段 =
+  **价格未知**(¥0)。回填更早的价即重算历史。
+- **卡片 = 路由目录 ∪ 账本 ∪ 价格文件**。路由目录 = 本机设置文档(`llm-pi-ai.providers` 的键
+  + `llm-deepseek` 的唯一路由 `deepseek-official`)∪ 正在运行的适配器注册表
+  (`ctx.llm.listProviders()`,所以运行时铸出的路由也有卡);卡内模型 = 配置的 `models` 列表
+  (profile 没列就回落到 `ctx.llm.listModels()`)**∪** 账本计费过的串(标「仅账本」),所以历史
+  金额永远有可定价入口。**通道名称**取设置里的 `displayName`,其次适配器名,再其次路由键。
+- **折叠与计价解耦**:费率行的身份是从价格表推导的,所以 `rollup.json` 记 `pricingRevision`
+  (价格文件内容的签名),签名一变整份折叠作废重建;价格表 tab 的「账本 N 次」透镜只读记录缓存、
+  **不写折叠**(它不按价折叠,写进去会把全库金额毒成 ¥0)。
+- **旧数据一律不迁移**(维护者选择「全部丢弃、重填」):旧格式的 `pricing.json`、
+  `provider-pricing.json`、两个 `.ccsa.json` 都不再被读取,也不由插件删除。
+
+**影响与已知取舍。**
+
+- 在填价之前,全部历史金额是 ¥0(口径仍是「价格未知」,不是免费)。
+- 计费性质是**路由级**、且作用于全部历史:订阅路由必须手工标成 `subscription`,否则它的钱
+  会记成实际支出;代价是「混合通道」(一卡内两种性质)不再可表达——旧镜像里只有条目级
+  `billing` 才需要它。
+- 形态(`official`/`relay`/`subscription`/`wrapper`)、厂商分组、参考价表、包装路由跟随
+  (`aliasOf`)与同价通道(`$routes`)都消失;通道用量卡片的名来自配置。
+- 契约见 [`docs/CONTRACTS.md`](CONTRACTS.md) 的「术语」「Host 路由」「数据目录」三段;
+  数据形状见 `src/pricing.ts` 顶部模块注释。
 
 ---
 
