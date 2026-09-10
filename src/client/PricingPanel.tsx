@@ -12,7 +12,7 @@
  *    rate that is not actually charged. The cloud table is reference-only and
  *    folded into a bounded scroll by default, so the tab never becomes a wall
  *    of hundreds of rows.
- *  · 「Provider 覆盖层」 — per (provider, exact model string) overrides of the
+ *  · 「通道覆盖层」 — per (provider, exact model string) overrides of the
  *    billing nature and price source (`provider-pricing.json`), grouped by
  *    provider route. A row either follows a base model's full rule set
  *    (`inheritBase`, so the timeline comes along) or owns an explicit
@@ -88,7 +88,7 @@ export interface PricingPanelProps {
   /** Reports whether the tab currently holds unsaved staged edits (drives the
    *  tab dot). Not cleared on unmount: the drafts outlive the panel. */
   onDirtyChange?: (dirty: boolean) => void
-  /** A cross-tab request (the overview's 未定价 note) to open on one scope. */
+  /** A cross-tab request (the overview's 价格未知 note) to open on one scope. */
   focusScope?: ModelScope | null
   /** Called once `focusScope` has been applied. */
   onFocusScopeHandled?: () => void
@@ -369,7 +369,7 @@ function modelBaseline(rows: readonly EditableRow[]): ReadonlyMap<string, string
 }
 
 /** One row's staged state. An edited hand price is 未保存; a row whose baseline
- *  hand price is staged for deletion (the user went back to 云端/未定价) is
+ *  hand price is staged for deletion (the user went back to 云端/价格未知) is
  *  待删除 — a staged deletion must be as visible as a staged edit. */
 function rowStatus(row: EditableRow, baseline: ReadonlyMap<string, string>): RowStatus {
   const saved = baseline.get(row.model)
@@ -565,7 +565,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focusScope, onFocusScop
           aria-pressed={mode === 'provider'}
           onClick={() => setMode('provider')}
         >
-          Provider 覆盖层
+          通道覆盖层
         </button>
       </div>
 
@@ -770,7 +770,7 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
     onDirtyChange(dirty)
   }, [rows, baseline, channels, labels, dirty, onDirtyChange])
 
-  // A cross-tab jump (未定价 note) narrows this surface once, then clears.
+  // A cross-tab jump (价格未知 note) narrows this surface once, then clears.
   useEffect(() => {
     if (focusScope === null || focusScope === undefined) return
     setScope(focusScope)
@@ -832,7 +832,7 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
   // 在用 is a FILTER over the whole table, not a mutually exclusive group: the
   // models the ledger billed are the tab's main subject, and a row must not
   // vanish from that view just because the user gave it a hand price. 全部 keeps
-  // the grouped layout (手工价 / 账本未定价 / 云端基准表).
+  // the grouped layout (手工价 / 价格未知 / 云端基准表).
   const manualRows = useMemo(() => rows === null ? [] : rows.filter(row => row.manual), [rows])
   const unpricedRows = useMemo(() => rows === null ? [] : rows.filter(row => !row.manual && row.origin.unpriced === true), [rows])
   const cloudRows = useMemo(() => rows === null ? [] : rows.filter(row => !row.manual && row.origin.unpriced !== true), [rows])
@@ -903,7 +903,7 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
     setFlashModel(model)
   }
 
-  // One renderer for every model list (在用 / 手工价 / 未定价 / 云端厂商分组):
+  // One renderer for every model list (在用 / 手工价 / 价格未知 / 云端厂商分组):
   // the props are identical, only the React key prefix differs. `provider`
   // marks the row as a channel row of the 在用 view (it disambiguates the same
   // model string rendered under several routes).
@@ -954,8 +954,8 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
           <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'used'} onClick={() => setScope('used')}>
             在用<span className="dtpl-pricing-scope-count">{usedCount}</span>
           </button>
-          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'unpriced'} onClick={() => setScope('unpriced')}>
-            未定价<span className="dtpl-pricing-scope-count">{unpricedRows.length}</span>
+          <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === 'unpriced'} onClick={() => setScope('unpriced')} title="账本记过这些串，但两表都不知道它们的价——暂按 ¥0 计，不是免费">
+            价格未知<span className="dtpl-pricing-scope-count">{unpricedRows.length}</span>
           </button>
           <button type="button" className="dtpl-pricing-scope" aria-pressed={scope === null} onClick={() => setScope(null)}>
             全部<span className="dtpl-pricing-scope-count">{rows?.length ?? 0}</span>
@@ -1014,7 +1014,7 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
                     {usedGroups.map(([provider, group]) => {
                       const records = group.reduce((sum, row) => sum + row.records, 0)
                       const billing = group[0]?.billing ?? 'metered'
-                      // A channel nothing prices is not "实际支出" — say 未定价
+                      // A channel nothing prices is not "实际支出" — say 价格未知
                       // instead of claiming a spend bucket it cannot fill.
                       const allUnpriced = group.every(row => row.unpriced === true)
                       const name = provider === '' ? '(未知)' : labels[provider] ?? provider
@@ -1026,7 +1026,7 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
                               <span className="dtpl-pricing-chan-route">{provider}</span>
                             )}
                             <span className={`dtpl-pricing-chan-billing dtpl-pricing-chan-billing-${allUnpriced ? 'unpriced' : billing}`}>
-                              {allUnpriced ? '未定价' : billing === 'subscription' ? '订阅价值' : '实际支出'}
+                              {allUnpriced ? '价格未知' : billing === 'subscription' ? '订阅价值' : '实际支出'}
                             </span>
                             <span className="dtpl-pricing-chan-meta">{group.length} 个模型 · {records} 条</span>
                           </div>
@@ -1070,7 +1070,7 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
                 )}
                 {manualVisible.map(row => renderRow(row, 'm'))}
                 {scope === null && manualRows.length === 0 && (
-                  <p className="dtpl-pricing-empty">还没有手工价。在「在用 / 未定价」里点「自定义 / 去定价」，或在下方输入模型串新增。</p>
+                  <p className="dtpl-pricing-empty">还没有手工价。在「在用 / 价格未知」里点「自定义 / 去定价」，或在下方输入模型串新增。</p>
                 )}
 
                 {/* ── 新增模型 entry: starts an empty hand row. ── */}
@@ -1078,11 +1078,11 @@ function ModelPriceEditor({ onChanged, active, onDirtyChange, focusScope, onFocu
 
                 {/* ── ledger-billed, no model-layer entry, currently ¥0 ── */}
                 {unpricedRows.length > 0 && (
-                  <SectionHead title="账本未定价" count={unpricedRows.length} shown={unpricedVisible.length} tone="warn" hint="按 ¥0 计，点「去定价」设置手工价" />
+                  <SectionHead title="价格未知" count={unpricedRows.length} shown={unpricedVisible.length} tone="warn" hint="不知价，暂按 ¥0 计；点「去定价」设置手工价" />
                 )}
                 {unpricedVisible.map(row => renderRow(row, 'p'))}
                 {scope === 'unpriced' && unpricedVisible.length === 0 && (
-                  <p className="dtpl-pricing-empty">没有未定价的账本模型。</p>
+                  <p className="dtpl-pricing-empty">没有价格未知的账本模型。</p>
                 )}
 
                 {/* ── cloud mirror (folded, bounded scroll) ── */}
@@ -1294,7 +1294,7 @@ function ModelRow({ row, nowSec, flash, staged, editing, dataProvider, sharedRou
     : (origin.layered === true)
   const overlayPriced = origin.overlayPriced === true
   const tag = row.manual ? '手工价'
-    : origin.unpriced === true ? `未定价${origin.records !== undefined && origin.records > 0 ? ` · ${String(origin.records)} 条` : ''}`
+    : origin.unpriced === true ? `价格未知${origin.records !== undefined && origin.records > 0 ? ` · ${String(origin.records)} 条` : ''}`
       // Inside a channel group the route is the group's own header, so the tag
       // does not repeat it (that space goes to the model name instead).
       : overlayPriced ? `覆盖层定价${dataProvider === undefined && origin.provider !== undefined && origin.provider !== '' ? ` · ${origin.provider}` : ''}`
@@ -1367,12 +1367,12 @@ function ModelRow({ row, nowSec, flash, staged, editing, dataProvider, sharedRou
               ? <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onDone}>完成</button>
               : <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onEdit} title="编辑这条手工价：四档单价 + 限时降价 / 高峰时段">编辑</button>
           ) : origin.unpriced === true ? (
-            <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onCustomize} title="此模型账本有记录但未定价，现按 ¥0 计。点击为它设置手工价">去定价</button>
+            <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onCustomize} title="此模型账本有记录但价格未知，暂按 ¥0 计（不是免费）。点击为它设置手工价">去定价</button>
           ) : overlayPriced ? (
             // A model-layer entry for this string would never be read (the
             // overlay entry wins), so send the user to the override instead of
             // offering an edit that cannot take effect.
-            <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onOpenProvider} title="由 Provider 覆盖层定价；点击跳到那条覆盖去编辑">去覆盖层</button>
+            <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onOpenProvider} title="由通道覆盖层定价；点击跳到那条覆盖去编辑">去覆盖层</button>
           ) : (
             <button type="button" className="dtpl-pricing-btn dtpl-pricing-custom" onClick={onCustomize} title="以当前规则集为底稿新增手工价">自定义</button>
           )}
@@ -1386,7 +1386,7 @@ function ModelRow({ row, nowSec, flash, staged, editing, dataProvider, sharedRou
               <>
                 <DraftRulesEditor draft={row.draft} onPatch={onPatchDraft} />
                 <div className="dtpl-pricing-detail-actions">
-                  <button type="button" className="dtpl-pricing-btn dtpl-pricing-remove" onClick={onRevert} title="删除这条手工价，回到云端/未定价">删除手工价</button>
+                  <button type="button" className="dtpl-pricing-btn dtpl-pricing-remove" onClick={onRevert} title="删除这条手工价，回到云端/价格未知">删除手工价</button>
                 </div>
               </>
             ) : (
@@ -1403,7 +1403,7 @@ function ModelRow({ row, nowSec, flash, staged, editing, dataProvider, sharedRou
               now={savedNow}
               nowSec={nowSec}
               emptyHint={overlayPriced
-                ? `这个模型串由 Provider 覆盖层（${origin.provider !== undefined && origin.provider !== '' ? origin.provider : '—'}）定价，模型层没有条目；点「去覆盖层」修改那条覆盖。`
+                ? `这个模型串由通道覆盖层（${origin.provider !== undefined && origin.provider !== '' ? origin.provider : '—'}）定价，模型层没有条目；点「去覆盖层」修改那条覆盖。`
                 : origin.unpriced === true ? '这个模型串没有任何价格条目，当前按 ¥0 计价。' : undefined}
             />
           )}
@@ -1932,7 +1932,7 @@ function providerSourceSummary(row: ProviderPricingViewRow): string {
 }
 
 /**
- * Provider 覆盖层 surface: one compact row per (provider, model) grouped by
+ * 通道覆盖层 surface: one compact row per (provider, model) grouped by
  * provider route. Rows are read-only summaries until the user opens the row's
  * editor (one row at a time), which stages changes into a drafts map; the
  * footer 保存 writes the WHOLE desired hand overlay. Rows with no mirror entry
@@ -2249,7 +2249,7 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
       )}
 
       <p className="dtpl-pricing-provider-intro">
-        按「路由 + 精确模型串」定价：订阅通道算<b>订阅价值</b>、跟随官方价的写「跟随官方价」、
+        按「通道 + 精确模型串」定价：订阅通道算<b>订阅价值</b>、跟随官方价的写「跟随官方价」、
         中转自定价用「自己填价」逐段填。前缀串（如 <code>deepseek/deepseek-v4-flash</code>）在这里命中。
       </p>
 
@@ -2257,7 +2257,7 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
         <div className="dtpl-pricing-skeleton dtpl-sk" />
       ) : (
         <div className="dtpl-pricing-provider-list">
-          {grouped.length === 0 && <p className="dtpl-pricing-empty">Provider 覆盖层为空（云端镜像可能尚未同步）。用下方「新增覆盖」为你的通道手工定价。</p>}
+          {grouped.length === 0 && <p className="dtpl-pricing-empty">通道覆盖层为空（云端镜像可能尚未同步）。用下方「新增覆盖」为你的通道手工定价。</p>}
           {grouped.map(([provider, list]) => {
             const isCollapsed = collapsed.has(provider)
             const handCount = list.filter(row => drafts.has(providerKeyOf(row.provider, row.model))).length
@@ -2453,7 +2453,7 @@ function ProviderOverlayEditor({ onChanged, active, onDirtyChange, focus, onFocu
         <span className={`dtpl-pricing-save-state${savedFlash ? ' dtpl-pricing-saved' : ''}`}>{savedFlash ? '已保存' : ''}</span>
         {dirty && <button type="button" className="dtpl-pricing-btn" onClick={() => void load()} disabled={saving}>放弃修改</button>}
         <button type="button" className="dtpl-pricing-save" onClick={() => void save()} disabled={saving || rows === null || !dirty}>
-          {saving ? '保存中…' : draftCount > 0 ? `保存 ${String(draftCount)} 条 Provider 覆盖` : aliasDirty ? '保存同价通道' : '保存 Provider 覆盖'}
+          {saving ? '保存中…' : draftCount > 0 ? `保存 ${String(draftCount)} 条通道覆盖` : aliasDirty ? '保存同价通道' : '保存通道覆盖'}
         </button>
       </div>
     </div>
@@ -2607,8 +2607,8 @@ function AddOverrideForm({ providers, onAdd }: {
           type="text"
           list="dtpl-provider-names"
           value={provider}
-          placeholder="Provider 路由键"
-          aria-label="Provider 路由键"
+          placeholder="通道路由键"
+          aria-label="通道路由键"
           onChange={event => setProvider(event.target.value)}
         />
         <datalist id="dtpl-provider-names">
@@ -2675,7 +2675,7 @@ function groupByProvider(rows: readonly ChannelUsageRow[]): Array<[string, Chann
 
 /** The source chip of one channel row: which layer prices THIS channel. */
 function channelSourceTag(channel: ChannelUsageRow, modelRow: EditableRow | undefined): string {
-  if (channel.unpriced === true) return '未定价'
+  if (channel.unpriced === true) return '价格未知'
   if (channel.overlay) return '覆盖层定价'
   if (modelRow?.manual === true) return '手工价'
   return modelRow?.origin.layered === true ? '云端 · 分时' : '云端'

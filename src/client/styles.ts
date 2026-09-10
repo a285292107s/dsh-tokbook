@@ -10,7 +10,7 @@
  * The overlay mirrors the DSH native dialog language: large radius (20px),
  * hairline strokes (0.5px), bg-mask-1 + mask-blur backdrop, elevation-prominent
  * shadow, pill buttons, and a segmented pill tab control (four tabs today:
- * 用量总览 / Provider 用量 / 订阅额度 / 统计口径; the Provider tab carries its
+ * 用量总览 / 通道用量(Provider) / 订阅额度 / 统计口径; the Provider tab carries its
  * own range switcher and per-provider cards, the quota tab per-plan budget
  * cards, styled in this same sheet).
  *
@@ -764,9 +764,28 @@ const CSS = `
 [data-plugin="dsh-tokbook"] .dtpl-provider-id{
   display:flex;flex-direction:column;gap:2px;min-width:0;
 }
+[data-plugin="dsh-tokbook"] .dtpl-provider-title{
+  display:flex;align-items:center;gap:6px;min-width:0;
+}
 [data-plugin="dsh-tokbook"] .dtpl-provider-name{
   color:var(--dtpl-fg);font-size:14px;line-height:20px;font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* The route key under a label: the mirror's name leads, the ledger's key follows. */
+[data-plugin="dsh-tokbook"] .dtpl-provider-key{
+  font-family:var(--dtpl-mono,ui-monospace,SFMono-Regular,Menlo,monospace);
+  font-size:10px;
+}
+/* What this card's money means: 按量 (cash) / 订阅 (value) / 混合. */
+[data-plugin="dsh-tokbook"] .dtpl-provider-bill{
+  flex:none;padding:1px 5px;border-radius:999px;
+  font-size:10px;line-height:14px;font-weight:600;
+  color:var(--dtpl-fg-3);
+  background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);
+  box-shadow:inset 0 0 0 .5px var(--dtpl-hairline);
+}
+[data-plugin="dsh-tokbook"] .dtpl-provider-bill[data-billing="subscription"]{
+  color:var(--dtpl-accent);background:color-mix(in srgb,var(--dtpl-accent) 10%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-meta{
   color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
@@ -1061,7 +1080,7 @@ const CSS = `
    the modal's tokens; the intent is data-dense but navigable: cloud reference
    rows live in a bounded fold, provider rows are compact until edited. */
 
-/* Segmented mode switch (模型价 / Provider 覆盖层). */
+/* Segmented mode switch (模型价 / 通道覆盖层). */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-sec{display:flex;flex-direction:column;gap:10px;}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-modes{
   display:inline-flex;gap:2px;align-self:flex-start;flex:none;

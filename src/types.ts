@@ -504,6 +504,11 @@ export interface ProviderUsageView {
   usdExchangeRate: number
   /** When the snapshot was computed, epoch ms. */
   updatedAt: number
+  /** Human label per provider route (the mirror feed's `providers[].label`),
+   *  so a card heads with "Command Code（modlens 包装）" and shows the route key
+   *  beneath it, the same way the 价格表 tab names a channel. Absent or empty
+   *  when the feed carries no labels; the card then shows the key alone. */
+  providerLabels?: Record<string, string>
   /** One card per provider with recorded usage inside the window, largest
    * token total first; empty when the window holds no records. */
   providers: ProviderUsageCard[]

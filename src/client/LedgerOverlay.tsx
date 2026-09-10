@@ -7,7 +7,8 @@
  * the 4-bucket split, a
  * daily trend chart, a per-model breakdown with cost, a data-status line
  * (records/files/latest event), and a pinned window footer with the live
- * re-sync state + "重新扫描" button. A second tab (Provider 用量) shows one
+ * re-sync state + "重新扫描" button. A second tab (通道用量, the Provider
+ * dimension) shows one
  * card per provider route over a selectable 今日 / 昨天 / 近7天 / 近30天
  * window, its own route `/tokbook/usage?range=…`. A third tab (订阅额度) shows
  * account-level subscription budgets (OpenCode Go + Command Code GOAT: dollar
@@ -130,7 +131,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
   onClose: () => void
 }) {
   const [tab, setTab] = useState<OverlayTab>('ledger')
-  // A cross-tab jump (the overview's 未定价 note) asks the pricing tab to open
+  // A cross-tab jump (the overview's 价格未知 note) asks the pricing tab to open
   // on a specific scope; the request is cleared once the panel applied it.
   const [pricingScope, setPricingScope] = useState<ModelScope | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -236,7 +237,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             className="dtpl-tab"
             onClick={() => setTab('provider')}
           >
-            Provider 用量
+            通道用量
           </button>
           <button
             type="button"
@@ -364,7 +365,7 @@ function LedgerView({ overview, onOpenPricing }: {
         <div className="dtpl-empty">
           <UsageGlyph className="dtpl-empty-ico" />
           <p className="dtpl-empty-title">尚未记录到 token 用量</p>
-          <p className="dtpl-empty-sub">本插件监听模型调用的 provider usage 并逐条记录。产生对话后点击右下角“重新扫描”即可回填，或用过一段时间后这里会累计出数据。</p>
+          <p className="dtpl-empty-sub">本插件监听各通道回报的用量并逐条记录。产生对话后点击右下角“重新扫描”即可回填，或用过一段时间后这里会累计出数据。</p>
         </div>
       ) : (
         <>
@@ -386,7 +387,7 @@ function LedgerView({ overview, onOpenPricing }: {
               <span className="dtpl-hero-money">
                 {(hero.spend > 0 || hero.subscriptionValue === 0) && (
                   <span className={`dtpl-hero-cost${hero.spend > 0 ? '' : ' dtpl-hero-cost-zero'}`}>
-                    {money(hero.spend)}<em className="dtpl-hero-cost-k">今日支出</em>
+                    {money(hero.spend)}<em className="dtpl-hero-cost-k">今日实际支出</em>
                   </span>
                 )}
                 {hero.subscriptionValue > 0 && (
@@ -402,7 +403,7 @@ function LedgerView({ overview, onOpenPricing }: {
               <span className={`dtpl-meta${(overview.total.failures ?? 0) > 0 ? ' dtpl-meta-warn' : ''}`}><b className="dtpl-meta-n">{(overview.total.failures ?? 0)}</b> 失败</span>
               <span className="dtpl-meta"><b className="dtpl-meta-n">{formatTokens(overview.totalTokens)}</b> 累计词元</span>
               <span className="dtpl-meta">
-                <b className="dtpl-meta-n">{money(overview.spend)}</b> 累计支出
+                <b className="dtpl-meta-n">{money(overview.spend)}</b> 累计实际支出
                 {overview.subscriptionValue > 0 && <> · <b className="dtpl-meta-n">{money(overview.subscriptionValue)}</b> 累计订阅价值</>}
               </span>
             </div>
@@ -434,7 +435,7 @@ function LedgerView({ overview, onOpenPricing }: {
           )}
           {overview.unpricedModels.length > 0 && (
             <p className="dtpl-note">
-              未定价模型（按 ¥0 计）：{overview.unpricedModels.join('、')}
+              价格未知的模型（暂按 ¥0 计，不是免费）：{overview.unpricedModels.join('、')}
               <button type="button" className="dtpl-pricing-empty-link" onClick={() => onOpenPricing('unpriced')}>去定价</button>
             </p>
           )}
@@ -467,7 +468,7 @@ function LedgerSkeleton() {
 }
 
 /**
- * The Provider-usage tab of the floating window: one card per provider, each
+ * The 通道用量 (Provider-usage) tab of the floating window: one card per provider, each
  * listing the models that provider billed inside the selected look-back
  * window (今日 / 昨天 / 近7天 / 近30天), with token totals and cost. Data
  * comes from its own exact route `/tokbook/usage?range=…` (the overview's
@@ -520,7 +521,7 @@ function ProviderPanel() {
     view === undefined ? '¥0.00' : formatMoney(value, view.currency, view.usdExchangeRate)
 
   return (
-    <section className="dtpl-provider-sec" aria-label="按 Provider 查看用量">
+    <section className="dtpl-provider-sec" aria-label="按通道查看用量">
       <div className="dtpl-range-tabs" role="group" aria-label="时间跨度">
         {RANGE_IDS.map((id) => (
           <button
@@ -537,7 +538,7 @@ function ProviderPanel() {
 
       {error !== null && (
         <div className="dtpl-error" role="alert">
-          <p className="dtpl-error-text">Provider 用量加载失败：{error}</p>
+          <p className="dtpl-error-text">通道用量加载失败：{error}</p>
           <button type="button" className="dtpl-retry" onClick={() => void load(range, true)}>重试</button>
         </div>
       )}
@@ -551,13 +552,13 @@ function ProviderPanel() {
               <div className="dtpl-empty">
                 <UsageGlyph className="dtpl-empty-ico" />
                 <p className="dtpl-empty-title">该时间范围暂无用量</p>
-                <p className="dtpl-empty-sub">{RANGE_DAY_LABELS[view.range]}没有 provider 计费记录。换个时间跨度，或点击右下角“重新扫描”回填历史。</p>
+                <p className="dtpl-empty-sub">{RANGE_DAY_LABELS[view.range]}没有通道计费记录。换个时间跨度，或点击右下角“重新扫描”回填历史。</p>
               </div>
             )
             : (
               <div className="dtpl-providers">
                 {view.providers.map((card) => (
-                  <ProviderCard key={card.provider} card={card} money={moneyOf} />
+                  <ProviderCard key={card.provider} card={card} money={moneyOf} labels={view.providerLabels ?? {}} />
                 ))}
               </div>
             )}
@@ -565,17 +566,50 @@ function ProviderPanel() {
   )
 }
 
-/** One provider card: header (provider + totals) over its model rows. */
-function ProviderCard({ card, money }: { card: ProviderUsageCard; money: (value: number) => string }) {
+/**
+ * One provider card: header (channel + totals) over its model rows.
+ *
+ * The header names the channel the way the 价格表 tab does — the mirror feed's
+ * `label` first, with the route key beneath it, so a wrapper route
+ * (`modlens-commandcode` → "Command Code（modlens 包装）") reads as the channel
+ * it really is instead of as a separate vendor. The billing chip states what
+ * the card's money means: 按量 = cash spend, 订阅 = value folded at official
+ * rates, 混合 = the route records both.
+ */
+function ProviderCard({ card, money, labels }: {
+  card: ProviderUsageCard
+  money: (value: number) => string
+  labels: Record<string, string>
+}) {
   const cardTokens = card.tokens
+  const label = labels[card.provider]
+  // Read off the card's own models; an entry the feed left unclassified counts
+  // as metered, the same default `billingOf` applies server-side.
+  const billings = new Set(card.models.map((model) => model.billing ?? 'metered'))
+  const billingTag = billings.size > 1 ? '混合' : billings.has('subscription') ? '订阅' : '按量'
+  const billingTitle = billings.size > 1
+    ? '该通道内既有按量扣费的模型，也有套餐内按官方价折算的模型'
+    : billings.has('subscription')
+      ? '订阅通道：金额是按官方价折算的订阅价值，不是现金支出'
+      : '按量通道：金额是真实支出口径'
   return (
     <article className="dtpl-provider-card" data-provider={card.provider}>
       <header className="dtpl-provider-head">
         <div className="dtpl-provider-id">
-          <span className="dtpl-provider-name">{card.provider}</span>
+          <span className="dtpl-provider-title">
+            <span className="dtpl-provider-name">{label ?? card.provider}</span>
+            <span
+              className="dtpl-provider-bill"
+              data-billing={billings.size > 1 ? 'mixed' : billings.has('subscription') ? 'subscription' : 'metered'}
+              title={billingTitle}
+            >
+              {billingTag}
+            </span>
+          </span>
           <span className="dtpl-provider-meta">
+            {label !== undefined && <><span className="dtpl-provider-key">{card.provider}</span> · </>}
             {card.requests} 请求{card.compactions > 0 ? ` · ${card.compactions} 压缩` : ''}
-            {card.unpricedModels.length > 0 ? ` · 未定价 ${card.unpricedModels.join('、')}` : ''}
+            {card.unpricedModels.length > 0 ? ` · 价格未知 ${card.unpricedModels.join('、')}` : ''}
           </span>
         </div>
         <div className="dtpl-provider-nums">
@@ -649,8 +683,9 @@ function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
     <div className="dtpl-doc">
       <div className="dtpl-doc-lede">
         <p>本插件<b>不估算</b>：每个数字都来自<b>本机保存的对话记录</b>。</p>
-        <p>向模型提问时，提供服务的厂商（界面里叫 <b>Provider</b>，如 DeepSeek、Anthropic）会回报这次消耗了多少词元。</p>
-        <p>本插件照实记录、逐条累加——不是厂商官网上的账户数据。</p>
+        <p>向模型提问时，提供这条接入通道的一方（本页叫<b>通道</b>，代码与文档里写作 provider，如 <code>deepseek-official</code>、<code>commandcode</code>）会回报这次消耗了多少词元。</p>
+        <p>两个角色要分开：<b>模型厂商</b>是做出模型、定官方价的那一方（价格表按厂商/家族分组）；<b>通道</b>是你从哪接入、按什么方式付费的那条路。同一家公司可以兼任两者（DeepSeek 官方 API），也可以只是通道（Command Code 卖 DeepSeek 模型，但不是 DeepSeek）。</p>
+        <p>本插件照实记录、逐条累加——不是模型厂商官网上的账户数据。</p>
       </div>
 
       {/* ── 1 · 一眼看懂：来源 / 精度 / 完整度 ── */}
@@ -700,7 +735,7 @@ function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           可能跟不上厂商最新费率——所以<b>金额是近似值</b>，词元数不受影响。
         </p>
         <p className="dtpl-doc-sub">
-          计价按 <b>(Provider, 模型)</b> 双维解析：同一个模型串在官方 API 与订阅通道里的
+          计价按 <b>(通道, 模型)</b> 双维解析：同一个模型串在官方 API 与订阅通道里的
           计费性质不同，价格也可按记录时间的不同调价段变化。金额分成两个桶——
           <b>实际支出</b>（按量通道真金白银的花费）与 <b>订阅价值</b>（订阅通道按官方价折算
           的“省了多少”，<b>不是现金</b>，也不会混入上方支出数字）。
@@ -928,7 +963,7 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
   const byDay = new Map(overview.byDay.map(entry => [entry.day, totalsOf(entry.totals)]))
   const noRecord = {
     label: '今天还没有记录',
-    title: '本机账本今天尚未记录到任何 provider 计费调用。',
+    title: '本机账本今天尚未记录到任何通道计费调用。',
   }
   const young = !overview.byDay.some(entry => entry.day <= shiftDayKey(today, -BASELINE_DAYS))
   if (young) return todayTokens === 0 ? noRecord : null
@@ -1104,7 +1139,7 @@ function RecentRow({ record, unpriced, money }: {
   const failed = record.kind === 'failure'
   const detail = recentDetail(record, money)
   const costTitle = failed ? undefined
-    : unpriced ? '模型未定价，按 ¥0 计' : undefined
+    : unpriced ? '模型价格未知，暂按 ¥0 计' : undefined
   return (
     <li
       className={`dtpl-recent-row${failed ? ' dtpl-recent-fail' : ''}`}
@@ -1161,7 +1196,7 @@ function recentDetail(record: RecentLedgerEntry, money: (value: number) => strin
   const lines = [
     head,
     `模型 ${record.model || '(未知)'}`,
-    `Provider ${record.provider ?? '(未知)'}`,
+    `通道 ${record.provider ?? '(未知)'}`,
     `会话 ${record.sessionId}`,
     `请求 ${record.requestId}`,
     `时间 ${formatDateTime(record.time)}`,

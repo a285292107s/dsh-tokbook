@@ -48,7 +48,7 @@ import {
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import {
-  parseManualPricingInput, parseManualProviderPricingInput, readPricingTable, readPricingView, readProviderPricing, readProviderPricingView, readUsdExchangeRate, resolvePricingUrl, resolveProviderPricingUrl,
+  parseManualPricingInput, parseManualProviderPricingInput, readPricingTable, readPricingView, readProviderLabels, readProviderPricing, readProviderPricingView, readUsdExchangeRate, resolvePricingUrl, resolveProviderPricingUrl,
   resolvePriced, effectiveRatesOf, nowOf, billingOf, syncCloudPricing, syncProviderPricing, writeManualPricing, writeManualProviderOverlay,
   type ManualPricingParse, type ManualProviderPricingParse, type PricingSourceInput, type PricingRegion, type UsedModelHint,
 } from './pricing.ts'
@@ -511,6 +511,9 @@ export class TokenUsageBook extends Service {
     const cards = providerCards(records, pricing, resolve, providers)
     const region = this.pricing.pricingRegion ?? 'domestic'
     const rate = await readUsdExchangeRate(this.dir, this.logger)
+    // Channel names for the cards: the mirror's labels, so a route reads the way
+    // the 价格表 tab names it (wrapper routes and plan labels included).
+    const providerLabels = await readProviderLabels(this.dir, this.logger)
     return {
       range,
       fromDay,
@@ -518,6 +521,7 @@ export class TokenUsageBook extends Service {
       currency: currencyOfRegion(region),
       usdExchangeRate: rate,
       updatedAt: Date.now(),
+      providerLabels,
       providers: cards,
     }
   }

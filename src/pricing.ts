@@ -552,6 +552,17 @@ async function readSyncedProviderPricing(
   return { table: coerced, labels: coerceProviderLabels(raw) }
 }
 
+/** The mirror feed's provider labels alone — the light read for a surface that
+ *  needs channel names without the row work (the Provider-usage cards, so they
+ *  name a route the way the 价格表 tab already does). An absent or malformed
+ *  feed reads as no labels and the caller falls back to the route key. */
+export async function readProviderLabels(
+  dir: string,
+  logger: { error(...args: unknown[]): void } = console,
+): Promise<Record<string, string>> {
+  return coerceProviderLabels(await readJsonFile(dir, PROVIDER_PRICING_CCSA_FILE, logger))
+}
+
 /** Build the provider-overlay rows the 价格表 tab renders for its provider
  *  dimension: every (provider, model) of the hand-edited layer first (they are
  *  the ones the user maintains, and a hand row wins over a mirror row of the
