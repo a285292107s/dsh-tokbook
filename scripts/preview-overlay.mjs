@@ -133,6 +133,7 @@ const PRICING_FIXTURE = {
     { model: 'z-ai/glm-5.3-flash', manual: false, overlayPriced: true, provider: 'commandcode', records: 276, now: { rates: { inputPerMillion: 0.8, outputPerMillion: 2.8 }, peak: false } },
     { model: 'mimo-v2.5', manual: false, overlayPriced: true, provider: 'opencode-go', records: 83, now: { rates: { inputPerMillion: 0.6, outputPerMillion: 2.4 }, peak: false } },
     { model: 'dots3-note-prev', manual: false, unpriced: true, records: 644 },
+    { model: 'dots-unpriced-prev', manual: false, unpriced: true, records: 12 },
     { model: 'deepseek-chat', manual: false, cloudRates: { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5 }, layered: true, family: 'deepseek' },
     { model: 'deepseek-v4-flash', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, family: 'deepseek', records: 2913 },
     { model: 'deepseek-v4-flash-vision-exp', manual: false, cloudRates: { inputPerMillion: 1.5, outputPerMillion: 4.5 }, layered: true, family: 'deepseek', records: 3092 },
@@ -160,6 +161,7 @@ const PRICING_FIXTURE = {
     { provider: 'staryears', model: 'gpt-5.6-luna', records: 784, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 1.4, outputPerMillion: 8.4 }, peak: false } },
     { provider: 'staryears', model: 'grok-4.6', records: 322, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 3, outputPerMillion: 12 }, peak: false } },
     { provider: 'dots-ai', model: 'dots3-note-prev', records: 644, billing: 'metered', overlay: false, unpriced: true },
+    { provider: 'dots-ai', model: 'dots-unpriced-prev', records: 12, billing: 'metered', overlay: false, unpriced: true },
   ],
   providerLabels: {
     'deepseek-official': 'DeepSeek 官方 API',
@@ -202,6 +204,120 @@ const PRICING_FIXTURE = {
   providerRoutes: { 'opencode-go-2': 'opencode-go' },
   providerNames: ['commandcode', 'deepseek-modlens', 'deepseek-official', 'dots-ai', 'modlens-commandcode', 'opencode-go', 'opencode-go-2', 'opencode-go-3', 'staryears', 'zai'],
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
+}
+
+/* The host always sends `manualRules` on a hand row and `rules` + `now` on every
+   overlay row; the fixture above abbreviates them, so fill them in here — the
+   preview is meant to show the real numbers, not dashes. */
+for (const row of PRICING_FIXTURE.rows) {
+  if (row.manual !== true || row.manualRules !== undefined) continue
+  const base = row.manualRates
+  if (base === undefined) continue
+  row.manualRules = { base, timeRules: [], dailySlots: [], contextTiers: [] }
+  row.now = nowOfRules(row.manualRules)
+}
+for (const row of PRICING_FIXTURE.rows) {
+  if (row.manual === true || row.cloudRules !== undefined || row.cloudRates === undefined) continue
+  row.cloudRules = {
+    base: row.cloudRates,
+    // A 分时 row carries a real window so the timeline and the 当前生效 line
+    // have something to show (the mirror's own labels, approximated).
+    timeRules: row.layered === true
+      ? [{ startTime: 0, endTime: Number.MAX_SAFE_INTEGER, label: '限时5折', rates: { ...row.cloudRates, outputPerMillion: row.cloudRates.outputPerMillion / 2 } }]
+      : [],
+    dailySlots: [],
+    contextTiers: [],
+  }
+}
+for (const row of PRICING_FIXTURE.providerRows) {
+  if (row.rules !== undefined) continue
+  const rates = row.segments !== undefined
+    ? row.segments[0]?.rate
+    : PRICING_FIXTURE.rows.find(candidate => candidate.model === (row.inheritBase ?? row.model))?.cloudRates
+  if (rates === undefined) continue
+  row.rules = { base: rates, timeRules: [], dailySlots: [], contextTiers: [] }
+  row.now = { rates, peak: false }
+}
+
+/* ── pricing writes (fixture-level) ─────────────────────────────────────── */
+/**
+ * The preview accepts the 价格表 tab's two whole-file PUTs and merges them into
+ * the fixture, so the two-layer save and its re-seed can be exercised in the
+ * browser (nothing is persisted, and the merge is a fixture approximation of
+ * the host's own read path — not a reimplementation of it).
+ */
+const pricingState = {
+  rows: PRICING_FIXTURE.rows,
+  providerRows: PRICING_FIXTURE.providerRows,
+  providerRoutes: PRICING_FIXTURE.providerRoutes,
+}
+
+/** The price a rule set applies right now (time rule first, then base). */
+function nowOfRules(rules) {
+  const seconds = Math.floor(Date.now() / 1000)
+  const covering = [...(rules.timeRules ?? [])]
+    .sort((a, b) => a.startTime - b.startTime)
+    .find(rule => rule.startTime <= seconds && seconds <= (rule.endTime ?? Number.MAX_SAFE_INTEGER))
+  const rates = covering?.rates ?? rules.base
+  return { rates, ...(covering?.label !== undefined ? { label: covering.label } : {}), peak: false }
+}
+
+function pricingView() {
+  return {
+    ...PRICING_FIXTURE,
+    rows: pricingState.rows,
+    providerRows: pricingState.providerRows,
+    providerRoutes: pricingState.providerRoutes,
+  }
+}
+
+/** Merge a `PUT /tokbook/pricing` body (the WHOLE hand model table). */
+function withModelWrite(body) {
+  const written = new Map(Object.entries(body))
+  const rows = []
+  for (const [model, entry] of written) {
+    const flat = entry.base !== undefined
+    const base = flat ? entry.base : entry
+    const manualRules = { base, timeRules: entry.timeRules ?? [], dailySlots: entry.dailySlots ?? [], contextTiers: [] }
+    rows.push({ model, manual: true, manualRules, manualRates: base, now: nowOfRules(manualRules) })
+  }
+  for (const row of pricingState.rows) {
+    if (row.manual || written.has(row.model)) continue
+    rows.push(row)
+  }
+  pricingState.rows = rows
+}
+
+/** Merge a `PUT /tokbook/provider-pricing` body (the WHOLE hand overlay). */
+function withOverlayWrite(body) {
+  const hand = []
+  for (const [provider, models] of Object.entries(body)) {
+    if (provider === '$routes') continue
+    if (models === null || typeof models !== 'object') continue
+    for (const [model, entry] of Object.entries(models)) {
+      const segments = entry.segments
+      const rules = segments !== undefined
+        ? { base: segments[0]?.rate ?? { inputPerMillion: 0, outputPerMillion: 0 }, timeRules: [], dailySlots: [], contextTiers: [] }
+        : null
+      hand.push({
+        provider,
+        model,
+        billing: entry.billing,
+        manual: true,
+        ...(entry.inheritBase !== undefined ? { inheritBase: entry.inheritBase } : {}),
+        ...(segments !== undefined ? { segments } : {}),
+        ...(entry.placeholder !== undefined ? { placeholder: entry.placeholder } : {}),
+        ...(entry.note !== undefined ? { note: entry.note } : {}),
+        ...(rules !== null ? { rules, now: nowOfRules(rules) } : {}),
+      })
+    }
+  }
+  const keys = new Set(hand.map(row => `${row.provider}\n${row.model}`))
+  pricingState.providerRows = [
+    ...hand,
+    ...pricingState.providerRows.filter(row => !row.manual && !keys.has(`${row.provider}\n${row.model}`)),
+  ]
+  pricingState.providerRoutes = body.$routes ?? {}
 }
 
 /* ── quota-tab fixtures ─────────────────────────────────────────────────── */
@@ -304,23 +420,27 @@ const server = createServer((req, res) => {
     res.end('{}')
     return
   }
-  // Pricing tab: the merged view (GET) + a silent PUT that echoes the view back.
-  if (url.pathname === '/tokbook/pricing') {
-    res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify(PRICING_FIXTURE))
-    return
-  }
-  if (url.pathname === '/tokbook/provider-pricing') {
-    const fixture = {
-      providerRows: PRICING_FIXTURE.providerRows,
-      providerRoutes: PRICING_FIXTURE.providerRoutes,
-      providerNames: PRICING_FIXTURE.providerNames,
-      providerLabels: PRICING_FIXTURE.providerLabels,
-      providerForms: PRICING_FIXTURE.providerForms,
-      dataDir: PRICING_FIXTURE.dataDir,
+  // Pricing tab: the merged view (GET) + the two whole-file writes (PUT).
+  if (url.pathname === '/tokbook/pricing' || url.pathname === '/tokbook/provider-pricing') {
+    if (req.method === 'PUT') {
+      let body = ''
+      req.on('data', chunk => { body += chunk })
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body === '' ? '{}' : body)
+          if (url.pathname === '/tokbook/pricing') withModelWrite(parsed)
+          else withOverlayWrite(parsed)
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, view: pricingView() }))
+        } catch (error) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: String(error) }))
+        }
+      })
+      return
     }
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify(fixture))
+    res.end(JSON.stringify(pricingView()))
     return
   }
   // Quota tab: list (no provider) → enabled routes; per-provider → card.
@@ -470,16 +590,21 @@ const server = createServer((req, res) => {
       window.__DSH_REQUIRE_CACHE__['react-dom/client'].createRoot(host)
         .render(window.__DSH_REQUIRE_CACHE__['react'].createElement(component, share));
     }
-    const btn = document.querySelector('[data-plugin="dsh-tokbook"]');
-    // React 18 mounts concurrently, so delegated listeners are not attached
-    // synchronously after render() — wait a beat before opening the overlay.
+    // React 18 mounts concurrently, so the trigger does not exist yet when this
+    // script runs and its listeners attach a beat later: look it up on every
+    // attempt, and click it only while the overlay is still absent (the trigger
+    // TOGGLES — a second click would close it again).
     const tabFlag = params.has('tab') ? params.get('tab') : (params.has('quota') ? 'quota' : null);
-    setTimeout(() => {
-      if (btn) btn.click();
-      if (tabFlag) {
+    let tries = 0;
+    setTimeout(function open() {
+      if (document.querySelector('.dtpl-overlay') === null) {
+        const trigger = document.querySelector('[data-plugin="dsh-tokbook"]');
+        if (trigger) trigger.click();
+      } else if (tabFlag !== null) {
         const tabEl = document.getElementById('dtpl-tab-' + tabFlag);
-        if (tabEl) tabEl.click();
+        if (tabEl) { tabEl.click(); return; }
       }
+      if (++tries < 25) setTimeout(open, 100);
     }, 200);
   </script>
 </body>

@@ -20,7 +20,10 @@
 | 界面 | 代码 / 契约 |
 |---|---|
 | 通道用量 | Provider-usage tab,`GET /tokbook/usage` |
+| 模型层(全局价) | `pricing.json`:一个模型串一份规则集,该串的所有通道都按它计价 |
 | 通道覆盖层 | provider overlay,`provider-pricing.json`,`PUT /tokbook/provider-pricing` |
+| 参考价表 | 镜像云端行里账本未计费的那些:`rows[]` 中无 `records`、且非 `manual`、且非 `overlayPriced` |
+| 未计费 | 没有账本记录的通道路由分组(`channelRows` 里没有它,但有手工价或覆盖层条目) |
 | 通道路由键 | provider route key(账本里的通道标识) |
 | 实际支出 / 订阅价值 | `billing: metered` / `subscription` 两个桶(`spend` / `subscriptionValue`) |
 | 跟随官方价 / 自己填价 | `inheritBase` / `segments[]` |
@@ -102,9 +105,10 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   没有该字段。它只是展示分组元数据,**不参与计价链**,UI 用它把云端参考表按厂商折叠分组。
 - `GET /tokbook/pricing` 还带 **`channelRows`**——每一条账本计费过的 （通道，模型） 一行
   (`provider` / `model` / `records` / `billing` / `overlay` / `now?` / `unpriced?`),
-  与 **`providerLabels`**(镜像 feed 的 `providers[].label`,路由键 → 人类标签)。「在用」视图
-  按 `channelRows` 分通道分组、用 `providerLabels` 把路由键显示成人话。两者都是**增量**字段:
-  旧 host 不发送时,「在用」退回平铺模型列表(按用量降序)。注意**模型层价仍是全局的**——
+  与 **`providerLabels`**(镜像 feed 的 `providers[].label`,路由键 → 人类标签)。价格表主列表
+  按 `channelRows` 分通道分组(账本记录数降序)、用 `providerLabels` 把路由键显示成人话。
+  两者都是**增量**字段:
+  旧 host 不发送时,主列表退回平铺模型列表(按用量降序)。注意**模型层价仍是全局的**——
   `channelRows` 只表达"这条通道记了多少、按什么性质计费",可编辑的条目仍只有 `rows` 里那份
   (UI 只在一条"主通道"行上给出编辑器,其余通道行只读并标「全局价」)。
 - `PUT /tokbook/provider-pricing` body:两层级

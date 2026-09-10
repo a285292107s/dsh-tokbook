@@ -33,7 +33,7 @@ import type {
 } from '../types.ts'
 import type { TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
-import { PricingPanel, type ModelScope } from './PricingPanel.tsx'
+import { PricingPanel, type PricingFocus } from './pricing/PricingPanel.tsx'
 import { QuotaPanel } from './QuotaPanel.tsx'
 import { CloseGlyph, RefreshGlyph, UsageGlyph } from './icons.tsx'
 
@@ -133,10 +133,10 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
   const [tab, setTab] = useState<OverlayTab>('ledger')
   // A cross-tab jump (the overview's 价格未知 note) asks the pricing tab to open
   // on a specific scope; the request is cleared once the panel applied it.
-  const [pricingScope, setPricingScope] = useState<ModelScope | null>(null)
+  const [pricingScope, setPricingScope] = useState<PricingFocus>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
-  const openPricing = (scope: ModelScope): void => { setPricingScope(scope); setTab('pricing') }
+  const openPricing = (scope: PricingFocus): void => { setPricingScope(scope); setTab('pricing') }
 
   // Focus the card on open, restore focus to the trigger on close.
   useEffect(() => {
@@ -296,8 +296,8 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
                     <PricingPanel
                       onChanged={onRefresh}
                       onDirtyChange={onDirtyChange}
-                      focusScope={pricingScope}
-                      onFocusScopeHandled={() => setPricingScope(null)}
+                      focus={pricingScope}
+                      onFocusHandled={() => setPricingScope(null)}
                     />
                   )
                   : (
@@ -343,7 +343,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
 
 function LedgerView({ overview, onOpenPricing }: {
   overview: TokBookOverview
-  onOpenPricing: (scope: ModelScope) => void
+  onOpenPricing: (scope: PricingFocus) => void
 }) {
   const money = (value: number): string => formatMoney(value, overview.currency, overview.usdExchangeRate)
   const empty = overview.records === 0
