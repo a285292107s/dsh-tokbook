@@ -13,9 +13,9 @@
 import { useState, type ReactNode } from 'react'
 import type { BillingNature, ChannelForm, ModelRates, PricingNow } from '../../types.ts'
 import {
-  BLANK_RATES, FIELD_LABELS, FIELD_ORDER, WEEKDAY_LABELS, clockToMinute, draftNow,
-  draftToRates, fmtRate, minuteToClock, nextId, ruleStartSec, segmentIndexNow, spanText,
-  type DraftRates, type DraftRule, type DraftSegment, type DraftSlot, type ManualDraft, type ProviderDraft, type RowStatus,
+  BLANK_RATES, FIELD_LABELS, FIELD_ORDER, HAND_FORM_OPTIONS, WEEKDAY_LABELS, clockToMinute, draftNow,
+  draftToRates, fmtRate, minuteToClock, nextId, ruleStartSec, segmentIndexNow, spanText, FORM_LABELS,
+  type DraftRates, type DraftRule, type DraftSegment, type DraftSlot, type ManualDraft, type ProviderDraft, type RouteMetaDraft, type RowStatus,
 } from './draft.ts'
 
 /** The per-row staged marker, shown in the row header so an unsaved change is
@@ -670,9 +670,56 @@ export function AddOverrideForm({ providers, onAdd }: {
   )
 }
 
+/**
+ * 通道名称与形态: the hand layer's own display facts for ONE route — the escape
+ * hatch for a channel the mirror feed does not name (a private relay, a new
+ * subscription), or a local rename of one it does. Display-only: it groups,
+ * sorts and filters, and never enters the pricing chain. Empty fields fall back
+ * to the mirror's value (then to the bare route key), and clearing both removes
+ * the hand declaration.
+ */
+export function RouteMetaEditor({ route, meta, onPatch }: {
+  route: string
+  meta: RouteMetaDraft
+  onPatch: (patch: RouteMetaDraft) => void
+}) {
+  return (
+    <div className="dtpl-pricing-routemeta" role="group" aria-label={`${route} 的名称与形态`}>
+      <div className="dtpl-pricing-routemeta-grid">
+        <label className="dtpl-pricing-field">
+          <span>名称（留空 = 镜像的名字，没有就用路由键）</span>
+          <input
+            className="dtpl-pricing-input"
+            type="text"
+            value={meta.label}
+            placeholder={route}
+            aria-label={`${route} 的名称`}
+            onChange={event => onPatch({ ...meta, label: event.target.value })}
+          />
+        </label>
+        <label className="dtpl-pricing-field">
+          <span>形态（留空 = 镜像声明的形态）</span>
+          <select
+            className="dtpl-pricing-input dtpl-pricing-select"
+            value={meta.form}
+            aria-label={`${route} 的形态`}
+            onChange={event => onPatch({ ...meta, form: event.target.value as RouteMetaDraft['form'] })}
+          >
+            <option value="">不声明</option>
+            {HAND_FORM_OPTIONS.map(form => <option key={form} value={form}>{FORM_LABELS[form]}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="dtpl-pricing-detail-hint">
+        只影响分组、排序与筛选，不参与计价；保存后写进 <code>provider-pricing.json</code> 的
+        <code>{' $providers '}</code>。清空两项即可回到镜像的命名。
+      </p>
+    </div>
+  )
+}
+
 /** 同价通道: one route follows another's prices (the same plan bought twice,
- *  where each imported key is its own route). */
-export function AliasSection({ names, aliases, forms, onAdd, onRemove }: {
+ *  where each imported key is its own route). */export function AliasSection({ names, aliases, forms, onAdd, onRemove }: {
   names: readonly string[]
   aliases: ReadonlyMap<string, string>
   forms: Record<string, ChannelForm>

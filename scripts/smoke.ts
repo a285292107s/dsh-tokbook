@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
-import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, PRICING_FILE, coerceProviderFeed, coerceProviderLabels, readProviderPricing, resolvePriced, billingOf, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE, PROVIDER_PRICING_FILE, PROVIDER_ROUTES_KEY, applyProviderAliases, mergeProviderAliases, coerceProviderAliases, parseManualProviderPricingInput, readManualProviderOverlay, readProviderPricingView, writeManualProviderOverlay } from '../src/pricing.ts'
+import { resolveRate, ratesForKey, costOf, coercePricingTable, cloudToTable, coerceCloudPricing, parseManualPricingInput, writeManualPricing, readManualPricing, readPricingTable, readPricingView, PRICING_CCSA_FILE, PRICING_FILE, coerceProviderFeed, coerceProviderLabels, coerceProviderMeta, readProviderPricing, resolvePriced, billingOf, syncProviderPricing, PROVIDER_PRICING_CCSA_FILE, PROVIDER_PRICING_FILE, PROVIDER_ROUTES_KEY, PROVIDER_META_KEY, applyProviderAliases, mergeProviderAliases, coerceProviderAliases, parseManualProviderPricingInput, readManualProviderOverlay, readProviderPricingView, writeManualProviderOverlay } from '../src/pricing.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
@@ -898,6 +898,7 @@ console.log('provider route aliases (同价通道)')
         {
           provider: 'opencode-go',
           label: 'OpenCode Go 订阅',
+          form: 'subscription',
           billing: 'subscription',
           entries: [
             { model: 'deepseek-v4-flash', inheritBase: 'deepseek-v4-flash' },
@@ -916,6 +917,17 @@ console.log('provider route aliases (同价通道)')
     check('non-string alias target rejected', !parseManualProviderPricingInput({ [PROVIDER_ROUTES_KEY]: { a: 42 } }).ok)
     check('lenient read drops self/invalid pairs', JSON.stringify(coerceProviderAliases({ a: 'b', c: 'c', d: 1, '': 'x' })) === '{"a":"b"}')
 
+    // Hand channel names / forms ($providers): strict on the write path, lenient
+    // on the read path, and never able to claim a mirror-minted `wrapper`.
+    const metaParse = parseManualProviderPricingInput({ [PROVIDER_META_KEY]: { 'my-relay': { label: ' 老王的机场 ', form: 'relay' } } })
+    check('name/form body parses', metaParse.ok && metaParse.meta['my-relay']?.label === '老王的机场' && metaParse.meta['my-relay']?.form === 'relay')
+    check('wrapper refused as a hand form', !parseManualProviderPricingInput({ [PROVIDER_META_KEY]: { a: { form: 'wrapper' } } }).ok)
+    check('unknown hand form refused', !parseManualProviderPricingInput({ [PROVIDER_META_KEY]: { a: { form: 'reseller' } } }).ok)
+    check('empty hand entry refused', !parseManualProviderPricingInput({ [PROVIDER_META_KEY]: { a: {} } }).ok)
+    check('blank hand label refused', !parseManualProviderPricingInput({ [PROVIDER_META_KEY]: { a: { label: '   ' } } }).ok)
+    check('overlong hand label refused', !parseManualProviderPricingInput({ [PROVIDER_META_KEY]: { a: { label: 'x'.repeat(65) } } }).ok)
+    check('$providers is not read as a provider', Object.keys(parseManualProviderPricingInput({ [PROVIDER_META_KEY]: { a: { label: 'A' } } }).ok ? (parseManualProviderPricingInput({ [PROVIDER_META_KEY]: { a: { label: 'A' } } }) as { table: Record<string, unknown> }).table : {}).length === 0)
+
     // Materialization precedence: exact entry > inherited; one hop by construction.
     const applied = applyProviderAliases(
       { A: { m1: { inheritBase: 'm1' }, m2: { inheritBase: 'm2' } }, B: { m1: { inheritBase: 'own' } } },
@@ -925,15 +937,18 @@ console.log('provider route aliases (同价通道)')
     check('exact route entry beats the alias', applied['B']?.['m1']?.inheritBase === 'own' && applied['B']?.['m2']?.inheritBase === 'm2')
     check('one hop only: C follows B, never A through B', applied['C']?.['m2'] === undefined)
 
-    // File round-trip: `$routes` survives the atomic write.
+    // File round-trip: `$routes` and `$providers` survive the atomic write.
     await writeManualProviderOverlay(dir, {
       table: { 'opencode-go-3': { 'deepseek-v4-flash': { billing: 'subscription', inheritBase: 'deepseek-v4-flash' } } },
       routes: { 'opencode-go-3': 'opencode-go' },
+      meta: { 'opencode-go': { label: '我的主套餐' }, 'opencode-go-2': { label: '第二份', form: 'relay' } },
     }, { error: () => {} })
     const file = JSON.parse(await readFile(join(dir, PROVIDER_PRICING_FILE), 'utf8')) as Record<string, unknown>
     check('hand file keeps $routes', JSON.stringify(file[PROVIDER_ROUTES_KEY]) === '{"opencode-go-3":"opencode-go"}')
+    check('hand file keeps $providers', JSON.stringify(file[PROVIDER_META_KEY]) === '{"opencode-go":{"label":"我的主套餐"},"opencode-go-2":{"label":"第二份","form":"relay"}}')
     const overlay = await readManualProviderOverlay(dir, { error: () => {} })
     check('overlay reads both halves', overlay.routes['opencode-go-3'] === 'opencode-go' && overlay.table['opencode-go-3']?.['deepseek-v4-flash']?.billing === 'subscription')
+    check('overlay reads the hand names', overlay.meta['opencode-go-2']?.label === '第二份' && overlay.meta['opencode-go-2']?.form === 'relay')
 
     // Effective table: the aliased route prices like its target, its own entry
     // still wins, and the mirror's explicit second-route entry is untouched.
@@ -948,10 +963,21 @@ console.log('provider route aliases (同价通道)')
     const view = await readProviderPricingView(dir, ['opencode-go-2'], { error: () => {} })
     check('view echoes the aliases', view.routes['opencode-go-3'] === 'opencode-go')
     check('view names the ledger route too', view.names.includes('opencode-go-2') && view.names.includes('opencode-go-3'))
-    check('view carries the mirror labels', view.labels['opencode-go'] === 'OpenCode Go 订阅' && view.labels['opencode-go-2'] === undefined)
+    check('a hand name beats the mirror label', view.labels['opencode-go'] === '我的主套餐')
+    check('a hand form fills the gap the mirror leaves', view.forms['opencode-go-2'] === 'relay')
+    check('the mirror form still stands where the hand says nothing', view.forms['opencode-go'] === 'subscription')
+    check('view returns the hand half alone', JSON.stringify(Object.keys(view.meta).sort()) === '["opencode-go","opencode-go-2"]')
     check('labels coerce leniently', JSON.stringify(coerceProviderLabels({
       providers: [{ provider: 'a', label: 'A' }, { provider: '', label: 'x' }, { provider: 'b' }, { provider: 'c', label: '' }],
     })) === '{"a":"A"}')
+    check('hand meta coerces leniently', JSON.stringify(coerceProviderMeta({
+      a: { label: ' A ' },
+      b: { form: 'official' },
+      c: { form: 'wrapper' },
+      d: { label: '' },
+      e: null,
+      '': { label: 'x' },
+    })) === '{"a":{"label":"A"},"b":{"form":"official"}}')
     const inherited = view.rows.find(row => row.provider === 'opencode-go-3' && row.model === 'glm-5.3-flash')
     check('inherited row carries via + a resolved price', inherited?.via === 'opencode-go' && inherited.now?.rates.inputPerMillion === 0.8, JSON.stringify(inherited))
     const ownRow = view.rows.find(row => row.provider === 'opencode-go-3' && row.model === 'deepseek-v4-flash')

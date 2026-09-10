@@ -163,6 +163,23 @@ export type ProviderPricingTable = Record<string, Record<string, ProviderPricing
  *  the wrapper routes) separately from this hand-layer map. */
 export type ProviderAliasMap = Record<string, string>
 
+/** Hand-declared display facts of ONE provider route: the human name and the
+ *  operation form, for routes the mirror feed does not name (a private relay, a
+ *  brand-new subscription) — or to rename one it does. Display-only: it groups,
+ *  sorts and filters, and never enters the pricing chain. `wrapper` is NOT a
+ *  hand-declarable form: a wrapper is a synthetic twin the mirror mints for
+ *  another route, and the hand layer expresses following with `$routes`
+ *  instead. */
+export interface ProviderMeta {
+  /** Human name shown instead of the route key. */
+  label?: string
+  /** Operation form (`official` / `relay` / `subscription`). */
+  form?: ChannelForm
+}
+
+/** Hand-layer route metadata: provider route key → its hand-declared facts. */
+export type ProviderMetaMap = Record<string, ProviderMeta>
+
 
 /** One peak window of a day, half-open [startMinute, endMinute) in local minutes. */
 export interface RateWindow {
@@ -325,6 +342,12 @@ export interface PricingView {
   /** Route → canonical route aliases of the hand-edited overlay (a route
    *  priced by another route's entries). */
   providerRoutes?: ProviderAliasMap
+  /** Hand-declared names / forms of the routes the user labelled himself
+   *  (`provider-pricing.json`'s reserved `$providers` section). The hand half
+   *  only, like `providerRoutes`: the tab owns and writes it back.
+   *  `providerLabels` / `providerForms` above are the MERGED (hand wins over
+   *  mirror) view the tab renders. */
+  providerMeta?: ProviderMetaMap
   /** Every provider route the tab knows: the mirror's keys, the hand file's
    *  keys and alias targets, and the routes the ledger billed. The tab offers
    *  these as alias targets. */

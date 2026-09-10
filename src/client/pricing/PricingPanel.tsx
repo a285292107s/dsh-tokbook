@@ -29,13 +29,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { ChannelForm, PricingNow, PricingView, PricingViewRow } from '../../types.ts'
 import {
   FORM_LABELS, FORM_ORDER, UNBILLED_GROUP, aliasSignature, baselineOf, buildPriceRows, composeModelTable,
-  composeProviderTable, composeRates, cssId, draftNow, draftOf, draftToRates, fmtRate, formCounts,
-  groupByFamily, groupRows, nextId, providerKeyOf, providerDraftOf, ratesToDraft, referenceRows,
-  ruleLabelsOf, rowStatusOf, segmentIndexNow, segmentNow, signatureOf, stagedChangeCount, stagedDirty,
-  validateManualDraft,
-  type DraftRates, type ManualDraft, type PriceGroup, type PriceRow, type ProviderDraft, type RowStatus,
+  composeProviderMeta, composeProviderTable, composeRates, cssId, draftNow, draftOf, draftToRates, fmtRate,
+  formCounts, groupByFamily, groupRows, metaDeclared, metaSignature, nextId, providerKeyOf, providerDraftOf,
+  ratesToDraft, referenceRows, routeMetaOf, ruleLabelsOf, rowStatusOf, segmentIndexNow, segmentNow, signatureOf,
+  stagedChangeCount, stagedDirty, validateManualDraft,
+  type DraftRates, type ManualDraft, type PriceGroup, type PriceRow, type ProviderDraft, type RouteMetaDraft, type RowStatus,
 } from './draft.ts'
-import { AddModelForm, AddOverrideForm, AliasSection, PriceEditor, RateCell, RuleTimeline, StagedTag } from './editors.tsx'
+import { AddModelForm, AddOverrideForm, AliasSection, PriceEditor, RateCell, RouteMetaEditor, RuleTimeline, StagedTag } from './editors.tsx'
 
 /** A cross-tab request (the overview's 价格未知 note) to open on that filter. */
 export type PricingFocus = 'unpriced' | null
@@ -67,6 +67,8 @@ interface StagedPricing {
   overlayBaseline: ReadonlyMap<string, string>
   aliases: ReadonlyMap<string, string>
   aliasBaseline: string
+  metaDrafts: ReadonlyMap<string, RouteMetaDraft>
+  metaBaseline: string
 }
 let stagedPricing: StagedPricing | null = null
 
@@ -97,6 +99,9 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
   const [overlayBaseline, setOverlayBaseline] = useState<ReadonlyMap<string, string>>(() => stagedPricing?.overlayBaseline ?? new Map())
   const [aliases, setAliases] = useState<ReadonlyMap<string, string>>(() => stagedPricing?.aliases ?? new Map())
   const [aliasBaseline, setAliasBaseline] = useState<string>(() => stagedPricing?.aliasBaseline ?? aliasSignature(new Map()))
+  const [metaDrafts, setMetaDrafts] = useState<ReadonlyMap<string, RouteMetaDraft>>(() => stagedPricing?.metaDrafts ?? new Map())
+  const [metaBaseline, setMetaBaseline] = useState<string>(() => stagedPricing?.metaBaseline ?? metaSignature(new Map()))
+  const [metaRoute, setMetaRoute] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
@@ -128,6 +133,9 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     const aliasMap = new Map(Object.entries(next.providerRoutes ?? {}))
     setAliases(aliasMap)
     setAliasBaseline(aliasSignature(aliasMap))
+    const metaMap = routeMetaOf(next.providerMeta)
+    setMetaDrafts(metaMap)
+    setMetaBaseline(metaSignature(metaMap))
   }, [])
 
   const load = useCallback(async () => {
@@ -141,6 +149,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       seed(next)
       setOpenKey(null)
       setEditingKey(null)
+      setMetaRoute(null)
     } catch (err) {
       if (token !== activeRef.current) return
       setError(err instanceof Error ? err.message : String(err))
@@ -172,15 +181,19 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
   const modelDirty = stagedDirty(modelDrafts, modelBaseline)
   const overlayChanged = stagedDirty(overlayDrafts, overlayBaseline)
   const aliasDirty = aliasSignature(aliases) !== aliasBaseline
-  const dirty = modelDirty || overlayChanged || aliasDirty
+  const metaDirty = metaSignature(metaDrafts) !== metaBaseline
+  // Both layers' hand files: the alias map and the channel names/forms all live
+  // in `provider-pricing.json`, so ONE dirty flag guards its write.
+  const overlayFileDirty = overlayChanged || aliasDirty || metaDirty
+  const dirty = modelDirty || overlayFileDirty
 
   // Cache only dirty state; a clean view is re-fetched on the next mount.
   useEffect(() => {
     stagedPricing = dirty && view !== null
-      ? { view, modelDrafts, modelBaseline, overlayDrafts, overlayBaseline, aliases, aliasBaseline }
+      ? { view, modelDrafts, modelBaseline, overlayDrafts, overlayBaseline, aliases, aliasBaseline, metaDrafts, metaBaseline }
       : null
     onDirtyChange?.(dirty)
-  }, [dirty, view, modelDrafts, modelBaseline, overlayDrafts, overlayBaseline, aliases, aliasBaseline, onDirtyChange])
+  }, [dirty, view, modelDrafts, modelBaseline, overlayDrafts, overlayBaseline, aliases, aliasBaseline, metaDrafts, metaBaseline, onDirtyChange])
 
   // A cross-tab jump (价格未知 note) narrows this surface once, then clears.
   useEffect(() => {
@@ -251,6 +264,29 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       if (draft === undefined) return current
       const next = new Map(current)
       next.set(key, { ...draft, ...patch })
+      return next
+    })
+  }, [])
+
+  /** The staged display facts of one route (a fresh, empty slate when the route
+   *  has no hand declaration). */
+  const metaOf = useCallback((route: string): RouteMetaDraft => metaDrafts.get(route) ?? { label: '', form: '' }, [metaDrafts])
+
+  /** Whether the user declared something for this route (staged or loaded). */
+  const metaStaged = useCallback((route: string): boolean => metaDeclared(metaDrafts.get(route)), [metaDrafts])
+
+  /** Whether the mirror feed leaves this route unnamed or formless — the gap the
+   *  hand layer exists to fill. A route the mirror fully names gets no
+   *  affordance (renaming it is not what this escape hatch is for). */
+  const metaOffered = useCallback(
+    (route: string): boolean => route !== '' && (metaStaged(route) || labels[route] === undefined || forms[route] === undefined),
+    [metaStaged, labels, forms],
+  )
+
+  const patchMeta = useCallback((route: string, patch: RouteMetaDraft) => {
+    setMetaDrafts(current => {
+      const next = new Map(current)
+      next.set(route, patch)
       return next
     })
   }, [])
@@ -380,9 +416,12 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     let fresh: PricingView | null = null
     // 1) the overlay file first: the writing order must never leave a
     //    (route, string) momentarily unpriced while its entry is on the way in.
-    if (overlayChanged) {
+    //    Channel names/forms and the alias map ride in this same file.
+    if (overlayFileDirty) {
       const body: Record<string, unknown> = { ...composed.table }
+      const meta = composeProviderMeta(metaDrafts)
       if (aliases.size > 0) body.$routes = Object.fromEntries(aliases)
+      if (Object.keys(meta).length > 0) body.$providers = meta
       const result = await putJson('/tokbook/provider-pricing', body)
       if (!result.ok) {
         setSaving(false)
@@ -393,6 +432,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       // The written layer is clean now — even if the model file fails next.
       setOverlayBaseline(baselineOf(overlayDrafts))
       setAliasBaseline(aliasSignature(aliases))
+      setMetaBaseline(metaSignature(metaDrafts))
     }
     if (modelDirty) {
       const result = await putJson('/tokbook/pricing', composeModelTable(modelDrafts))
@@ -415,7 +455,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     setSavedFlash(true)
     window.setTimeout(() => setSavedFlash(false), 1600)
     onChanged()
-  }, [view, modelDrafts, overlayDrafts, aliases, modelDirty, overlayChanged, rows, seed, onChanged])
+  }, [view, modelDrafts, overlayDrafts, aliases, metaDrafts, modelDirty, overlayFileDirty, rows, seed, onChanged])
 
   // Ctrl/Cmd+S saves while this tab is open.
   useEffect(() => {
@@ -429,10 +469,10 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
   }, [saving, dirty, save])
 
   const changedModels = stagedChangeCount(modelDrafts, modelBaseline)
-  const changedOverlay = stagedChangeCount(overlayDrafts, overlayBaseline) + (aliasDirty ? 1 : 0)
+  const changedOverlay = stagedChangeCount(overlayDrafts, overlayBaseline) + (aliasDirty ? 1 : 0) + (metaDirty ? 1 : 0)
   const saveScope = [
     modelDirty ? `模型层 ${String(changedModels)} 条` : null,
-    (overlayChanged || aliasDirty) ? `覆盖层 ${String(changedOverlay)} 条` : null,
+    overlayFileDirty ? `覆盖层 ${String(changedOverlay)} 条` : null,
   ].filter((part): part is string => part !== null).join(' · ')
 
   // ── one row ────────────────────────────────────────────────────────────────
@@ -519,7 +559,22 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
         <div className={`dtpl-pricing-row${row.tone === 'hand' ? ' dtpl-pricing-row-manual' : ''}${row.unpriced ? ' dtpl-pricing-row-unpriced' : ''}${row.layered ? ' dtpl-pricing-row-layered' : ''}`}>
           <div className="dtpl-pricing-model">
             <span className="dtpl-pricing-model-head">
-              {unbilledGroup && row.provider !== '' && <span className="dtpl-pricing-chan-route" title="通道路由键">{labels[row.provider] ?? row.provider}</span>}
+              {unbilledGroup && row.provider !== '' && (
+                metaOffered(row.provider)
+                  ? (
+                    <button
+                      type="button"
+                      className="dtpl-pricing-chan-route dtpl-pricing-chan-route-btn"
+                      aria-expanded={metaRoute === row.provider}
+                      title="给这条通道路由起个名字、声明它的形态（只影响分组/排序/筛选）"
+                      onClick={() => setMetaRoute(current => current === row.provider ? null : row.provider)}
+                    >
+                      {labels[row.provider] ?? row.provider}
+                      <span aria-hidden="true"> ＋</span>
+                    </button>
+                  )
+                  : <span className="dtpl-pricing-chan-route" title="通道路由键">{labels[row.provider] ?? row.provider}</span>
+              )}
               <button
                 type="button"
                 className="dtpl-pricing-expand"
@@ -598,6 +653,14 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
             ) : (
               <RuleTimeline rules={timelineRules} now={live.now} nowSec={nowSec} emptyHint={emptyHint} />
             )}
+          </div>
+        )}
+
+        {/* 未计费 rows have no channel group head, so this is the only place to
+            name a route that has prices but no ledger history yet. */}
+        {unbilledGroup && metaRoute === row.provider && row.provider !== '' && (
+          <div className="dtpl-pricing-detail">
+            <RouteMetaEditor route={row.provider} meta={metaOf(row.provider)} onPatch={patch => patchMeta(row.provider, patch)} />
           </div>
         )}
       </div>
@@ -808,12 +871,28 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
                         <span className={`dtpl-pricing-provider-form dtpl-pricing-provider-form-${group.form}`}>{FORM_LABELS[group.form]}</span>
                       )}
                       <span className={`dtpl-pricing-chan-billing dtpl-pricing-chan-billing-${billing.tone}`}>{billing.label}</span>
+                      {!isUnbilled && metaOffered(group.provider) && (
+                        <button
+                          type="button"
+                          className="dtpl-pricing-btn dtpl-pricing-custom"
+                          aria-expanded={metaRoute === group.provider}
+                          title="给这条通道路由起个名字、声明它的形态（只影响分组/排序/筛选，不参与计价）"
+                          onClick={() => setMetaRoute(current => current === group.provider ? null : group.provider)}
+                        >
+                          {metaStaged(group.provider) ? '名称/形态' : '＋ 名称/形态'}
+                        </button>
+                      )}
                       <span className="dtpl-pricing-chan-meta">
                         {isUnbilled
                           ? `${String(group.rows.length)} 条价格 · 账本还没按它们计费`
                           : `${String(group.rows.length)} 个模型 · ${String(group.records)} 条`}
                       </span>
                     </div>
+                    {!isUnbilled && metaRoute === group.provider && (
+                      <div className="dtpl-pricing-chan-metaedit">
+                        <RouteMetaEditor route={group.provider} meta={metaOf(group.provider)} onPatch={patch => patchMeta(group.provider, patch)} />
+                      </div>
+                    )}
                     <div className="dtpl-pricing-chan-rows">
                       {group.rows.map(row => renderRow(row, isUnbilled))}
                     </div>

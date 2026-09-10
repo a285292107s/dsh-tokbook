@@ -298,6 +298,7 @@ export function registerTokBookProviderPricingRoutes(
         res.end(JSON.stringify({
           providerRows: snapshot.providerRows ?? [],
           providerRoutes: snapshot.providerRoutes ?? {},
+          providerMeta: snapshot.providerMeta ?? {},
           providerNames: snapshot.providerNames ?? [],
           providerLabels: snapshot.providerLabels ?? {},
           providerForms: snapshot.providerForms ?? {},

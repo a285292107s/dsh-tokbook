@@ -22,6 +22,7 @@
 | 通道用量 | Provider-usage tab,`GET /tokbook/usage` |
 | 模型层(全局价) | `pricing.json`:一个模型串一份规则集,该串的所有通道都按它计价 |
 | 通道覆盖层 | provider overlay,`provider-pricing.json`,`PUT /tokbook/provider-pricing` |
+| 通道名称 / 形态 | `providerLabels` / `providerForms`(镜像 feed 声明)**或**手工层的 `$providers`(手工赢镜像,删掉即回落) |
 | 参考价表 | 镜像云端行里账本未计费的那些:`rows[]` 中无 `records`、且非 `manual`、且非 `overlayPriced` |
 | 未计费 | 没有账本记录的通道路由分组(`channelRows` 里没有它,但有手工价或覆盖层条目) |
 | 通道路由键 | provider route key(账本里的通道标识) |
@@ -64,7 +65,7 @@
 | `GET` | `/tokbook/quota` | `provider=<路由键>`;可选 `refresh=1` 跳过 TTL 缓存 | 该通道的 `QuotaCard` |
 | `GET` | `/tokbook/pricing` | — | `PricingView`(含 `providerRows`) |
 | `PUT` | `/tokbook/pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
-| `GET` | `/tokbook/provider-pricing` | — | `{ providerRows: ProviderPricingViewRow[], providerRoutes: ProviderAliasMap, providerNames: string[], providerLabels: Record<string,string>, providerForms: Record<string,ChannelForm>, modelNames: string[], dataDir }`(通道覆盖层视图;`modelNames` 供「跟随官方价」的候选列表,`providerLabels` / `providerForms` 供分组头命名与形态筛选) |
+| `GET` | `/tokbook/provider-pricing` | — | `{ providerRows: ProviderPricingViewRow[], providerRoutes: ProviderAliasMap, providerMeta: ProviderMetaMap, providerNames: string[], providerLabels: Record<string,string>, providerForms: Record<string,ChannelForm>, modelNames: string[], dataDir }`(通道覆盖层视图;`providerRoutes` / `providerMeta` 是**手工层那半边**(客户端拥有并写回),`providerLabels` / `providerForms` 是**合并后**的展示事实(手工赢镜像),`modelNames` 供「跟随官方价」的候选列表,`providerLabels` / `providerForms` 供分组头命名与形态筛选) |
 | `PUT` | `/tokbook/provider-pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |
 
 Wire 形状要点(权威字段清单见 `src/types.ts`):
@@ -127,6 +128,15 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   目标路由那条;`providerRoutes` 只回手工层的那半边(客户端拥有并写回它)。
   `providerNames` 是 tab 能作为别名目标/来源的全部路由:镜像键 ∪ 手工键 ∪ 别名两端
   (镜像与手工)∪ 账本计费过的路由(新导入的 key 只有账本知道它)。
+- `PUT /tokbook/provider-pricing` body 还可带保留顶层键 `$providers`(`pricing.ts`
+  `PROVIDER_META_KEY`)声明**通道自己的名称与形态**:
+  `{ "$providers": { "<路由>": { "label"?: string, "form"?: "official"|"relay"|"subscription" } } }`
+  —— 镜像 feed 没命名的通道(私有中转、新订阅)的逃逸舱,也可用来改镜像已给的名字。
+  语义:读取时**手工赢镜像**(与 `$routes` 一致),删掉该路由即回落到镜像的 label/form、
+  再没有就用裸路由键;只影响分组 / 排序 / 筛选,**不参与计价链**。`form` **不收 `wrapper`**
+  (包装路由是镜像为另一条路由 mint 的孪生,手工层表达"跟随"用 `$routes`);`label` 非空、
+  最多 64 字;两项都空、或整个值不是对象的条目一律拒绝(写路径),读路径则丢掉畸形值。
+  `providerMeta` 只回手工层那半边,`providerLabels` / `providerForms` 回合并结果。
 - 镜像 feed(`provider_pricing.json` → `provider-pricing.ccsa.json`)的 `providers[]` 是
   `{ provider, label?, form, billing?, aliasOf?, entries? }`:**通道级 `billing`** 是该通道
   所有条目的缺省计费性质(条目自带 `billing` 时条目赢),解析时下发给条目;通道级 `billing`
@@ -194,7 +204,7 @@ host 请指向自己的 `path`,不要共享目录。
 | `owner.json` | 单写者标记 `{ pid, start }` | host 启动 | 崩溃进程留下的陈旧标记被静默接管 |
 | `pricing.json`(+ `.tmp`) | 手编手工价覆盖(整表替换;条目永远优先于云) | `PUT /tokbook/pricing` | 条目可以是 flat 价或带 `timeRules`/`dailySlots` 的规则集;缺失 = 无手工层;畸形条目只把对应模型降级为价格未知 |
 | `pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的云定价镜像(`pricing.ts`) | host 启动 | 只读参考;region/URL 按配置 |
-| `provider-pricing.json`(+ `.tmp`) | 手编通道覆盖层(整表替换;条目覆盖对应 （通道，模型） 的镜像行;保留键 `$routes` 存同价通道别名) | `PUT /tokbook/provider-pricing` | 缺失 = 无手工通道层 |
+| `provider-pricing.json`(+ `.tmp`) | 手编通道覆盖层(整表替换;条目覆盖对应 （通道，模型） 的镜像行;保留键 `$routes` 存同价通道别名、`$providers` 存手工声明的通道名称/形态) | `PUT /tokbook/provider-pricing` | 缺失 = 无手工通道层 |
 | `provider-pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的通道覆盖镜像(`pricing.ts`) | host 启动 | 只读参考;URL 按 `pricingProviderUrl` 配置 |
 | `quota-<provider>.json`(+ `.tmp`) | 最近一次官方额度卡快照 `{ savedAt, card }` | host 额度拉取 | 只持久化 `ok` 卡;缺失/撕裂/畸形读作 null |
 

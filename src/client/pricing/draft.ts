@@ -16,7 +16,7 @@
 
 import type {
   BillingNature, ChannelForm, ChannelUsageRow, DailySlot, ModelPricing, ModelRates, PricingNow,
-  PricingView, PricingViewRow, ProviderPricingTable, ProviderPricingViewRow, TimeRule,
+  PricingView, PricingViewRow, ProviderMetaMap, ProviderPricingTable, ProviderPricingViewRow, TimeRule,
 } from '../../types.ts'
 
 // ---------------------------------------------------------------------------
@@ -454,6 +454,58 @@ export function stagedDirty<T>(
 /** Order-insensitive signature of a staged alias map (route → canonical). */
 export function aliasSignature(aliases: ReadonlyMap<string, string>): string {
   return JSON.stringify([...aliases].sort(([left], [right]) => left.localeCompare(right)))
+}
+
+// ---------------------------------------------------------------------------
+// Hand-declared channel names / forms (the mirror does not name every route)
+// ---------------------------------------------------------------------------
+
+/** The forms a HAND route may claim, in the order the editor offers them:
+ *  `wrapper` is missing on purpose — a wrapper is a synthetic twin the mirror
+ *  mints for another route, and the hand layer expresses following with
+ *  `$routes` instead. */
+export const HAND_FORM_OPTIONS: ReadonlyArray<ChannelForm> = ['official', 'relay', 'subscription']
+
+/** One route's staged display facts. Raw input text: an empty label / form means
+ *  "not declared here" (the mirror's value, or the bare route key, stands). */
+export interface RouteMetaDraft {
+  label: string
+  form: ChannelForm | ''
+}
+
+/** The staged metadata of one wire view: the hand half only (`$providers`). */
+export function routeMetaOf(meta: ProviderMetaMap | undefined): Map<string, RouteMetaDraft> {
+  const drafts = new Map<string, RouteMetaDraft>()
+  for (const [route, entry] of Object.entries(meta ?? {})) {
+    drafts.set(route, { label: entry.label ?? '', form: entry.form ?? '' })
+  }
+  return drafts
+}
+
+/** Order-insensitive signature of a staged metadata map. */
+export function metaSignature(meta: ReadonlyMap<string, RouteMetaDraft>): string {
+  return JSON.stringify([...meta].sort(([left], [right]) => left.localeCompare(right)))
+}
+
+/** Whether one route's staged metadata actually declares something. */
+export function metaDeclared(meta: RouteMetaDraft | undefined): boolean {
+  return meta !== undefined && (meta.label.trim() !== '' || meta.form !== '')
+}
+
+/** Compose the staged metadata into the wire `$providers` section: empty labels
+ *  and routes that declare nothing are dropped, so clearing every field removes
+ *  the section (the write path refuses an empty entry). */
+export function composeProviderMeta(meta: ReadonlyMap<string, RouteMetaDraft>): ProviderMetaMap {
+  const out: ProviderMetaMap = {}
+  for (const [route, entry] of meta) {
+    const label = entry.label.trim()
+    if (label === '' && entry.form === '') continue
+    out[route] = {
+      ...(label !== '' ? { label } : {}),
+      ...(entry.form !== '' ? { form: entry.form } : {}),
+    }
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------

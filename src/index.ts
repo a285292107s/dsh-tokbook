@@ -731,6 +731,7 @@ export class TokenUsageBook extends Service {
       channelRows,
       providerRows: provider.rows,
       providerRoutes: provider.routes,
+      providerMeta: provider.meta,
       providerNames: provider.names,
       providerLabels: provider.labels,
       providerForms: provider.forms,
@@ -740,16 +741,18 @@ export class TokenUsageBook extends Service {
 
   /** Validate + persist a manual provider-overlay body from the 价格表 tab. The
    *  body is the COMPLETE desired manual overlay (`provider` → `model` →
-   *  entry, plus the reserved `$routes` alias map) — the write replaces
+   *  entry, plus the reserved `$routes` alias map and `$providers` name/form
+   *  map) — the write replaces
    *  `provider-pricing.json` wholesale, so an omitted (provider, model)
-   *  removes its override (back to the mirror row) and an omitted alias stops
-   *  following. Only the manual file is written; the read-time merged table
+   *  removes its override (back to the mirror row), an omitted alias stops
+   *  following and an omitted name/form falls back to the mirror's. Only the
+   *  manual file is written; the read-time merged table
    *  re-prices history on the next overview read. */
   async saveProviderPricing(table: unknown): Promise<ManualProviderPricingParse & { view: PricingView }> {
     const parsed = parseManualProviderPricingInput(table)
     if (!parsed.ok) return { ok: false, error: parsed.error, view: await this.pricingView() }
-    await writeManualProviderOverlay(this.dir, { table: parsed.table, routes: parsed.routes }, this.logger)
-    return { ok: true, table: parsed.table, routes: parsed.routes, view: await this.pricingView() }
+    await writeManualProviderOverlay(this.dir, { table: parsed.table, routes: parsed.routes, meta: parsed.meta }, this.logger)
+    return { ok: true, table: parsed.table, routes: parsed.routes, meta: parsed.meta, view: await this.pricingView() }
   }
 
   /** Validate + persist a manual pricing body from the 价格表 tab. The body is

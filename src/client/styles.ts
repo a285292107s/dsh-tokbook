@@ -1645,6 +1645,34 @@ const CSS = `
 [data-plugin="dsh-tokbook"] .dtpl-pricing-start{
   display:flex;align-items:center;gap:10px;flex-wrap:wrap;
 }
+/* 通道名称与形态: the hand declaration of a route the mirror does not name (or a
+   local rename). Display-only, so the box is deliberately plainer than the
+   pricing rules around it. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-routemeta{
+  display:flex;flex-direction:column;gap:8px;
+  padding:8px 10px 10px;
+  border:1px solid var(--dtpl-hairline);border-radius:9px;corner-shape:round;
+  background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-routemeta-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-routemeta .dtpl-pricing-detail-hint{margin:0;}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-routemeta code{
+  font-size:10px;color:var(--dtpl-fg-2);
+}
+/* The route chip of an 未计费 row doubles as the entry point for naming it. */
+[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-route-btn{
+  appearance:none;border:0;background:transparent;padding:0;
+  font:inherit;font-size:11px;line-height:16px;cursor:pointer;
+  color:var(--dtpl-fg-3);border-radius:4px;corner-shape:round;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-route-btn:hover{
+  color:var(--dtpl-accent);text-decoration:underline;text-underline-offset:2px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-pricing-chan-metaedit{
+  padding:0 10px 10px;
+}
 [data-plugin="dsh-tokbook"] .dtpl-pricing-prov-editor-grid{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
   gap:8px;

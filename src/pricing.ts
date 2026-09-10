@@ -28,7 +28,7 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
-  BillingNature, ChannelForm, ContextTier, DailySlot, ModelPricing, ModelRates, PricingNow, PricingSegment, PricingTable, PricingViewRow, ProviderAliasMap, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, RateWindow, TimeRule, UsageTotals,
+  BillingNature, ChannelForm, ContextTier, DailySlot, ModelPricing, ModelRates, PricingNow, PricingSegment, PricingTable, PricingViewRow, ProviderAliasMap, ProviderMeta, ProviderMetaMap, ProviderPricingEntry, ProviderPricingTable, ProviderPricingViewRow, RateKey, RateWindow, TimeRule, UsageTotals,
 } from './types.ts'
 
 /** The hand-maintained pricing file inside the data directory. */
@@ -46,6 +46,12 @@ export const PROVIDER_PRICING_FILE = 'provider-pricing.json'
 /** The reserved top-level key of `provider-pricing.json` holding route aliases
  *  (`{ "$routes": { "plan-b": "plan-a" } }`): route → the route it follows. */
 export const PROVIDER_ROUTES_KEY = '$routes'
+
+/** The reserved top-level key of `provider-pricing.json` holding the hand
+ *  layer's own channel names / forms (`{ "$providers": { "my-relay": { "label":
+ *  "老王的机场", "form": "relay" } } }`) — the escape hatch for a route the
+ *  mirror feed does not name, or a local rename. Display-only. */
+export const PROVIDER_META_KEY = '$providers'
 
 /** Default domestic (China) cloud pricing feed (¥ per million tokens, RMB). */
 export const DEFAULT_PRICING_URL_DOMESTIC = 'https://gitee.com/oyw125/model-price-table/raw/master/model_pricing.json'
@@ -524,22 +530,55 @@ export function coerceProviderAliases(value: unknown): ProviderAliasMap {
   return aliases
 }
 
-/** One hand-edited overlay file: its per-route entries plus its route aliases. */
+/** The channel forms a HAND declaration may name. `wrapper` is excluded on
+ *  purpose: a wrapper is a synthetic twin the mirror mints for another route
+ *  (`providers[].aliasOf`), and a hand route expresses "I follow X" with
+ *  `$routes` — accepting the word here would paint a chip with no mechanism
+ *  behind it. An unknown value is ignored rather than dropping the route, like
+ *  every other display fact. */
+export function isHandChannelForm(value: unknown): value is ChannelForm {
+  return value === 'official' || value === 'relay' || value === 'subscription'
+}
+
+/** Coerce the hand file's `$providers` section into route metadata, dropping
+ *  malformed facts (lenient read path). */
+export function coerceProviderMeta(value: unknown): ProviderMetaMap {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const meta: ProviderMetaMap = {}
+  for (const [route, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (route === '' || typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue
+    const entry = raw as Record<string, unknown>
+    const label = typeof entry.label === 'string' && entry.label.trim() !== '' ? entry.label.trim() : undefined
+    const form = isHandChannelForm(entry.form) ? entry.form : undefined
+    if (label === undefined && form === undefined) continue
+    meta[route] = {
+      ...(label !== undefined ? { label } : {}),
+      ...(form !== undefined ? { form } : {}),
+    }
+  }
+  return meta
+}
+
+/** One hand-edited overlay file: its per-route entries, its route aliases and
+ *  the display facts the user declared for his own routes. */
 export interface ManualProviderOverlay {
   table: ProviderPricingTable
   routes: ProviderAliasMap
+  meta: ProviderMetaMap
 }
 
 /** Coerce a hand-edited provider-overlay body (the `Record<provider, Record<
  *  model, entry>>` shape of `provider-pricing.json`, plus the reserved
- *  `$routes` key) into the two-level table, dropping malformed entries — never
- *  fatal, like the model-level manual file. Aliases are read separately by
- *  {@link coerceProviderAliases}. */
+ *  `$routes` / `$providers` keys) into the two-level table, dropping malformed
+ *  entries — never fatal, like the model-level manual file. Aliases and channel
+ *  metadata are read separately by {@link coerceProviderAliases} /
+ *  {@link coerceProviderMeta}. */
 export function coerceManualProviderPricing(value: unknown): ProviderPricingTable {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
   const table: ProviderPricingTable = {}
   for (const [provider, models] of Object.entries(value)) {
-    if (provider === '' || provider === PROVIDER_ROUTES_KEY || typeof models !== 'object' || models === null || Array.isArray(models)) continue
+    if (provider === '' || provider === PROVIDER_ROUTES_KEY || provider === PROVIDER_META_KEY
+      || typeof models !== 'object' || models === null || Array.isArray(models)) continue
     const entries: Record<string, ProviderPricingEntry> = {}
     for (const [model, raw] of Object.entries(models)) {
       if (model === '' || typeof raw !== 'object' || raw === null) continue
@@ -551,13 +590,14 @@ export function coerceManualProviderPricing(value: unknown): ProviderPricingTabl
   return table
 }
 
-/** Read the hand-edited `provider-pricing.json` (entries + `$routes`). */
+/** Read the hand-edited `provider-pricing.json` (entries + `$routes` + `$providers`). */
 export async function readManualProviderOverlay(dir: string, logger: { error(...args: unknown[]): void } = console): Promise<ManualProviderOverlay> {
   const raw = await readJsonFile(dir, PROVIDER_PRICING_FILE, logger)
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { table: {}, routes: {} }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { table: {}, routes: {}, meta: {} }
   return {
     table: coerceManualProviderPricing(raw),
     routes: coerceProviderAliases((raw as Record<string, unknown>)[PROVIDER_ROUTES_KEY]),
+    meta: coerceProviderMeta((raw as Record<string, unknown>)[PROVIDER_META_KEY]),
   }
 }
 
@@ -642,20 +682,30 @@ export async function readProviderLabels(
  *  the price that container resolves to now, so a 跟随基准 row shows the
  *  number it inherits instead of only naming the model it follows.
  *
- *  `routes` is the HAND-layer alias map alone (what the tab owns and writes
- *  back); the mirror's own wrapper aliases are returned as `forms` +
- *  synthesized `via` rows, so a wrapper route reads as what it pays without
- *  ever being editable on its own. */
+ *  `routes` / `meta` are the HAND-layer alias map and the hand-declared channel
+ *  names/forms alone (what the tab owns and writes back); `labels` / `forms` are
+ *  the MERGED display facts (hand wins over the mirror). The mirror's own
+ *  wrapper aliases are returned as `forms` + synthesized `via` rows, so a
+ *  wrapper route reads as what it pays without ever being editable on its own. */
 export async function readProviderPricingView(
   dir: string,
   usedProviders: Iterable<string> = [],
   logger: { error(...args: unknown[]): void } = console,
-): Promise<{ rows: ProviderPricingViewRow[]; dataDir: string; routes: ProviderAliasMap; names: string[]; labels: Record<string, string>; forms: Record<string, ChannelForm> }> {
+): Promise<{ rows: ProviderPricingViewRow[]; dataDir: string; routes: ProviderAliasMap; meta: ProviderMetaMap; names: string[]; labels: Record<string, string>; forms: Record<string, ChannelForm> }> {
   const rows: ProviderPricingViewRow[] = []
   const seen = new Set<string>()
   const manual = await readManualProviderOverlay(dir, logger)
   const synced = await readSyncedProviderPricing(dir, logger)
-  const { table: syncedTable, labels, forms } = synced
+  const { table: syncedTable } = synced
+  // Display facts merge hand-wins-over-mirror, exactly like the alias map: a
+  // route the feed never named gets its name/form here, and renaming one it did
+  // name is local to this data directory.
+  const labels: Record<string, string> = { ...synced.labels }
+  const forms: Record<string, ChannelForm> = { ...synced.forms }
+  for (const [route, meta] of Object.entries(manual.meta)) {
+    if (meta.label !== undefined) labels[route] = meta.label
+    if (meta.form !== undefined) forms[route] = meta.form
+  }
   // The merged overlay + merged base table price every row through the same
   // dual-dimension chain the cost layer uses; aliases are materialized so an
   // inherited row prices exactly like the canonical row it follows.
@@ -725,13 +775,58 @@ export async function readProviderPricingView(
     ...Object.values(aliases),
     ...usedProviders,
   ])].filter(name => name !== '').sort((a, b) => a.localeCompare(b))
-  return { rows, dataDir: dir, routes: manual.routes, names, labels, forms }
+  return { rows, dataDir: dir, routes: manual.routes, meta: manual.meta, names, labels, forms }
 }
 
 /** Outcome of validating a client-submitted manual provider-overlay body. */
 export type ManualProviderPricingParse =
-  | { ok: true; table: ProviderPricingTable; routes: ProviderAliasMap }
+  | { ok: true; table: ProviderPricingTable; routes: ProviderAliasMap; meta: ProviderMetaMap }
   | { ok: false; error: string }
+
+/** Validate the `$providers` section of a submitted overlay body: the hand
+ *  layer's own channel names / forms. Strict like the rest of the write path —
+ *  a label must be a non-empty string, a form one of the three a hand route may
+ *  claim (`wrapper` is refused: it is a mirror-minted twin, see
+ *  {@link isHandChannelForm}), and an entry that declares neither is refused
+ *  rather than kept as a no-op row. */
+function parseProviderMetaInput(value: unknown): { ok: true; meta: ProviderMetaMap } | { ok: false; error: string } {
+  if (value === undefined) return { ok: true, meta: {} }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: `${PROVIDER_META_KEY} 必须是对象（路由 → { label?, form? }）` }
+  }
+  const meta: ProviderMetaMap = {}
+  for (const [route, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (route === '') return { ok: false, error: `${PROVIDER_META_KEY} 下存在空路由名` }
+    if (route.length > 128) return { ok: false, error: `路由名过长：${route.slice(0, 40)}…` }
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      return { ok: false, error: `「${route}」的名称/形态必须是对象（{ label?, form? }）` }
+    }
+    const entry = raw as Record<string, unknown>
+    let label: string | undefined
+    if (entry.label !== undefined) {
+      if (typeof entry.label !== 'string' || entry.label.trim() === '') {
+        return { ok: false, error: `「${route}」的 label 必须是非空字符串` }
+      }
+      if (entry.label.trim().length > 64) return { ok: false, error: `「${route}」的名称过长（最多 64 字）` }
+      label = entry.label.trim()
+    }
+    let form: ChannelForm | undefined
+    if (entry.form !== undefined) {
+      if (entry.form === 'wrapper') {
+        return { ok: false, error: `「${route}」不能声明为 wrapper：包装路由是镜像为另一条路由 mint 的孪生，手工层用 ${PROVIDER_ROUTES_KEY} 表达「跟随」` }
+      }
+      if (!isHandChannelForm(entry.form)) {
+        return { ok: false, error: `「${route}」的 form 必须是 "official" / "relay" / "subscription"` }
+      }
+      form = entry.form
+    }
+    if (label === undefined && form === undefined) {
+      return { ok: false, error: `「${route}」必须给出 label 或 form（删掉这条即可回到镜像的命名）` }
+    }
+    meta[route] = { ...(label !== undefined ? { label } : {}), ...(form !== undefined ? { form } : {}) }
+  }
+  return { ok: true, meta }
+}
 
 /** Validate the `$routes` section of a submitted overlay body: route → the
  *  route it follows. Strict like the rest of the write path: one hop only
@@ -760,12 +855,14 @@ function parseProviderAliasesInput(value: unknown): { ok: true; routes: Provider
 }
 
 /** Validate a manual provider-overlay body (as sent by the 价格表 tab) into
- *  the two-level table plus its route aliases. The body is the COMPLETE
- *  desired manual overlay (`provider` → `model` → entry, plus the reserved
- *  `$routes` key), whole-table semantics like the model-level manual file: an
- *  omitted (provider, model) drops its override. A malformed body is REJECTED
- *  with a reason — this is the write path, where a typo must surface. The
- *  empty object is valid: it removes every manual override and alias. */
+ *  the two-level table plus its route aliases and channel metadata. The body is
+ *  the COMPLETE desired manual overlay (`provider` → `model` → entry, plus the
+ *  reserved `$routes` / `$providers` keys), whole-table semantics like the
+ *  model-level manual file: an omitted (provider, model) drops its override, an
+ *  omitted alias stops following, an omitted name/form falls back to the
+ *  mirror's. A malformed body is REJECTED with a reason — this is the write
+ *  path, where a typo must surface. The empty object is valid: it removes every
+ *  manual override, alias and hand label. */
 export function parseManualProviderPricingInput(value: unknown): ManualProviderPricingParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: '手工 provider 覆盖必须是 JSON 对象（provider → model → 条目）' }
@@ -773,9 +870,11 @@ export function parseManualProviderPricingInput(value: unknown): ManualProviderP
   const raw = value as Record<string, unknown>
   const aliases = parseProviderAliasesInput(raw[PROVIDER_ROUTES_KEY])
   if (!aliases.ok) return aliases
+  const meta = parseProviderMetaInput(raw[PROVIDER_META_KEY])
+  if (!meta.ok) return meta
   const table: ProviderPricingTable = {}
   for (const [provider, models] of Object.entries(raw)) {
-    if (provider === PROVIDER_ROUTES_KEY) continue
+    if (provider === PROVIDER_ROUTES_KEY || provider === PROVIDER_META_KEY) continue
     if (provider === '') return { ok: false, error: '存在空 provider 名' }
     if (provider.length > 128) return { ok: false, error: `provider 名过长：${provider.slice(0, 40)}…` }
     if (typeof models !== 'object' || models === null || Array.isArray(models)) {
@@ -827,7 +926,7 @@ export function parseManualProviderPricingInput(value: unknown): ManualProviderP
     }
     if (Object.keys(entries).length > 0) table[provider] = entries
   }
-  return { ok: true, table, routes: aliases.routes }
+  return { ok: true, table, routes: aliases.routes, meta: meta.meta }
 }
 
 function parseProviderSegment(value: unknown): PricingSegment | null {
@@ -849,7 +948,8 @@ function parseProviderSegment(value: unknown): PricingSegment | null {
 
 /** Persist the hand-edited `provider-pricing.json` atomically (temp file +
  *  rename; the same recipe the other writers use). Replaces the whole file;
- *  the `$routes` section is written only when there are aliases. */
+ *  the `$routes` / `$providers` sections are written only when they hold
+ *  something, so an overlay with neither stays a plain provider table. */
 export async function writeManualProviderOverlay(
   dir: string,
   overlay: ManualProviderOverlay,
@@ -857,6 +957,7 @@ export async function writeManualProviderOverlay(
 ): Promise<void> {
   const file: Record<string, unknown> = { ...overlay.table }
   if (Object.keys(overlay.routes).length > 0) file[PROVIDER_ROUTES_KEY] = overlay.routes
+  if (Object.keys(overlay.meta).length > 0) file[PROVIDER_META_KEY] = overlay.meta
   const target = join(dir, PROVIDER_PRICING_FILE)
   const tmp = join(dir, `${PROVIDER_PRICING_FILE}.tmp`)
   try {

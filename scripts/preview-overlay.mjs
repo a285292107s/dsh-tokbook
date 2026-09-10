@@ -162,6 +162,9 @@ const PRICING_FIXTURE = {
     { provider: 'staryears', model: 'grok-4.6', records: 322, billing: 'metered', overlay: true, now: { rates: { inputPerMillion: 3, outputPerMillion: 12 }, peak: false } },
     { provider: 'dots-ai', model: 'dots3-note-prev', records: 644, billing: 'metered', overlay: false, unpriced: true },
     { provider: 'dots-ai', model: 'dots-unpriced-prev', records: 12, billing: 'metered', overlay: false, unpriced: true },
+    // A route the mirror feed does NOT name: the 价格表 tab must offer to name
+    // and form it by hand (the ＋ 名称/形态 affordance on its group head).
+    { provider: 'private-relay', model: 'deepseek-v4-flash', records: 42, billing: 'metered', overlay: false, now: { rates: { inputPerMillion: 1.2, outputPerMillion: 3.6 }, peak: false } },
   ],
   providerLabels: {
     'deepseek-official': 'DeepSeek 官方 API',
@@ -197,6 +200,10 @@ const PRICING_FIXTURE = {
     { provider: 'zai', model: 'glm-5.3-flash', billing: 'metered', inheritBase: 'glm-5.3-flash', manual: false },
     { provider: 'dots-ai', model: 'dots3-note-prev', billing: 'metered', segments: [{ rate: { inputPerMillion: 0, outputPerMillion: 0 }, note: '免费测试阶段' }], manual: false },
     { provider: 'opencode-go-2', model: 'deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: false, via: 'opencode-go', note: '同款套餐的第二份' },
+    // A hand-priced route the mirror never named and the ledger never billed:
+    // it lands in the 未计费 bucket, where the route chip is the only place to
+    // name it (no channel group head exists).
+    { provider: 'new-relay', model: 'deepseek-v4-flash', billing: 'metered', segments: [{ rate: { inputPerMillion: 0.9, outputPerMillion: 2.7 } }], manual: true, note: '自己填的中转价' },
     // Mirror wrappers: no entries of their own — inherited rows, read-only.
     { provider: 'modlens-commandcode', model: 'deepseek/deepseek-v4-flash', billing: 'subscription', inheritBase: 'deepseek-v4-flash', manual: false, via: 'commandcode' },
     { provider: 'deepseek-modlens', model: 'deepseek-v4-flash', billing: 'metered', inheritBase: 'deepseek-v4-flash', manual: false, via: 'deepseek-official' },
@@ -250,6 +257,7 @@ const pricingState = {
   rows: PRICING_FIXTURE.rows,
   providerRows: PRICING_FIXTURE.providerRows,
   providerRoutes: PRICING_FIXTURE.providerRoutes,
+  providerMeta: {},
 }
 
 /** The price a rule set applies right now (time rule first, then base). */
@@ -263,11 +271,22 @@ function nowOfRules(rules) {
 }
 
 function pricingView() {
+  // Display facts merge hand-wins-over-mirror in the host, so the preview does
+  // the same: `$providers` overrides a label/form the fixture declares.
+  const labels = { ...PRICING_FIXTURE.providerLabels }
+  const forms = { ...PRICING_FIXTURE.providerForms }
+  for (const [route, meta] of Object.entries(pricingState.providerMeta)) {
+    if (meta.label !== undefined) labels[route] = meta.label
+    if (meta.form !== undefined) forms[route] = meta.form
+  }
   return {
     ...PRICING_FIXTURE,
     rows: pricingState.rows,
     providerRows: pricingState.providerRows,
     providerRoutes: pricingState.providerRoutes,
+    providerMeta: pricingState.providerMeta,
+    providerLabels: labels,
+    providerForms: forms,
   }
 }
 
@@ -292,7 +311,7 @@ function withModelWrite(body) {
 function withOverlayWrite(body) {
   const hand = []
   for (const [provider, models] of Object.entries(body)) {
-    if (provider === '$routes') continue
+    if (provider === '$routes' || provider === '$providers') continue
     if (models === null || typeof models !== 'object') continue
     for (const [model, entry] of Object.entries(models)) {
       const segments = entry.segments
@@ -318,6 +337,7 @@ function withOverlayWrite(body) {
     ...pricingState.providerRows.filter(row => !row.manual && !keys.has(`${row.provider}\n${row.model}`)),
   ]
   pricingState.providerRoutes = body.$routes ?? {}
+  pricingState.providerMeta = body.$providers ?? {}
 }
 
 /* ── quota-tab fixtures ─────────────────────────────────────────────────── */
