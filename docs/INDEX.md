@@ -20,7 +20,7 @@
 | [`docs/LESSONS.md`](LESSONS.md) | lessons | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
 | [`docs/skills.md`](skills.md) | reference | current | 改动涉及 DSH 技能系统或 `.dsh/skills` 时 |
 | [`docs/WORKFLOW.md`](WORKFLOW.md) | process | current | 接到功能迭代 / 修复任务时对照的「代码 + 文档同 commit」循环;新建文档前先看判据 |
-| [`docs/PLAN.provider-pricing.md`](PLAN.provider-pricing.md) | process | current | （通道，模型） 双维定价 + 时间维度 + 双桶统计的实施计划——执行中；改 `src/pricing.ts`/`stats.ts`/价格相关 wire 前先读 |
+| [`docs/archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md) | process(归档) | superseded | 只想追溯当期实施计划与推理时读;**不描述现状**——现状看 README / CONTRACTS / DECISIONS |
 
 ## Doc meta 约定
 
