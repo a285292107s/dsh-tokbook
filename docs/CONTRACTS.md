@@ -12,8 +12,22 @@
 `last-reviewed`。
 
 **术语。** 正文用**通道**指代 wire 与代码里的 `provider`——字段名、JSON 键、路由键与 URL
-一律保持原文,不翻译;`model` 对应「模型」。做模型、定官方价的一方是**厂商**(`family`),
+一律保持原文,不翻译;`model` 对应「模型」。做模型、定官方价的一方是**模型厂商**(`family`),
 不是通道:同一个模型可以经多条通道计费,同一家公司也可能兼任厂商与通道。
+
+界面词与代码/契约的对应(界面一律中文,代码一律原文):
+
+| 界面 | 代码 / 契约 |
+|---|---|
+| 通道用量 | Provider-usage tab,`GET /tokbook/usage` |
+| 通道覆盖层 | provider overlay,`provider-pricing.json`,`PUT /tokbook/provider-pricing` |
+| 通道路由键 | provider route key(账本里的通道标识) |
+| 实际支出 / 订阅价值 | `billing: metered` / `subscription` 两个桶(`spend` / `subscriptionValue`) |
+| 跟随官方价 / 自己填价 | `inheritBase` / `segments[]` |
+| 价格未知 | `unpriced`,`unpricedModels`(暂按 ¥0,**不是免费**;已知的 ¥0 是免费) |
+| 按量 / 订阅 / 混合 | 卡片计费芯片,由条目各自的 `billing` 推出 |
+| 同价通道 | 手工层的 `$routes` 一跳路由别名(**不是**镜像层的包装路由) |
+| 包装路由 | 插件为上游通道 mint 的 `<插件>-<provider>` 合成 id(镜像 feed 的一条通道) |
 
 ## Host 路由
 
@@ -45,11 +59,11 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   `currency` 与 `usdExchangeRate` 字段换算后展示。
 - `range` id 是以本地日历天命名的窗口,与它们读取的日文件对应。
 - 从未见过通道头的行归入 `'(未知)'` 组。
-- 未定价模型计 ¥0,并在 `unpricedModels` 中列出——口径是**价格未知**,不是免费(费率为 0
+- 价格未知模型计 ¥0,并在 `unpricedModels` 中列出——口径是**价格未知**,不是免费(费率为 0
   属于已知价,正常计价并显示为 ¥0)。
 - `GET /tokbook/usage` 的载荷同样带 `providerLabels`(与 `pricing` 同源),卡片头因此用镜像
   feed 的通道标签做主标题、路由键做次要小字,与价格表 tab 命名一致;卡片的计费芯片(按量 /
-  订阅 / 混合)由卡内模型各自的 `billing` 推出,说明该卡的金额是现金支出还是折算价值。
+  订阅 / 混合)由卡内模型各自的 `billing` 推出,说明该卡的金额是实际支出（现金）还是订阅价值（折算）。
 - `PUT /tokbook/pricing` body:`{ "<精确模型串>": 条目 }`,条目二选一:
   - **flat 价**(旧格式,仍完全支持):`{ "inputPerMillion": number, "outputPerMillion": number, "cacheReadPerMillion"?: number, "cacheWritePerMillion"?: number }`;
   - **规则集**:`{ "base": <flat 价>, "timeRules"?: [{ "startTime": seconds, "endTime"?: seconds,
@@ -65,7 +79,7 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
 - `GET /tokbook/pricing` 每行都带**当前生效价** `now`(`{ rates, label?, peak }`,按读取时刻
   走「时间规则 → 峰谷」链)与完整规则集(模型行 `manualRules` / `cloudRules`、通道行
   `rules`);`cloudRates` / `manualRates` 只是各自 `base` 的平铺简写(旧客户端兼容)。带
-  `records` 的行是账本真正记过的模型串(不只未定价行);`overlayPriced` = 模型层无条目但
+  `records` 的行是账本真正记过的模型串(不只价格未知行);`overlayPriced` = 模型层无条目但
   通道覆盖层已定价——此时 `now` 就是覆盖层解析出的价,`provider` 是该覆盖所在的路由键
   (UI 用它跳到那条覆盖;给这类串写模型层手工条目不会被读取)。
 - `GET /tokbook/pricing` 里**云端 feed 命名的行**还带 `family`(厂商/家族,如 `deepseek` /
@@ -148,7 +162,7 @@ host 请指向自己的 `path`,不要共享目录。
 | `rollup.json`(+ `.tmp`) | 冻结日的派生统计折叠,截至 `upto` 日 | host stats 读路径 | 缺失/损坏 → 由日文件重建;同步追加行后删除重建 |
 | `sync-progress.json`(+ `.tmp`) | 持久化的逐会话 `revision` 基线,供增量新鲜度探测 | host sync | 严格在同步成功后写;读不到的会话被排除 |
 | `owner.json` | 单写者标记 `{ pid, start }` | host 启动 | 崩溃进程留下的陈旧标记被静默接管 |
-| `pricing.json`(+ `.tmp`) | 手编手工价覆盖(整表替换;条目永远优先于云) | `PUT /tokbook/pricing` | 条目可以是 flat 价或带 `timeRules`/`dailySlots` 的规则集;缺失 = 无手工层;畸形条目只把对应模型降级为未定价 |
+| `pricing.json`(+ `.tmp`) | 手编手工价覆盖(整表替换;条目永远优先于云) | `PUT /tokbook/pricing` | 条目可以是 flat 价或带 `timeRules`/`dailySlots` 的规则集;缺失 = 无手工层;畸形条目只把对应模型降级为价格未知 |
 | `pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的云定价镜像(`pricing.ts`) | host 启动 | 只读参考;region/URL 按配置 |
 | `provider-pricing.json`(+ `.tmp`) | 手编通道覆盖层(整表替换;条目覆盖对应 （通道，模型） 的镜像行;保留键 `$routes` 存同价通道别名) | `PUT /tokbook/provider-pricing` | 缺失 = 无手工通道层 |
 | `provider-pricing.ccsa.json`(+ `.tmp`) | 启动时拉取的通道覆盖镜像(`pricing.ts`) | host 启动 | 只读参考;URL 按 `pricingProviderUrl` 配置 |

@@ -53,7 +53,7 @@
 | 官方/直连（deepseek-official、zai） | `metered` | 跟随官方基准价（含调价史） | 实际支出 |
 | 订阅（opencode-go、commandcode、modlens-commandcode） | `subscription` | 官方基准价折算价值 | 订阅价值（非现金） |
 | 中转站（staryears） | `metered` | 先用官方价占位；**用户填真实价后**改显式 segments | 实际支出 |
-| 未知串（如 dots-ai / dots3-note-prev） | `metered` | 镜像**不建条目** → 未定价 ¥0（在 `unpricedModels` 里可见）；用户填价后加 segments | 实际支出 |
+| 未知串（如 dots-ai / dots3-note-prev） | `metered` | 镜像**不建条目** → 价格未知 ¥0（在 `unpricedModels` 里可见）；用户填价后加 segments | 实际支出 |
 
 时间维度：官方/订阅跟随基准价 `timeRules`（自动得调价史）；中转/未知串用显式
 `segments` 时间轴（用户维护自己的调价史）。
