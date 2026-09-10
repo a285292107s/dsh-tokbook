@@ -349,8 +349,10 @@ function LedgerView({ overview, onOpenPricing }: {
   const empty = overview.records === 0
   const hero = todayHero(overview)
   const today = hero.totals
-  const cacheBase = today.cacheReadTokens + today.inputTokens
-  const hitRate = cacheBase > 0 ? Math.round((today.cacheReadTokens / cacheBase) * 100) : null
+  const hitRate = formatHitRate(
+    today.cacheReadTokens,
+    today.inputTokens + today.cacheReadTokens + today.cacheWriteTokens,
+  )
   // Whether cache-write is a dimension of THIS ledger at all. Decided per
   // install, not per day: the aggregate cannot tell "reported 0" from "not
   // reported" (UsageFields marks it optional, UsageTotals does not), and a
@@ -414,7 +416,7 @@ function LedgerView({ overview, onOpenPricing }: {
           <div className="dtpl-sec-head">
             <h2 className="dtpl-sec-title">今日词元构成</h2>
             {hitRate !== null && (
-              <span className="dtpl-sec-aside" title="缓存读取 ÷（缓存读取 + 输入）——越高，同样的词元越便宜。">
+              <span className="dtpl-sec-aside" title="缓存读取 ÷（输入 + 缓存读取 + 缓存写入）——越高，同样的词元越便宜；部分命中不会凑整成 100%。">
                 缓存命中率 {hitRate}%
               </span>
             )}
@@ -666,7 +668,9 @@ function ProviderSkeleton() {
  *   1. 一眼看懂 — a 3-fact strip (source / precision / coverage) answers
  *      "can I trust this" before any detail;
  *   2. 词元分四桶 — the four mutually-exclusive buckets as scannable tiles
- *      with the sum equation under them;
+ *      with the sum equation under them, then the cache-hit rate that the
+ *      input-side three derive (its own denominator, never rounded up to
+ *      100%);
  *   3. 记了哪些调用 — scope of the recording (what is / isn't a row);
  *   4. 差额从哪来 — the two reasons a number diverges from the bill, side by
  *      side: calls the ledger structurally cannot see vs. same facts counted
@@ -730,6 +734,9 @@ function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           <span className="dtpl-doc-eq-op">+</span>
           <span className="dtpl-doc-eq-term">输出</span>
         </div>
+        <p className="dtpl-doc-sub">
+          输入侧三桶还派生出一个数字：<b>缓存命中率</b> = 缓存读取 ÷（输入 + 缓存读取 + 缓存写入）。越高，同样的词元越便宜——命中的那部分按低得多的费率计费。分母取<b>全部输入侧词元</b>（与 DSH 会话统计同口径）；只有真正零遗漏才显示 100%，部分命中会退到一位小数显示，不会被四舍五入凑成满命中。
+        </p>
         <p className="dtpl-doc-sub">
           金额 = 按每模型价格表（每百万词元多少元）逐条计价后累加。价格表存在本机、
           可能跟不上厂商最新费率——所以<b>金额是近似值</b>，词元数不受影响。
@@ -1254,6 +1261,21 @@ function usageTotal(r: UsageRecord): number {
 function share(value: number, total: number): number {
   if (total <= 0) return 0
   return Math.max(0, Math.min(100, (value / total) * 100))
+}
+
+/**
+ * Cache-hit share of the prompt side — uncached input + cache read + cache
+ * write, the same denominator the harness's own session stats use. A partial
+ * hit never prints as 100%: integer rounding is kept while the result stays
+ * below 100, otherwise the value drops to one decimal, truncated, so the
+ * display can only understate a hit and never claim a full one.
+ */
+function formatHitRate(cacheReadTokens: number, billedInputTokens: number): string | null {
+  if (billedInputTokens <= 0) return null
+  if (cacheReadTokens >= billedInputTokens) return '100'
+  const percent = (cacheReadTokens / billedInputTokens) * 100
+  const whole = Math.round(percent)
+  return whole < 100 ? String(whole) : (Math.floor(percent * 10) / 10).toFixed(1)
 }
 
 /** Compact token count: 517 / 12.2K / 1.2M. */
