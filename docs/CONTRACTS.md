@@ -48,7 +48,7 @@
 | `GET` | `/tokbook/overview` | — | `TokBookOverview`(带成本的汇总 + 趋势 + 按模型 + 最近记录 + 新鲜度) |
 | `POST` | `/tokbook/rescan` | — | `RescanView` = `{ status: 'running'\|'skipped', lastSyncAt: number\|null }` |
 | `GET` | `/tokbook/usage` | `range` ∈ `today` \| `yesterday` \| `last7` \| `last30`(缺失/未知 → `400 {error}`) | `ProviderUsageView` |
-| `GET` | `/tokbook/quota` | — | `QuotaView` = `{ providers: string[] }` — 仅已启用计划,无网络 |
+| `GET` | `/tokbook/quota` | — | `QuotaView` = `{ providers: string[], alert?: boolean }` — 仅已启用计划;`alert` 只读持久化快照,无网络 |
 | `GET` | `/tokbook/quota` | `provider=<路由键>`;可选 `refresh=1` 跳过 TTL 缓存 | 该通道的 `QuotaCard` |
 | `GET` | `/tokbook/pricing` | — | `PricingView` = `{ routes: PricingRouteView[], dataDir, updatedAt }` |
 | `PUT` | `/tokbook/pricing` | JSON body ≤ 256 KiB | `200 { ok: true, view }`;表非法 → `400 { error, view }` |

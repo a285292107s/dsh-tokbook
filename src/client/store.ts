@@ -18,6 +18,8 @@ export interface TokBookViewSnapshot {
   /** True while the 价格表 tab holds unsaved staged edits. The drafts survive
    *  unmount, so this flag outlives the panel and drives the tab's dot. */
   readonly pricingDirty: boolean
+  /** Last-known quota 告急 from the host's durable snapshots (no network). */
+  readonly quotaAlert: boolean
 }
 
 export interface TokBookViewStore {
@@ -27,12 +29,15 @@ export interface TokBookViewStore {
   setOverview(overview: TokBookOverview | null): void
   setError(error: string | null): void
   setPricingDirty(dirty: boolean): void
+  setQuotaAlert(alert: boolean): void
 }
 
 /** Create a fresh root-scoped view store (one per plugin activation). */
 export function createTokBookViewStore(): TokBookViewStore {
   const listeners = new Set<() => void>()
-  let snapshot: TokBookViewSnapshot = { open: false, overview: null, error: null, pricingDirty: false }
+  let snapshot: TokBookViewSnapshot = {
+    open: false, overview: null, error: null, pricingDirty: false, quotaAlert: false,
+  }
   const emit = (): void => {
     for (const listener of [...listeners]) listener()
   }
@@ -59,6 +64,11 @@ export function createTokBookViewStore(): TokBookViewStore {
     setPricingDirty(pricingDirty) {
       if (snapshot.pricingDirty === pricingDirty) return
       snapshot = { ...snapshot, pricingDirty }
+      emit()
+    },
+    setQuotaAlert(quotaAlert) {
+      if (snapshot.quotaAlert === quotaAlert) return
+      snapshot = { ...snapshot, quotaAlert }
       emit()
     },
   }

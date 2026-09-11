@@ -1,6 +1,6 @@
 # 迭代维护工作流 — dsh-tokbook
 
-> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-10 · supersedes: —
 
 > **用法**:接到任何功能迭代 / 修复任务时,按本文件走一遍。目标:功能不断演进时,文档与
 > 代码在**同一 commit** 保持同步,契约不漂移,文档永不明目张胆滞后于代码。它与
@@ -14,8 +14,10 @@
    - 改契约性代码(路由 / wire / 配置 / 事件 / 数据文件)前:先读
      [`CONTRACTS.md`](CONTRACTS.md);
    - 改账本 / 去重 / 折叠路径前:先读 [`HMR.md`](HMR.md);
-   - 改 `src/pricing.ts` / `stats.ts` / 价格相关 wire 前:先读仍为 `current` 的相关
-     PLAN 与 [`DECISIONS.md`](DECISIONS.md) D-004。
+   - 改 `src/pricing.ts` / `stats.ts` / 价格相关 wire 前:先读
+     [`DECISIONS.md`](DECISIONS.md) **D-011**(当前手工价表形态)与
+     [`CONTRACTS.md`](CONTRACTS.md) 的价格/计价段;不要沿用已被 D-011 取代的
+     云端镜像/通道覆盖层决策。
 
 ## 2. 大功能先落 PLAN,小改动直接做
 

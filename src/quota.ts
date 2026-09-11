@@ -61,6 +61,20 @@ export const BUILTIN_KEY_ENV: Readonly<Record<string, string>> = {
   [COMMAND_CODE_PROVIDER]: 'COMMANDCODE_API_KEY',
 }
 
+/** Usage percent at which a last-known window lights the sidebar 告急 dot.
+ *  90 is "you will notice soon", not "already dead" — exceeded is separate. */
+export const QUOTA_ALERT_PERCENT = 90
+
+/**
+ * Whether one official quota card is worth a persistent 告急 indicator on the
+ * footer trigger. Only 'ok' cards count: an unconfigured/error card has no
+ * window facts, and inventing an alert from a fetch failure would cry wolf.
+ */
+export function isQuotaAlert(card: QuotaCard | null | undefined): boolean {
+  if (card === null || card === undefined || card.state !== 'ok') return false
+  return card.windows.some((window) => window.exceeded || window.usagePercent >= QUOTA_ALERT_PERCENT)
+}
+
 /**
  * Which provider routes carry an official quota fetch. A plan is "on" when
  * the route is known and not disabled (`enabled:false` in the config). A key

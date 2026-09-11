@@ -502,10 +502,15 @@ export interface QuotaCard {
 
 /** The wire payload of the quota route (订阅额度 tab) when no `provider` is
  * given: a fast, non-network list of the enabled provider routes, so the
- * client can then fetch each provider's card independently (`?provider=`). */
+ * client can then fetch each provider's card independently (`?provider=`).
+ * `alert` is derived only from durable last-known 'ok' snapshots (never a
+ * network hit) and drives the sidebar footer's 告急 dot. */
 export interface QuotaView {
   /** Enabled built-in provider routes in display order (no network fetch). */
   providers: string[]
+  /** True when any last-known 'ok' snapshot has a window at/over the alert
+   * threshold or already exceeded. Absent/undefined = no alert. */
+  alert?: boolean
 }
 
 

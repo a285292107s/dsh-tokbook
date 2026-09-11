@@ -10,7 +10,7 @@ import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type Session
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
 import { providerCards, splitByProvider, providerKeyOf } from '../src/by-provider.ts'
-import { windowFromCreditsBlock, windowFromUsagePercent, resetEpoch, planInfoFromSubscriptions, unconfiguredCard, errorCard, hasQuotaContent, isBuiltinQuotaPlan, BUILTIN_PLAN_TITLES } from '../src/quota.ts'
+import { windowFromCreditsBlock, windowFromUsagePercent, resetEpoch, planInfoFromSubscriptions, unconfiguredCard, errorCard, hasQuotaContent, isBuiltinQuotaPlan, isQuotaAlert, BUILTIN_PLAN_TITLES } from '../src/quota.ts'
 import { resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage } from '../src/quota-official.ts'
 import type { UsageRecord } from '../src/types.ts'
 
@@ -539,6 +539,24 @@ console.log('quota: builtin plan identity')
   check('opencode-go is builtin', isBuiltinQuotaPlan('opencode-go') && isBuiltinQuotaPlan('commandcode'))
   check('unknown is not builtin', isBuiltinQuotaPlan('zen') === false)
   check('titles', BUILTIN_PLAN_TITLES['opencode-go'] === 'OpenCode Go' && BUILTIN_PLAN_TITLES['commandcode'] === 'Command Code')
+}
+
+console.log('quota: footer 告急 from last-known cards')
+{
+  const ok = (windows: { exceeded: boolean; usagePercent: number }[]) => ({
+    plan: 'opencode-go', title: 'OpenCode Go', state: 'ok' as const,
+    windows: windows.map((w, i) => ({ id: `w${i}`, label: '窗', resetAt: null, ...w })),
+  })
+  check('null card is not an alert', isQuotaAlert(null) === false)
+  check('unconfigured is not an alert', isQuotaAlert(unconfiguredCard('opencode-go', 'no key')) === false)
+  check('error card is not an alert', isQuotaAlert(errorCard('opencode-go', 'boom')) === false)
+  check('comfortable window is quiet', isQuotaAlert(ok([{ exceeded: false, usagePercent: 40 }])) === false)
+  check('near-cap window alerts', isQuotaAlert(ok([{ exceeded: false, usagePercent: 90 }])) === true)
+  check('exceeded window alerts even at 0%', isQuotaAlert(ok([{ exceeded: true, usagePercent: 0 }])) === true)
+  check('any window in the card can alert', isQuotaAlert(ok([
+    { exceeded: false, usagePercent: 10 },
+    { exceeded: false, usagePercent: 95 },
+  ])) === true)
 }
 
 console.log('quota: official key resolution (env + config, no network)')

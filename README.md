@@ -34,6 +34,7 @@ token/成本,可切换 今日 / 昨天 / 近7天 / 近30天 窗口)、**价格�
 ```
 src/
   index.ts            host: TokenUsageBook 服务(ctx.tokbook)+ 实时 hook
+  config.ts           插件配置校验 + plans 覆盖层宽松 coerce
   types.ts            共享领域类型(仅类型)
   ledger.ts           数据目录解析 + owner 标记(单写者守卫)
   usage-record.ts     逐调用记录模型 + 会话事件投影
@@ -53,11 +54,15 @@ src/
     index.ts          client: apply(ctx),注册两个 slot
     contract.ts       最小 client ctx/slots 类型
     store.ts          按钮 ↔ 浮窗共享视图 store
-    styles.ts         注入样式表(DSH tokens)
+    format.ts         纯展示 helper(日键、token/金额/时间格式化)
+    styles.ts         注入样式表入口(按 surface 拼接 styles/*.ts)
+    styles/           CSS 分片:tokens/footer/overlay/ledger/method/provider/quota/pricing/shared
     FooterButton.tsx  sidebar.footer.action 触发器
     QuotaPanel.tsx    订阅额度 tab(官方用量卡)
-    LedgerOverlay.tsx shell.overlay 浮窗(带成本汇总 + 趋势 + 按模型 + 按通道
-                      + 价格 + 额度 tab)
+    LedgerOverlay.tsx shell.overlay 浮窗外壳(五 tab + 焦点/快捷键)
+    LedgerView.tsx    用量总览 tab(今日英雄卡 + 构成 + 趋势 + 按模型 + 最近)
+    ProviderPanel.tsx 通道用量 tab
+    MethodDoc.tsx     统计口径 tab
     pricing/
       draft.ts        价格表纯逻辑:草稿↔wire 转换、校验、签名(未保存标记)
       editors.tsx     行原语:四档价输入、价段编辑器、模型行、路由卡片
@@ -321,9 +326,9 @@ plugins:
 - **订阅额度(quota)tab**:逐计划**官方账户用量**在 host 侧从各通道自家端点拉取
   (`GET /tokbook/quota`)——Command Code 走其 CLI 账户端点(窗口 + 积分 + 计划),OpenCode
   Go 走 `/zen/go/v1/usage`(百分比 + 重置)。无本地估算;无 key → `unconfigured` 提示卡。
+  侧边栏按钮上的**告急色点**读同一路由列表载荷里的 `alert`(只看持久化最近已知快照,
+  窗口 ≥90% 或已 exceeded;绝不为此打官方 API)。
 
 剩余缺口 / 计划升级:
 
 - 额度计划每个通道路由只收一个 API key(尚无多账户轮换)。
-- 侧边栏触发按钮上的持久「告急」指示(最紧额度窗口前的色点)未接线:它需要事件驱动
-  更新,因为额度只在 tab 打开时拉取——窗口关闭时,没有东西把变化推给按钮。
