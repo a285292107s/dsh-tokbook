@@ -1,6 +1,6 @@
 # 决策记录(ADR 日志)— dsh-tokbook
 
-> **Doc meta** · role: decisions · language: zh-CN · status: current · last-reviewed: 2026-09-10 · supersedes: —
+> **Doc meta** · role: decisions · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
 
 持久架构决策,最新的在最后。每条记录:决策本身、迫使它成立的背景、以及它取代了什么。
 像维护契约一样维护本日志:**落地的决策与代码在同一个 commit 追加条目**。完整推理见
@@ -405,6 +405,33 @@ provider-overlay(通道覆盖层 / `$routes` / `$providers` / `inheritBase` / `s
   (`aliasOf`)与同价通道(`$routes`)都消失;通道用量卡片的名来自配置。
 - 契约见 [`docs/CONTRACTS.md`](CONTRACTS.md) 的「术语」「Host 路由」「数据目录」三段;
   数据形状见 `src/pricing.ts` 顶部模块注释。
+
+---
+
+### D-012 · 2026-09-11 · 侧栏告急点只读持久化快照;client 按 surface 拆文件
+
+**Status: current**
+
+**背景。** D-011 后代码与文档出现三类摩擦:① 统计口径/WORKFLOW/DESIGN 仍描述已删除的
+云端价表形态;② `LedgerOverlay`(~1300 行)与 `styles.ts`(~1400 行 CSS 字符串)过大,
+改一个 tab 要滚过无关代码;③ README 记着的侧栏「告急」色点未接线——额度只在 tab 打开时
+拉,窗口关着时没有东西推给按钮。
+
+**决策。**
+
+- **告急点 = 最近已知快照,绝不后台打官方 API**。`GET /tokbook/quota` 列表载荷增加
+  `alert?: boolean`,由 host 读 `quota-<provider>.json`(及内存 TTL 卡)上任一
+  `usagePercent ≥ 90` 或 `exceeded` 的窗口推出(`isQuotaAlert`)。client 在 apply /
+  每 5 分钟 / 关浮窗后拉一次列表刷新 store 与 Footer 点。语义是「上次看时已经紧了」,
+  不是实时配额——空闲时轮询通道账户 API 会烧限流,不符合单人工具的诚实最小面。
+- **client 按 surface 拆,不改行为**:`LedgerOverlay` 只留壳;总览/通道/口径各成文件;
+  共享格式化进 `format.ts`;CSS 进 `styles/*.ts` 由 `styles.ts` **按固定顺序拼接**
+  (级联顺序是契约)。host 侧 config 校验/coerce 抽出 `config.ts`。
+- **DESIGN「重构说明」§3 删除云端长文**,只留 D-011 当前语义 + 指针——历史决策
+  D-003…D-010 与归档 PLAN 仍可追溯,但 DESIGN 正文不再毒化「现状」阅读。
+
+**影响。** 多账户额度仍不做(README 缺口保留);`stats.ts` 未拆(纯数学与 IO 混在一起
+尚可接受)。契约字段见 `CONTRACTS.md` 的 `QuotaView`。
 
 ---
 

@@ -47,6 +47,12 @@ browser 半区用侧边栏 footer 按钮 + shell.overlay 浮窗展示它们(汇�
 
 - 源码唯一真源在 `src/`:host 半区在 `src/*.ts`,browser 半区在 `src/client/*.tsx`。
   整体文件布局见 README。
+- **别养出巨型单文件。** 功能落在已有大文件上时,优先按**职责/surface**顺手拆开
+  (一个 tab 一个文件、一类 CSS 一个 `styles/*.ts` 分片、config 校验独立),而不是继续
+  往里堆。经验阈值:单一职责源文件到 **~400 行**就该审视是否该拆;~600+ 且混了多类
+  关注点必须拆。**不为拆而拆**——`types.ts` / `pricing.ts` 这类内聚领域模块保持整文件。
+  拆分不改行为、不引入投机抽象;样式分片的拼接顺序是级联契约。判据与示例见
+  `docs/WORKFLOW.md` §7。
 - `lib/` 是构建产物且被 gitignore——改 `src/`,然后跑 `pnpm build`。不要手改或提交 `lib/`。
 - 构建后,host 改动经 profile 的 `cordis-plugin-hmr` 行热替换;browser 改动在刷新页面后
   生效。确切保证见 README(Dev / HMR)与 `docs/HMR.md`。

@@ -1,6 +1,6 @@
 # 文档索引 — dsh-tokbook
 
-> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-10 · supersedes: —
+> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
 
 本仓库所有文档文件的地图。动手前先读你要触及领域的条目,然后**只读那一份**。本文件
 的存在是为了让 [`AGENTS.md`](../AGENTS.md) 与你的第一跳保持精简:根文件只放面包屑,
@@ -20,6 +20,7 @@
 | [`docs/LESSONS.md`](LESSONS.md) | lessons | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
 | [`docs/skills.md`](skills.md) | reference | current | 改动涉及 DSH 技能系统或 `.dsh/skills` 时 |
 | [`docs/WORKFLOW.md`](WORKFLOW.md) | process | current | 接到功能迭代 / 修复任务时对照的「代码 + 文档同 commit」循环;新建文档前先看判据 |
+| [`docs/compose/spec/code-review.md`](compose/spec/code-review.md) | process(归档快照) | current | 追溯 D-011 落地前那轮全面审查的结论与修复时;**不描述此后重构后的文件布局** |
 | [`docs/archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md) | process(归档) | superseded | 只想追溯当期实施计划与推理时读;**不描述现状**——现状看 README / CONTRACTS / DECISIONS |
 
 ## Doc meta 约定

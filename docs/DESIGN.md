@@ -1,6 +1,6 @@
 # dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-10 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。
 > 本文档是第一期的**调研结论 + 技术选型 + 框架设计**。调研依据仅两个权威来源：
@@ -373,7 +373,9 @@ react, react/jsx-runtime, react-dom, react-dom/client,
 
 ## 9. 第一期（Phase 1）交付物清单
 
-> 你已选择「先出方案文档」。以下为**脚手架文件清单**，待你确认后按其搭建。
+> **历史脚手架**，不是当前布局。现状文件树见 [`../README.md`](../README.md)「布局」——
+> 二期/三期后 host 侧已拆出 `config.ts` / `usage-log.ts` / `stats.ts` / `pricing.ts` 等,
+> client 侧浮窗拆成 `LedgerOverlay` + 各 tab 模块,样式在 `client/styles/*.ts`。
 
 ```
 dsh-tokbook/

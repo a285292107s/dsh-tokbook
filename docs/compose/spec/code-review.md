@@ -40,6 +40,7 @@ commits: # uncommitted working tree on main; range not applicable
 
 1. **D-011 host**：`pricing.ts` / `route-catalog.ts` / `types.ts` / `stats.ts` / `routes.ts` / `index.ts` / `by-provider.ts` 与 `docs/CONTRACTS.md`、`DECISIONS.md` D-011 的对齐。
 2. **D-011 client**：`src/client/pricing/*`、`styles.ts`、`LedgerOverlay.tsx` 对 wire 的消费、自动保存链、与 host 路由的一致。
+   （审查后 2026-09-11 起 client 再拆：`LedgerView`/`ProviderPanel`/`MethodDoc`/`format.ts`，样式在 `styles/*.ts`；本节按当时工作树路径记录。）
 3. **整库一致性**：已提交模块（usage-log / sync / quota* / ledger）是否仍与重构后的契约、类型、文档一致；遗留死代码；明显边界缺陷。
 
 分级标准（对齐维护者「单人维护 + 不做过度防御」）：

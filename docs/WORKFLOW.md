@@ -1,6 +1,6 @@
 # 迭代维护工作流 — dsh-tokbook
 
-> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-10 · supersedes: —
+> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
 
 > **用法**:接到任何功能迭代 / 修复任务时,按本文件走一遍。目标:功能不断演进时,文档与
 > 代码在**同一 commit** 保持同步,契约不漂移,文档永不明目张胆滞后于代码。它与
@@ -60,7 +60,40 @@
 
 `INDEX.md` 是地图不是日志:单次任务细节、一次性讨论结论不进树。
 
+## 7. 文件体量:别让新功能继续堆进巨石文件
+
+D-011 之后实测的痛点:`LedgerOverlay.tsx` 曾到 ~1300 行(壳 + 五 tab + 趋势图 + 口径文案),
+`styles.ts` 曾到 ~1400 行 CSS 字符串——改一个 tab 要滚过整份无关代码。拆完后的约定:
+
+### 判据(何时拆)
+
+| 信号 | 动作 |
+|---|---|
+| 单一职责源文件 **~400 行** | 审视:是否混了第二个职责/第二个 surface?是 → 拆 |
+| **~600+ 行且混多类关注点** | 必须拆(或本次功能顺手拆) |
+| 内聚领域模块(`types.ts`、`pricing.ts`、`stats.ts` 的纯折叠) | **保持整文件**,不为数字拆 |
+| 纯搬家会引入新抽象层 | 不拆——单人仓库里导航成本通常低于错误分层 |
+
+### 怎么拆(已用过的模式)
+
+- **浮窗 / tab**:`LedgerOverlay.tsx` = 对话框壳 + tab 装配;每个 tab 一个文件
+  (`LedgerView` / `ProviderPanel` / `MethodDoc` / `QuotaPanel` / `pricing/*`);
+  纯展示 helper 进 `format.ts`。
+- **CSS**:`styles.ts` 只做 `injectStyles()` + **固定顺序**拼接 `styles/*.ts`
+  (tokens → footer → overlay → ledger → method → provider → quota → pricing → shared)。
+  **级联顺序是契约**,不要重排。
+- **host 配置**:`config.ts` 收 `validateConfig` / `coercePlan*`;Service 本体留在 `index.ts`。
+- 拆分 commit **不改行为**:同一次 `pnpm typecheck` + `pnpm test` 要绿;README「布局」
+  同步新文件名。
+
+### 不要做
+
+- 不要在拆分时顺手加配置开关、事件总线、通用「panel registry」。
+- 不要为「可能再长出一个 tab」预留空目录或空模块。
+- 不要把一行逻辑切成三层 import。
+
 ## 参考
 
-- 地图与 role/status 语义:`INDEX.md`;契约:`CONTRACTS.md`;决策日志:`DECISIONS.md`;
-  设计推理:`DESIGN.md`(顶部阅读指南区分历史与现状);教训:`LESSONS.md` / `HMR.md`。
+- 地图与 role/status 语义:`INDEX.md`;契约:`CONTRACTS.md`;决策日志:`DECISIONS.md`
+  (体量与告急点见 **D-012**);设计推理:`DESIGN.md`(顶部阅读指南区分历史与现状);
+  教训:`LESSONS.md` / `HMR.md`。

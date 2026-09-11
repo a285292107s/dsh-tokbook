@@ -1,6 +1,6 @@
 # Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-10 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
 
 其他代码与 browser 半区必须**分毫不差**依赖的事实的唯一家园:host 路由与 wire JSON、
 插件配置、消费的 `session/event` 类型、数据目录文件布局。

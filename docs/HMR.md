@@ -1,6 +1,6 @@
 # dsh-tokbook · DSH 热重载（HMR）机制与本项目实况
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）插件热重载机制的**官方语义 + 本项目实际接线与实测**。
 > 官方依据：<https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>（“插件与生命周期”页）。
@@ -173,7 +173,7 @@ pnpm build     # scripts/build-client.mjs（esbuild）重写 lib/index.js（host
   成本可接受）：
 
   ```sh
-  pnpm build     # 重写 lib/client.js（样式在 styles.ts，也打进这个 bundle）
+  pnpm build     # 重写 lib/client.js（样式在 client/styles/*.ts，也打进这个 bundle）
   # host 半区：profile 已启用 cordis-plugin-hmr → 自动 卸载→重载→重 apply（§3.1）
   # client 半区：刷新浏览器取新 rev 的 bundle；client-hmr 活着时也可能 ≤500ms 免刷新热换，
   #              但那是加分项不是保证——没生效就硬刷新兜底（永远能取到新 rev）

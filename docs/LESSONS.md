@@ -1,6 +1,6 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-08 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
 
 > 本文件整理本次「UI 优化 + 全中文 + 对齐 DSH 官方设置按钮样式」迭代中踩过的坑与结论，
 > 供后续维护 / 继续开发时对照。结构统一按 **现象 → 根因 → 修复 / 正确做法** 组织。
@@ -74,8 +74,10 @@
 
 ## 2. 此插件的"样式"就是 JS bundle 的一部分，不是独立 CSS
 
-- `src/client/styles.ts` 里的 CSS 是一段 JS 字符串，由 `injectStyles()` 在运行时注入 `<style>`。
-- esbuild 会把这段字符串**编译进 `lib/client.js`**。
+- CSS 拆在 `src/client/styles/*.ts`（tokens / footer / overlay / ledger / method /
+  provider / quota / pricing / shared），由 `styles.ts` 的 `injectStyles()` 按固定顺序
+  拼接后在运行时注入 `<style>`——**级联顺序是契约**。
+- esbuild 会把这些字符串**编译进 `lib/client.js`**。
 - 因此「改一行样式」= 改变了 lazy-CJS bundle 的字节内容，跟改逻辑**没有区别**，同样受下方 `rev`
   不可变缓存约束。**没有"只改样式就自动热更"这回事。**
 
