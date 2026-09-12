@@ -7,7 +7,7 @@
  * @module dsh-tokbook/client/format
  */
 
-import type { UsageRecord, UsageTotals } from '../types.ts'
+import type { UsageRecord } from '../types.ts'
 
 /** A day key shifted by N days; the host names its day files the same way. */
 export function shiftDayKey(day: string, delta: number): string {
@@ -57,12 +57,8 @@ export function failureCodeLabel(code: string | undefined): string {
   return label === undefined ? code : `${code} ${label}`
 }
 
-/** Total tokens across the four buckets of an aggregates row. */
-export function totalsOf(t: UsageTotals): number {
-  return t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens + t.outputTokens
-}
-
-/** Total tokens of one record ('' usage rows count 0). */
+/** Total tokens of one record ('' usage rows count 0). Aggregated rows use the
+ *  host's `totalsTokens` (`../types.ts`) — one implementation, both halves. */
 export function usageTotal(r: UsageRecord): number {
   const u = r.usage
   if (u === undefined) return 0

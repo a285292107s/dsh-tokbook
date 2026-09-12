@@ -1,6 +1,6 @@
 # 决策记录(ADR 日志)— dsh-tokbook
 
-> **Doc meta** · role: decisions · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: decisions · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
 
 持久架构决策,最新的在最后。每条记录:决策本身、迫使它成立的背景、以及它取代了什么。
 像维护契约一样维护本日志:**落地的决策与代码在同一个 commit 追加条目**。完整推理见
@@ -434,6 +434,14 @@ provider-overlay(通道覆盖层 / `$routes` / `$providers` / `inheritBase` / `s
 
 **影响。** 多账户额度仍不做(README 缺口保留);`stats.ts` 未拆(纯数学与 IO 混在一起
 尚可接受)。契约字段见 `CONTRACTS.md` 的 `QuotaView`。
+
+**2026-09-12 复核。** `stats.ts` 已到 797 行,越过 `WORKFLOW.md` §7 的 600 行线,仍**不拆**:
+它的天然缝是「纯折叠(`summarizeRecords`/`mergeSummaries`)↔ 按日文件 IO + 解析缓存 +
+`rollup.json` 持久化」,而这条缝只在真要动其中一半时才值得切开——为一个跨越阈值的数字
+去切一个内聚的读路径,是 `WORKFLOW.md` §7「不为拆而拆」明说不要做的事。真正落在
+「按 surface 拆文件」这条决策上的是 `client/QuotaPanel.tsx`:它从 811 行(全仓最大)拆成
+`client/quota/{metrics,QuotaCard,QuotaPanel}`,按纯规则 / 展示 / 数据装配分层,顺带消掉了
+它自己那份与 `client/format.ts` 重复的 `formatTokens`。
 
 ---
 

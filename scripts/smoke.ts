@@ -3,7 +3,7 @@
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
+import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
 import { billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, EARLIEST, instantKey, instantMs, parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_FILE, rateKeyAt, ratesAt, readPriceFile, writePriceFile } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import {
@@ -21,6 +21,7 @@ import { providerCards, splitByProvider, providerKeyOf } from '../src/by-provide
 import { windowFromCreditsBlock, windowFromUsagePercent, resetEpoch, planInfoFromSubscriptions, unconfiguredCard, errorCard, noSubscriptionCard, hasQuotaContent, isBuiltinQuotaPlan, isQuotaAlert, orderQuotaProviders, quotaGate, balanceGateNote, dayText, BUILTIN_PLAN_TITLES } from '../src/quota.ts'
 import { resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage } from '../src/quota-official.ts'
 import type { PricingSegmentInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
+import { totalsTokens } from '../src/types.ts'
 
 let failed = 0
 function check(name: string, cond: boolean, detail?: string): void {

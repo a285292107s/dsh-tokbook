@@ -19,7 +19,7 @@ import { coerceRecord, parseRecord } from './usage-record.ts'
 import {
   type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type SlotRef, type TokenSummary,
   type UsageDayRow, type UsageHourRow, type UsageModelRow, type UsageRateRow, type UsageRecord,
-  type UsageTotals, UNPRICED_KEY, totalsTokens,
+  type UsageTotals, UNPRICED_KEY,
 } from './types.ts'
 import { billingOf, costOf, priceOfKey, ratesAt } from './pricing.ts'
 
@@ -795,5 +795,3 @@ export async function buildSummary(
   for (const name of hot) fresh.push(...await readDayFile(dir, name, logger))
   return { dataDir: dir, ...mergeSummaries(absorbed, summarizeRecords(fresh, resolve)) }
 }
-
-export { totalsTokens, UNPRICED_KEY }

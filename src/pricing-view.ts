@@ -20,30 +20,11 @@
 import { instantKey, EARLIEST } from './price-format.ts'
 import { billingOf, priceAt, rateKeyAt, readPriceFile } from './pricing.ts'
 import type {
-  PriceSegment, PriceSlot, PricingModelView, PricingRouteView, PricingSegmentInput, PricingSlotInput,
-  PricingTable, PricingView, UsageRecord,
+  ModelEntry, PriceSegment, PriceSlot, PricingModelView, PricingRouteView, PricingSegmentInput, PricingSlotInput,
+  PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
 } from './types.ts'
 interface Logger {
   error(...args: unknown[]): void
-}
-
-/** One model a route can be billed for: the exact string records carry, plus
- *  the human name a source gives it (settings `models[].name`, else the
- *  adapter catalog's `name`) — the same pair the model picker renders, where
- *  the name is the label and the exact id stays the identity. */
-export interface ModelEntry {
-  /** Exact model string, as the ledger records it. */
-  id: string
-  /** Display name; absent when nothing names this string. */
-  name?: string
-}
-
-/** One route's catalog entry: the models it can currently be billed for, and
- *  the label to head its card with. */
-export interface RouteCatalogEntry {
-  route: string
-  label: string
-  models: readonly ModelEntry[]
 }
 
 /** What the ledger billed one (route, model): the count the row shows, when it

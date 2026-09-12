@@ -28,14 +28,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PricingView } from '../../types.ts'
+import type { PricingFocus } from '../contract.ts'
 import {
   anchoredRow, baselineOfDraft, baselinesOf, composePriceBody, draftFromView, isUnpriced, stagedChanges, rowKey,
   type ModelDraft, type PriceDraft, type RouteDraft,
 } from './draft.ts'
 import { RouteCard } from './editors.tsx'
-
-/** A cross-tab request (the overview's 价格未知 note) to open on that filter. */
-export type PricingFocus = 'unpriced' | null
 
 export interface PricingPanelProps {
   /** Called after a successful save so the parent can refresh the overview. */

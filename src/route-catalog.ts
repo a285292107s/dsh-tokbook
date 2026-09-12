@@ -14,7 +14,7 @@
  * @module dsh-tokbook/route-catalog
  */
 
-import type { ModelEntry, RouteCatalogEntry } from './pricing-view.ts'
+import type { ModelEntry, RouteCatalogEntry } from './types.ts'
 
 /** The one route the direct DeepSeek adapter owns (`dsh-llm-deepseek`). */
 export const DEEPSEEK_ROUTE = 'deepseek-official'

@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费
 模型调用——`assistant/message` 通道的 `usage`(外加压缩 summarize 调用与失败尝试)
@@ -35,7 +35,8 @@ token/成本,可切换 今日 / 昨天 / 近7天 / 近30天 窗口)、**价格�
 src/
   index.ts            host: TokenUsageBook 服务(ctx.tokbook)+ 实时 hook
   config.ts           插件配置校验 + plans 覆盖层宽松 coerce
-  types.ts            共享领域类型(仅类型)
+  types.ts            共享领域类型 + 纯领域值(UNPRICED_KEY / PROVIDER_RANGES /
+                      totalsTokens),host 与 browser 共用
   ledger.ts           数据目录解析 + owner 标记(单写者守卫)
   usage-record.ts     逐调用记录模型 + 会话事件投影
   usage-log.ts        按日 JSONL 存储(追加/去重/refile;去重状态按数据目录在
@@ -56,13 +57,12 @@ src/
                       /tokbook/usage?range=…、/tokbook/quota、/tokbook/pricing
   client/
     index.ts          client: apply(ctx),注册两个 slot
-    contract.ts       最小 client ctx/slots 类型
+    contract.ts       最小 client 契约:ctx/slots 面 + 跨 surface 视图契约(PricingFocus)
     store.ts          按钮 ↔ 浮窗共享视图 store
     format.ts         纯展示 helper(日键、token/金额/时间格式化)
     styles.ts         注入样式表入口(按 surface 拼接 styles/*.ts)
     styles/           CSS 分片:tokens/footer/overlay/ledger/method/provider/quota/pricing/shared
     FooterButton.tsx  sidebar.footer.action 触发器
-    QuotaPanel.tsx    订阅额度 tab(官方用量卡)
     LedgerOverlay.tsx shell.overlay 浮窗外壳(五 tab + 焦点/快捷键)
     LedgerView.tsx    用量总览 tab(今日英雄卡 + 构成 + 趋势 + 按模型 + 最近)
     ProviderPanel.tsx 通道用量 tab
@@ -71,6 +71,10 @@ src/
       draft.ts        价格表纯逻辑:草稿↔wire 转换、校验、签名(未保存标记)
       editors.tsx     行原语:四档价输入、价段编辑器(生效时间/全天价/峰谷时段)、模型行、路由卡片
       PricingPanel.tsx 价格表 tab 外壳:工具栏 + 路由卡片 + 暂存保存条
+    quota/
+      metrics.ts      订阅额度纯规则:占比/语气/口径/文案(无 React)
+      QuotaCard.tsx   订阅额度卡:卡壳 + ok 主体 + 余额/无订阅面板 + gauge/骨架
+      QuotaPanel.tsx  订阅额度 tab 外壳:取数 + 刷新策略 + 卡片排序
 scripts/
   build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS)
   smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试

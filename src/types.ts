@@ -210,6 +210,27 @@ export interface PricingSegmentInput {
   note?: string
 }
 
+/** One model a route can be billed for: the exact string records carry, plus
+ *  the human name a source gives it (settings `models[].name`, else the
+ *  adapter catalog's `name`) — the same pair the model picker renders, where
+ *  the name is the label and the exact id stays the identity. */
+export interface ModelEntry {
+  /** Exact model string, as the ledger records it. */
+  id: string
+  /** Display name; absent when nothing names this string. */
+  name?: string
+}
+
+/** One route's catalog entry: the models it can currently be billed for, and
+ *  the label to head its card with. Produced by `route-catalog.ts` and consumed
+ *  by `pricing-view.ts`, which is why the shape is stated here instead of in
+ *  either of them: a producer must not import its consumer for its own output. */
+export interface RouteCatalogEntry {
+  route: string
+  label: string
+  models: readonly ModelEntry[]
+}
+
 /** One model row of one route card: the exact model string, where the route
  *  knows it from, and its price timeline. */
 export interface PricingModelView {

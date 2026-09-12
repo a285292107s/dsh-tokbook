@@ -9,11 +9,12 @@
 import type {
   CostedModelRow, RecentLedgerEntry, TokBookOverview, UsageDayRow, UsageTotals,
 } from '../types.ts'
-import type { PricingFocus } from './pricing/PricingPanel.tsx'
+import { totalsTokens } from '../types.ts'
+import type { PricingFocus } from './contract.ts'
 import { UsageGlyph } from './icons.tsx'
 import {
   failureCodeLabel, formatDateTime, formatHitRate, formatMoney, formatRelative, formatTokens,
-  localDayKey, share, shiftDayKey, shortDay, shortId, totalsOf, usageTotal,
+  localDayKey, share, shiftDayKey, shortDay, shortId, usageTotal,
 } from './format.ts'
 
 /** Days in the trend window; the window never starts before the first record. */
@@ -53,7 +54,7 @@ interface TodayHero {
 function todayHero(overview: TokBookOverview): TodayHero {
   const today = localDayKey()
   const row = overview.byDay.find(entry => entry.day === today)
-  const tokens = row === undefined ? 0 : totalsOf(row.totals)
+  const tokens = row === undefined ? 0 : totalsTokens(row.totals)
   return {
     totals: row?.totals ?? ZERO_TOTALS,
     tokens,
@@ -70,7 +71,7 @@ function todayHero(overview: TokBookOverview): TodayHero {
  * ledger shows no ratio at all.
  */
 function todayReference(overview: TokBookOverview, today: string, todayTokens: number): TodayHero['reference'] {
-  const byDay = new Map(overview.byDay.map(entry => [entry.day, totalsOf(entry.totals)]))
+  const byDay = new Map(overview.byDay.map(entry => [entry.day, totalsTokens(entry.totals)]))
   const noRecord = {
     label: '今天还没有记录',
     title: '本机账本今天尚未记录到任何通道计费调用。',
@@ -117,7 +118,7 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
  */
 function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   if (days.length === 0) return null
-  const byDay = new Map(days.map(row => [row.day, totalsOf(row.totals)]))
+  const byDay = new Map(days.map(row => [row.day, totalsTokens(row.totals)]))
   const today = localDayKey()
   const earliest = shiftDayKey(today, -(TREND_DAYS - 1))
   const start = days[0]!.day > earliest ? days[0]!.day : earliest
@@ -191,11 +192,11 @@ function ModelBreakdown({ byModel, totalTokens, money }: {
               <span className="dtpl-model-name">{m.model}</span>
               {m.provider !== '' && <span className="dtpl-model-provider">{m.provider}</span>}
               <span className="dtpl-model-bar" role="presentation">
-                <span className="dtpl-model-bar-fill" style={{ width: `${share(totalsOf(m.totals), totalTokens)}%` }} />
+                <span className="dtpl-model-bar-fill" style={{ width: `${share(totalsTokens(m.totals), totalTokens)}%` }} />
               </span>
             </div>
             <div className="dtpl-model-nums">
-              <span className="dtpl-val">{formatTokens(totalsOf(m.totals))}</span>
+              <span className="dtpl-val">{formatTokens(totalsTokens(m.totals))}</span>
               <span className="dtpl-cost">
                 {m.spend > 0
                   ? money(m.spend)
