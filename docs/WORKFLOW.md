@@ -1,6 +1,6 @@
 # 迭代维护工作流 — dsh-tokbook
 
-> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
 
 > **用法**:接到任何功能迭代 / 修复任务时,按本文件走一遍。目标:功能不断演进时,文档与
 > 代码在**同一 commit** 保持同步,契约不漂移,文档永不明目张胆滞后于代码。它与
@@ -91,6 +91,72 @@ D-011 之后实测的痛点:`LedgerOverlay.tsx` 曾到 ~1300 行(壳 + 五 tab +
 - 不要在拆分时顺手加配置开关、事件总线、通用「panel registry」。
 - 不要为「可能再长出一个 tab」预留空目录或空模块。
 - 不要把一行逻辑切成三层 import。
+
+## 8. 并行功能:车道与 worktree
+
+单个功能在飞时留在主检出(那里有实时反馈环路)。**同时有两个及以上功能在飞时,第 2 个起
+必须进 `git worktree`**——在同一个目录里交错编辑,是唯一会静默毁掉另一个功能的那类冲突。
+
+### 为什么主检出不能并行(本仓库的事实,不是习惯)
+
+- 运行中的 DSH **只认一个路径**:profile 里 `dsh-tokbook` 是指向主检出的 junction,host HMR
+  的 `base` 也钉在主检出。`lib/` 是每个检出各自的产物,**只有主检出的那份是线上的**。
+- 账本数据目录是全局的(`$DSH_HOME/tokbook`)且假设单写者(`src/ledger.ts` 的 `owner.json`
+  告警;README「一个数据目录,一个写入进程」)。
+- `tsconfig` 收 `src/**`、host HMR 的 `root` 是主检出——所以 **worktree 建在仓库外**,否则被
+  构建与 watch 扫到,还会让「哪份是线上」不可判。
+
+### 车道分工
+
+| 车道 | 位置 | 职责 |
+|---|---|---|
+| 集成 / 实时验证 | 主检出(仓库内) | 合并、`pnpm test`、`pnpm build` → 刷新浏览器看真东西。**唯一能实时验证的车道** |
+| 编辑 / 自测 | worktree(仓库外同级,如 `..\dsh-tokbook-wt\<topic>`) | 改代码 + 同 commit 改文档 + `pnpm test`,不碰主检出 |
+
+```sh
+git worktree add -b feat/<topic> ..\dsh-tokbook-wt\<topic> main
+cd ..\dsh-tokbook-wt\<topic>
+pnpm install      # 只有 pnpm typecheck / pnpm build 需要;pnpm test 不装依赖也能跑
+```
+
+分支点永远是 main 的**最后一个 commit**,不是脏树。`pnpm test` 跑的是 `src/`(node 类型剥离,
+三个自检脚本不依赖 node_modules),所以 worktree 里不 build 也能自证——实测新建的 worktree
+不装依赖即可 `pnpm test` 全绿;要 build 就 build 在那里,它不影响线上。
+
+### 合并协议
+
+1. 合并前在 worktree 里 `git rebase main`,在热文件上解冲突(见下表)。
+2. 主检出 `git merge --no-ff feat/<topic>`。
+3. **合后门禁在主检出跑**:`pnpm test` + `pnpm build` + 刷新浏览器验证。红就当场修或 revert。
+   worktree 只让冲突显形,不减少冲突——真正的风险是两个功能各自的逻辑合起来之后才第一次相遇。
+4. `git worktree remove ..\dsh-tokbook-wt\<topic>` + `git branch -d feat/<topic>`。
+
+### 热文件与各自规则
+
+每个功能都要碰它们,所以冲突是可预期的、按规则解:
+
+| 文件 | 冲突形态 | 规则 |
+|---|---|---|
+| `docs/DECISIONS.md` | 双方各追加,`D-NNN` 撞号 | 按 main 尾号重编号,并同步引用该编号的 CONTRACTS / README 行 |
+| `docs/CONTRACTS.md` 路由表 | 双方各加一行 | 取并集;`selfcheck-docs` 与 `src/routes.ts` 双向比对,漏并一条就红 |
+| `src/client/styles.ts` | 分片拼接顺序是级联契约 | **不取并集重排**,由人定序后写死 |
+| `src/types.ts` / `src/index.ts` / `src/routes.ts` | 追加到同一 seam | 两功能改的是**同一个 seam**时**不并行**,排队做 |
+| `README.md` / `docs/INDEX.md` | 追加式 | 取并集 |
+| `scripts/smoke.ts` | 各自加断言 | 取并集 |
+
+### AI 并行子代理
+
+同一条规则:父代理开 worktree、分配分支,**每个子代理只在自己的 worktree 里改**,不碰主检出;
+rebase、合并、合后门禁都归父代理,子代理之间不互相代管目录。
+
+### 不要做
+
+- 不要为「实时预览 worktree 里的分支」另起第二个 host:那需要独立 `path` 数据目录,而
+  `--patch` overlay 只覆盖 host 半区(README 引用的 `dev/cordis.yml` 目前也不存在)。要看效果就
+  合并到 main,在主检出看。
+- 不要为建/删 worktree 养脚本:两条 git 命令(install 只在要 build / typecheck 时),包一层
+  只是多一个维护面。
+- 不要给单个在飞的功能也开 worktree:白付一次目录切换 + 合并,还丢掉 HMR 快反馈。
 
 ## 参考
 

@@ -66,6 +66,8 @@ browser 半区用侧边栏 footer 按钮 + shell.overlay 浮窗展示它们(汇�
 - `README.md` — 端到端项目范围、布局、构建/安装/配置、状态。最先读它。
 - `docs/INDEX.md` — 本仓库文档树的地图(role · status · 何时读)。在改动有文档契约的
   代码(路由、配置、事件、数据文件)前,先看该领域的条目。
+- `docs/WORKFLOW.md` — 每次改代码要走的循环:同 commit 改文档、门禁、文件体量判据(§7),
+  以及**两个及以上功能并行时的 worktree 车道与合并协议**(§8)。
 
 必须与代码一致的契约在 `docs/CONTRACTS.md`,持久架构决策在 `docs/DECISIONS.md`——在
 **同一个 commit** 里随代码改动更新它们;`scripts/selfcheck-docs.ts`(属于 `pnpm
