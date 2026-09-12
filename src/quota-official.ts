@@ -14,15 +14,20 @@
  * source notes):
  *  - Command Code (mirrors dsh-commandcode-provider / the official `cmd` CLI):
  *      GET {base}/alpha/whoami
- *      GET {base}/alpha/usage/summary
+ *      GET {base}/alpha/usage/summary?since=<current period start>
  *      GET {base}/alpha/billing/credits        → credits + windowLimits{fiveHour,weekly}
  *      GET {base}/alpha/billing/subscriptions  → plan identity + period
  *    Auth: `Authorization: Bearer <key>` + CLI version / environment headers.
+ *    The card also carries its usage *gate* (`QuotaGate`): whether an in-force
+ *    subscription — and therefore the rolling windows and monthly pool — is
+ *    what bounds the account, or only its credit balance.
  *  - OpenCode Go (live endpoint — see cc-switch #6433 / dsh-opencode-go-usage):
  *      GET https://opencode.ai/zen/go/v1/usage  → { usage: {
  *           rolling|weekly|monthly: { status, percent, resetsAt } } }
  *    Auth: `Authorization: Bearer <key>` (+ a browser User-Agent, since the
- *    endpoint sits behind Cloudflare).
+ *    endpoint sits behind Cloudflare). 401 = bad key (an `error` card);
+ *    403 = valid key without a Go subscription (Zen and Go share the workspace
+ *    key), answered as a `gate: 'none'` state card rather than a failure.
  *
  * Every fetch is best-effort and short-timeout; failures surface as an
  * `error` card rather than throwing.
@@ -33,7 +38,7 @@
 import type { PlanConfig, QuotaCard, QuotaCreditPool, QuotaUsageSummary } from './types.ts'
 import {
   BUILTIN_KEY_ENV, BUILTIN_PLAN_TITLES, COMMAND_CODE_PLAN_NAMES, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER,
-  errorCard, hasQuotaContent, planInfoFromSubscriptions, unconfiguredCard,
+  balanceGateNote, errorCard, hasQuotaContent, noSubscriptionCard, planInfoFromSubscriptions, quotaGate, unconfiguredCard,
   windowFromCreditsBlock, windowFromUsagePercent,
 } from './quota.ts'
 
@@ -121,6 +126,26 @@ export async function resolvePlanApiKey(
 const COMMAND_CODE_API_BASE = 'https://api.commandcode.ai'
 const COMMAND_CODE_CLI_VERSION = '1.47.0'
 
+/** One `/alpha/*` path with its query params; empty/absent values drop out.
+ * `orgId` scopes the billing endpoints, `since` scopes the usage summary. */
+function ccPath(path: string, params: Record<string, string | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, value)
+  }
+  const query = search.toString()
+  return query === '' ? path : `${path}?${query}`
+}
+
+/** A raw timestamp field as a string, for a query param the API takes
+ * verbatim (`since`): the provider may report it as an ISO string or as an
+ * epoch, and passing it back unchanged is the only reading that fits both. */
+function rawTimestamp(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return undefined
+}
+
 /** Fetch one Command Code `/alpha/*` endpoint, returning its parsed body or
  * `{ status }` on failure. */
 async function ccGet(
@@ -182,21 +207,30 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
   if (key === undefined) return unconfiguredCard(COMMAND_CODE_PROVIDER)
   const logger = deps.logger
 
-  // whoami, usage/summary and billing/credits are independent — fire them
-  // concurrently so the card never waits for four serial round trips. The
-  // subscriptions endpoint may need an orgId read from whoami (org accounts),
-  // so it is issued after the trio resolves.
-  const [whoami, usage, credits] = await Promise.all([
-    ccGet('/alpha/whoami', key, logger),
-    ccGet('/alpha/usage/summary', key, logger),
-    ccGet('/alpha/billing/credits', key, logger),
-  ])
+  // whoami first — it names the org the billing endpoints are scoped to — then
+  // credits + subscriptions concurrently, then the usage summary last, because
+  // only subscriptions knows the current period start. The summary is scoped to
+  // that period (`since`): it is the spend side of the monthly-allowance math,
+  // so it must belong to the same cycle as the credit pool it is read against.
+  // (Verified by hand: period spend + remaining pool ≈ the plan's monthly
+  // credits.) The ordering costs one extra round trip, which the tab's
+  // stale-while-revalidate first paint never waits on.
+  const whoami = await ccGet('/alpha/whoami', key, logger)
   const whoamiBody = isRecord(whoami) && !('__httpStatus' in whoami) ? whoami : undefined
   const orgId = whoamiBody !== undefined && isRecord(whoamiBody.org) ? str(whoamiBody.org.id) : undefined
-  const subscription = await ccGet(
-    orgId === undefined
-      ? '/alpha/billing/subscriptions'
-      : `/alpha/billing/subscriptions?orgId=${encodeURIComponent(orgId)}`,
+  const [credits, subscription] = await Promise.all([
+    ccGet(ccPath('/alpha/billing/credits', { orgId }), key, logger),
+    ccGet(ccPath('/alpha/billing/subscriptions', { orgId }), key, logger),
+  ])
+  // Did the subscriptions endpoint *answer*? Not the same question as "is there
+  // a plan node": it also has no node when the call itself failed, and the two
+  // demand opposite readings (see the gate block below).
+  const subscriptionBody = isRecord(subscription) && !('__httpStatus' in subscription) ? subscription : undefined
+  const subscriptionNode = subscriptionBody !== undefined && isRecord(subscriptionBody.data)
+    ? subscriptionBody.data
+    : subscriptionBody
+  const usage = await ccGet(
+    ccPath('/alpha/usage/summary', { orgId, since: rawTimestamp(subscriptionNode?.currentPeriodStart) }),
     key,
     logger,
   )
@@ -268,11 +302,39 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
   }
 
   // billing/subscriptions → plan identity (fall back to credits.planId).
-  if (isRecord(subscription) && !('__httpStatus' in subscription)) {
-    const data = isRecord(subscription.data) ? subscription.data : undefined
-    attachPlanInfo(card, data ?? subscription, creditsPlanId)
+  if (subscriptionNode !== undefined) {
+    attachPlanInfo(card, subscriptionNode, creditsPlanId)
   } else if (creditsPlanId !== undefined) {
     attachPlanInfo(card, undefined, creditsPlanId)
+  }
+
+  // What the numbers above *mean* depends on whether a subscription is in
+  // force. The rolling windows and the monthly pool pace an in-force plan's
+  // included credits only; with no subscription the provider gates usage by
+  // the credit balance alone and the windows do not apply. So the card names
+  // its gate instead of letting leftover window numbers read as budget.
+  //
+  // The gate is read ONLY from the endpoint that carries the evidence: `status`
+  // and `periodEnd` exist in `billing/subscriptions` and nowhere else, so that
+  // call failing means "unknown", never "no subscription". Deriving a lapsed
+  // plan off a 5xx would hide windows the account is still under *and say so in
+  // words*. Left unset, the gate defaults to `subscription` and the card
+  // renders exactly what it rendered before this gate existed, until a later
+  // refresh actually answers.
+  if (subscriptionBody !== undefined) {
+    card.gate = quotaGate(card.planInfo)
+    if (card.gate === 'balance') {
+      card.gateNote = balanceGateNote(card.planInfo)
+      // A `balance` gate promises a balance to show. When `billing/credits` did
+      // not answer either there is no number to put in the windows' place, and
+      // an absent one renders as `$0.00` — a claim we cannot support. That is
+      // the same "nothing to show" case as OpenCode Go's, so it takes the same
+      // gate rather than inventing a zero.
+      if (card.credits === undefined) {
+        card.gate = 'none'
+        card.gateNote = `${card.gateNote}（本次未取到余额，暂无法显示可用量）`
+      }
+    }
   }
 
   if (!hasQuotaContent(card)) {
@@ -308,6 +370,11 @@ export function parseOpenCodeGoUsage(body: Record<string, unknown>, now: number 
     plan: OPENCODE_GO_PROVIDER,
     title: BUILTIN_PLAN_TITLES[OPENCODE_GO_PROVIDER]!,
     state: 'ok',
+    // Window percentages *are* this plan's limits (5-hour = 20% of a model's
+    // monthly allowance, weekly = 50%, monthly = 100%), so a card with windows
+    // is subscription-gated. Stated explicitly so the client never has to infer
+    // the gate from the presence of a field.
+    gate: 'subscription',
     windows: [],
     fetchedAt: Date.now(),
   }
@@ -342,7 +409,16 @@ export async function fetchOpenCodeGoQuota(deps: QuotaFetchDeps = {}): Promise<Q
       return errorCard(OPENCODE_GO_PROVIDER, '官方接口拒绝了该 key（401）——请检查 OpenCode Go API key。')
     }
     if (response.status === 403) {
-      return errorCard(OPENCODE_GO_PROVIDER, '官方接口拒绝了请求（403）——可能无 Go 订阅或 key 无权访问。')
+      // Documented as "valid key, no Go subscription" — Zen and Go share the
+      // same workspace key, so this is not an auth failure and not an outage:
+      // the account simply has no Go plan in force (never subscribed, or it
+      // ended). Answered as a state, so the tab shows what is true instead of
+      // 「查询失败」. This endpoint reports window percentages only, so unlike
+      // Command Code there is no balance to put in the windows' place.
+      return noSubscriptionCard(
+        OPENCODE_GO_PROVIDER,
+        '该 key 有效，但当前没有生效中的 OpenCode Go 订阅（未订阅或已过期）——订阅后点右上角刷新即可恢复显示。',
+      )
     }
     if (!response.ok) {
       return errorCard(OPENCODE_GO_PROVIDER, `官方接口返回 HTTP ${response.status}。`)

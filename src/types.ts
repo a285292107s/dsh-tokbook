@@ -6,10 +6,12 @@
  * failed attempts), then aggregates the rows into totals, per-day, per-hour,
  * per-model and per-(day, model, provider, rate) cells. Cost is an additive
  * layer computed through a (route, model) price resolution — a hand-written
- * price table (¥ per million tokens) whose only key is the effective date —
- * so a price update re-prices history without rebuilding the aggregation.
- * Amounts split into real spend (metered channels) and subscription value
- * (subscription channels).
+ * price table (¥ per million tokens) whose time axis has two levels: the
+ * effective instant of a segment (local date, or local date + exact hour) and,
+ * inside it, the daily slots (hour range × day set) that carry an exception
+ * price — so a price update re-prices history without rebuilding the
+ * aggregation. Amounts split into real spend (metered channels) and
+ * subscription value (subscription channels).
  *
  * @module dsh-tokbook/types
  */
@@ -115,14 +117,48 @@ export interface ModelPricing {
  *  value. A route-level fact (`$billing` in the price file); absent = metered. */
 export type BillingNature = 'metered' | 'subscription'
 
+/** Which days of the week one exception slot applies to. */
+export type DaySet = 'daily' | 'weekdays' | 'weekends'
+
+/** One exception slot of a price segment: an hour range of the local day
+ *  (`[start, end)`, so `24` closes the day) that applies on its day set, with
+ *  its own four ¥/M rates. While it is in force it layers over the segment's
+ *  whole-day price — a rate it omits keeps the whole-day one. */
+export interface PriceSlot {
+  days: DaySet
+  /** First hour it covers, 0–23. */
+  start: number
+  /** Hour it stops covering (exclusive), 1–24. */
+  end: number
+  rates: ModelPricing
+}
+
 /** One price segment of one (route, model): the price in force from `from`
  *  (epoch ms; 0 = 最早一段, i.e. since the beginning of time) until the next
  *  segment of the same (route, model) starts. The list stays ascending by
  *  `from`, so "the price at time T" is the last segment with `from ≤ T`. */
 export interface PriceSegment {
   from: number
+  /** The whole-day price of this segment: what a moment its own slots do not
+   *  cover is billed at. */
   rates: ModelPricing
+  /** Exception slots, ascending by start hour; absent/empty = one whole-day
+   *  price. Two slots never overlap (the write path refuses a pair that could
+   *  be in force at the same moment; the read path drops the later one), so at
+   *  most one slot is ever in force. */
+  slots?: PriceSlot[]
   note?: string
+}
+
+/** The identity of one exception slot: the hour it starts at plus its day set.
+ *  Unique inside a segment — two slots sharing both would overlap for their
+ *  whole common range, which the write path refuses — so a rate row can name
+ *  the slot it was billed under while holding no price. Editing the slot's own
+ *  rates or its end hour therefore re-prices its history, while moving its
+ *  start hour or day set (or deleting it) leaves that history 价格未知. */
+export interface SlotRef {
+  start: number
+  days: DaySet
 }
 
 /** The hand-written price table: provider route key → exact model string →
@@ -132,26 +168,45 @@ export type PricingTable = Record<string, Record<string, PriceSegment[]>>
 /** route → its billing nature. The price file's reserved `$billing` section. */
 export type BillingMap = Record<string, BillingNature>
 
-/** The identity of the price segment one record was billed under: the start
- *  instant of the segment that applied. Holds identity, never numbers, so a
- *  price edit re-prices history on the next read. */
+/** The identity of the price one record was billed under: the start instant of
+ *  the segment that applied, plus the exception slot that applied inside it
+ *  (null/absent = that segment's whole-day price). Holds identity, never
+ *  numbers, so a price edit re-prices history on the next read. */
 export interface RateKey {
   from: number
+  slot?: SlotRef | null
 }
 
 /** The neutral key of an unpriced record's rows. */
 export const UNPRICED_KEY: RateKey = { from: -1 }
 
+/** One exception slot as it travels on the wire and lives in `pricing.json`. */
+export interface PricingSlotInput {
+  days: DaySet
+  /** First hour covered (0–23) / hour it stops covering, exclusive (1–24). */
+  start: number
+  end: number
+  inputPerMillion: number
+  outputPerMillion: number
+  cacheReadPerMillion?: number
+  cacheWritePerMillion?: number
+}
+
 /** One price segment as it travels on the wire and lives in `pricing.json`:
- *  `from` is a local calendar date (`YYYY-MM-DD`) or null for 最早一段. Flat
- *  on purpose — the file is hand-written, so a segment is one object carrying
- *  its four rates, not a nested `rates` node. */
+ *  `from` is a local calendar date (`YYYY-MM-DD`) or a local date plus an exact
+ *  hour (`YYYY-MM-DDTHH:00`), or null for 最早一段. Flat on purpose — the file
+ *  is hand-written, so a segment is one object carrying its four whole-day
+ *  rates (plus the exception slots that override them), not a nested `rates`
+ *  node. */
 export interface PricingSegmentInput {
   from: string | null
   inputPerMillion: number
   outputPerMillion: number
   cacheReadPerMillion?: number
   cacheWritePerMillion?: number
+  /** Exception slots layered over the four whole-day rates; absent/empty = this
+   *  segment has one price for the whole day. */
+  slots?: PricingSlotInput[]
   note?: string
 }
 
@@ -160,17 +215,36 @@ export interface PricingSegmentInput {
 export interface PricingModelView {
   /** The exact model string records are billed under. */
   model: string
+  /** Human-readable name, when a source names this string: the settings
+   *  profile's `models[].name`, else the adapter catalog's `name`. Absent for a
+   *  仅账本 row and for a string only the price file mentions — the tab then
+   *  shows the exact string on its own, the way the model picker falls back to
+   *  `provider/model`. */
+  name?: string
   /** True when settings / the adapter catalog lists this string for the route
    *  (i.e. it is callable there); false = a 仅账本 row the configuration no
    *  longer lists, or a string that only carries a hand-written price. */
   configured: boolean
   /** Ledger records naming this (route, model); 0 when never billed. */
   records: number
+  /** Timestamp of this row's first ledger record. Absent when it has none, or
+   *  when the ledger lens could not be read at all. */
+  firstAt?: number
+  /** Timestamp of its last recorded request; same conditions as `firstAt`. */
+  lastAt?: number
+  /** How many of its records fall outside every price segment at their own
+   *  timestamp — they bill ¥0. Absent = unknown (no ledger lens), which is NOT
+   *  the same as 0: a row that has a price can still have unpriced history. */
+  unpriced?: number
   /** Price segments in force order (empty = 价格未知, billed ¥0). */
   segments: PricingSegmentInput[]
-  /** The price in force at view time; absent = nothing prices this row. */
+  /** The four ¥/M buckets of the segment in force at view time — its whole-day
+   *  price, which is exactly what the row's inline cells edit; absent = nothing
+   *  prices this row. A moment an exception slot covers is billed at the slot's
+   *  own rates instead. */
   now?: ModelPricing
-  /** Effective date of the segment that governs `now` (null = 最早一段). */
+  /** Effective instant of the segment that governs `now`
+   *  (`YYYY-MM-DD` or `YYYY-MM-DDTHH:00`; null = 最早一段). */
   nowFrom?: string | null
 }
 
@@ -266,7 +340,10 @@ export interface CostedSummary extends TokenSummary {
   /** Subscription value (¥, non-cash): amount of rows whose billing is
    * `subscription`. */
   subscriptionValue: number
-  /** Models with usage but no entry in the pricing table. */
+  /** Models with usage the current price table cannot bill: nothing prices the
+   *  (route, model) at all, or some of its recorded rate rows name a price
+   *  identity the table no longer holds (a segment date or an exception slot
+   *  that was moved or deleted). Those amounts count ¥0 — 价格未知, not free. */
   unpricedModels: string[]
   /** The active price table (hand-written; empty when nothing is priced). */
   pricing: PricingTable
@@ -318,7 +395,8 @@ export interface ProviderUsageCard {
   spend: number
   /** Subscription value (¥, non-cash) over the whole card. */
   subscriptionValue: number
-  /** Models whose usage has no entry in the pricing table (costed as ¥0). */
+  /** Models of this provider the price table cannot bill (no price at all, or
+   *  a recorded rate row whose price identity it no longer holds); costed ¥0. */
   unpricedModels: string[]
   /** Models of this provider, largest token total first. */
   models: ProviderModelUsage[]
@@ -476,6 +554,29 @@ export interface QuotaCreditPool {
 /** The availability of one official quota card. */
 export type QuotaCardState = 'ok' | 'unconfigured' | 'error'
 
+/**
+ * What bounds one account's usage right now, as the provider itself defines it.
+ *
+ * `subscription` — an in-force plan: its included monthly credits plus the
+ * 5-hour/weekly rolling windows that pace them.
+ * `balance` — no in-force subscription, but the provider reports a credit
+ * balance (`credits` is therefore always present on a `balance` card; when the
+ * credits call does not answer, the card takes the `none` gate instead of
+ * showing a zero nobody reported), and only that balance gates usage. This is
+ * the provider's own rule ("usage with no subscription … gated only by their
+ * credit balance"), and it covers two normal, non-error situations: a plan that
+ * ended (including the documented `cancel at end of billing period` flow), and
+ * an account that was never on a subscription at all (the pay-as-you-go plan).
+ * `none` — no in-force subscription and no balance to show either, because the
+ * provider's endpoint reports none (OpenCode Go exposes window percentages
+ * only). Nothing bounds the account that this card can put a number on, so a
+ * renderer must show the state and nothing else — never leftover windows.
+ *
+ * Absent means `subscription` — the pre-existing reading for a card that
+ * carries ordinary window data.
+ */
+export type QuotaGate = 'subscription' | 'balance' | 'none'
+
 /** One official quota card: one provider's account usage fetched from the
  * provider's own endpoints. Never a local estimate. */
 export interface QuotaCard {
@@ -494,6 +595,18 @@ export interface QuotaCard {
   usage?: QuotaUsageSummary
   /** Credit-pool state when reported. */
   credits?: QuotaCreditPool
+  /** What bounds usage right now (see {@link QuotaGate}); absent reads as
+   * `subscription`. A non-`subscription` card's `windows` are *not* a limit the
+   * account is under — the provider's rolling windows pace an in-force plan's
+   * included monthly credits only — so a renderer must not present them as
+   * budget. Absent (rather than `subscription`) is what an unanswered evidence
+   * source produces: the gate is never inferred from a failed call, so a
+   * renderer keeps its pre-gate reading in that case. */
+  gate?: QuotaGate
+  /** One sentence explaining a `balance` gate (which evidence it rests on, and
+   * the date when the API reported one). Host-composed, so the client never
+   * re-derives the provider's subscription-status vocabulary. */
+  gateNote?: string
   /** Limit windows in display order. */
   windows: QuotaWindowView[]
   /** When the official data was fetched, epoch ms. */

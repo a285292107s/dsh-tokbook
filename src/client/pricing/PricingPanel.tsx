@@ -3,8 +3,12 @@
  *
  * ONE card per provider route, ONE row per model the route can be billed for —
  * the two things the ledger actually names. Every price is hand-written: four
- * ¥/M buckets plus the date they take effect (several dated segments make a
- * 调价史). A row with no segment is 价格未知 and bills ¥0.
+ * whole-day ¥/M buckets plus the instant they take effect (an exact local hour,
+ * so several dated segments make a 调价史), and — one level down, inside the
+ * drawer — the daily 例外时段 that override the whole-day price for an hour
+ * range (峰谷价). A row with no segment is 价格未知 and bills ¥0. A row the
+ * ledger already billed is never left with an undated price: an unwritten 生效
+ * 时间 is anchored at that row's first record (`anchoredRow`).
  *
  * There is no save button and no revert: any change — a rate, an effective
  * date, a segment, the 按量 / 订阅 switch — is written automatically a beat
@@ -25,7 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PricingView } from '../../types.ts'
 import {
-  baselineOfDraft, baselinesOf, composePriceBody, draftFromView, isUnpriced, stagedChanges, rowKey,
+  anchoredRow, baselineOfDraft, baselinesOf, composePriceBody, draftFromView, isUnpriced, stagedChanges, rowKey,
   type ModelDraft, type PriceDraft, type RouteDraft,
 } from './draft.ts'
 import { RouteCard } from './editors.tsx'
@@ -260,7 +264,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       const card = current.get(route)
       if (card === undefined) return current
       const models = new Map(card.models)
-      models.set(model, next)
+      models.set(model, anchoredRow(next))
       const copy = new Map(current)
       copy.set(route, { ...card, models })
       return copy
@@ -340,7 +344,11 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       const models = new Map<string, ModelDraft>()
       for (const [model, row] of card.models) {
         if (unknownOnly && !isUnpriced(row)) continue
-        if (needle !== '' && !routeHit && !model.toLowerCase().includes(needle)) continue
+        // The search covers what the row shows: the human name, the exact model
+        // string, and — when the whole route matches — every row of it.
+        if (needle !== '' && !routeHit
+          && !model.toLowerCase().includes(needle)
+          && !(row.name ?? '').toLowerCase().includes(needle)) continue
         models.set(model, row)
       }
       // A filtered card shows the rows the filter kept, whatever its fold
@@ -371,7 +379,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
           aria-pressed={unknownOnly}
           onClick={() => setUnknownOnly(value => !value)}
         >
-          {unknownOnly ? '只看未定价' : '未定价'} {String(unknownCount)} 个模型
+          {unknownOnly ? '只看价格未知' : '价格未知'} {String(unknownCount)} 个模型
         </button>
         <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
           {stateText}
@@ -381,10 +389,11 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
         )}
       </div>
 
-      {unknownCount > 0 && (
+      {cards.length > 0 && (
         <p className="dtpl-price-legend">
-          <b>—</b> 表示还没写价（暂按 ¥0 计，<b>不是免费</b>）；点上任意一格即可就地填写四档价，
-          需要调价史时点行尾的 ▸。
+          <b>—</b> 表示还没写价（暂按 ¥0 计，<b>不是免费</b>）。行内四个数字改的是
+          <b>当前生效那一段的全天价</b>——改它就是重算用这段价计费的历史；
+          要从现在起调价、或给某个时段单独定价，点行尾的 ▸。
         </p>
       )}
 

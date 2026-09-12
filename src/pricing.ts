@@ -2,28 +2,39 @@
  * The hand-written price table of the token-book.
  *
  * ONE file, ONE axis: `pricing.json` maps a provider route key → an exact model
- * string → that pair's price timeline. A segment is four ¥/M rates plus the
- * date it takes effect; a record is priced by the LAST segment whose effective
- * date has arrived, so backdating a price re-prices history and no aggregation
- * is ever rebuilt. Nothing else decides a price: there is no cloud mirror and
- * no global per-model layer — every (route, model) is the user's own number,
- * and a pair nobody priced bills ¥0 while surfacing as 价格未知.
+ * string → that pair's price timeline. A segment is four whole-day ¥/M rates
+ * plus the instant it takes effect — a local date, or a local date and an exact
+ * hour — and, optionally, the exception slots that override those rates inside
+ * an hour range on a day set (工作日早高峰, 周末通宵…). A record is priced by the
+ * LAST segment whose effective instant has arrived, then by the slot of that
+ * segment in force at the record's own local time (no slot in force = the
+ * whole-day price), so backdating or re-slotting a price re-prices history and
+ * no aggregation is ever rebuilt. Nothing else decides a price: there is no
+ * cloud mirror and no global per-model layer — every (route, model) is the
+ * user's own number, and a pair nobody priced bills ¥0 while surfacing as
+ * 价格未知.
  *
  * The file has exactly one reserved key, `$billing`: route → billing nature
  * (`metered` = real spend, `subscription` = folded plan value). It is a
  * channel-level fact, the same way the ledger records a channel per row.
  *
- * Reading is lenient (a malformed segment is dropped, never fatal); writing is
- * strict and replaces the whole file, so a bad PUT cannot half-apply.
+ * Reading is lenient (a malformed segment or slot is dropped, never fatal);
+ * writing is strict and replaces the whole file, so a bad PUT cannot
+ * half-apply. The time axis itself — instants, hours and day sets — is shared
+ * with the browser half through `./price-format.ts`, so the draft the tab
+ * accepts is exactly what this writer takes.
  *
  * @module dsh-tokbook/pricing
  */
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import {
+  DAY_SETS, EARLIEST, instantKey, instantMs, isHourRange, slotCovers, slotsOverlap,
+} from './price-format.ts'
 import type {
-  BillingMap, BillingNature, ModelPricing, PriceSegment, PricingModelView, PricingRouteView,
-  PricingSegmentInput, PricingTable, PricingView, RateKey, UsageTotals,
+  BillingMap, BillingNature, ModelPricing, PriceSegment, PriceSlot, PricingSegmentInput, PricingSlotInput,
+  PricingTable, RateKey, SlotRef, UsageTotals,
 } from './types.ts'
 import { UNPRICED_KEY } from './types.ts'
 
@@ -33,11 +44,8 @@ export const PRICING_FILE = 'pricing.json'
 /** The file's one reserved top-level key (route → billing nature). */
 export const PRICING_BILLING_KEY = '$billing'
 
-/** The `from` of a segment with no effective date: 最早一段, i.e. it has always
- *  applied. Stored as 0 so a plain `from <= timeMs` comparison works. */
-export const EARLIEST = 0
+export { DAY_SETS, EARLIEST, dayKeyOf, dayStartMs, instantKey, instantMs } from './price-format.ts'
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/u
 const MAX_NOTE_LENGTH = 120
 const MAX_ROUTE_LENGTH = 128
 const MAX_MODEL_LENGTH = 256
@@ -53,46 +61,6 @@ export interface PriceFile {
   table: PricingTable
   billing: BillingMap
   revision: string
-}
-
-/** One route's catalog entry: the models it can currently be billed for, and
- *  the label to head its card with. */
-export interface RouteCatalogEntry {
-  route: string
-  label: string
-  models: readonly string[]
-}
-
-/** What the ledger billed, per route and per (route, model). */
-export interface LedgerUsage {
-  /** route → exact model string → recorded requests. */
-  byRouteModel: ReadonlyMap<string, ReadonlyMap<string, number>>
-  /** route → recorded requests over the whole route. */
-  byRoute: ReadonlyMap<string, number>
-}
-
-// ---------------------------------------------------------------------------
-// Dates
-// ---------------------------------------------------------------------------
-
-/** Local-midnight epoch ms of a `YYYY-MM-DD` date; null when it is not a real
- *  calendar date (2026-02-31 is not). */
-export function dayStartMs(date: string): number | null {
-  if (!DATE_RE.test(date)) return null
-  const year = Number(date.slice(0, 4))
-  const month = Number(date.slice(5, 7))
-  const day = Number(date.slice(8, 10))
-  const at = new Date(year, month - 1, day)
-  if (at.getFullYear() !== year || at.getMonth() !== month - 1 || at.getDate() !== day) return null
-  return at.getTime()
-}
-
-/** The local `YYYY-MM-DD` of an epoch-ms instant. */
-export function dayKeyOf(ms: number): string {
-  const at = new Date(ms)
-  const month = String(at.getMonth() + 1).padStart(2, '0')
-  const day = String(at.getDate()).padStart(2, '0')
-  return `${String(at.getFullYear())}-${month}-${day}`
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +110,51 @@ function coerceRates(raw: Record<string, unknown>): ModelPricing | null {
   }
 }
 
+/** The rates a 峰谷时段 restates: any non-empty subset of the four buckets. A
+ *  bucket it omits keeps the segment's whole-day rate, so a peak window can
+ *  restate just what differs. Null = nothing rate-shaped in there at all. */
+function coerceSlotRates(raw: Record<string, unknown>): ModelPricing | null {
+  const rates: ModelPricing = {
+    ...(isRate(raw.inputPerMillion) ? { inputPerMillion: raw.inputPerMillion } : {}),
+    ...(isRate(raw.outputPerMillion) ? { outputPerMillion: raw.outputPerMillion } : {}),
+    ...(isRate(raw.cacheReadPerMillion) ? { cacheReadPerMillion: raw.cacheReadPerMillion } : {}),
+    ...(isRate(raw.cacheWritePerMillion) ? { cacheWritePerMillion: raw.cacheWritePerMillion } : {}),
+  } as ModelPricing
+  return Object.keys(rates).length === 0 ? null : rates
+}
+
+/** One 峰谷时段 of the file: the hours and days it covers, plus the buckets it
+ *  restates. A malformed slot (bad hours, an unknown day set, no usable rate)
+ *  is dropped — never applied with a guessed day set, which would silently bill
+ *  every day at the exception price. */
+function coerceSlot(raw: unknown): PriceSlot | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const slot = raw as Record<string, unknown>
+  const rates = coerceSlotRates(slot)
+  if (rates === null) return null
+  if (typeof slot.start !== 'number' || typeof slot.end !== 'number') return null
+  if (!isHourRange({ start: slot.start, end: slot.end })) return null
+  let days: PriceSlot['days'] = 'daily'
+  if (slot.days !== undefined) {
+    const named = DAY_SETS.find(item => item === slot.days)
+    if (named === undefined) return null
+    days = named
+  }
+  return { days, start: slot.start, end: slot.end, rates }
+}
+
+/** Ascending by start hour, overlapping slots dropped (the file's EARLIER slot
+ *  wins — the read path never throws). */
+function normalizeSlots(slots: readonly PriceSlot[]): PriceSlot[] {
+  const out: PriceSlot[] = []
+  for (const slot of [...slots].sort((left, right) =>
+    left.start - right.start || DAY_SETS.indexOf(left.days) - DAY_SETS.indexOf(right.days))) {
+    if (out.some(kept => slotsOverlap(kept, slot))) continue
+    out.push(slot)
+  }
+  return out
+}
+
 function coerceSegment(raw: unknown): PriceSegment | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const segment = raw as Record<string, unknown>
@@ -150,18 +163,26 @@ function coerceSegment(raw: unknown): PriceSegment | null {
   let from = EARLIEST
   if (segment.from !== undefined && segment.from !== null && segment.from !== '') {
     if (typeof segment.from !== 'string') return null
-    const at = dayStartMs(segment.from)
+    const at = instantMs(segment.from)
     if (at === null) return null
     from = at
   }
+  const slots = Array.isArray(segment.slots)
+    ? normalizeSlots(segment.slots.map(coerceSlot).filter((slot): slot is PriceSlot => slot !== null))
+    : []
   const note = typeof segment.note === 'string' && segment.note.trim() !== ''
     ? segment.note.trim().slice(0, MAX_NOTE_LENGTH)
     : undefined
-  return { from, rates, ...(note !== undefined ? { note } : {}) }
+  return {
+    from,
+    rates,
+    ...(slots.length > 0 ? { slots } : {}),
+    ...(note !== undefined ? { note } : {}),
+  }
 }
 
-/** Ascending by effective date, one segment per date (the file's FIRST segment
- *  for a repeated date wins — the read path never throws). */
+/** Ascending by effective instant, one segment per instant (the file's FIRST
+ *  segment for a repeated instant wins — the read path never throws). */
 function normalizeSegments(segments: readonly PriceSegment[]): PriceSegment[] {
   const out: PriceSegment[] = []
   for (const segment of [...segments].sort((left, right) => left.from - right.from)) {
@@ -217,12 +238,48 @@ export async function readPriceFile(dir: string, logger: Logger = console): Prom
   return { ...coercePriceFile(raw, logger), revision: revisionOf(text) }
 }
 
-function parseSegment(value: unknown, where: string): { ok: true; segment: PriceSegment } | { ok: false; error: string } {
+const SLOT_FIELDS = new Set([
+  'days', 'start', 'end', 'inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion',
+])
+
+/** Strict parse of one 峰谷时段: hours inside one local day, a known day set,
+ *  and any non-empty subset of the four rates — a bucket left out keeps the
+ *  segment's whole-day rate. */
+function parseSlot(value: unknown, where: string): { ok: true; slot: PriceSlot } | { ok: false; error: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { ok: false, error: `${where}必须是对象（from? + 四档单价）` }
+    return { ok: false, error: `${where}必须是对象（start + end + 要覆盖的档位单价）` }
   }
   const raw = value as Record<string, unknown>
-  const known = new Set(['from', 'inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion', 'note'])
+  const extra = Object.keys(raw).find(key => !SLOT_FIELDS.has(key))
+  if (extra !== undefined) return { ok: false, error: `${where}含未知字段「${extra}」` }
+  let days: PriceSlot['days'] = 'daily'
+  if (raw.days !== undefined) {
+    if (typeof raw.days !== 'string' || !DAY_SETS.includes(raw.days as PriceSlot['days'])) {
+      return { ok: false, error: `${where}的 days 必须是 "daily" / "weekdays" / "weekends"` }
+    }
+    days = raw.days as PriceSlot['days']
+  }
+  if (typeof raw.start !== 'number' || typeof raw.end !== 'number' || !isHourRange({ start: raw.start, end: raw.end })) {
+    return { ok: false, error: `${where}的时段必须是整数整点，且 0 ≤ start < end ≤ 24（24 = 当天结束）` }
+  }
+  for (const key of ['inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion'] as const) {
+    if (raw[key] !== undefined && !isRate(raw[key])) {
+      return { ok: false, error: `${where}的 ${key} 必须是非负数字（要沿用全天价就别写它）` }
+    }
+  }
+  const rates = coerceSlotRates(raw)
+  if (rates === null) {
+    return { ok: false, error: `${where}至少要写一档价（输入 / 输出 / 缓存读 / 缓存写），否则整条时段等于全天价` }
+  }
+  return { ok: true, slot: { days, start: raw.start, end: raw.end, rates } }
+}
+
+function parseSegment(value: unknown, where: string): { ok: true; segment: PriceSegment } | { ok: false; error: string } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: `${where}必须是对象（from? + 四档单价 + slots?）` }
+  }
+  const raw = value as Record<string, unknown>
+  const known = new Set(['from', 'inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion', 'slots', 'note'])
   const extra = Object.keys(raw).find(key => !known.has(key))
   if (extra !== undefined) return { ok: false, error: `${where}含未知字段「${extra}」` }
   if (!isRate(raw.inputPerMillion) || !isRate(raw.outputPerMillion)) {
@@ -236,11 +293,13 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
   }
   let from = EARLIEST
   if (raw.from !== undefined && raw.from !== null && raw.from !== '') {
-    if (typeof raw.from !== 'string' || !DATE_RE.test(raw.from)) {
-      return { ok: false, error: `${where}的 from 必须是 YYYY-MM-DD 日期（省略 = 最早一段）` }
+    if (typeof raw.from !== 'string') {
+      return { ok: false, error: `${where}的 from 必须是 YYYY-MM-DD 或 YYYY-MM-DDTHH:00（省略 = 无起点，自始生效）` }
     }
-    const at = dayStartMs(raw.from)
-    if (at === null) return { ok: false, error: `${where}的 from 不是有效日期：${raw.from}` }
+    const at = instantMs(raw.from)
+    if (at === null) {
+      return { ok: false, error: `${where}的 from 必须是真实存在的 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00：${raw.from}` }
+    }
     from = at
   }
   if (raw.note !== undefined && typeof raw.note !== 'string') {
@@ -249,6 +308,22 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
   const note = typeof raw.note === 'string' ? raw.note.trim() : ''
   if (note.length > MAX_NOTE_LENGTH) {
     return { ok: false, error: `${where}的 note 过长（最多 ${String(MAX_NOTE_LENGTH)} 字）` }
+  }
+  const slots: PriceSlot[] = []
+  if (raw.slots !== undefined) {
+    if (!Array.isArray(raw.slots)) return { ok: false, error: `${where}的 slots 必须是数组` }
+    for (let index = 0; index < raw.slots.length; index += 1) {
+      const parsed = parseSlot(raw.slots[index], `${where}第 ${String(index + 1)} 个例外时段`)
+      if (!parsed.ok) return { ok: false, error: parsed.error }
+      const clash = slots.find(kept => slotsOverlap(kept, parsed.slot))
+      if (clash !== undefined) {
+        return {
+          ok: false,
+          error: `${where}的例外时段重叠：${clash.start}–${clash.end} 与 ${parsed.slot.start}–${parsed.slot.end} 会在同一时刻同时生效`,
+        }
+      }
+      slots.push(parsed.slot)
+    }
   }
   return {
     ok: true,
@@ -260,6 +335,7 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
         ...(raw.cacheReadPerMillion !== undefined ? { cacheReadPerMillion: raw.cacheReadPerMillion } : {}),
         ...(raw.cacheWritePerMillion !== undefined ? { cacheWritePerMillion: raw.cacheWritePerMillion } : {}),
       },
+      ...(slots.length > 0 ? { slots: normalizeSlots(slots) } : {}),
       ...(note !== '' ? { note } : {}),
     },
   }
@@ -312,8 +388,8 @@ export function parsePriceInput(value: unknown): PriceParse {
         const parsed = parseSegment(list[index], `${where}第 ${String(index + 1)} 段`)
         if (!parsed.ok) return { ok: false, error: parsed.error }
         if (seen.has(parsed.segment.from)) {
-          const label = parsed.segment.from === EARLIEST ? '最早一段' : dayKeyOf(parsed.segment.from)
-          return { ok: false, error: `${where}有两段的生效日期相同（${label}）：同一时刻只能有一段价` }
+          const label = parsed.segment.from === EARLIEST ? '无起点' : instantKey(parsed.segment.from)
+          return { ok: false, error: `${where}有两段的生效时间相同（${label}）：同一时刻只能有一段价` }
         }
         seen.add(parsed.segment.from)
         segments.push(parsed.segment)
@@ -325,8 +401,24 @@ export function parsePriceInput(value: unknown): PriceParse {
   return { ok: true, file: { table, billing, revision: '' } }
 }
 
+/** One exception slot of one segment, as the file writes it. */
+function slotBody(slot: PriceSlot): Record<string, unknown> {
+  return {
+    days: slot.days,
+    start: slot.start,
+    end: slot.end,
+    inputPerMillion: slot.rates.inputPerMillion,
+    outputPerMillion: slot.rates.outputPerMillion,
+    ...(slot.rates.cacheReadPerMillion !== undefined
+      ? { cacheReadPerMillion: slot.rates.cacheReadPerMillion } : {}),
+    ...(slot.rates.cacheWritePerMillion !== undefined
+      ? { cacheWritePerMillion: slot.rates.cacheWritePerMillion } : {}),
+  }
+}
+
 /** The file body of one price file: routes and models sorted, the reserved
- *  `$billing` section first, segments ascending by effective date. */
+ *  `$billing` section first, segments ascending by effective instant and the
+ *  exception slots inside each ascending by start hour. */
 export function priceFileBody(file: PriceFile): Record<string, unknown> {
   const body: Record<string, unknown> = {}
   const billingRoutes = Object.keys(file.billing).sort((left, right) => left.localeCompare(right))
@@ -341,16 +433,20 @@ export function priceFileBody(file: PriceFile): Record<string, unknown> {
     for (const model of Object.keys(models).sort((left, right) => left.localeCompare(right))) {
       const segments = models[model]!
       if (segments.length === 0) continue
-      priced[model] = segments.map(segment => ({
-        ...(segment.from > EARLIEST ? { from: dayKeyOf(segment.from) } : {}),
-        inputPerMillion: segment.rates.inputPerMillion,
-        outputPerMillion: segment.rates.outputPerMillion,
-        ...(segment.rates.cacheReadPerMillion !== undefined
-          ? { cacheReadPerMillion: segment.rates.cacheReadPerMillion } : {}),
-        ...(segment.rates.cacheWritePerMillion !== undefined
-          ? { cacheWritePerMillion: segment.rates.cacheWritePerMillion } : {}),
-        ...(segment.note !== undefined ? { note: segment.note } : {}),
-      }))
+      priced[model] = segments.map((segment) => {
+        const slots = segment.slots ?? []
+        return {
+          ...(segment.from > EARLIEST ? { from: instantKey(segment.from) } : {}),
+          inputPerMillion: segment.rates.inputPerMillion,
+          outputPerMillion: segment.rates.outputPerMillion,
+          ...(segment.rates.cacheReadPerMillion !== undefined
+            ? { cacheReadPerMillion: segment.rates.cacheReadPerMillion } : {}),
+          ...(segment.rates.cacheWritePerMillion !== undefined
+            ? { cacheWritePerMillion: segment.rates.cacheWritePerMillion } : {}),
+          ...(slots.length > 0 ? { slots: slots.map(slotBody) } : {}),
+          ...(segment.note !== undefined ? { note: segment.note } : {}),
+        }
+      })
     }
     if (Object.keys(priced).length > 0) body[route] = priced
   }
@@ -384,8 +480,8 @@ export async function writePriceFile(dir: string, file: PriceFile, logger: Logge
 // ---------------------------------------------------------------------------
 
 /** The segment in force at `timeMs` for one (route, model): the last segment
- *  whose effective date has arrived. Null = 价格未知 (nothing priced it, or the
- *  instant predates the earliest segment). */
+ *  whose effective instant has arrived. Null = 价格未知 (nothing priced it, or
+ *  the instant predates the earliest segment). */
 export function priceAt(
   table: PricingTable,
   route: string | undefined,
@@ -402,9 +498,49 @@ export function priceAt(
   return hit
 }
 
-/** The rate identity of one (route, model) at `timeMs` — the effective date of
- *  the segment that applied, or {@link UNPRICED_KEY}. Holds identity, never
- *  numbers, so editing a rate re-prices history on the next read. */
+/** The exception slot of one segment in force at `timeMs` — by the instant's own
+ *  local weekday and hour — or null for the segment's whole-day price. At most
+ *  one slot is ever in force: the write path refuses an overlapping pair and the
+ *  read path drops the later of the two. */
+export function slotAt(segment: PriceSegment, timeMs: number): PriceSlot | null {
+  for (const slot of segment.slots ?? []) {
+    if (slotCovers(slot, timeMs)) return slot
+  }
+  return null
+}
+
+/** The identity of the slot in force at `timeMs`, or null for the whole-day
+ *  price. */
+export function slotRefAt(segment: PriceSegment, timeMs: number): SlotRef | null {
+  const slot = slotAt(segment, timeMs)
+  return slot === null ? null : { start: slot.start, days: slot.days }
+}
+
+/** The ¥/M rates of one segment at `timeMs`: its whole-day price with the
+ *  exception slot in force layered over it. A rate a slot omits keeps the
+ *  whole-day one, so a peak slot may restate only what actually changes. */
+export function ratesOfSegment(segment: PriceSegment, timeMs: number): ModelPricing {
+  const slot = slotAt(segment, timeMs)
+  return slot === null ? segment.rates : { ...segment.rates, ...slot.rates }
+}
+
+/** The price in force at `timeMs` for one (route, model), both levels resolved:
+ *  the segment whose effective instant has arrived, then its slot for that
+ *  instant's local time. Null = 价格未知. */
+export function ratesAt(
+  table: PricingTable,
+  route: string | undefined,
+  model: string,
+  timeMs: number,
+): ModelPricing | null {
+  const segment = priceAt(table, route, model, timeMs)
+  return segment === null ? null : ratesOfSegment(segment, timeMs)
+}
+
+/** The rate identity of one (route, model) at `timeMs` — the effective instant
+ *  of the segment that applied plus the slot that applied inside it, or
+ *  {@link UNPRICED_KEY}. Holds identity, never numbers, so editing a rate
+ *  re-prices history on the next read. */
 export function rateKeyAt(
   table: PricingTable,
   route: string | undefined,
@@ -412,12 +548,15 @@ export function rateKeyAt(
   timeMs: number,
 ): RateKey {
   const hit = priceAt(table, route, model, timeMs)
-  return hit === null ? UNPRICED_KEY : { from: hit.from }
+  return hit === null ? UNPRICED_KEY : { from: hit.from, slot: slotRefAt(hit, timeMs) }
 }
 
 /** The price of one rate identity: look the segment's own instant back up under
- *  the current table (a rate row is keyed by the segment start it was billed
- *  under, so re-pricing history needs no per-record timestamps). */
+ *  the current table, then the slot it names (a rate row is keyed by the segment
+ *  instant and slot it was billed under, so re-pricing history needs no
+ *  per-record timestamps). Null when the table no longer holds that identity —
+ *  the segment instant is gone, or the named slot was moved or deleted — which
+ *  reads as 价格未知 for exactly those rows. */
 export function priceOfKey(
   table: PricingTable,
   route: string | undefined,
@@ -425,7 +564,12 @@ export function priceOfKey(
   key: RateKey,
 ): ModelPricing | null {
   if (key.from < 0) return null
-  return priceAt(table, route, model, key.from)?.rates ?? null
+  const segment = priceAt(table, route, model, key.from)
+  if (segment === null) return null
+  const ref = key.slot
+  if (ref === undefined || ref === null) return segment.rates
+  const slot = (segment.slots ?? []).find(item => item.start === ref.start && item.days === ref.days)
+  return slot === undefined ? null : { ...segment.rates, ...slot.rates }
 }
 
 /** The billing nature of one route: its `$billing` entry, default metered. */
@@ -446,106 +590,3 @@ export function costOf(totals: UsageTotals, prices: ModelPricing): number {
     + totals.cacheWriteTokens * cacheWrite) / M
 }
 
-// ---------------------------------------------------------------------------
-// The 价格表 view
-// ---------------------------------------------------------------------------
-
-function segmentInput(segment: PriceSegment): PricingSegmentInput {
-  return {
-    from: segment.from > EARLIEST ? dayKeyOf(segment.from) : null,
-    inputPerMillion: segment.rates.inputPerMillion,
-    outputPerMillion: segment.rates.outputPerMillion,
-    ...(segment.rates.cacheReadPerMillion !== undefined
-      ? { cacheReadPerMillion: segment.rates.cacheReadPerMillion } : {}),
-    ...(segment.rates.cacheWritePerMillion !== undefined
-      ? { cacheWritePerMillion: segment.rates.cacheWritePerMillion } : {}),
-    ...(segment.note !== undefined ? { note: segment.note } : {}),
-  }
-}
-
-/**
- * Assemble the 价格表 cards: one card per provider route, one row per model the
- * route can be billed for. The route set is the union of
- *   · the route catalog (settings profiles ∪ the live adapter registry), and
- *   · every route the ledger billed, and
- *   · every route the price file mentions,
- * so a route that disappeared from configuration — or that only carries a
- * hand-written price — stays visible and editable instead of orphaning its
- * money. The same union applies inside a card: `configured` marks the models
- * settings/catalog list, and a ledger-only string is kept so its history keeps
- * an editable price.
- */
-export async function readPricingView(
-  dir: string,
-  catalog: readonly RouteCatalogEntry[],
-  ledger: LedgerUsage,
-  logger: Logger = console,
-): Promise<PricingView> {
-  const file = await readPriceFile(dir, logger)
-  interface ModelAcc { configured: boolean; records: number }
-  const routes = new Map<string, { label: string; models: Map<string, ModelAcc> }>()
-  const ensure = (route: string, label?: string): Map<string, ModelAcc> => {
-    let entry = routes.get(route)
-    if (entry === undefined) {
-      entry = { label: label !== undefined && label !== '' ? label : route, models: new Map() }
-      routes.set(route, entry)
-    } else if (label !== undefined && label !== '' && entry.label === route) {
-      entry.label = label
-    }
-    return entry.models
-  }
-  for (const entry of catalog) {
-    const models = ensure(entry.route, entry.label)
-    for (const model of entry.models) {
-      const row = models.get(model)
-      if (row === undefined) models.set(model, { configured: true, records: 0 })
-      else row.configured = true
-    }
-  }
-  for (const [route, byModel] of ledger.byRouteModel) {
-    const models = ensure(route)
-    for (const [model, records] of byModel) {
-      const row = models.get(model)
-      if (row === undefined) models.set(model, { configured: false, records })
-      else row.records = records
-    }
-  }
-  for (const [route, byModel] of Object.entries(file.table)) {
-    const models = ensure(route)
-    for (const model of Object.keys(byModel)) {
-      if (!models.has(model)) models.set(model, { configured: false, records: 0 })
-    }
-  }
-
-  const now = Date.now()
-  const cards: PricingRouteView[] = []
-  for (const [route, entry] of routes) {
-    const models: PricingModelView[] = []
-    for (const [model, acc] of entry.models) {
-      const segments = file.table[route]?.[model]
-      const hit = segments === undefined ? null : priceAt(file.table, route, model, now)
-      models.push({
-        model,
-        configured: acc.configured,
-        records: acc.records,
-        segments: (segments ?? []).map(segmentInput),
-        ...(hit !== null
-          ? { now: hit.rates, nowFrom: hit.from > EARLIEST ? dayKeyOf(hit.from) : null }
-          : {}),
-      })
-    }
-    models.sort((left, right) =>
-      right.records - left.records
-      || Number(right.configured) - Number(left.configured)
-      || left.model.localeCompare(right.model))
-    cards.push({
-      route,
-      label: entry.label,
-      billing: billingOf(file.billing, route),
-      records: ledger.byRoute.get(route) ?? 0,
-      models,
-    })
-  }
-  cards.sort((left, right) => right.records - left.records || left.route.localeCompare(right.route))
-  return { routes: cards, dataDir: dir, updatedAt: now }
-}

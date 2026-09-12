@@ -500,7 +500,8 @@ dsh-tokbook/
 - **金额双桶**:`spend`(metered,实际支出)与 `subscriptionValue`(subscription,订阅价值、
   非现金);`totalCost` = 两者之和,兼容旧 wire。
 - **价格表 tab**:每条通道路由一张卡(卡源 = 设置文档 ∪ 运行时适配器 ∪ 账本 ∪ 价格文件),
-  卡内每模型一行:四档价 + 生效日期 + 调价史抽屉;改动后约 0.6s 自动整表 `PUT /tokbook/pricing`。
+  卡内每模型一行:四档价 + 生效日期 + 调价史抽屉;没写的生效时间按该行**首记**(账本第一条记录)
+  的整点锚定(`anchoredRow`,见 D-017),改动后约 0.6s 自动整表 `PUT /tokbook/pricing`。
 
 ### 4. 前端（保留浮窗形态，内容升级，覆盖 §6.1/§6.2）
 

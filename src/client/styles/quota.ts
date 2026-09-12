@@ -111,6 +111,13 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   color:var(--dtpl-err);
   background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);
 }
+/* Balance-gate chip (无生效订阅): not an error — the account still works, it is
+   just no longer paced by a plan's rolling windows — so it reads as a caution
+   rather than a failure. */
+[data-plugin="dsh-tokbook"] .dtpl-quota-chip-gate{
+  color:var(--dtpl-warn);
+  background:color-mix(in srgb,var(--dtpl-warn) 12%,transparent);
+}
 /* Monthly-budget ring gauge. Sits in the header identity slot on the card's
    leading edge (where the plan monogram used to be): the ring stroke carries
    the tone and the used-% number is centered *inside* the ring, with the
@@ -213,6 +220,25 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-reset-limited{color:var(--dtpl-err);font-weight:600;}
+/* Balance-gated body: the credit balance leads where the meters would be. A
+   balance has no denominator, so there is no percentage to draw and no ring. */
+[data-plugin="dsh-tokbook"] .dtpl-quota-balance{display:flex;align-items:baseline;gap:8px;}
+[data-plugin="dsh-tokbook"] .dtpl-quota-balance-v{
+  color:var(--dtpl-fg);font-size:22px;line-height:26px;font-weight:700;
+  font-variant-numeric:tabular-nums;letter-spacing:-.01em;
+}
+[data-plugin="dsh-tokbook"] .dtpl-quota-balance-k{
+  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;font-weight:500;
+}
+[data-plugin="dsh-tokbook"] .dtpl-quota-balance-note{
+  margin:6px 0 0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
+}
+/* Credit sources (月额度 / 已购 / 赠送): one compact line under the balance —
+   and under the meters for an in-force card that carries top-up credits. */
+[data-plugin="dsh-tokbook"] .dtpl-quota-sources{
+  margin:8px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
+  font-variant-numeric:tabular-nums;
+}
 /* Usage-summary activity strip (Command Code): mini K/V cells, at the bottom
    of an ok body as the "how was this period" context under the meter rows. */
 [data-plugin="dsh-tokbook"] .dtpl-quota-stats{

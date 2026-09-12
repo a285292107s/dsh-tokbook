@@ -49,9 +49,10 @@ import {
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import {
-  parsePriceInput, rateKeyAt, readPriceFile, readPricingView, writePriceFile,
-  type LedgerUsage, type PriceParse,
+  parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
+  type PriceParse,
 } from './pricing.ts'
+import { ledgerUsageOf, readPricingView, type LedgerUsage } from './pricing-view.ts'
 import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'
 import { providerCards } from './by-provider.ts'
 import { registerTokBookPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
@@ -610,9 +611,12 @@ export class TokenUsageBook extends Service {
     try {
       // The ledger lens needs record counts, not prices: read the warmed record
       // cache rather than folding a rollup, so this tab never stages rate rows
-      // of its own for the costed paths to trust.
+      // of its own for the costed paths to trust. The table rides along because
+      // the lens also reports how much of each row the price does NOT cover —
+      // records a written 生效时间 cut off, which bill ¥0.
       const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
-      ledger = ledgerUsageOf(records)
+      const { table } = await readPriceFile(this.dir, this.logger)
+      ledger = ledgerUsageOf(records, table)
     } catch (error) {
       // A failing read must not block the tab: the price file is still editable
       // without the ledger's usage lens.
@@ -636,29 +640,6 @@ export class TokenUsageBook extends Service {
     return { ok: true, file: parsed.file, view: await this.pricingView() }
   }
 
-}
-
-/** Fold the ledger's rows into the pricing view's usage lens: recorded requests
- *  per (route, model). Failed attempts name a route but no billed call, so they
- *  stay out — the card's 「账本 N 次」 means the same thing the 通道用量 tab's
- *  request count does. Unattributed rows (no route header was ever seen) cannot
- *  be priced and stay out of the 价格表 cards. */
-function ledgerUsageOf(records: readonly UsageRecord[]): LedgerUsage {
-  const byRouteModel = new Map<string, Map<string, number>>()
-  const byRoute = new Map<string, number>()
-  for (const record of records) {
-    if (record.kind === 'failure') continue
-    const route = record.provider ?? ''
-    if (route === '' || record.model === '') continue
-    let models = byRouteModel.get(route)
-    if (models === undefined) {
-      models = new Map()
-      byRouteModel.set(route, models)
-    }
-    models.set(record.model, (models.get(record.model) ?? 0) + 1)
-    byRoute.set(route, (byRoute.get(route) ?? 0) + 1)
-  }
-  return { byRouteModel, byRoute }
 }
 
 /** Drop the derived stats state after a sync appended rows (a rollup whose

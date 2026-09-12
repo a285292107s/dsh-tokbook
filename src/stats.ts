@@ -3,7 +3,7 @@
  * records into totals, per-day rows, per-hour rows, per-(provider, model)
  * rows, and a bounded recent window — keeping one row per (day, model,
  * provider, rate identity) so every record is billed at the price its own
- * timestamp resolved to (see pricing.priceAt).
+ * timestamp resolved to (see pricing.ratesAt).
  * Frozen (pre-today) day files are served from the on-disk rollup; only
  * today's file is read on every call. Parsed day files are cached in process
  * memory (frozen files stay resident; today's file is re-read when its
@@ -14,13 +14,14 @@
 
 import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DAY_SETS } from './price-format.ts'
 import { coerceRecord, parseRecord } from './usage-record.ts'
 import {
-  type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type TokenSummary,
+  type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type SlotRef, type TokenSummary,
   type UsageDayRow, type UsageHourRow, type UsageModelRow, type UsageRateRow, type UsageRecord,
   type UsageTotals, UNPRICED_KEY, totalsTokens,
 } from './types.ts'
-import { billingOf, costOf, priceAt, priceOfKey } from './pricing.ts'
+import { billingOf, costOf, priceOfKey, ratesAt } from './pricing.ts'
 
 /** Bounded recent window length: only the newest records cross the wire. */
 export const RECENT_LIMIT = 20
@@ -309,11 +310,12 @@ export async function warmRecordCache(dir: string, now?: () => Date, logger?: St
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
-/** Rollup format version. v3 keys every rate row by the effective date of the
- *  price segment that applied (the v2 rule/tier/slot identity is gone); a
- *  rollup of any other version is treated as absent and rebuilt from the day
- *  files, so a format change can never silently mis-merge rows. */
-export const ROLLUP_SCHEMA_VERSION = 3
+/** Rollup format version. v4 keys every rate row by the effective instant of
+ *  the price segment that applied AND the exception slot that applied inside it
+ *  (v3 knew only the segment's date); a rollup of any other version is treated
+ *  as absent and rebuilt from the day files, so a format change can never
+ *  silently mis-merge rows. */
+export const ROLLUP_SCHEMA_VERSION = 4
 
 export interface RollupFile {
   schemaVersion: number
@@ -342,10 +344,18 @@ function isTotals(value: unknown): value is UsageTotals {
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/u
 const HOUR_KEY = /^\d{4}-\d{2}-\d{2}T\d{2}$/u
 
+function isSlotRef(value: unknown): value is SlotRef {
+  if (typeof value !== 'object' || value === null) return false
+  const ref = value as Record<string, unknown>
+  return typeof ref.start === 'number' && Number.isFinite(ref.start)
+    && DAY_SETS.some(days => days === ref.days)
+}
+
 function isRateKey(value: unknown): value is RateKey {
   if (typeof value !== 'object' || value === null) return false
   const key = value as Record<string, unknown>
-  return typeof key.from === 'number' && Number.isFinite(key.from)
+  if (typeof key.from !== 'number' || !Number.isFinite(key.from)) return false
+  return key.slot === undefined || key.slot === null || isSlotRef(key.slot)
 }
 
 function isRollupFile(value: unknown): value is RollupFile {
@@ -464,7 +474,7 @@ function hourRows(hours: Map<string, UsageTotals>): UsageHourRow[] {
 }
 
 function compareKeys(left: RateKey, right: RateKey): number {
-  return left.from - right.from
+  return left.from - right.from || (left.slot?.start ?? -1) - (right.slot?.start ?? -1)
 }
 
 function rateRowsSorted(rows: Iterable<UsageRateRow>): UsageRateRow[] {
@@ -485,8 +495,13 @@ function modelMapKey(provider: string | undefined, model: string): string {
   return `${providerKey(provider)}\n${model}`
 }
 
+/** The aggregation identity of one rate row: the segment instant, plus the
+ *  exception slot that applied inside it (`-` = the segment's whole-day
+ *  price). Two rows of one (day, model, provider) therefore never mix a peak
+ *  hour with an off-peak one. */
 function rateRowKey(day: string, model: string, provider: string | undefined, rate: RateKey): string {
-  return `${day}\n${model}\n${providerKey(provider)}\n${String(rate.from)}`
+  const slot = rate.slot === undefined || rate.slot === null ? '-' : `${String(rate.slot.start)}:${rate.slot.days}`
+  return `${day}\n${model}\n${providerKey(provider)}\n${String(rate.from)}\n${slot}`
 }
 
 function hourRowKey(hour: string, model: string): string {
@@ -618,12 +633,15 @@ export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSu
 
 /** Attach the cost layer to a token-only summary: every rate row is priced by
  * looking its (route, model, rate identity) back up in the current price table
- * — the row's identity is the effective date of the segment that applied, so a
- * rate edit re-prices history without a rebuild. Each row's amount lands in the
- * bucket its ROUTE's billing names: `metered` routes accumulate into `spend`,
- * `subscription` routes into `subscriptionValue`; `totalCost` stays the sum of
- * both. Rows nothing prices cost ¥0 and their model strings surface in
- * `unpricedModels`. */
+ * — the row's identity is the effective instant of the segment that applied
+ * plus the exception slot that applied inside it, so a rate edit re-prices
+ * history without a rebuild. Each row's amount lands in the bucket its ROUTE's
+ * billing names: `metered` routes accumulate into `spend`, `subscription`
+ * routes into `subscriptionValue`; `totalCost` stays the sum of both. Rows the
+ * table cannot price cost ¥0 and their model strings surface in
+ * `unpricedModels` — that covers both a (route, model) nothing prices and a row
+ * whose own identity (a segment instant, or an exception slot that was moved or
+ * deleted) the table no longer holds. */
 export function attachCosts(
   summary: TokenSummary & { dataDir: string },
   pricing: PricingTable,
@@ -634,12 +652,18 @@ export function attachCosts(
   const value = new Map<string, number>()
   const daySpend = new Map<string, number>()
   const dayValue = new Map<string, number>()
+  const unpriced = new Set<string>()
   let totalCost = 0
   let totalSpend = 0
   let totalValue = 0
   for (const row of summary.rateRows) {
     const prices = priceOfKey(pricing, row.provider, row.model, row.rate)
-    if (prices === null) continue
+    if (prices === null) {
+      // An unattributed failure's blank model string stays out, the way it stays
+      // out of byModel.
+      if (row.model !== '') unpriced.add(row.model)
+      continue
+    }
     const cost = costOf(row.totals, prices)
     const key = modelMapKey(row.provider, row.model)
     costs.set(key, (costs.get(key) ?? 0) + cost)
@@ -666,11 +690,7 @@ export function attachCosts(
       subscriptionValue: value.get(key) ?? 0,
     }
   })
-  const unpricedModels = [...new Set(
-    summary.byModel
-      .filter(row => priceAt(pricing, row.provider, row.model, Date.now()) === null)
-      .map(row => row.model),
-  )]
+  const unpricedModels = [...unpriced]
   const byDay: UsageDayRow[] = summary.byDay.map(row => ({
     day: row.day,
     totals: row.totals,
@@ -711,7 +731,7 @@ export function costRecentEntries(
   return recent.map((record) => {
     const usage = record.usage
     if (usage === undefined) return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
-    const hit = priceAt(pricing, record.provider, record.model, record.time)
+    const hit = ratesAt(pricing, record.provider, record.model, record.time)
     if (hit === null) return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
     // Cost the four buckets as the totals layer would (absent cache buckets
     // read as 0, never NaN).
@@ -721,7 +741,7 @@ export function costRecentEntries(
       outputTokens: usage.outputTokens,
       cacheReadTokens: usage.cacheReadTokens ?? 0,
       cacheWriteTokens: usage.cacheWriteTokens ?? 0,
-    }, hit.rates)
+    }, hit)
     const subscription = billingOf(billing, record.provider) === 'subscription'
     return {
       ...record,

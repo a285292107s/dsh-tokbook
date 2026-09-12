@@ -14,7 +14,7 @@
  * @module dsh-tokbook/route-catalog
  */
 
-import type { RouteCatalogEntry } from './pricing.ts'
+import type { ModelEntry, RouteCatalogEntry } from './pricing-view.ts'
 
 /** The one route the direct DeepSeek adapter owns (`dsh-llm-deepseek`). */
 export const DEEPSEEK_ROUTE = 'deepseek-official'
@@ -27,10 +27,11 @@ export interface SettingsLike {
   get(ns: string): unknown
 }
 
-/** Minimal face of the host LLM seam (`ctx.llm`). */
+/** Minimal face of the host LLM seam (`ctx.llm`). `listModels` carries the
+ *  adapter's own display names, the same ones the model picker shows. */
 export interface LlmLike {
   listProviders(): readonly { id: string; name: string }[]
-  listModels(provider: string): Promise<readonly { id: string }[]>
+  listModels(provider: string): Promise<readonly { id: string; name?: string }[]>
 }
 
 interface Logger {
@@ -44,16 +45,25 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-/** The model ids of one `models:` list — entries are `{ id }` objects in the
- *  settings document, a bare string also counts (a hand-trimmed section). */
-function modelIds(value: unknown): string[] {
+/** The models of one `models:` list — entries are `{ id, name? }` objects in
+ *  the settings document, a bare string also counts (a hand-trimmed section).
+ *  The name is kept: it is what the model picker labels the row with, and the
+ *  price table shows it the same way (exact string as the identity beneath). */
+function modelEntries(value: unknown): ModelEntry[] {
   if (!Array.isArray(value)) return []
-  const ids: string[] = []
+  const out: ModelEntry[] = []
   for (const entry of value) {
     const id = typeof entry === 'string' ? entry : asRecord(entry)?.id
-    if (typeof id === 'string' && id !== '') ids.push(id)
+    if (typeof id !== 'string' || id === '') continue
+    const name = typeof entry === 'string' ? undefined : asRecord(entry)?.name
+    out.push({
+      id,
+      ...(typeof name === 'string' && name.trim() !== '' && name.trim() !== id
+        ? { name: name.trim() }
+        : {}),
+    })
   }
-  return ids
+  return out
 }
 
 /** The routes and models the settings document alone declares. */
@@ -67,14 +77,14 @@ export function routesFromSettings(settings: SettingsLike | undefined): RouteCat
       if (route === '') continue
       const raw = asRecord(profile)
       const displayName = typeof raw?.displayName === 'string' ? raw.displayName.trim() : ''
-      entries.push({ route, label: displayName !== '' ? displayName : '', models: modelIds(raw?.models) })
+      entries.push({ route, label: displayName !== '' ? displayName : '', models: modelEntries(raw?.models) })
     }
   }
   // The direct adapter owns exactly ONE route and writes no route key into the
   // document: the namespace's presence is what says it is mounted.
   const deepseek = asRecord(settings.get(DEEPSEEK_NS))
   if (deepseek !== null) {
-    entries.push({ route: DEEPSEEK_ROUTE, label: '', models: modelIds(deepseek.models) })
+    entries.push({ route: DEEPSEEK_ROUTE, label: '', models: modelEntries(deepseek.models) })
   }
   return entries
 }
@@ -112,20 +122,27 @@ export async function collectRoutes(
   llm: LlmLike | undefined,
   logger: Logger = console,
 ): Promise<RouteCatalogEntry[]> {
-  const byRoute = new Map<string, { label: string; models: Set<string> }>()
-  const ensure = (route: string, label: string): { label: string; models: Set<string> } => {
+  const byRoute = new Map<string, { label: string; models: Map<string, ModelEntry> }>()
+  const ensure = (route: string, label: string): { label: string; models: Map<string, ModelEntry> } => {
     let entry = byRoute.get(route)
     if (entry === undefined) {
-      entry = { label, models: new Set() }
+      entry = { label, models: new Map() }
       byRoute.set(route, entry)
     } else if (entry.label === '' && label !== '') {
       entry.label = label
     }
     return entry
   }
+  /** Add one model, keeping the first name a source gave it (the settings
+   *  document's name is the user's own wording and wins over the adapter's). */
+  const add = (models: Map<string, ModelEntry>, model: ModelEntry): void => {
+    const seen = models.get(model.id)
+    if (seen === undefined) models.set(model.id, model)
+    else if (seen.name === undefined && model.name !== undefined) seen.name = model.name
+  }
   for (const entry of routesFromSettings(settings)) {
     const acc = ensure(entry.route, entry.label)
-    for (const model of entry.models) acc.models.add(model)
+    for (const model of entry.models) add(acc.models, model)
   }
 
   let providers: readonly { id: string; name: string }[] = []
@@ -144,7 +161,13 @@ export async function collectRoutes(
     if (acc.models.size > 0 || llm === undefined) continue
     try {
       for (const model of await llm.listModels(provider.id)) {
-        if (model.id !== '') acc.models.add(model.id)
+        if (model.id === '') continue
+        add(acc.models, {
+          id: model.id,
+          ...(typeof model.name === 'string' && model.name.trim() !== '' && model.name.trim() !== model.id
+            ? { name: model.name.trim() }
+            : {}),
+        })
       }
     } catch (error) {
       logger.warn?.(`[tokbook] cannot list models of route ${provider.id}:`, error)
@@ -154,6 +177,6 @@ export async function collectRoutes(
   return [...byRoute.entries()].map(([route, acc]) => ({
     route,
     label: acc.label !== '' ? acc.label : route,
-    models: [...acc.models],
+    models: [...acc.models.values()],
   }))
 }

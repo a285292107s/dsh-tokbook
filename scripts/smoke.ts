@@ -4,15 +4,23 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, totalsTokens, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
-import { billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, EARLIEST, parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_FILE, rateKeyAt, readPriceFile, readPricingView, writePriceFile } from '../src/pricing.ts'
+import { billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, EARLIEST, instantKey, instantMs, parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_FILE, rateKeyAt, ratesAt, readPriceFile, writePriceFile } from '../src/pricing.ts'
+import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
+import {
+  anchoredRow, baselinesOf, composePriceBody, draftFromView, duplicateSlot, editableSegment, effectiveSegments,
+  isBlankSegment, isBlankSlot, isUnpriced, modelDirty, newSegment, newSlot, pendingSegment, rowIssue,
+  slotRange, withSlotEnd, withSlotStart,
+  type ModelDraft, type PriceDraft, type SegmentDraft,
+} from '../src/client/pricing/draft.ts'
+import { hourStartMs, slotsOverlap } from '../src/price-format.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routeLabels, routesFromSettings } from '../src/route-catalog.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
 import { providerCards, splitByProvider, providerKeyOf } from '../src/by-provider.ts'
-import { windowFromCreditsBlock, windowFromUsagePercent, resetEpoch, planInfoFromSubscriptions, unconfiguredCard, errorCard, hasQuotaContent, isBuiltinQuotaPlan, isQuotaAlert, BUILTIN_PLAN_TITLES } from '../src/quota.ts'
+import { windowFromCreditsBlock, windowFromUsagePercent, resetEpoch, planInfoFromSubscriptions, unconfiguredCard, errorCard, noSubscriptionCard, hasQuotaContent, isBuiltinQuotaPlan, isQuotaAlert, orderQuotaProviders, quotaGate, balanceGateNote, dayText, BUILTIN_PLAN_TITLES } from '../src/quota.ts'
 import { resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage } from '../src/quota-official.ts'
-import type { UsageRecord } from '../src/types.ts'
+import type { PricingSegmentInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
 
 let failed = 0
 function check(name: string, cond: boolean, detail?: string): void {
@@ -116,7 +124,7 @@ console.log('hand price table: dates, segments, resolution')
     { from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2 },
     { from: '2026-09-01', inputPerMillion: 3, outputPerMillion: 4 },
   ] } })
-  check('parsePriceInput rejects a repeated effective date', dupes.ok === false && dupes.error.includes('生效日期相同'))
+  check('parsePriceInput rejects a repeated effective time', dupes.ok === false && dupes.error.includes('生效时间相同'))
   const negative = parsePriceInput({ r: { m: [{ inputPerMillion: -1, outputPerMillion: 2 }] } })
   check('parsePriceInput rejects a negative rate', negative.ok === false && negative.error.includes('inputPerMillion'))
   const unknownKey = parsePriceInput({ $routes: { a: 'b' } })
@@ -149,11 +157,13 @@ console.log('hand price table: dates, segments, resolution')
     const view = await readPricingView(
       dir,
       [
-        { route: 'deepseek-official', label: 'DeepSeek', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
+        { route: 'deepseek-official', label: 'DeepSeek', models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }, { id: 'deepseek-v4-pro' }] },
         { route: 'opencode-go', label: 'OpenCode Go', models: [] },
       ],
       {
-        byRouteModel: new Map([['opencode-go', new Map([['mimo-v2.5', 83]])]]),
+        byRouteModel: new Map([['opencode-go', new Map([['mimo-v2.5', {
+          records: 83, firstAt: Date.UTC(2026, 7, 17), lastAt: Date.UTC(2026, 8, 2), unpriced: 11,
+        }]])]]),
         byRoute: new Map([['opencode-go', 83]]),
       },
       { error: () => {} },
@@ -164,6 +174,14 @@ console.log('hand price table: dates, segments, resolution')
     const official = view.routes.find(c => c.route === 'deepseek-official')
     const flash = official?.models.find(m => m.model === 'deepseek-v4-flash')
     check('configured model is marked', flash?.configured === true)
+    check('a configured name reaches the row', flash?.name === 'DeepSeek V4 Flash')
+    check('a model nothing names carries no name', official?.models.find(m => m.model === 'deepseek-v4-pro')?.name === undefined)
+    check('a 仅账本 row carries no name', view.routes.find(c => c.route === 'opencode-go')?.models.find(m => m.model === 'mimo-v2.5')?.name === undefined)
+    const only = view.routes.find(c => c.route === 'opencode-go')?.models.find(m => m.model === 'mimo-v2.5')
+    check('the ledger lens reaches the row: first/last/unpriced',
+      only?.firstAt === Date.UTC(2026, 7, 17) && only.lastAt === Date.UTC(2026, 8, 2) && only.unpriced === 11,
+      JSON.stringify(only))
+    check('a row the ledger never billed carries no ledger facts', official?.models.find(m => m.model === 'deepseek-v4-pro')?.firstAt === undefined)
     check('card shows the price in force', flash?.now?.inputPerMillion === 2 && flash.nowFrom === '2026-09-01')
     check('a configured model with no price is 价格未知', official?.models.find(m => m.model === 'deepseek-v4-pro')?.now === undefined)
     check('the price file keeps a route configuration dropped', (await readPricingView(dir, [], { byRouteModel: new Map(), byRoute: new Map() }, { error: () => {} })).routes.some(c => c.route === 'deepseek-official'))
@@ -172,13 +190,297 @@ console.log('hand price table: dates, segments, resolution')
   }
 }
 
+console.log('ledger lens: what the 价格表 says the ledger did')
+{
+  // The row's earliest segment starts after some of its records: those bill ¥0
+  // and the lens has to count them (the drawer's axis warns on that number).
+  const table: PricingTable = {
+    'deepseek-official': {
+      'deepseek-v4-flash': [{ from: dayStartMs('2026-09-01'), rates: { inputPerMillion: 1, outputPerMillion: 4 } }],
+    },
+  }
+  const at = (day: string): number => dayMillis(day, 12)
+  const billed = (id: string, day: string): UsageRecord => ({
+    requestId: id, time: at(day), sessionId: 's1', provider: 'deepseek-official',
+    model: 'deepseek-v4-flash', usage: { inputTokens: 10, outputTokens: 5 },
+  })
+  const lens = ledgerUsageOf([
+    billed('a', '2026-08-15'),
+    billed('b', '2026-09-02'),
+    billed('c', '2026-08-29'),
+    { requestId: 'd', time: at('2026-09-03'), sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-v4-flash', kind: 'failure', failureCode: 'QUOTA' },
+    { requestId: 'e', time: at('2026-08-20'), sessionId: 's1', model: 'deepseek-v4-flash', usage: { inputTokens: 10, outputTokens: 5 } },
+  ], table)
+  const row = lens.byRouteModel.get('deepseek-official')?.get('deepseek-v4-flash')
+  check('the lens counts billed calls only (no failures, no unattributed rows)', row?.records === 3, JSON.stringify(row))
+  check('it carries the ledger\'s own span', row?.firstAt === at('2026-08-15') && row?.lastAt === at('2026-09-02'))
+  check('records older than the earliest segment count as unpriced', row?.unpriced === 2, JSON.stringify(row))
+  check('the route total folds the same rows', lens.byRoute.get('deepseek-official') === 3)
+  // 无起点 covers everything, so nothing is unpriced.
+  const open = ledgerUsageOf([billed('f', '2026-08-15')], {
+    'deepseek-official': {
+      'deepseek-v4-flash': [{ from: EARLIEST, rates: { inputPerMillion: 1, outputPerMillion: 4 } }],
+    },
+  })
+  check('a 无起点 segment leaves nothing unpriced', open.byRouteModel.get('deepseek-official')?.get('deepseek-v4-flash')?.unpriced === 0)
+}
+
+console.log('peak/off-peak slots and hourly effective instants')
+{
+  // 2026-09-14 is a Monday, 2026-09-20 a Sunday.
+  const parsed = parsePriceInput({
+    'deepseek-official': {
+      'deepseek-v4-flash': [
+        {
+          from: '2026-09-10T12:00',
+          inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
+          slots: [
+            { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
+            { days: 'weekdays', start: 14, end: 18, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
+            { days: 'weekends', start: 0, end: 24, inputPerMillion: 1.5, outputPerMillion: 6 },
+          ],
+        },
+      ],
+    },
+  })
+  check('parsePriceInput accepts exception slots', parsed.ok === true, parsed.ok ? '' : parsed.error)
+  const route = 'deepseek-official'
+  const model = 'deepseek-v4-flash'
+  const mondayPeak = dayMillis('2026-09-14', 10)
+  const mondayTrough = dayMillis('2026-09-14', 20)
+  const sunday = dayMillis('2026-09-20', 10)
+  if (parsed.ok) {
+    const table = parsed.file.table
+    check('an instant keeps its hour', instantKey(instantMs('2026-09-10T12:00')!) === '2026-09-10T12:00' && instantKey(instantMs('2026-09-10')!) === '2026-09-10')
+    check('a segment effective at noon is not in force an hour earlier', ratesAt(table, route, model, dayMillis('2026-09-10', 11)) === null)
+    check('a slot overrides the whole-day rate inside its hours', ratesAt(table, route, model, mondayPeak)?.inputPerMillion === 2)
+    check('a slot ends at its end hour, not after it', ratesAt(table, route, model, dayMillis('2026-09-14', 12))?.inputPerMillion === 1)
+    check('the whole-day rate covers the hours no slot claims', ratesAt(table, route, model, mondayTrough)?.inputPerMillion === 1)
+    check('a weekday slot does not apply at the weekend', ratesAt(table, route, model, sunday)?.inputPerMillion === 1.5)
+    check('a rate a slot omits keeps the whole-day one', ratesAt(table, route, model, sunday)?.cacheReadPerMillion === 0.02)
+    const peakKey = rateKeyAt(table, route, model, mondayPeak)
+    check('rate identity carries the slot', peakKey.from === instantMs('2026-09-10T12:00') && peakKey.slot?.start === 9 && peakKey.slot.days === 'weekdays')
+    check('the whole-day identity carries no slot', rateKeyAt(table, route, model, mondayTrough)?.slot === null)
+    check('priceOfKey re-reads a named slot', priceOfKey(table, route, model, peakKey)?.outputPerMillion === 8)
+    check('a rescheduled slot is re-priced, not orphaned', priceOfKey(table, route, model, { from: peakKey.from, slot: { start: 14, days: 'weekdays' } })?.outputPerMillion === 8)
+    check('a moved slot leaves exactly its own history 价格未知', priceOfKey(table, route, model, { from: peakKey.from, slot: { start: 8, days: 'weekdays' } }) === null)
+
+    // The cost layer surfaces that orphan instead of silently billing ¥0 for it.
+    const records: UsageRecord[] = [{
+      requestId: 'peak-1', time: mondayPeak, sessionId: 's1', provider: route, model,
+      usage: { inputTokens: 1_000_000, outputTokens: 0 },
+    }]
+    const resolve = (record: UsageRecord) => rateKeyAt(table, record.provider, record.model, record.time)
+    const costed = attachCosts({ ...summarizeRecords(records, resolve), dataDir: 'x' }, table)
+    check('a record billed under a peak slot costs the peak rate', Math.abs(costed.totalCost - 2) < 1e-9, `got ${costed.totalCost}`)
+    check('a priced record is not listed as 价格未知', costed.unpricedModels.length === 0)
+    const moved = { [route]: { [model]: [{
+      from: instantMs('2026-09-10T12:00')!,
+      rates: { inputPerMillion: 1, outputPerMillion: 4 },
+      slots: [{ days: 'weekdays' as const, start: 8, end: 12, rates: { inputPerMillion: 2, outputPerMillion: 8 } }],
+    }] } }
+    const orphaned = attachCosts({ ...summarizeRecords(records, resolve), dataDir: 'x' }, moved)
+    check('an orphaned slot identity surfaces as 价格未知', orphaned.totalCost === 0 && orphaned.unpricedModels.includes(model))
+
+    // Round-trip: the writer stores the hourly instant and the slots, and the
+    // reader resolves them back to the same prices.
+    const dir = await mkdtemp(join(tmpdir(), 'tokbook-slot-'))
+    try {
+      await writePriceFile(dir, parsed.file, { error: () => {} })
+      const text = await readFile(join(dir, PRICING_FILE), 'utf8')
+      check('the file writes the hourly instant and the slots', text.includes('"2026-09-10T12:00"') && text.includes('"slots"') && text.includes('"weekdays"'))
+      const back = await readPriceFile(dir, { error: () => {} })
+      const segment = back.table[route]?.[model]?.[0]
+      check('slots round-trip through the file', segment?.slots?.length === 3 && segment.from === instantMs('2026-09-10T12:00'))
+      check('the round-tripped slot still prices its hours', ratesAt(back.table, route, model, mondayPeak)?.inputPerMillion === 2)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  // The write path refuses a slot set it cannot resolve unambiguously.
+  const overlap = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [
+    { days: 'daily', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 },
+    { days: 'weekdays', start: 11, end: 13, inputPerMillion: 2, outputPerMillion: 4 },
+  ] }] } })
+  check('slots that could both be in force are refused', overlap.ok === false && overlap.error.includes('重叠'))
+  const sameHours = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [
+    { days: 'weekdays', start: 9, end: 18, inputPerMillion: 2, outputPerMillion: 4 },
+    { days: 'weekends', start: 9, end: 18, inputPerMillion: 2, outputPerMillion: 4 },
+  ] }] } })
+  check('day-disjoint slots may share an hour range', sameHours.ok === true)
+  const bareDays = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [
+    { start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 },
+  ] }] } })
+  check('a slot with no days reads as 每天', bareDays.ok === true && bareDays.file.table.r?.m?.[0]?.slots?.[0]?.days === 'daily')
+  const backwards = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [
+    { days: 'daily', start: 18, end: 9, inputPerMillion: 2, outputPerMillion: 4 },
+  ] }] } })
+  check('a backwards hour range is refused', backwards.ok === false && backwards.error.includes('start'))
+  const pastEnd = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [
+    { days: 'daily', start: 9, end: 25, inputPerMillion: 2, outputPerMillion: 4 },
+  ] }] } })
+  check('an hour range past the end of the day is refused', pastEnd.ok === false)
+  const badDays = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [
+    { days: 'mondays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 },
+  ] }] } })
+  check('an unknown day set is refused', badDays.ok === false && badDays.error.includes('days'))
+  const slotNoOutput = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [
+    { days: 'daily', start: 9, end: 12, inputPerMillion: 2 },
+  ] }] } })
+  check('a slot may restate only some buckets (the rest inherit)', slotNoOutput.ok === true && slotNoOutput.file.table.r?.m?.[0]?.slots?.[0]?.rates.outputPerMillion === undefined)
+  const slotExtra = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [
+    { days: 'daily', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4, note: 'x' },
+  ] }] } })
+  check('a slot with an unknown field is refused', slotExtra.ok === false && slotExtra.error.includes('未知字段'))
+  const minute = parsePriceInput({ r: { m: [{ from: '2026-09-10T12:30', inputPerMillion: 1, outputPerMillion: 2 }] } })
+  check('a non-hourly effective instant is refused (the axis is hourly)', minute.ok === false && minute.error.includes('整点'))
+
+  // The read path is lenient: a malformed slot is dropped, and of two slots
+  // that could both be in force the file's earlier one wins.
+  const lenient = coercePriceFile({ r: { m: [{
+    inputPerMillion: 1, outputPerMillion: 2,
+    slots: [
+      { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 },
+      { days: 'weekdays', start: 12, end: 15, inputPerMillion: 3, outputPerMillion: 5 },
+      { days: 'weekdays', start: 11, end: 13, inputPerMillion: 9, outputPerMillion: 9 },
+      { days: 'mondays', start: 18, end: 20, inputPerMillion: 9, outputPerMillion: 9 },
+    ],
+  }] } }, { error: () => {} })
+  const kept = lenient.table.r?.m?.[0]?.slots ?? []
+  check('lenient read drops a slot with an unknown day set', kept.every(slot => String(slot.days) !== 'mondays'))
+  check('lenient read keeps the earlier of two clashing slots', kept.length === 2 && kept.some(slot => slot.start === 9 && slot.end === 12) && !kept.some(slot => slot.rates.inputPerMillion === 9))
+  const clash = coercePriceFile({ r: { m: [{
+    inputPerMillion: 1, outputPerMillion: 2,
+    slots: [
+      { days: 'daily', start: 9, end: 10, inputPerMillion: 7, outputPerMillion: 7 },
+      { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 },
+    ],
+  }] } }, { error: () => {} })
+  check('lenient read drops a slot a daily one already covers', (clash.table.r?.m?.[0]?.slots ?? []).length === 1)
+}
+
+console.log('price-table draft: unfinished blocks, inheritance, slot edits')
+{
+  const model = (segments: SegmentDraft[]): ModelDraft => ({ model: 'm', configured: true, records: 0, segments })
+  const draftOf = (segments: SegmentDraft[]): PriceDraft => new Map([['r', {
+    route: 'r', label: 'r', billing: 'metered' as const, records: 0, models: new Map([['m', model(segments)]]),
+  }]])
+  const bodyOf = (segments: SegmentDraft[]) => composePriceBody(draftOf(segments))
+
+  // A blank block is a draft: no error, no dirty mark, nothing written.
+  const blank = newSegment()
+  check('a fresh segment is blank', isBlankSegment(blank) === true && effectiveSegments(model([blank])).length === 0)
+  check('a row of only drafts is 价格未知', isUnpriced(model([blank])) === true)
+  check('a blank segment raises no issue', rowIssue(model([blank])) === null)
+  check('a blank segment writes nothing', JSON.stringify(bodyOf([blank])) === JSON.stringify({ ok: true, body: {} }))
+
+  // Adding a draft next to a real price changes neither the row nor the file.
+  const view: PricingView = {
+    routes: [{ route: 'r', label: 'r', billing: 'metered', records: 0, models: [
+      { model: 'm', configured: true, records: 0, segments: [{ from: null, inputPerMillion: 1, outputPerMillion: 4 }] },
+    ] }],
+    dataDir: 'x', updatedAt: 0,
+  }
+  const baseline = baselinesOf(view)
+  const seeded = draftFromView(view)
+  const real = seeded.get('r')!.models.get('m')!.segments
+  check('a seeded row is clean', modelDirty('r', seeded.get('r')!.models.get('m')!, baseline.models) === false)
+  const withDraft = { ...seeded.get('r')!.models.get('m')!, segments: [...real, newSegment()] }
+  check('＋ 加一段价 leaves the row clean', modelDirty('r', withDraft, baseline.models) === false)
+  check('＋ 加一段价 leaves the save body unchanged', JSON.stringify(bodyOf(withDraft.segments)) === JSON.stringify(bodyOf(real)))
+
+  // A blank slot is a draft too; a partly filled one inherits the rest.
+  const seg = newSegment({ from: '', input: '1', output: '4', cacheRead: '0.02' })
+  const draftSlot = newSlot()
+  check('a fresh slot is blank', isBlankSlot(draftSlot) === true)
+  check('a blank slot is not written', JSON.stringify(bodyOf([{ ...seg, slots: [draftSlot] }])) === JSON.stringify(bodyOf([seg])))
+  const partial = newSlot({ start: '9', end: '12', input: '2' })
+  const partialBody = bodyOf([{ ...seg, slots: [partial] }])
+  const written = partialBody.ok ? (partialBody.body.r as Record<string, Record<string, { slots: Record<string, unknown>[] }[]>>).m![0]!.slots[0]! : {}
+  check('a slot writes only the buckets it restates', JSON.stringify(written) === JSON.stringify({ days: 'daily', start: 9, end: 12, inputPerMillion: 2 }))
+  const badSlot = newSlot({ input: 'abc' })
+  check('a slot with a bad number still reports it', rowIssue(model([{ ...seg, slots: [badSlot] }]))?.includes('输入价') === true)
+
+  // 复制 lands NEXT to its source, never on top of it.
+  const source = newSlot({ start: '9', end: '12', input: '2' })
+  const copy = duplicateSlot(source)
+  check('复制 shifts by its own length', copy.start === '12' && copy.end === '15' && copy.input === '2')
+  check('复制 does not overlap its source', slotsOverlap(
+    { days: 'daily', ...slotRange(source) }, { days: 'daily', ...slotRange(copy) },
+  ) === false)
+  const lateCopy = duplicateSlot(newSlot({ start: '22', end: '24' }))
+  check('复制 near the end of the day goes before instead', lateCopy.start === '20' && lateCopy.end === '22')
+
+  // Picking the hours never passes through an invalid range.
+  const clamped = withSlotStart(newSlot({ start: '9', end: '12' }), '14')
+  check('moving the start past the end pulls the end along', clamped.start === '14' && clamped.end === '15')
+  const backEnd = withSlotEnd(newSlot({ start: '14', end: '18' }), '12')
+  check('moving the end before the start pulls the start back', backEnd.start === '11' && backEnd.end === '12')
+  const stays = withSlotStart(newSlot({ start: '9', end: '18' }), '10')
+  check('a start still inside the window leaves the end alone', stays.start === '10' && stays.end === '18')
+
+  // The inline cells fill the draft the user already added rather than adding
+  // a second, silently earlier one.
+  const pendingRow = model([real[0]!, newSegment({ from: '2026-09-20' })])
+  check('the pending draft is the one inline typing fills', pendingSegment(pendingRow)?.from === '2026-09-20')
+  check('a row with no drafts has nothing pending', pendingSegment(model([real[0]!])) === null)
+  check('inline cells edit the priced segment, not the draft', editableSegment(pendingRow)?.id === real[0]!.id)
+
+  // An undated price on a row the ledger already billed does not stay 自始生效:
+  // it anchors at the hour of that row's FIRST record. That prices exactly the
+  // same records (nothing exists before 首记) and finally says since when.
+  const rowView = (firstAt: number | undefined, segments: PricingSegmentInput[]): PricingView => ({
+    routes: [{ route: 'r', label: 'r', billing: 'metered', records: 4, models: [
+      { model: 'm', configured: true, records: 4, ...(firstAt !== undefined ? { firstAt } : {}), segments },
+    ] }],
+    dataDir: 'x', updatedAt: 0,
+  })
+  const seededRow = (firstAt: number | undefined, segments: PricingSegmentInput[]): ModelDraft =>
+    draftFromView(rowView(firstAt, segments)).get('r')!.models.get('m')!
+  const undated: PricingSegmentInput[] = [{ from: null, inputPerMillion: 1, outputPerMillion: 4 }]
+  const firstAt = dayMillis('2026-08-15', 18) + 47 * 60_000
+  const anchored = seededRow(firstAt, undated)
+  check('an undated price takes 首记\'s hour', anchored.segments[0]?.from === '2026-08-15T18:00', JSON.stringify(anchored.segments[0]))
+  // The axis's left end and the written anchor are the SAME instant: 首记 is
+  // taken at the price file's precision (the hour it falls in), so the graph and
+  // the file cannot drift apart.
+  check('the price axis floors an instant to its own unit', hourStartMs(firstAt) === dayMillis('2026-08-15', 18))
+  check('the axis\'s left end is the instant the anchor writes', instantMs(anchored.segments[0]!.from) === hourStartMs(firstAt))
+  check('the anchored row is seeded clean', modelDirty('r', anchored, baselinesOf(rowView(firstAt, undated)).models) === false)
+  check('an anchored price starts no later than 首记', (instantMs(anchored.segments[0]!.from) ?? Number.MAX_SAFE_INTEGER) <= firstAt)
+  check('a row the ledger never billed keeps 无起点', seededRow(undefined, undated).segments[0]?.from === '')
+  check('a written boundary at or before 首记 keeps the price open', seededRow(firstAt, [
+    { from: null, inputPerMillion: 1, outputPerMillion: 4 },
+    { from: '2026-08-15T10:00', inputPerMillion: 2, outputPerMillion: 8 },
+  ]).segments[0]?.from === '', 'anchoring there would move the open price past that boundary')
+  check('anchoring an anchored row changes nothing', anchoredRow(anchored) === anchored)
+  // Clearing the date is the same rule, one keystroke later: the choke point
+  // every change goes through ({@link anchoredRow}) puts it back.
+  check('a cleared date on a billed row is anchored again', anchoredRow(
+    { ...anchored, segments: anchored.segments.map(segment => ({ ...segment, from: '' })) },
+  ).segments[0]?.from === '2026-08-15T18:00')
+  const anchoredBody = composePriceBody(new Map([['r', {
+    route: 'r', label: 'r', billing: 'metered' as const, records: 4, models: new Map([['m', anchored]]),
+  }]]))
+  const anchoredWritten = anchoredBody.ok
+    ? (anchoredBody.body.r as Record<string, Record<string, { from?: string }[]>>).m![0]!.from
+    : undefined
+  check('the anchor is the date a save writes', anchoredWritten === '2026-08-15T18:00', String(anchoredWritten))
+}
+
 console.log('route catalog (settings ∪ live registry)')
 {
   const settings = {
     get(ns: string): unknown {
       if (ns === 'llm-pi-ai') {
         return { providers: {
-          'opencode-go': { models: [{ id: 'deepseek-v4-flash' }, { id: 'glm-5.3-flash' }] },
+          'opencode-go': {
+            models: [
+              { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+              { id: 'glm-5.3-flash', name: 'glm-5.3-flash' },
+            ],
+          },
           'dots-ai': { displayName: '小红书', models: [{ id: 'dots3-note-prev' }] },
         } }
       }
@@ -191,6 +493,11 @@ console.log('route catalog (settings ∪ live registry)')
   check('a profile displayName becomes the label', fromSettings.find(e => e.route === 'dots-ai')?.label === '小红书')
   check('the direct DeepSeek route is added once', fromSettings.filter(e => e.route === DEEPSEEK_ROUTE).length === 1)
   check('a route without a name falls back to its key', fromSettings.find(e => e.route === 'opencode-go')?.label === '')
+  check('a configured name is kept', fromSettings.find(e => e.route === 'opencode-go')?.models[0]?.name === 'DeepSeek V4 Flash')
+  // A name that merely repeats the id is not a name: the row then shows the
+  // exact string alone, the way the picker falls back to `provider/model`.
+  check('a name equal to the id is dropped', fromSettings.find(e => e.route === 'opencode-go')?.models[1]?.name === undefined)
+  check('a bare string entry carries no name', fromSettings.find(e => e.route === 'dots-ai')?.models[0]?.name === undefined)
 
   const llm = {
     listProviders: () => [
@@ -198,11 +505,14 @@ console.log('route catalog (settings ∪ live registry)')
       { id: 'modlens-commandcode', name: 'Command Code' },
       { id: DEEPSEEK_ROUTE, name: 'DeepSeek' },
     ],
-    listModels: async (route: string) => (route === 'modlens-commandcode' ? [{ id: 'deepseek/deepseek-v4-flash' }] : [{ id: 'ignored' }]),
+    listModels: async (route: string) => (route === 'modlens-commandcode'
+      ? [{ id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash' }]
+      : [{ id: 'ignored' }]),
   }
   const catalog = await collectRoutes(settings, llm, { error: () => {} })
   check('a registered route the document omits becomes a card', catalog.some(e => e.route === 'modlens-commandcode'))
-  check('the adapter fills a route with no configured models', catalog.find(e => e.route === 'modlens-commandcode')?.models[0] === 'deepseek/deepseek-v4-flash')
+  check('the adapter fills a route with no configured models', catalog.find(e => e.route === 'modlens-commandcode')?.models[0]?.id === 'deepseek/deepseek-v4-flash')
+  check('the adapter\'s own model name is kept', catalog.find(e => e.route === 'modlens-commandcode')?.models[0]?.name === 'DeepSeek V4 Flash')
   check('a configured list is not overwritten by the adapter', catalog.find(e => e.route === 'opencode-go')?.models.length === 2)
   check('the registry names a route the document left bare', catalog.find(e => e.route === 'opencode-go')?.label === 'OpenCode Go')
   check('the DeepSeek route keeps its adapter name', catalog.find(e => e.route === DEEPSEEK_ROUTE)?.label === 'DeepSeek')
@@ -534,6 +844,56 @@ console.log('quota: plan normalization helpers')
   check('hasQuotaContent negative on empty ok card', hasQuotaContent({ plan: 'x', title: 'x', state: 'ok', windows: [] }) === false)
 }
 
+console.log('quota: usage gate (in-force subscription vs balance)')
+{
+  const now = 1_800_000_000_000
+  check('active is in force', quotaGate({ status: 'active' }, now) === 'subscription')
+  check('trialing is in force', quotaGate({ status: 'trialing' }, now) === 'subscription')
+  check('status case/space tolerated', quotaGate({ status: ' Active ' }, now) === 'subscription')
+  // The provider's documented cancel flow: access continues to the period end.
+  check('canceled before period end is still in force', quotaGate({ status: 'canceled', periodEnd: now + 86_400_000 }, now) === 'subscription')
+  check('canceled after period end is balance', quotaGate({ status: 'canceled', periodEnd: now - 1 }, now) === 'balance')
+  check('unreported status but future period end is in force', quotaGate({ periodEnd: now + 1 }, now) === 'subscription')
+  // An unknown status word must fall back to the date rule, never to a guess.
+  check('unknown status past period end is balance', quotaGate({ status: 'some-new-word', periodEnd: now - 1 }, now) === 'balance')
+  check('past_due with no period end is balance', quotaGate({ status: 'past_due' }, now) === 'balance')
+  check('no plan identity is balance', quotaGate(undefined, now) === 'balance')
+  check('empty plan identity is balance', quotaGate({}, now) === 'balance')
+
+  const ended = balanceGateNote({ status: 'canceled', periodEnd: Date.parse('2026-10-06T12:00:00') }, Date.parse('2026-10-09T12:00:00'))
+  check('note names the end date', ended.includes('2026-10-06'), ended)
+  check('note says the windows no longer apply', ended.includes('窗口'))
+  check('note carries an unknown status word', balanceGateNote({ status: 'past_due' }, now).includes('past_due'))
+  check('note without evidence is generic', balanceGateNote(undefined, now).includes('余额'))
+  check('dayText pads month/day', dayText(new Date(2026, 0, 5).getTime()) === '2026-01-05', dayText(new Date(2026, 0, 5).getTime()))
+}
+
+console.log('quota: card order (retired plans last)')
+{
+  const gates: Record<string, 'subscription' | 'balance' | 'none' | undefined> = {
+    live: 'subscription',
+    lapsed: 'balance',
+    nosub: 'none',
+  }
+  const order = (providers: string[]) => orderQuotaProviders(providers, (p) => gates[p]).join(',')
+
+  check('a retired plan sinks below an active one', order(['lapsed', 'live']) === 'live,lapsed', order(['lapsed', 'live']))
+  check('a no-subscription plan sinks too', order(['nosub', 'live']) === 'live,nosub', order(['nosub', 'live']))
+  // It is a stable partition, not a sort: the host's display order survives
+  // inside each group, so only the demotion itself moves anything.
+  check('base order kept inside a group', order(['live', 'nosub', 'lapsed']) === 'live,nosub,lapsed', order(['live', 'nosub', 'lapsed']))
+  // Unknown = still loading, or the last fetch failed: order it as active, the
+  // same way an absent gate renders. Guessing "retired" from missing data is
+  // exactly what the gate exists to prevent.
+  check('unknown gate counts as active', order(['unknown', 'lapsed']) === 'unknown,lapsed', order(['unknown', 'lapsed']))
+  check('all retired keeps the base order', order(['lapsed', 'nosub']) === 'lapsed,nosub', order(['lapsed', 'nosub']))
+  check('all active is a no-op', order(['live', 'unknown']) === 'live,unknown')
+  check('empty stays empty', order([]) === '')
+  const input = ['lapsed', 'live']
+  orderQuotaProviders(input, (p) => gates[p])
+  check('the input array is not mutated', input.join(',') === 'lapsed,live', input.join(','))
+}
+
 console.log('quota: builtin plan identity')
 {
   check('opencode-go is builtin', isBuiltinQuotaPlan('opencode-go') && isBuiltinQuotaPlan('commandcode'))
@@ -543,9 +903,10 @@ console.log('quota: builtin plan identity')
 
 console.log('quota: footer 告急 from last-known cards')
 {
-  const ok = (windows: { exceeded: boolean; usagePercent: number }[]) => ({
+  const ok = (windows: { exceeded: boolean; usagePercent: number }[], gate?: 'subscription' | 'balance' | 'none') => ({
     plan: 'opencode-go', title: 'OpenCode Go', state: 'ok' as const,
     windows: windows.map((w, i) => ({ id: `w${i}`, label: '窗', resetAt: null, ...w })),
+    ...(gate !== undefined ? { gate } : {}),
   })
   check('null card is not an alert', isQuotaAlert(null) === false)
   check('unconfigured is not an alert', isQuotaAlert(unconfiguredCard('opencode-go', 'no key')) === false)
@@ -557,6 +918,10 @@ console.log('quota: footer 告急 from last-known cards')
     { exceeded: false, usagePercent: 10 },
     { exceeded: false, usagePercent: 95 },
   ])) === true)
+  // A balance-gated card's windows are not a bound it is under: a leftover
+  // "exceeded" from when the plan was live must not raise the 告急 dot.
+  check('balance gate is never an alert', isQuotaAlert(ok([{ exceeded: true, usagePercent: 100 }], 'balance')) === false)
+  check('none gate is never an alert', isQuotaAlert(ok([{ exceeded: true, usagePercent: 100 }], 'none')) === false)
 }
 
 console.log('quota: official key resolution (env + config, no network)')
@@ -593,6 +958,118 @@ console.log('quota: fetcher failure/unconfigured shapes (no live network)')
   check('commandcode no-key → unconfigured card', cc.state === 'unconfigured' && cc.windows.length === 0)
   const unknown = await fetchOfficialQuota('not-a-provider', {})
   check('unknown provider → error card', unknown.state === 'error')
+}
+
+console.log('quota: commandcode gate is read only from the answering endpoint (mocked HTTP)')
+{
+  const originalFetch = globalThis.fetch
+  const key = { resolve: async () => 'test-key' }
+  const ok = (body: unknown) => new Response(JSON.stringify(body), {
+    status: 200, headers: { 'content-type': 'application/json' },
+  })
+  const boom = () => new Response('boom', { status: 500 })
+  const mock = (opts: { subscriptions: 'active' | 'lapsed' | 'fail'; credits: 'ok' | 'fail' }) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/alpha/whoami')) return ok({ user: { userName: 'tester' } })
+      if (url.includes('/alpha/billing/credits')) {
+        if (opts.credits === 'fail') return boom()
+        return ok({
+          credits: { monthlyCredits: opts.subscriptions === 'active' ? 54.8 : 0, purchasedCredits: 12.4, freeCredits: 3, planId: 'individual-goat' },
+          windowLimits: { fiveHour: { used: 1, cap: 14, exceeded: false, resetAt: Date.now() + 3_600_000 } },
+        })
+      }
+      if (url.includes('/alpha/billing/subscriptions')) {
+        if (opts.subscriptions === 'fail') return boom()
+        return ok({
+          data: {
+            planId: 'individual-goat',
+            status: opts.subscriptions === 'active' ? 'active' : 'canceled',
+            currentPeriodEnd: Date.now() + (opts.subscriptions === 'active' ? 26 : -6) * 86_400_000,
+          },
+        })
+      }
+      return ok({ completedCount: 3, totalCost: 5 })
+    }) as typeof fetch
+  }
+  try {
+    // The subscriptions call failing is "unknown", NOT "no subscription": the
+    // account may be perfectly subscribed, so the card must keep the windows it
+    // was already rendering and claim nothing about the plan.
+    mock({ subscriptions: 'fail', credits: 'ok' })
+    const unknown = await fetchCommandCodeQuota({ plan: { apiKey: 'k' } })
+    check('cc subscriptions 500 → no gate claimed', unknown.gate === undefined, `got ${String(unknown.gate)}`)
+    check('cc subscriptions 500 → no lapsed claim', unknown.gateNote === undefined, `got ${String(unknown.gateNote)}`)
+    check('cc subscriptions 500 → windows kept', unknown.windows.length === 1, `got ${unknown.windows.length}`)
+    check('cc subscriptions 500 → plan still named', unknown.planInfo?.planId === 'individual-goat')
+
+    // A `balance` gate promises a balance; with credits missing, showing one
+    // would print `$0.00`. It degrades to the same "nothing to show" gate as Go.
+    mock({ subscriptions: 'lapsed', credits: 'fail' })
+    const noBalance = await fetchCommandCodeQuota({ plan: { apiKey: 'k' } })
+    check('cc lapsed + credits 500 → gate none', noBalance.gate === 'none', `got ${String(noBalance.gate)}`)
+    check('cc lapsed + credits 500 → credits absent', noBalance.credits === undefined)
+    check('cc lapsed + credits 500 → note says balance is missing', (noBalance.gateNote ?? '').includes('未取到余额'), `got ${String(noBalance.gateNote)}`)
+    check('cc lapsed + credits 500 → still not a 告急', isQuotaAlert(noBalance) === false)
+
+    // Both answered: the intended readings.
+    mock({ subscriptions: 'lapsed', credits: 'ok' })
+    const lapsed = await fetchCommandCodeQuota({ plan: { apiKey: 'k' } })
+    check('cc lapsed answered → gate balance', lapsed.gate === 'balance', `got ${String(lapsed.gate)}`)
+    check('cc lapsed answered → carries the balance', lapsed.credits !== undefined)
+    check('cc lapsed answered → dated note', (lapsed.gateNote ?? '').includes('订阅已于'), `got ${String(lapsed.gateNote)}`)
+
+    mock({ subscriptions: 'active', credits: 'ok' })
+    const live = await fetchCommandCodeQuota({ plan: { apiKey: 'k' } })
+    check('cc active → gate subscription', live.gate === 'subscription', `got ${String(live.gate)}`)
+    check('cc active → no note', live.gateNote === undefined)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
+
+console.log('quota: opencode-go entitlement states (mocked HTTP, no live network)')
+{
+  const originalFetch = globalThis.fetch
+  const key = { resolve: async () => 'test-key' }
+  const respond = (status: number, body: unknown = {}) => {
+    globalThis.fetch = (async () => new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch
+  }
+  try {
+    // 403 = valid key, no Go subscription (cc-switch #6433). The provider
+    // answered, so it is a state — not 「查询失败」, and not something to poll.
+    respond(403, { error: 'no subscription' })
+    const noSub = await fetchOpenCodeGoQuota({ credentials: key })
+    check('go 403 → ok card, not an error', noSub.state === 'ok', `got ${noSub.state}`)
+    check('go 403 → gate none', noSub.gate === 'none', `got ${String(noSub.gate)}`)
+    check('go 403 → no windows to draw', noSub.windows.length === 0)
+    check('go 403 → answers with a reason', (noSub.gateNote ?? '').length > 0)
+    check('go 403 → not a 告急', isQuotaAlert(noSub) === false)
+    check('go 403 → carries a fetch time', typeof noSub.fetchedAt === 'number')
+    // 401 stays a failure: the key itself is wrong, and re-polling cannot fix it.
+    respond(401, { error: 'invalid-key' })
+    const badKey = await fetchOpenCodeGoQuota({ credentials: key })
+    check('go 401 → error card', badKey.state === 'error', `got ${badKey.state}`)
+    check('go 401 → no gate', badKey.gate === undefined)
+    // A normal payload declares its gate and keeps its windows alertable.
+    respond(200, { usage: { rolling: { status: 'ok', percent: 12, resetsAt: '2026-08-14T07:20:00Z' } } })
+    const live = await fetchOpenCodeGoQuota({ credentials: key })
+    check('go 200 → gate subscription', live.gate === 'subscription', `got ${String(live.gate)}`)
+    check('go 200 → windows kept', live.windows.length === 1)
+    check('go 200 → still alertable', isQuotaAlert({
+      ...live,
+      windows: [{ ...live.windows[0]!, usagePercent: 95, exceeded: false }],
+    }) === true)
+    // The builder both providers' no-subscription path shares.
+    const built = noSubscriptionCard('opencode-go', 'note')
+    check('noSubscriptionCard shape', built.state === 'ok' && built.gate === 'none' && built.windows.length === 0 && built.gateNote === 'note')
+    check('a windowless card carries no quota content', hasQuotaContent(built) === false)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 }
 
 console.log('quota: opencode-go real endpoint parse (usage.rolling/percent/resetsAt)')

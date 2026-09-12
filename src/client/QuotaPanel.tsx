@@ -18,6 +18,13 @@
  * replace them in place. The only skeleton ever shown is the very first open
  * of a fresh install, when nothing is known yet.
  *
+ * Card order: the host's list is the base order, and cards that turn out to
+ * have no in-force subscription are demoted below the rest as they resolve
+ * (`orderQuotaProviders`) — the tab should open on the plans that can actually
+ * be spent, not on a retired one. Each card owns its own fetch, so the order is
+ * learned one card at a time and a card moves at most once, when its first
+ * response lands.
+ *
  * Card anatomy (see `QuotaCard` in types):
  *  - header identity: a ring gauge leads on the left in place of a monogram,
  *    followed by provider + plan/account context. The ring answers one fixed
@@ -37,14 +44,26 @@
  *       budget reads identically;
  *    2. a thin period-activity strip (completed calls / success / tokens),
  *       only when the provider reports a usage summary.
+ *  - non-subscription gates: a card whose account has no in-force subscription
+ *    renders a different body, because the provider's rolling windows pace an
+ *    in-force plan's included monthly credits only. `gate: 'balance'` (a lapsed
+ *    plan, or a pay-as-you-go account) hides the window rows, drops the ring (a
+ *    balance has no denominator) and leads with the credit balance and its
+ *    sources — including the top-up/free credits that outlive a plan.
+ *    `gate: 'none'` (OpenCode Go: valid key, no subscription, and an endpoint
+ *    that reports no balance at all) shows the state and nothing else, since
+ *    there is no number this card could honestly put on screen. Both are
+ *    skipped by auto-refresh: nothing they report moves on a minutes scale, and
+ *    the manual + on-open refreshes still pick up a renewal.
  *  - unconfigured / error states: a state chip in the header + an explanatory
  *    panel (hint names the fix / reason).
  *
  * @module dsh-tokbook/client/QuotaPanel
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { QuotaCard, QuotaView, QuotaWindowView } from '../types.ts'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { QuotaCard, QuotaGate, QuotaView, QuotaWindowView } from '../types.ts'
+import { orderQuotaProviders } from '../quota.ts'
 import { RefreshGlyph, UsageGlyph } from './icons.tsx'
 
 /** What a window bar / gauge may be colored as. */
@@ -64,6 +83,25 @@ export function QuotaPanel() {
   const [listError, setListError] = useState<string | null>(null)
   const [autoMinutes, setAutoMinutes] = useState(5)
   const [autoTicker, setAutoTicker] = useState(0)
+  /** Last gate each card reported, keyed by provider. Cards fetch and load
+   *  independently (that is the point of the per-provider route), so the panel
+   *  cannot know the order up front — it learns each card's gate as that card
+   *  resolves. Only known gates are stored: an absent entry means "not known
+   *  yet", which orders as active, the same way an absent gate renders. */
+  const [gates, setGates] = useState<Readonly<Record<string, QuotaGate>>>({})
+
+  // Stable identity on purpose: the cards take this as a prop and hold it in
+  // their fetch callback's deps, so a new function on every render would
+  // rebuild that callback and re-run their mount effect (a refetch loop).
+  const reportGate = useCallback((provider: string, gate: QuotaGate | undefined) => {
+    setGates((prev) => {
+      if (prev[provider] === gate) return prev
+      const next = { ...prev }
+      if (gate === undefined) delete next[provider]
+      else next[provider] = gate
+      return next
+    })
+  }, [])
 
   // Fetch the enabled-provider list once per mount. Fast and non-network.
   useEffect(() => {
@@ -96,6 +134,14 @@ export function QuotaPanel() {
   }, [autoMinutes])
 
   const hasProviders = providers !== null && providers.length > 0
+  // Display order: retired plans last (see `orderQuotaProviders`). Recomputed
+  // as cards report their gate, which is why it lives here and not in the host's
+  // list payload — the host's list is static and un-fetched, while the truth
+  // arrives one card at a time.
+  const ordered = useMemo(
+    () => (providers === null ? [] : orderQuotaProviders(providers, (provider) => gates[provider])),
+    [providers, gates],
+  )
   return (
     <section className="dtpl-quota-sec" aria-label="订阅额度">
       <p className="dtpl-quota-intro">
@@ -130,8 +176,13 @@ export function QuotaPanel() {
           )
           : (
             <div className="dtpl-quota-cards">
-              {providers!.map((provider) => (
-                <QuotaCardController key={provider} provider={provider} autoTicker={autoTicker} />
+              {ordered.map((provider) => (
+                <QuotaCardController
+                  key={provider}
+                  provider={provider}
+                  autoTicker={autoTicker}
+                  onGate={reportGate}
+                />
               ))}
             </div>
           )}
@@ -181,12 +232,22 @@ const QUOTA_REFRESH_COOLDOWN_MS = 30_000
  * round trip), and only when that served data is already old does the card
  * refresh itself in place. A refresh never blanks a rendered card: old
  * numbers stay visible and are swapped when fresh ones arrive. */
-function QuotaCardController({ provider, autoTicker }: { provider: string; autoTicker: number }) {
+function QuotaCardController({ provider, autoTicker, onGate }: {
+  provider: string
+  autoTicker: number
+  /** Reports this card's gate to the panel, which orders the cards with it.
+   *  Must have a stable identity (the panel memoizes it) — it sits in
+   *  `fetchCard`'s deps, which the mount effect keys off. */
+  onGate: (provider: string, gate: QuotaGate | undefined) => void
+}) {
   const [card, setCard] = useState<QuotaCard | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const inFlight = useRef(0)
   const lastRefreshAt = useRef(0)
+  /** The rendered card, readable from the timer effect without making the
+   *  effect depend on it (which would restart the interval on every fetch). */
+  const cardRef = useRef<QuotaCard | null>(null)
 
   const fetchCard = useCallback((force: boolean): Promise<QuotaCard | null> => {
     const token = ++inFlight.current
@@ -199,8 +260,17 @@ function QuotaCardController({ provider, autoTicker }: { provider: string; autoT
       })
       .then((data) => {
         if (token !== inFlight.current) return null
+        cardRef.current = data
         setCard(data)
         setError(null)
+        // Report after the supersede check, so only the response that actually
+        // became this card's state can move it in the order. A successful
+        // response carrying no gate (a fetch failed server-side, or the key is
+        // gone) reports `undefined` and drops the entry: we no longer know the
+        // gate, and that card renders as a state panel — not as a retired plan.
+        // A *failed* refresh never reaches here, because it deliberately keeps
+        // the rendered card, so that card's gate still stands.
+        onGate(provider, data.gate)
         return data
       })
       .catch((err: unknown) => {
@@ -213,7 +283,7 @@ function QuotaCardController({ provider, autoTicker }: { provider: string; autoT
       .finally(() => {
         if (token === inFlight.current) setLoading(false)
       })
-  }, [provider])
+  }, [provider, onGate])
 
   // Initial load (host serves fresh TTL or the durable last-known card, so
   // this resolves without waiting on the provider). If the served data is
@@ -231,10 +301,18 @@ function QuotaCardController({ provider, autoTicker }: { provider: string; autoT
     return () => { cancelled = true; inFlight.current += 1 }
   }, [fetchCard])
 
-  // Auto-refresh tick → force this card's data.
+  // Auto-refresh tick → force this card's data. A non-subscription card is
+  // skipped: nothing it reports moves on a minutes scale, because the rolling
+  // windows that would move are not a bound the account is under. Its balance
+  // changes only when the user spends or tops up, and both the manual refresh
+  // button and the on-open freshness refresh above still re-hit the provider —
+  // so a renewal or a top-up is picked up on the next click or open, without
+  // polling an API that has nothing new to say.
   const firstTick = useRef(true)
   useEffect(() => {
     if (firstTick.current) { firstTick.current = false; return }
+    const gate = cardRef.current?.gate
+    if (gate !== undefined && gate !== 'subscription') return
     lastRefreshAt.current = Date.now()
     void fetchCard(true)
   }, [autoTicker, fetchCard])
@@ -292,6 +370,9 @@ function QuotaCardView({ provider, card, error, loading, onRefresh }: {
         <div className="dtpl-quota-head-side">
           {ok && card !== null && card.fetchedAt !== undefined && (
             <span className="dtpl-quota-updated">更新于 {formatClock(card.fetchedAt)}</span>
+          )}
+          {card !== null && card.gate !== undefined && card.gate !== 'subscription' && (
+            <span className="dtpl-quota-chip dtpl-quota-chip-gate">无生效订阅</span>
           )}
           {card !== null && card.state === 'unconfigured' && (
             <span className="dtpl-quota-chip dtpl-quota-chip-muted">未配置</span>
@@ -354,9 +435,12 @@ function QuotaCardView({ provider, card, error, loading, onRefresh }: {
 }
 
 /** The data body of an ok card. Top to bottom: budget-window meter rows
- * (Command Code appends its monthly-allowance meter), activity strip. The
- * freshness label lives in the header next to the refresh control. */
+ * (Command Code appends its monthly-allowance meter, plus its top-up balance
+ * when it has one), activity strip. The freshness label lives in the header
+ * next to the refresh control. A balance-gated card gets a different body. */
 function QuotaCardBody({ card }: { card: QuotaCard }) {
+  if (card.gate === 'balance') return <QuotaBalanceBody card={card} />
+  if (card.gate === 'none') return <QuotaNoSubscriptionBody card={card} />
   const rows = [...card.windows]
   const monthly = monthlyAllowanceWindow(card)
   if (monthly !== null) rows.push(monthly)
@@ -369,9 +453,91 @@ function QuotaCardBody({ card }: { card: QuotaCard }) {
           ))}
         </div>
       )}
+      {card.credits !== undefined && extraCreditsUsd(card.credits) > 0 && (
+        <CreditSources credits={card.credits} extraOnly />
+      )}
       {card.usage !== undefined && <ActivityStrip usage={card.usage} />}
     </>
   )
+}
+
+/** Body of a `none`-gated card: no in-force subscription *and* no balance the
+ *  provider's endpoint reports (OpenCode Go exposes window percentages only).
+ *  There is nothing this card can put a number on, so it says the state and how
+ *  to get out of it — the one thing it must not do is draw the windows, whose
+ *  percentages would read as headroom the account does not have. This is the
+ *  same instinct as the `unconfigured` / `error` panels, but the state is not a
+ *  failure: the key is valid and the provider answered. */
+function QuotaNoSubscriptionBody({ card }: { card: QuotaCard }) {
+  return (
+    <div className="dtpl-quota-msg dtpl-quota-msg-muted">
+      <p className="dtpl-quota-msg-title">无生效中的订阅</p>
+      {card.gateNote !== undefined && card.gateNote !== '' && (
+        <p className="dtpl-quota-msg-body">{card.gateNote}</p>
+      )}
+    </div>
+  )
+}
+
+/** Body of a balance-gated card: the account has no in-force subscription, so
+ *  the rolling windows are not a bound it is under and are hidden, and the ring
+ *  goes with them (no denominator). What replaces them is the number the
+ *  provider actually gates on — the credit balance, of which top-up and free
+ *  credits survive a lapsed plan and included monthly credits do not — so the
+ *  sources are spelled out rather than folded into one amount the user cannot
+ *  check against the billing page. */
+function QuotaBalanceBody({ card }: { card: QuotaCard }) {
+  return (
+    <>
+      <div className="dtpl-quota-balance">
+        <span className="dtpl-quota-balance-v">{money(balanceUsd(card.credits))}</span>
+        <span className="dtpl-quota-balance-k">按量余额</span>
+      </div>
+      {card.gateNote !== undefined && card.gateNote !== '' && (
+        <p className="dtpl-quota-balance-note">{card.gateNote}</p>
+      )}
+      {card.credits !== undefined && <CreditSources credits={card.credits} />}
+      {card.usage !== undefined && <ActivityStrip usage={card.usage} />}
+    </>
+  )
+}
+
+/** Sum of the three credit sources the provider reports — the same
+ *  `remainingCredits` the reference implementation derives, and the whole of
+ *  what bounds an account with no in-force subscription. */
+function balanceUsd(credits: QuotaCard['credits']): number {
+  if (credits === undefined) return 0
+  return (credits.monthlyUsd ?? 0) + (credits.purchasedUsd ?? 0) + (credits.freeUsd ?? 0)
+}
+
+/** Top-up + free credits: the part of the balance that outlives a plan and
+ *  that the provider spends *first* once a rolling window is hit, so it
+ *  explains a card whose monthly pool still reads as untouched. */
+function extraCreditsUsd(credits: NonNullable<QuotaCard['credits']>): number {
+  return (credits.purchasedUsd ?? 0) + (credits.freeUsd ?? 0)
+}
+
+/** The credit sources as one compact line (`月额度 $x · 已购 $y · 赠送 $z`).
+ *  These used to be fetched and then never rendered: the balance that decides
+ *  whether a lapsed account can still call anything was invisible. On a
+ *  balance-gated card all three are named; on an in-force card only the extras
+ *  are (the included monthly pool is already the 本月额度 meter). A source the
+ *  provider reports as exactly zero is left out — and a line with nothing left
+ *  to say is dropped, since the balance above it already reads `$0.00`. */
+function CreditSources({ credits, extraOnly = false }: {
+  credits: NonNullable<QuotaCard['credits']>
+  extraOnly?: boolean
+}) {
+  const parts: string[] = []
+  const add = (label: string, value: number | undefined) => {
+    if (value !== undefined && value > 0) parts.push(`${label} ${money(value)}`)
+  }
+  if (!extraOnly) add('月额度', credits.monthlyUsd)
+  add('已购', credits.purchasedUsd)
+  add('赠送', credits.freeUsd)
+  if (parts.length === 0) return null
+  const text = parts.join(' · ')
+  return <p className="dtpl-quota-sources">{extraOnly ? `额外余额 ${text}` : text}</p>
 }
 
 /** One budget window, on one skeleton for both data shapes: label + used
@@ -476,6 +642,12 @@ function allowanceState(card: QuotaCard): {
  * tightest rolling window — and `cap` then names that window, so the ring's
  * referent is never implicit. */
 function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; cap: string } | undefined {
+  // Nothing to be a percentage *of*: a non-subscription card is not under its
+  // window limits at all, and the body hides or omits those rows — so a ring
+  // drawn from one (or from the fallback below) would summarize a number the
+  // card does not show. A balance has no denominator, so it is shown as an
+  // amount instead (see QuotaBalanceBody); a `none` card has no number at all.
+  if (card.gate !== undefined && card.gate !== 'subscription') return undefined
   const monthly = card.windows.find((w) => w.id === 'monthly')
   if (monthly !== undefined) {
     return { pct: monthly.usagePercent, tone: toneOf(monthly.usagePercent), cap: '本月' }
@@ -592,7 +764,8 @@ function planContext(card: QuotaCard): string {
       : planName)
   }
   const periodEnd = card.planInfo?.periodEnd
-  if (card.credits === undefined
+  if (card.gate !== 'balance' && card.gate !== 'none'
+    && card.credits === undefined
     && periodEnd !== undefined && periodEnd !== null && periodEnd > 0) {
     bits.push(`至 ${new Date(periodEnd).toLocaleDateString()}`)
   }

@@ -22,7 +22,7 @@
  * @module dsh-tokbook/quota
  */
 
-import type { QuotaCard, QuotaPlanInfo, QuotaWindowView } from './types.ts'
+import type { QuotaCard, QuotaGate, QuotaPlanInfo, QuotaWindowView } from './types.ts'
 
 export type { QuotaCard, QuotaView, QuotaWindowView } from './types.ts'
 
@@ -69,9 +69,15 @@ export const QUOTA_ALERT_PERCENT = 90
  * Whether one official quota card is worth a persistent 告急 indicator on the
  * footer trigger. Only 'ok' cards count: an unconfigured/error card has no
  * window facts, and inventing an alert from a fetch failure would cry wolf.
+ *
+ * A non-`subscription` card is never an alert either: its windows do not pace
+ * anything the account is under, so a number left over from when the plan was
+ * live must not raise a 告急 dot the user cannot act on. (A low *balance* is a
+ * real signal, but a different one — it needs a threshold nobody asked for.)
  */
 export function isQuotaAlert(card: QuotaCard | null | undefined): boolean {
   if (card === null || card === undefined || card.state !== 'ok') return false
+  if (card.gate !== undefined && card.gate !== 'subscription') return false
   return card.windows.some((window) => window.exceeded || window.usagePercent >= QUOTA_ALERT_PERCENT)
 }
 
@@ -83,6 +89,92 @@ export function isQuotaAlert(card: QuotaCard | null | undefined): boolean {
  */
 export function isBuiltinQuotaPlan(provider: string): boolean {
   return provider === OPENCODE_GO_PROVIDER || provider === COMMAND_CODE_PROVIDER
+}
+
+/**
+ * Card order for the 订阅额度 tab: cards whose account has no in-force
+ * subscription sink below the ones that do, so the tab opens on the plans that
+ * can actually be spent rather than on a retired one.
+ *
+ * A stable partition, not a sort: `providers` is the host's display order (see
+ * `QuotaView.providers`) and stays the order *within* each group, so nothing
+ * reshuffles except the demotion itself. A provider with no known gate yet — it
+ * is still loading, or its last fetch failed — counts as active, which is the
+ * same reading the card renders (an absent gate means `subscription`); guessing
+ * "retired" from missing data is the mistake the gate exists to prevent.
+ */
+export function orderQuotaProviders(
+  providers: readonly string[],
+  gateOf: (provider: string) => QuotaGate | undefined,
+): string[] {
+  const active: string[] = []
+  const retired: string[] = []
+  for (const provider of providers) {
+    const gate = gateOf(provider)
+    if (gate !== undefined && gate !== 'subscription') retired.push(provider)
+    else active.push(provider)
+  }
+  return [...active, ...retired]
+}
+
+// ---------------------------------------------------------------------------
+// Usage gate: what bounds the account right now
+// ---------------------------------------------------------------------------
+
+/**
+ * Subscription statuses that are unambiguously an in-force plan. Anything else
+ * is judged by the billing period instead of by name: the provider's own
+ * documented cancel flow keeps access until the period ends ("it stays active
+ * until the end of the current billing period"), so a status word like
+ * `canceled` can still mean "in force until `periodEnd`". Judging unknown
+ * status words by date rather than by a hard-coded vocabulary also means a new
+ * word from the provider degrades to the date rule instead of to a wrong card.
+ */
+export const QUOTA_IN_FORCE_STATUSES: readonly string[] = ['active', 'trialing']
+
+/**
+ * What bounds one account's usage, derived from the plan identity the provider
+ * reports (`billing/subscriptions`). No plan identity at all means no evidence
+ * of an in-force subscription — the balance gate, which is also the honest
+ * reading for a pay-as-you-go account (a normal, non-error state: the provider
+ * sells one).
+ */
+export function quotaGate(planInfo: QuotaPlanInfo | undefined, now: number = Date.now()): QuotaGate {
+  if (planInfo === undefined) return 'balance'
+  const status = planInfo.status?.trim().toLowerCase() ?? ''
+  if (QUOTA_IN_FORCE_STATUSES.includes(status)) return 'subscription'
+  const periodEnd = planInfo.periodEnd
+  if (periodEnd !== undefined && periodEnd !== null && periodEnd > now) return 'subscription'
+  return 'balance'
+}
+
+/** Local `YYYY-MM-DD` of an epoch-ms instant. Formatted by hand (not
+ * `toLocaleDateString`) so the host-composed sentence is stable regardless of
+ * the host process's locale. */
+export function dayText(epochMs: number): string {
+  const date = new Date(epochMs)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${String(date.getFullYear())}-${month}-${day}`
+}
+
+/**
+ * The one sentence shown on a `balance`-gated card: why the rolling windows no
+ * longer describe anything, and what does. Names the evidence it rests on — a
+ * period end, or the raw status word when the provider sent one — so a card
+ * never asserts "expired" on thin air (a pay-as-you-go account reports neither,
+ * and is not expired).
+ */
+export function balanceGateNote(planInfo: QuotaPlanInfo | undefined, now: number = Date.now()): string {
+  const periodEnd = planInfo?.periodEnd
+  if (periodEnd !== undefined && periodEnd !== null && periodEnd > 0 && periodEnd <= now) {
+    return `订阅已于 ${dayText(periodEnd)} 结束，现仅由余额决定可用量——5 小时 / 本周窗口只约束订阅内的月度额度，该账户不再适用。`
+  }
+  const status = planInfo?.status?.trim()
+  if (status !== undefined && status !== '') {
+    return `官方报告的订阅状态为 ${status}，当前没有生效中的月度额度——该账户由余额决定可用量。`
+  }
+  return '未检测到生效中的订阅——该账户由余额决定可用量（5 小时 / 本周窗口仅约束订阅内的月度额度）。'
 }
 
 // ---------------------------------------------------------------------------
@@ -202,5 +294,30 @@ export function errorCard(provider: string, reason: string): QuotaCard {
     state: 'error',
     message: reason,
     windows: [],
+  }
+}
+
+/**
+ * Build an `ok` card for an account the provider has *answered* about, but
+ * whose answer is "no in-force subscription, and no balance for this endpoint
+ * to report either" — OpenCode Go's 403, which the endpoint's own reference
+ * reads as "valid key, no Go subscription" (distinct from a 401 auth failure).
+ *
+ * `state: 'ok'` on purpose: nothing failed, so calling it 「查询失败」 tells the
+ * user to debug the wrong thing. The deficiency moves to `gate: 'none'`, which
+ * is what stops a renderer from showing meters and what keeps the card out of
+ * the auto-refresh loop and off the 告急 dot. The card carries no windows at
+ * all — there is no bound here to draw, and inventing a 0% would read as
+ * "plenty left".
+ */
+export function noSubscriptionCard(provider: string, note: string, now: number = Date.now()): QuotaCard {
+  return {
+    plan: provider,
+    title: BUILTIN_PLAN_TITLES[provider] ?? provider,
+    state: 'ok',
+    gate: 'none',
+    gateNote: note,
+    windows: [],
+    fetchedAt: now,
   }
 }

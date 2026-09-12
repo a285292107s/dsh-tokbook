@@ -87,9 +87,17 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </p>
         <p className="dtpl-doc-sub">
           计价按 <b>(通道, 模型)</b> 双维解析：同一个模型串在官方 API 与订阅通道里的
-          计费性质不同，价格也可按记录时间的不同调价段变化。金额分成两个桶——
+          计费性质不同。时刻上分两级——先取该记录时间戳落在哪一段<b>调价段</b>（生效时间精确到整点），
+          再取该段内该时刻落在哪个<b>峰谷时段</b>（星期几 + 几点到几点）；没被任何时段覆盖的
+          时间按该段的<b>全天价</b>算。金额分成两个桶——
           <b>实际支出</b>（按量通道真金白银的花费）与 <b>订阅价值</b>（订阅通道按官方价折算
           的“省了多少”，<b>不是现金</b>，也不会混入上方支出数字）。
+        </p>
+        <p className="dtpl-doc-sub">
+          价格表页<b>行内那四个数字改的是「当前生效那一段的全天价」</b>——改它等于重算用这段价
+          计费的全部历史。要从现在起调价，请用行尾 ▸ 里的「＋ 加一段价（调价史）」新增一段。
+          某段历史原来的时段或生效时间被改掉、删掉后，那些记录会回到<b>价格未知</b>（¥0）并
+          在概览里列出来，不会被悄悄按邻近的价计算。
         </p>
       </section>
 
@@ -139,7 +147,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">金额是估算</span>
-                <span className="dtpl-doc-gap-item-desc">本机价格表跟不上厂商最新费率时，金额会偏离（词元数不受影响）。</span>
+                <span className="dtpl-doc-gap-item-desc">本机价格表跟不上厂商最新费率时，金额会偏离（词元数不受影响）。改价只影响本机账本，不会回写厂商账单。</span>
               </li>
             </ul>
           </article>

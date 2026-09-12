@@ -55,18 +55,25 @@ body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
      disclosure — and drop the column header, which no longer lines up. */
   [data-plugin="dsh-tokbook"] .dtpl-price-cols{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-price-row{
-    grid-template-columns:minmax(0,1fr) auto;row-gap:4px;
+    grid-template-columns:minmax(0,1fr) auto;row-gap:6px;
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-id{grid-column:1;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-more{grid-column:2;grid-row:1;}
+  /* The disclosure is the only way into a row's price history, so on a touch
+     sheet it gets a full 44px target instead of the 26px pointer-sized one. */
+  [data-plugin="dsh-tokbook"] .dtpl-price-more{
+    grid-column:2;grid-row:1;width:44px;height:44px;font-size:12px;
+  }
   [data-plugin="dsh-tokbook"] .dtpl-price-rates{
     grid-column:1 / -1;
-    grid-template-columns:repeat(2,minmax(0,1fr));row-gap:4px;
+    grid-template-columns:repeat(2,minmax(0,1fr));row-gap:6px;
     margin-top:2px;
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-cell-k{display:block;}
   [data-plugin="dsh-tokbook"] .dtpl-price-input{text-align:left;}
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates{
     grid-template-columns:repeat(2,minmax(0,1fr));
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-head{flex-wrap:wrap;}

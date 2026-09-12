@@ -9,7 +9,7 @@
  * overlay.
  *
  * Query flags: ?dark=1 dark skin, ?empty=1 empty ledger, ?err=1 fetch error,
- * ?quota=rich|percent|mix|unconfigured|error|none quota-tab fixture +
+ * ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none quota-tab fixture +
  * auto-switch to the quota tab.
  */
 import { build } from 'esbuild'
@@ -122,29 +122,81 @@ const emptyOverview = {
 
 /* ── pricing-tab fixtures ── */
 /** Pricing-tab fixture: the route cards the 价格表 tab renders. One card per
- *  route, one row per model, each carrying its price segments (四档价 + 生效
- *  日期). The states worth looking at are all here: a priced row, a 调价史,
- *  价格未知, a 仅账本 string (the config no longer lists it), a 订阅 route, and
- *  a route that only exists because the price file names it. */
+ *  route, one row per model, each carrying its price segments (生效时间 +
+ *  全天价四档 + 例外时段). The states worth looking at are all here: a priced
+ *  row, a 调价史, a 峰谷时段 row, 价格未知, a 仅账本 string (the config no longer
+ *  lists it), a 订阅 route, and a route that only exists because the price file
+ *  names it. */
 const PRICING_FIXTURE = {
   routes: [
     {
       route: 'deepseek-official', label: 'DeepSeek', billing: 'metered', records: 6159,
       models: [
-        { model: 'deepseek-v4-flash', configured: true, records: 322, segments: [
+        { model: 'deepseek-v4-flash', configured: true, records: 322,
+          // 有账本时间跨度,而且有 40 次账落在最早那段的起点之前(见时间轴上的
+          // 「40 次无价」标记):这是价格表唯一会承认"钱没覆盖全史"的地方。
+          firstAt: Date.UTC(2026, 6, 20), lastAt: Date.UTC(2026, 8, 11), unpriced: 40,
+          segments: [
           { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
           { from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 6, note: '官方调价' },
+          // 带峰谷时段的一段:工作日高峰另定,其余时间按全天价。
+          { from: '2026-09-10T12:00', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
+            note: 'V4.1 Flash 上线,峰谷定价',
+            slots: [
+              { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
+              { days: 'weekdays', start: 14, end: 18, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
+            ] },
         ] },
-        { model: 'deepseek-v4-flash-vision-exp', configured: true, records: 3092, segments: [
-          { from: null, inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
+        // 真实的一例(维护者 2026-09-12 截图里的行):首记 08-25,最早那段却写 08-21
+        // ——边界落在轴的左端之外,块要在轴起点拿到刻度 + 空心点,否则轴最前面一段
+        // 看起来是空的。
+        { model: 'deepseek-v4-flash-vision-exp', configured: true, records: 3092,
+          firstAt: Date.UTC(2026, 7, 25), lastAt: Date.UTC(2026, 8, 6), unpriced: 0,
+          segments: [
+          { from: '2026-08-21', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheWritePerMillion: 0.05 },
+          { from: '2026-09-10', inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 },
         ] },
-        { model: 'deepseek-v4-pro', configured: true, records: 0, segments: [] },
+        // 密集调价史:8 个节点挤在三周内(含同一天两个),用来看"节点之间的最小
+        // 间隔"与横向滚动——节点不会被压到一起。
+        { model: 'deepseek-v4.1-flash', configured: true, records: 899,
+          firstAt: Date.UTC(2026, 7, 18, 2), lastAt: Date.UTC(2026, 8, 12, 6), unpriced: 0,
+          segments: [
+          { from: '2026-08-20', inputPerMillion: 1, outputPerMillion: 4 },
+          { from: '2026-08-21', inputPerMillion: 1.2, outputPerMillion: 4.5 },
+          { from: '2026-08-25', inputPerMillion: 1.5, outputPerMillion: 5 },
+          { from: '2026-09-01', inputPerMillion: 1.8, outputPerMillion: 5.5 },
+          { from: '2026-09-02T09:00', inputPerMillion: 2, outputPerMillion: 6 },
+          { from: '2026-09-02T18:00', inputPerMillion: 2.2, outputPerMillion: 6.5 },
+          { from: '2026-09-08', inputPerMillion: 2.5, outputPerMillion: 7 },
+          { from: '2026-09-10', inputPerMillion: 3, outputPerMillion: 8 },
+        ] },
+        // 首记在生效时间之后:那格的边界画不到轴上(标签写成「◀ 2026-09-01」),
+        // 这是"边界不咬账本"的常态——轴左端仍是首记,不是价段边界。
+        { model: 'deepseek-v4-pro', configured: true, records: 2745,
+          firstAt: Date.UTC(2026, 8, 5, 3), lastAt: Date.UTC(2026, 8, 11, 10), unpriced: 0,
+          segments: [
+          { from: '2026-09-01', inputPerMillion: 4.5, outputPerMillion: 13.5, cacheWritePerMillion: 0.15 },
+        ] },
+        // 账本没记过这条串(还没调用过):没有首记可锚,价段仍是无起点,轴上左缘渐隐
+        // (D-017——有账的行上这个状态已经被首记锚定取代)。
+        { model: 'deepseek-flash', configured: true, records: 0, segments: [
+          { from: null, inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 },
+        ] },
+        // 有价、但账本没记过:同样是"没有首记",但价段写了日期,所以轴从这段价自己的边界
+        // 起算,并在轴下写明「没有首记可锚」(D-016 第二次修订)。
+        { model: 'deepseek-v4-flash-vision', configured: true, records: 0, segments: [
+          { from: '2026-08-18', inputPerMillion: 1.5, outputPerMillion: 4.5 },
+        ] },
       ],
     },
     {
       route: 'commandcode', label: 'commandcode', billing: 'subscription', records: 3232,
       models: [
-        { model: 'deepseek/deepseek-v4-flash', configured: true, records: 2964, segments: [
+        // 播种时无起点段按首记整点锚上(D-017):行上印「价段自 … 起」,轴上的第一段
+        // 拿到一枚刻度(锚点通常比首记早几十分钟,所以走 `◀ 日期` + 空心点那一支)。
+        { model: 'deepseek/deepseek-v4-flash', configured: true, records: 2964,
+          firstAt: Date.UTC(2026, 8, 6, 11, 3), lastAt: Date.UTC(2026, 8, 8, 11, 2), unpriced: 0,
+          segments: [
           { from: null, inputPerMillion: 1.5, outputPerMillion: 4.5 },
         ] },
         { model: 'z-ai/glm-5.3-flash', configured: true, records: 276, segments: [] },
@@ -153,25 +205,41 @@ const PRICING_FIXTURE = {
     {
       route: 'opencode-go', label: 'OpenCode Go', billing: 'subscription', records: 2935,
       models: [
-        { model: 'glm-5.3-flash', configured: true, records: 243, segments: [
+        { model: 'glm-5.3-flash', configured: true, records: 243,
+          firstAt: Date.UTC(2026, 8, 5, 8, 5), lastAt: Date.UTC(2026, 8, 6, 0, 54), unpriced: 0,
+          segments: [
           { from: null, inputPerMillion: 0.8, outputPerMillion: 2.8 },
         ] },
-        { model: 'mimo-v2.5', configured: true, records: 83, segments: [] },
+        // 没有价、但有账:抽屉里只报账本自己的跨度,不报"全部计 ¥0"
+        // (那是「价格未知」徽标的事),也不该动用警示色。
+        { model: 'mimo-v2.5', configured: true, records: 83,
+          firstAt: Date.UTC(2026, 7, 17, 4), lastAt: Date.UTC(2026, 7, 17, 9), unpriced: 83,
+          segments: [] },
         // 配置里已经没有这条串了,只有账本记得它:标「仅账本」,照样可定价。
-        { model: 'retired-model', configured: false, records: 41, segments: [] },
+        { model: 'retired-model', configured: false, records: 41,
+          firstAt: Date.UTC(2026, 8, 1, 6), lastAt: Date.UTC(2026, 8, 1, 7, 30), unpriced: 41,
+          segments: [] },
       ],
     },
     {
       route: 'dots-ai', label: '小红书', billing: 'metered', records: 560,
       models: [
-        { model: 'dots3-note-prev', configured: true, records: 644, segments: [] },
+        // 无起点段 + 完整覆盖:锚到首记整点后,轴上不该出现任何「无价」标记,最前面那一段
+        // 在自己的真实边界上拿到刻度(D-017)。
+        { model: 'dots3-note-prev', configured: true, records: 644,
+          firstAt: Date.UTC(2026, 7, 19, 3), lastAt: Date.UTC(2026, 7, 27, 9), unpriced: 0,
+          segments: [
+          { from: null, inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
+        ] },
       ],
     },
     {
       // 配置里已删掉、但账本/价格文件还记得的路由。
       route: 'private-relay', label: 'private-relay', billing: 'metered', records: 42,
       models: [
-        { model: 'deepseek-v4-flash', configured: false, records: 42, segments: [
+        { model: 'deepseek-v4-flash', configured: false, records: 42,
+          firstAt: Date.UTC(2026, 8, 3, 2), lastAt: Date.UTC(2026, 8, 3, 4), unpriced: 0,
+          segments: [
           { from: null, inputPerMillion: 1.2, outputPerMillion: 3.6, note: '自己填的中转价' },
         ] },
       ],
@@ -280,6 +348,15 @@ const QUOTA_MODES = {
   unconfigured: ['commandcode', 'opencode-go'],
   /** Both providers errored. */
   error: ['commandcode', 'opencode-go'],
+  /** commandcode with a lapsed subscription (balance gate: no ring, no windows). */
+  balance: ['commandcode'],
+  /** commandcode pay-as-you-go (balance gate, no plan identity reported). */
+  payg: ['commandcode'],
+  /** opencode-go with a valid key but no Go subscription (gate none). */
+  nosub: ['opencode-go'],
+  /** opencode-go retired *and* first in the host list: it must sink below the
+   *  active Command Code card, with the host order otherwise untouched. */
+  retiredfirst: ['opencode-go', 'commandcode'],
   /** No configured providers (empty state). */
   none: [],
 }
@@ -297,7 +374,7 @@ function quotaCards(mode) {
     account: { name: 'a285292107s' },
     planInfo: { planId: 'individual-goat', name: 'GOAT', status: 'active', periodEnd: t + 26 * 86_400_000 },
     usage: { completed: 1375, failed: 0, successRate: 100, costUsd: 6.5, tokensIn: 254_077_204, tokensOut: 1_435_790 },
-    credits: { monthlyUsd: 63.5, purchasedUsd: 0, freeUsd: 0 },
+    credits: { monthlyUsd: 63.5, purchasedUsd: 4.25, freeUsd: 0 },
     windows: [
       { id: 'fiveHour', label: '5 小时', usagePercent: 19.5, exceeded: false, resetAt: t + 1.3 * 3_600_000, usedUsd: 2.73, capUsd: 14 },
       { id: 'weekly', label: '本周', usagePercent: 18.6, exceeded: false, resetAt: t + 5 * 86_400_000 + 3 * 3_600_000, usedUsd: 6.5, capUsd: 35 },
@@ -331,10 +408,54 @@ function quotaCards(mode) {
     plan: 'opencode-go', title: 'OpenCode Go', state: 'error',
     message: '无法连接官方接口（网络错误）。',
   }
+  // A plan that ended: the API still reports the plan identity, but there is no
+  // in-force subscription left, so the account is gated by its balance alone.
+  const lapsedCommand = {
+    plan: 'commandcode',
+    title: 'GOAT',
+    state: 'ok',
+    gate: 'balance',
+    gateNote: '订阅已于 2026-10-06 结束，现仅由余额决定可用量——5 小时 / 本周窗口只约束订阅内的月度额度，该账户不再适用。',
+    account: { name: 'a285292107s' },
+    planInfo: { planId: 'individual-goat', name: 'GOAT', status: 'canceled', periodEnd: t - 6 * 86_400_000 },
+    usage: { completed: 1375, failed: 0, successRate: 100, costUsd: 15.14, tokensIn: 254_077_204, tokensOut: 1_435_790 },
+    credits: { monthlyUsd: 0, purchasedUsd: 12.4, freeUsd: 3 },
+    windows: [],
+    fetchedAt: t - 42_000,
+  }
+  // Pay-as-you-go: no plan identity at all, which is a normal account shape —
+  // the provider sells one — not an expired plan.
+  const paygCommand = {
+    plan: 'commandcode',
+    title: 'Command Code',
+    state: 'ok',
+    gate: 'balance',
+    gateNote: '未检测到生效中的订阅——该账户由余额决定可用量（5 小时 / 本周窗口仅约束订阅内的月度额度）。',
+    account: { name: 'a285292107s' },
+    credits: { monthlyUsd: 0, purchasedUsd: 28.75, freeUsd: 0 },
+    windows: [],
+    fetchedAt: t - 90_000,
+  }
+  // OpenCode Go with a valid key and no subscription: the endpoint answers 403
+  // ("valid key, no Go subscription"), which is a state, not a failure — and
+  // this endpoint reports no balance, so there is no number to show at all.
+  const noSubOpen = {
+    plan: 'opencode-go',
+    title: 'OpenCode Go',
+    state: 'ok',
+    gate: 'none',
+    gateNote: '该 key 有效，但当前没有生效中的 OpenCode Go 订阅（未订阅或已过期）——订阅后点右上角刷新即可恢复显示。',
+    windows: [],
+    fetchedAt: t - 30_000,
+  }
   switch (mode) {
     case 'mix': return { commandcode, 'opencode-go': unconfiguredOpen }
     case 'unconfigured': return { commandcode: unconfiguredCommand, 'opencode-go': unconfiguredOpen }
     case 'error': return { commandcode: errorCommand, 'opencode-go': errorOpen }
+    case 'balance': return { commandcode: lapsedCommand }
+    case 'payg': return { commandcode: paygCommand }
+    case 'nosub': return { 'opencode-go': noSubOpen }
+    case 'retiredfirst': return { commandcode, 'opencode-go': noSubOpen }
     case 'percent': return { 'opencode-go': opencode }
     default: return { commandcode, 'opencode-go': opencode }
   }
@@ -525,6 +646,11 @@ const server = createServer((req, res) => {
         inject(name, callback) { callback(); return () => {}; },
         register(options, component) { mounted.push({ options, component }); return () => {}; },
       },
+      // The client entry registers its cleanup hooks through ctx.effect
+      // (cordis runs the returned disposer on unload). The preview never
+      // unloads, so a no-op registration is all the harness needs — without it
+      // apply throws and nothing mounts at all.
+      effect() { return () => {}; },
     };
     window.__PLUGIN_EXPORTS__.apply(ctx);
     for (const { options, component } of mounted) {
@@ -559,6 +685,6 @@ const server = createServer((req, res) => {
 
 const port = Number(process.env.PORT ?? 8931)
 server.listen(port, '127.0.0.1', () => {
-  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?empty=1, ?err=1, ?quota=rich|percent|mix|unconfigured|error|none)`)
+  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?empty=1, ?err=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
 })
 

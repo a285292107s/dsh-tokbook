@@ -8,8 +8,9 @@
  * Injected once at materialize time and removed by the returned disposer.
  *
  * Fragments live in `styles/*.ts` (tokens / footer / overlay / ledger /
- * method / provider / quota / pricing / shared) and are concatenated in that
- * order — CSS cascade order is part of the contract, do not reshuffle.
+ * method / provider / quota / pricing / pricing-timeline / shared) and are
+ * concatenated in that order — CSS cascade order is part of the contract, do
+ * not reshuffle.
  *
  * Chinese UI: labels use normal text (no `text-transform: uppercase`, which is
  * meaningless for CJK) with a small secondary type style for hierarchy.
@@ -25,6 +26,7 @@ import { CSS_METHOD } from './styles/method.ts'
 import { CSS_PROVIDER } from './styles/provider.ts'
 import { CSS_QUOTA } from './styles/quota.ts'
 import { CSS_PRICING } from './styles/pricing.ts'
+import { CSS_PRICING_TIMELINE } from './styles/pricing-timeline.ts'
 import { CSS_SHARED } from './styles/shared.ts'
 
 const CSS = [
@@ -36,6 +38,7 @@ const CSS = [
   CSS_PROVIDER,
   CSS_QUOTA,
   CSS_PRICING,
+  CSS_PRICING_TIMELINE,
   CSS_SHARED,
 ].join('')
 

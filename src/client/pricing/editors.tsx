@@ -3,18 +3,28 @@
  * one price segment's editor, one model row, and one route card.
  *
  * The row IS the table: identity on the left, the four ¥/M buckets as aligned
- * tabular cells, and a disclosure that opens the row's 调价史. Nothing here
- * owns state — the panel does, and hands down small callbacks.
+ * tabular cells, and a disclosure that opens the row's 调价史. The cells always
+ * edit the segment in force's WHOLE-DAY price, so the table stays a table — 峰谷
+ * prices live one level down, on the 峰谷时段 rows inside the drawer. Nothing
+ * here owns state: the panel does, and hands down small callbacks.
+ *
+ * A 峰谷时段 restates only the buckets that differ; the ones it leaves empty
+ * show the whole-day rate as their placeholder, so "inherit" is visible instead
+ * of being a dash that means the opposite of the dash one level up.
  *
  * @module dsh-tokbook/client/pricing/editors
  */
 
 import { memo } from 'react'
-import type { BillingNature } from '../../types.ts'
+import { DAY_SET_LABELS, DAY_SETS, clockLabel } from '../../price-format.ts'
+import type { BillingNature, DaySet } from '../../types.ts'
 import {
-  editableSegment, fieldState, inForceToday, isUnpriced, modelDirty, newSegment, rowIssue, sortedSegments,
-  type ModelDraft, type RateField, type RouteDraft, type SegmentDraft,
+  blankSegment, duplicateSlot, editableSegment, effectiveSlots, fieldState, fmtFrom, fmtRowFrom, fromFieldInput,
+  fromFieldValue, inForceToday, inheritedRates, isBlankSlot, isUnpriced, modelDirty, newSegment, newSlot,
+  pendingSegment, rowIssue, sortedSegments, withSlotEnd, withSlotStart,
+  type ModelDraft, type RateField, type RateTexts, type RouteDraft, type SegmentDraft, type SlotDraft,
 } from './draft.ts'
+import { PriceTimeline } from './Timeline.tsx'
 
 /** The four ¥/M buckets, in the order every surface writes them. */
 export const RATE_FIELDS = [
@@ -27,9 +37,14 @@ export const RATE_FIELDS = [
 /** The row's four cells, in column order. */
 const CELLS: ReadonlyArray<{ field: RateField; label: string }> = RATE_FIELDS.map(({ key, label }) => ({ field: key, label }))
 
+/** Every hour a slot may start at, and every hour it may end at (end-exclusive,
+ *  so `24:00` closes the day). */
+const START_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
+const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour + 1)
+
 /** One numeric cell, edited in place: it reads as text until focused, so 50
  *  rows stay calm while every value is one click (or Tab) away. */
-function RateCell({ id, label, hint, value, state, context, onEdit }: {
+function RateCell({ id, label, hint, value, state, context, placeholder, note, onEdit }: {
   id: string
   label: string
   /** The static header this cell belongs to (for screen readers). */
@@ -37,10 +52,20 @@ function RateCell({ id, label, hint, value, state, context, onEdit }: {
   value: string
   state: 'ok' | 'empty' | 'bad' | 'readonly'
   context: string
+  /** Shown while the cell is empty. A 峰谷时段 passes the whole-day rate here,
+   *  so "empty = inherits" is visible rather than implied. */
+  placeholder?: string
+  /** Hover text explaining what an empty cell means in this context. */
+  note?: string
   onEdit?: (next: string) => void
 }) {
   const errorId = `${id}-err`
-  const message = state === 'bad' ? `${label}必须是非负数字（¥/百万词元）` : undefined
+  // The VISIBLE message stays short so it cannot distort a narrow rate column
+  // (a full sentence wraps into a tall thin sliver inside a 68px cell); the
+  // full sentence rides the input's title, and the row line below repeats the
+  // first problem in full width.
+  const message = state === 'bad' ? '须为非负数字' : undefined
+  const tip = state === 'bad' ? `${label}必须是非负数字（¥/百万词元）` : note
   return (
     <div className="dtpl-price-cell" data-state={state}>
       <label className="dtpl-price-cell-k" htmlFor={id}>{hint ?? label}</label>
@@ -52,7 +77,8 @@ function RateCell({ id, label, hint, value, state, context, onEdit }: {
         autoComplete="off"
         spellCheck={false}
         readOnly={state === 'readonly'}
-        placeholder="—"
+        placeholder={placeholder ?? '—'}
+        title={tip}
         value={value}
         aria-label={`${context} ${label}`}
         aria-invalid={state === 'bad' || undefined}
@@ -68,8 +94,92 @@ function RateCell({ id, label, hint, value, state, context, onEdit }: {
   )
 }
 
-/** One price segment of the 调价史: date + four rates + note. Actions appear on
- *  hover or keyboard focus (they stay reachable, never hover-only). */
+/** One 峰谷时段: the days it applies to, the hours it covers, and the buckets it
+ *  restates. Its rates are laid out exactly like the whole-day row above it, so
+ *  a peak price reads as "the same four buckets, other numbers" — and a bucket
+ *  left empty shows the whole-day rate it keeps. */
+function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onDuplicate }: {
+  slot: SlotDraft
+  index: number
+  /** Whether this one may be deleted (an unfinished draft always can; the last
+   *  priced slot may not, since that would silently drop the window). */
+  canRemove: boolean
+  /** The segment's whole-day rates, shown as the placeholders of empty cells. */
+  inherited: RateTexts
+  onChange: (next: SlotDraft) => void
+  onRemove: () => void
+  onDuplicate: () => void
+}) {
+  const context = `第 ${String(index + 1)} 个峰谷时段`
+  const inherit = (field: RateField): string | undefined => {
+    const value = inherited[field].trim()
+    return value === '' ? undefined : value
+  }
+  return (
+    <div className="dtpl-price-slot">
+      <div className="dtpl-price-slot-head">
+        <select
+          className="dtpl-price-select dtpl-price-select-days"
+          value={slot.days}
+          aria-label={`${context}的适用日`}
+          onChange={(event) => onChange({ ...slot, days: event.target.value as DaySet })}
+        >
+          {DAY_SETS.map(days => <option key={days} value={days}>{DAY_SET_LABELS[days]}</option>)}
+        </select>
+        <span className="dtpl-price-slot-clock">
+          <select
+            className="dtpl-price-select"
+            value={slot.start}
+            aria-label={`${context}的开始时间`}
+            onChange={(event) => onChange(withSlotStart(slot, event.target.value))}
+          >
+            {START_HOURS.map(hour => <option key={hour} value={String(hour)}>{clockLabel(hour)}</option>)}
+          </select>
+          <span className="dtpl-price-slot-dash" aria-hidden="true">–</span>
+          <select
+            className="dtpl-price-select"
+            value={slot.end}
+            aria-label={`${context}的结束时间`}
+            onChange={(event) => onChange(withSlotEnd(slot, event.target.value))}
+          >
+            {END_HOURS.map(hour => <option key={hour} value={String(hour)}>{clockLabel(hour)}</option>)}
+          </select>
+        </span>
+        <span className="dtpl-price-seg-actions">
+          <button type="button" className="dtpl-price-ghost" onClick={onDuplicate}>复制</button>
+          <button
+            type="button"
+            className="dtpl-price-ghost dtpl-price-ghost-danger"
+            onClick={onRemove}
+            disabled={!canRemove}
+            title={canRemove ? '删除这个峰谷时段' : '删掉最后一个有价的时段，这段覆盖的时间回到全天价'}
+          >
+            删除
+          </button>
+        </span>
+      </div>
+      <div className="dtpl-price-slot-rates">
+        {CELLS.map(({ field, label }) => (
+          <RateCell
+            key={field}
+            id={`slot-${String(slot.id)}-${field}`}
+            label={label}
+            value={slot[field]}
+            state={fieldState(slot, field)}
+            context={`${context} ${DAY_SET_LABELS[slot.days]}`}
+            placeholder={inherit(field)}
+            note={inherit(field) === undefined ? '留空 = 沿用全天价（全天价这档也是空的）' : `留空 = 沿用全天价 ${inherit(field)!}`}
+            onEdit={(next) => onChange({ ...slot, [field]: next })}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** One price segment of the 调价史: the instant it takes effect, its whole-day
+ *  price, its 峰谷时段 and its note. Actions appear on hover or keyboard focus
+ *  (they stay reachable, never hover-only). */
 function SegmentEditor({ segment, index, count, active, onChange, onRemove, onDuplicate }: {
   segment: SegmentDraft
   index: number
@@ -80,6 +190,10 @@ function SegmentEditor({ segment, index, count, active, onChange, onRemove, onDu
   onDuplicate: () => void
 }) {
   const base = `seg-${String(segment.id)}`
+  const slots = effectiveSlots(segment)
+  const hint = slots.length === 0
+    ? '四档价就是这一天 0–24 点的价。峰谷价用下面的 ＋ 加峰谷时段 加。'
+    : `没被这 ${String(slots.length)} 个峰谷时段覆盖的时间，按上面的全天价算。`
   return (
     <div className="dtpl-price-seg" data-active={active}>
       <div className="dtpl-price-seg-head">
@@ -87,15 +201,17 @@ function SegmentEditor({ segment, index, count, active, onChange, onRemove, onDu
           <input
             id={`${base}-from`}
             className="dtpl-price-input dtpl-price-input-date"
-            type="date"
-            value={segment.from}
-            aria-label={`第 ${String(index + 1)} 段的生效日期`}
-            onChange={(event) => onChange({ ...segment, from: event.target.value })}
+            type="datetime-local"
+            step={3600}
+            value={fromFieldValue(segment.from)}
+            aria-label={`第 ${String(index + 1)} 段的生效时间`}
+            title="生效时间精确到整点；分钟会向下取到整点。留空会按这条模型的首记整点填上"
+            onChange={(event) => onChange({ ...segment, from: fromFieldInput(event.target.value) })}
           />
-          <span className="dtpl-price-seg-date-k">生效日期</span>
+          <span className="dtpl-price-seg-date-k">生效时间</span>
         </label>
         <span className="dtpl-price-seg-tag">
-          {segment.from === '' ? '最早一段' : `${segment.from} 起`}
+          {fmtFrom(segment.from)}
           {active && <em className="dtpl-price-seg-live">当前生效</em>}
         </span>
         <span className="dtpl-price-seg-actions">
@@ -105,11 +221,14 @@ function SegmentEditor({ segment, index, count, active, onChange, onRemove, onDu
             className="dtpl-price-ghost dtpl-price-ghost-danger"
             onClick={onRemove}
             disabled={count <= 1}
-            title={count <= 1 ? '删掉这一段等于让这条模型回到「未定价」' : '删除这一段'}
+            title={count <= 1 ? '删掉这一段等于让这条模型回到「价格未知」' : '删除这一段'}
           >
             删除
           </button>
         </span>
+      </div>
+      <div className="dtpl-price-sub">
+        <span className="dtpl-price-sub-k">全天价<em>00:00–24:00</em></span>
       </div>
       <div className="dtpl-price-seg-rates">
         {CELLS.map(({ field, label }) => (
@@ -119,10 +238,35 @@ function SegmentEditor({ segment, index, count, active, onChange, onRemove, onDu
             label={label}
             value={segment[field]}
             state={fieldState(segment, field)}
-            context={`第 ${String(index + 1)} 段`}
+            context={`第 ${String(index + 1)} 段全天价`}
             onEdit={(next) => onChange({ ...segment, [field]: next })}
           />
         ))}
+      </div>
+      <div className="dtpl-price-slots">
+        <span className="dtpl-price-slots-k">峰谷时段<em>留空的档位沿用上面的全天价</em></span>
+        {segment.slots.map((slot, slotIndex) => (
+          <SlotEditor
+            key={slot.id}
+            slot={slot}
+            index={slotIndex}
+            canRemove={isBlankSlot(slot) || slots.length > 1}
+            inherited={inheritedRates(segment)}
+            onChange={(next) => onChange({ ...segment, slots: segment.slots.map(item => (item.id === slot.id ? next : item)) })}
+            onRemove={() => onChange({ ...segment, slots: segment.slots.filter(item => item.id !== slot.id) })}
+            onDuplicate={() => onChange({ ...segment, slots: [...segment.slots, duplicateSlot(slot)] })}
+          />
+        ))}
+        <div className="dtpl-price-slots-foot">
+          <button
+            type="button"
+            className="dtpl-price-add"
+            onClick={() => onChange({ ...segment, slots: [...segment.slots, newSlot()] })}
+          >
+            ＋ 加峰谷时段
+          </button>
+          <span className="dtpl-price-history-hint">{hint}</span>
+        </div>
       </div>
       <label className="dtpl-price-seg-note" htmlFor={`${base}-note`}>
         <input
@@ -155,19 +299,36 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
   const shown = editableSegment(row)
   const issue = rowIssue(row)
   const live = inForceToday(shown)
+  const slots = shown === null ? 0 : effectiveSlots(shown).length
+  // The model picker's split, applied to a price row: the human name is the
+  // label, the exact string stays the identity (it is the billing key, so it
+  // remains on screen rather than living in a tooltip). A string nothing names
+  // — a 仅账本 row, or one only the price file mentions — is its own label.
+  const named = row.name !== undefined && row.name !== '' && row.name !== row.model
   const meta: string[] = []
-  if (shown !== null) meta.push(shown.from === '' ? '最早一段起' : `${shown.from} 起`)
+  if (shown !== null) meta.push(fmtRowFrom(shown.from))
   meta.push(row.records > 0 ? `账本 ${String(row.records)} 次` : '账本没记过')
-  if (shown !== null && !live && !unpriced) meta.push('未生效')
   if (shown !== null && shown.note.trim() !== '') meta.push(shown.note.trim())
+  // The meta line has no room for a sentence, so the one term it prints without
+  // defining rides the hover: which account a 无起点 price reaches back over.
+  const metaTitle = shown !== null && shown.from.trim() === ''
+    ? `${meta.join(' · ')}｜「无起点」= 定价文件没写这份价的生效时间，这条模型的全部历史都按它算`
+    : meta.join(' · ')
 
   const edit = (field: RateField, next: string): void => {
     if (shown === null) {
-      // The first keystroke on an unpriced row writes its 最早一段.
-      onChange(route, row.model, {
-        ...row,
-        segments: [{ id: Math.max(0, ...row.segments.map(item => item.id)) + 1, from: '', input: '', output: '', cacheRead: '', cacheWrite: '', note: '', [field]: next }],
-      })
+      // The first keystroke on an unpriced row writes its 最早一段 — or fills
+      // the unfinished segment the user already added, so their choice of
+      // effective time is respected instead of being shadowed by a new one.
+      const pending = pendingSegment(row)
+      if (pending !== null) {
+        onChange(route, row.model, {
+          ...row,
+          segments: row.segments.map(item => (item.id === pending.id ? { ...item, [field]: next } : item)),
+        })
+        return
+      }
+      onChange(route, row.model, { ...row, segments: [...row.segments, blankSegment(field, next)] })
       return
     }
     onChange(route, row.model, {
@@ -180,13 +341,35 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
     <>
       <div className="dtpl-price-row" data-dirty={dirty} data-unpriced={unpriced} data-open={open}>
         <div className="dtpl-price-id">
+          {/* Line 1 is IDENTITY (name, or the exact string when nothing names
+              it) plus the flags that change how the four numbers read. Line 2
+              is PROVENANCE: the exact billing string, then the facts about the
+              price. Splitting them this way is what lets a long model string
+              live on the full width of the column instead of sharing one line
+              with the name and getting clipped to `deepseek-v4-f…`. */}
           <span className="dtpl-price-name">
-            <span className="dtpl-price-model" title={row.model}>{row.model}</span>
+            <span
+              className="dtpl-price-title"
+              title={named ? `${row.name!}\n${row.model}` : row.model}
+            >
+              {named ? row.name : row.model}
+            </span>
             {!row.configured && <span className="dtpl-price-badge">仅账本</span>}
-            {unpriced && <span className="dtpl-price-badge dtpl-price-badge-unknown">未定价</span>}
+            {unpriced && <span className="dtpl-price-badge dtpl-price-badge-unknown">价格未知</span>}
+            {/* The two marks that decide whether the row's four numbers are the
+                ones actually billing: both stay outside the truncating meta
+                line, so they can never be ellipsized away. */}
+            {slots > 0 && <span className="dtpl-price-badge dtpl-price-badge-slot">峰谷 {String(slots)} 段</span>}
+            {shown !== null && !live && !unpriced && <span className="dtpl-price-badge dtpl-price-badge-idle">未生效</span>}
             {dirty && <span className="dtpl-price-badge dtpl-price-badge-dirty">未保存</span>}
           </span>
-          <span className="dtpl-price-meta">{meta.join(' · ')}</span>
+          <span className="dtpl-price-meta">
+            {named && <span className="dtpl-price-model" title={row.model}>{row.model}</span>}
+            {named && meta.length > 0 && <span className="dtpl-price-sep" aria-hidden="true">·</span>}
+            {meta.length > 0 && (
+              <span className="dtpl-price-meta-text" title={metaTitle}>{meta.join(' · ')}</span>
+            )}
+          </span>
         </div>
         <div className="dtpl-price-rates">
           {CELLS.map(({ field, label }) => (
@@ -207,7 +390,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
           className="dtpl-price-more"
           aria-expanded={open}
           aria-label={`${row.model} 的价段（${String(row.segments.length)} 段）`}
-          title={row.segments.length > 1 ? `${String(row.segments.length)} 段价（调价史）` : '价格段与生效日期'}
+          title={row.segments.length > 1 ? `${String(row.segments.length)} 段价（调价史）` : '价格段、生效时间与峰谷时段'}
           onClick={() => onToggle(route, row.model)}
         >
           <span aria-hidden="true">{open ? '▾' : '▸'}</span>
@@ -217,8 +400,12 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
         <div className="dtpl-price-history">
           <div className="dtpl-price-history-head">
             <span className="dtpl-price-history-model">{row.model}</span>
-            <span className="dtpl-price-history-colid">生效日期 → 输入 / 输出 / 缓存读 / 缓存写（¥/百万词元）</span>
+            <span className="dtpl-price-history-colid">生效时间 → 全天价（¥/百万词元）→ 峰谷时段</span>
           </div>
+          {/* The axis heads the list it indexes: which interval is billing now,
+              where the boundaries are, what sits past 今天, and how much of the
+              ledger the price does not reach. */}
+          <PriceTimeline row={row} activeId={shown === null ? null : shown.id} />
           {sortedSegments(row).map((segment, index) => (
             <SegmentEditor
               key={segment.id}
@@ -241,6 +428,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
                   output: segment.output,
                   cacheRead: segment.cacheRead,
                   cacheWrite: segment.cacheWrite,
+                  slots: segment.slots.map(slot => newSlot(slot)),
                   note: segment.note,
                 })],
               })}
@@ -259,7 +447,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
             </button>
             <span className="dtpl-price-history-hint">
               {row.segments.length <= 1
-                ? '只有一段时,行内四个数字就是这一段。加第二段即可做调价史。'
+                ? '只有一段时,行内四个数字就是这一段的全天价。加第二段即可做调价史。'
                 : `${String(row.segments.length)} 段:行内显示当前生效的那一段,更早/更晚的在这里改。`}
             </span>
           </div>
@@ -305,7 +493,7 @@ export const RouteCard = memo(function RouteCard({ card, baseline, collapsed, op
           {card.label !== card.route && <span className="dtpl-price-key">{card.route}</span>}
           <span className="dtpl-price-count">
             {String(models.length)} 个模型 · 已定价 {String(priced)}
-            {unknown > 0 ? ` · 未定价 ${String(unknown)}` : ''}
+            {unknown > 0 ? ` · 价格未知 ${String(unknown)}` : ''}
             {card.records > 0 ? ` · 账本 ${String(card.records)} 次` : ''}
           </span>
         </button>

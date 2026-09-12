@@ -117,9 +117,9 @@ console.log('rollup: derived-state lossless rebuild')
     check('corrupt rollup rebuilds losslessly', key(first) === key(fromCorrupt))
 
     // A v1 rollup (no `schemaVersion`) is a format-change migration: it must
-    // read as absent and rebuild under the current shape (v3 rate rows carry
-    // the effective date of the segment that applied), never silently merge
-    // rows across providers.
+    // read as absent and rebuild under the current shape (v4 rate rows carry the
+    // effective instant of the segment that applied AND the exception slot that
+    // applied inside it), never silently merge rows across providers or slots.
     const v1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
     delete v1.schemaVersion
     // The stored rateRows lack `provider`; strip it to simulate a real v1 file.
@@ -136,7 +136,7 @@ console.log('rollup: derived-state lossless rebuild')
     check('v1 rollup rebuilds losslessly to the current shape', key(first) === key(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined))
     // The rebuilt file carries the current schema version.
     const afterV1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
-    check('rebuilt rollup is stamped schemaVersion 3', afterV1.schemaVersion === 3)
+    check('rebuilt rollup is stamped schemaVersion 4', afterV1.schemaVersion === 4)
 
     // And both agree with a direct full aggregation of the raw day files.
     const all = await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', never, quiet)
