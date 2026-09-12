@@ -7,9 +7,10 @@ DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把�
 ——记成一行、写入持久化的按日 JSONL 账本,再对外提供**带成本**的聚合总览。browser
 半区通过**侧边栏 footer 按钮**(route A:`sidebar.footer.action`)把它展示出来,按钮弹出
 **浮窗**(`shell.overlay`),内含汇总卡(**今日词元** + 较近7天日均涨跌参照 + 今日成本)、
-今日词元构成(四桶 + 缓存命中率)、按日 token 趋势图、按模型拆分
-(含成本)、按工作区累计(每个工作区一行:累计词元 + 请求数 + 金额,最近有操作的在前面,
-没有工作区目录的用量收在一行「未归属」)、**按通道的 tab**(每个通道路由一张卡,卡头用本机配置里的显示名
+今日词元构成(四桶 + 缓存命中率)、按日 token 趋势图、**按模型 / 按工作区两个子 tab**
+(同一个累计账本的两种切法,点击切换:按模型 = 词元 + 费用 + 占比条;按工作区 = 每个工作区
+一行累计词元 + 请求数 + 金额,最近有操作的在前面,没有工作区目录的用量收在一行「未归属」)、
+**按通道的 tab**(每个通道路由一张卡,卡头用本机配置里的显示名
 命名、路由键作次要小字,并标出该通道的计费性质「按量 / 订阅」;内含该路由下各模型的
 token/成本,可切换 今日 / 昨天 / 近7天 / 近30天 窗口)、**价格表 tab**(每个路由键一张卡,
 生效时间 + 四档全天价 + 峰谷时段全部由你自己写),以及**订阅额度 tab**
@@ -67,7 +68,8 @@ src/
     styles/           CSS 分片:tokens/footer/overlay/ledger/method/provider/quota/pricing/shared
     FooterButton.tsx  sidebar.footer.action 触发器
     LedgerOverlay.tsx shell.overlay 浮窗外壳(五 tab + 焦点/快捷键)
-    LedgerView.tsx    用量总览 tab(今日英雄卡 + 构成 + 趋势 + 按模型 + 按工作区)
+    LedgerView.tsx    用量总览 tab(今日英雄卡 + 构成 + 趋势)
+    Breakdowns.tsx     用量总览的两个子 tab:按模型 / 按工作区(点击切换)
     ProviderPanel.tsx 通道用量 tab
     MethodDoc.tsx     统计口径 tab
     pricing/

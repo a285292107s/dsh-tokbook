@@ -116,8 +116,38 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
   margin:4px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
 }
 
-/* ── models ─────────────────────────────────────────────────────────────── */
-[data-plugin="dsh-tokbook"] .dtpl-models-sec{margin-bottom:14px;}
+/* ── breakdown switch (按模型 / 按工作区) ────────────────────────────────── */
+/* Same segmented recipe as the window's own tabs, one step down in weight and
+   inline rather than full-width: a view switch INSIDE the 用量总览 tab must not
+   read as a peer of the top-level tabs. The aside names the ordering of the
+   panel on screen — the two angles do not share a sort key (models by request
+   count, workspaces most-recently-used first). */
+[data-plugin="dsh-tokbook"] .dtpl-bd{margin-bottom:14px;}
+[data-plugin="dsh-tokbook"] .dtpl-bd-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-bottom:8px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-bd-tabs{
+  display:inline-flex;gap:2px;padding:2px;
+  border-radius:8px;corner-shape:round;
+  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-bd-tab{
+  appearance:none;border:0;background:transparent;
+  height:22px;padding:0 10px;
+  font:inherit;font-size:11px;line-height:16px;font-weight:500;
+  color:var(--dtpl-fg-2);white-space:nowrap;
+  border-radius:6px;corner-shape:round;cursor:pointer;
+  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-bd-tab:hover{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-bd-tab[aria-selected="true"]{
+  color:var(--dtpl-fg);
+  background:var(--dtpl-surface);
+  box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
+}
+
+/* ── models / workspaces (the two panels behind the switch) ─────────────── */
 [data-plugin="dsh-tokbook"] .dtpl-models{display:flex;flex-direction:column;gap:10px;}
 [data-plugin="dsh-tokbook"] .dtpl-row{display:flex;align-items:center;justify-content:space-between;gap:16px;}
 [data-plugin="dsh-tokbook"] .dtpl-model{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;}
@@ -140,7 +170,6 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 [data-plugin="dsh-tokbook"] .dtpl-cost{color:var(--dtpl-fg-2);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;white-space:nowrap;}
 
 /* ── workspaces ─────────────────────────────────────────────────────────── */
-[data-plugin="dsh-tokbook"] .dtpl-ws-sec{margin-bottom:14px;}
 /* The identity line under the workspace title: the directory, then the two
    facts that make "most recent first" legible. The directory yields (ellipsis)
    under pressure; the facts never do — a clipped "最近 …" would read as a

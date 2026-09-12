@@ -1,20 +1,19 @@
 /**
- * 用量总览 tab content: today's hero, the four-bucket split, the daily trend,
- * the per-model breakdown and the cumulative per-workspace section. Shell
- * (tabs, dialog chrome, rescan footer) lives in `LedgerOverlay.tsx`.
+ * 用量总览 tab content: today's hero, the four-bucket split, the daily trend
+ * and the 按模型 / 按工作区 breakdown switch (which lives in `Breakdowns.tsx`).
+ * Shell (tabs, dialog chrome, rescan footer) lives in `LedgerOverlay.tsx`.
  *
  * @module dsh-tokbook/client/LedgerView
  */
 
-import type {
-  CostedModelRow, TokBookOverview, UsageDayRow, UsageTotals, WorkspaceUsageRow,
-} from '../types.ts'
+import type { TokBookOverview, UsageDayRow, UsageTotals } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import type { PricingFocus } from './contract.ts'
 import { UsageGlyph } from './icons.tsx'
+import { Breakdowns } from './Breakdowns.tsx'
 import {
-  formatDateTime, formatHitRate, formatMoney, formatRelative, formatTokens,
-  localDayKey, share, shiftDayKey, shortDay,
+  formatHitRate, formatMoney, formatTokens,
+  localDayKey, shiftDayKey, shortDay,
 } from './format.ts'
 
 /** Days in the trend window; the window never starts before the first record. */
@@ -176,133 +175,6 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   )
 }
 
-function ModelBreakdown({ byModel, totalTokens, money }: {
-  byModel: readonly CostedModelRow[]
-  totalTokens: number
-  money: (value: number) => string
-}) {
-  if (byModel.length === 0) return null
-  return (
-    <section className="dtpl-models-sec">
-      <h2 className="dtpl-sec-title">按模型</h2>
-      <div className="dtpl-models">
-        {byModel.map((m) => (
-          <div className="dtpl-row" key={`${m.provider}/${m.model}`}>
-            <div className="dtpl-model">
-              <span className="dtpl-model-name">{m.model}</span>
-              {m.provider !== '' && <span className="dtpl-model-provider">{m.provider}</span>}
-              <span className="dtpl-model-bar" role="presentation">
-                <span className="dtpl-model-bar-fill" style={{ width: `${share(totalsTokens(m.totals), totalTokens)}%` }} />
-              </span>
-            </div>
-            <div className="dtpl-model-nums">
-              <span className="dtpl-val">{formatTokens(totalsTokens(m.totals))}</span>
-              <span className="dtpl-cost">
-                {m.spend > 0
-                  ? money(m.spend)
-                  : <><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-sub-k">订阅价值</em></>}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-/**
- * Cumulative tokens per workspace, most recently used first. The host joins
- * every ledger row's session against the workspace registry and the session
- * headers (see `src/workspaces.ts`), so this section is a read-time projection
- * of the very ledger the totals above describe — the ¥ of a row is the same
- * amount every other surface bills, split into its two buckets.
- *
- * The 未归属 row closes the list: it holds the records no registered workspace
- * claims, which is what keeps the rows adding back up to 累计词元. It is a
- * reconciliation line, not a project, so "most recent first" does not apply.
- */
-function WorkspaceBreakdown({ rows, totalTokens, money }: {
-  rows: readonly WorkspaceUsageRow[]
-  totalTokens: number
-  money: (value: number) => string
-}) {
-  if (rows.length === 0) return null
-  return (
-    <section className="dtpl-ws-sec">
-      <div className="dtpl-sec-head">
-        <h2 className="dtpl-sec-title">按工作区</h2>
-        <span
-          className="dtpl-sec-aside"
-          title="每个工作区的累计词元（全账本）。记录按会话的创建目录归属到工作区；没有工作区目录、或目录未注册为工作区的记录归入「未归属」。"
-        >
-          全账本累计 · 最近有操作在前
-        </span>
-      </div>
-      <div className="dtpl-models">
-        {rows.map(row => (
-          <div
-            className="dtpl-row"
-            key={row.id === '' ? 'unattributed' : row.id}
-            title={workspaceDetail(row, money)}
-          >
-            <div className="dtpl-model">
-              <span className="dtpl-model-name">{row.title}</span>
-              {/* The directory yields (ellipsis) under pressure; the two facts
-                  never do — a clipped "最近 …" would read as a broken number. */}
-              <span className="dtpl-ws-meta">
-                {row.path !== '' && (
-                  <>
-                    <span className="dtpl-ws-path" title={row.path}>{row.path}</span>
-                    <span className="dtpl-ws-sep" aria-hidden="true">·</span>
-                  </>
-                )}
-                <span className="dtpl-ws-facts">
-                  {row.totals.requests} 请求 · 最近 {formatRelative(row.lastAt)}
-                </span>
-              </span>
-              <span className="dtpl-model-bar" role="presentation">
-                <span className="dtpl-model-bar-fill" style={{ width: `${share(row.tokens, totalTokens)}%` }} />
-              </span>
-            </div>
-            <div className="dtpl-model-nums">
-              <span className="dtpl-val">{formatTokens(row.tokens)}</span>
-              {/* A workspace spans channels, so BOTH money buckets can be
-                  non-zero at once — unlike a model row, which one route scopes
-                  to a single bucket. Each non-zero bucket is therefore named,
-                  and a fully unpriced workspace still shows ¥0.00 (价格未知 is
-                  a 口径, never a free ride). */}
-              <span className="dtpl-cost">
-                {row.spend > 0 && <span>{money(row.spend)}</span>}
-                {row.spend > 0 && row.subscriptionValue > 0 && <span aria-hidden="true"> · </span>}
-                {row.subscriptionValue > 0 && (
-                  <><b className="dtpl-sub-amt">{money(row.subscriptionValue)}</b><em className="dtpl-sub-k">订阅价值</em></>
-                )}
-                {row.spend === 0 && row.subscriptionValue === 0 && <span>{money(0)}</span>}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-/** The hover audit trail of one workspace row: identity, cumulative token
- * split, requests/failures, both money buckets and when it was last used. */
-function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => string): string {
-  const totals = row.totals
-  const failed = totals.failures ?? 0
-  return [
-    row.path === '' ? '未归属用量' : `工作区 ${row.title}`,
-    row.path === '' ? '会话没有工作区目录，或目录未注册为工作区。' : `目录 ${row.path}`,
-    `累计 ${formatTokens(row.tokens)} 词元 · ${totals.requests} 请求${failed > 0 ? ` · ${failed} 失败` : ''}`,
-    `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
-    + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
-    `实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`,
-    `最近一次 ${formatDateTime(row.lastAt)}`,
-  ].join('\n')
-}
-
 export function LedgerView({ overview, onOpenPricing }: {
   overview: TokBookOverview
   onOpenPricing: (scope: PricingFocus) => void
@@ -392,9 +264,12 @@ export function LedgerView({ overview, onOpenPricing }: {
 
           <DailyTrend days={overview.byDay} />
 
-          <ModelBreakdown byModel={overview.byModel} totalTokens={overview.totalTokens} money={money} />
-
-          <WorkspaceBreakdown rows={overview.byWorkspace} totalTokens={overview.totalTokens} money={money} />
+          <Breakdowns
+            byModel={overview.byModel}
+            byWorkspace={overview.byWorkspace}
+            totalTokens={overview.totalTokens}
+            money={money}
+          />
 
           {(overview.total.compactions ?? 0) > 0 && (
             <p className="dtpl-note">其中包含 {overview.total.compactions} 次上下文压缩 summarize 调用。</p>
