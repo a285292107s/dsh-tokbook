@@ -1,186 +1,100 @@
 /**
- * styles.ts fragment: the 调价史 drawer's time axis (`Pricing/Timeline.tsx`).
+ * styles.ts fragment: the 调价史 drawer's axis (`Pricing/Timeline.tsx`).
  *
- * The axis has to read as a *timeline* at a glance, so it borrows the ledger
- * tab's visual language (`.dtpl-trend` / `.dtpl-bar`): a bar per region, a
- * caption row beneath, tabular figures. Three states are told apart by shape,
- * not only by color — 无起点 fades off the left edge, 当前生效 is filled with
- * accent, 未生效 sits past the 今天 tick with a dashed bar.
+ * The axis is a rail with dated nodes on it: 首记 and 今天 label the two ends
+ * ABOVE the rail, one dot per 调价 sits on it with its date UNDER it. Nothing
+ * else — the bar-per-segment, the state tags and the note under the axis are gone
+ * (the module doc in `Timeline.tsx` says why), so this fragment no longer borrows
+ * the ledger trend chart's language: all it has to make legible is one horizontal
+ * line, N dots and N dates.
  *
  * Cascade order is part of the contract (`client/styles.ts`): this fragment
  * follows the pricing one and only adds `.dtpl-tl-*`, so it cannot disturb it.
  */
 export const CSS_PRICING_TIMELINE = `
-[data-plugin="dsh-tokbook"] .dtpl-tl{
-  display:flex;flex-direction:column;gap:6px;padding:2px 0 0;
-  /* One 调价 = one node, and every node keeps at least this much room. The
-     widest label the axis prints is an hourly boundary (2026-09-10 12:00),
-     ~80px in 9px tabular figures — so two 调价 a day apart can never stack their
-     dates on top of each other. Measured, not guessed: below ~86px the two
-     labels touch. */
-  --dtpl-tl-node-w:86px;
-  /* Warn TEXT needs 4.5:1, and the skin's warn token measures 4.18:1 on this
-     card (it is tuned for icons and fills, not for 9px text). Nudging it toward
-     the foreground always moves contrast the right way — darker on a light skin,
-     lighter on a dark one — while the hatch, the dot and the fill keep the pure
-     token so the warning color itself still matches the rest of the plugin. */
-  --tl-warn-text:color-mix(in srgb,var(--dtpl-warn) 78%,var(--dtpl-fg));
+[data-plugin="dsh-tokbook"] .dtpl-tl{padding:1px 0 0;}
+/* The track is only a measuring box: the rail, the dots and the labels are all
+   placed against the width JS measured (a minimum gap is a px width, and a
+   percentage cannot keep two labels from piling up in a narrow drawer). Three
+   rows, top to bottom: the bracket's two labels (首记 / 今天), the rail with its
+   dots, and the 调价 dates — 12 + 5 + 3 + 4 + 12 = 36px. */
+[data-plugin="dsh-tokbook"] .dtpl-tl-track{position:relative;height:36px;}
+/* The rail is the skin's tertiary label color, not a wash of the foreground: it
+   has to READ as the line the dates hang from (a 22% mix measured ~2:1 on the
+   card and all but vanished), while staying subordinate to the dots. fg-3 is the
+   token for exactly that — 3.18:1 on a light card (D-016) and 6.2:1 on this dark
+   one. 3px, not a hairline: at 1px it read as a stray rule rather than as the
+   axis the nodes are threaded on (2px still read thin beside the 5px dots). */
+[data-plugin="dsh-tokbook"] .dtpl-tl-rail{
+  position:absolute;left:0;right:0;top:17px;height:3px;
+  border-radius:1.5px;background:var(--dtpl-fg-3);
 }
-/* The track: nodes left to right, then the 今天 tick, then anything dated in the
-   future. Nodes never compress below the floor above — the strip scrolls
-   sideways instead (a dense 调价史 stays legible rather than turning to mush). */
-[data-plugin="dsh-tokbook"] .dtpl-tl-track{
-  display:flex;align-items:stretch;min-width:0;
-  overflow-x:auto;overflow-y:hidden;
+/* One node: its dot on the rail, its date UNDER it. A node with a segment behind
+   it is a button (the axis is navigation, not decoration); an end with no 调价 on
+   it is a plain element, so the pointer never promises a jump that does not
+   exist. The box is the whole track high, which is what makes a 5px dot a 36px
+   target. */
+[data-plugin="dsh-tokbook"] .dtpl-tl-node{
+  position:absolute;top:0;left:0;height:100%;
+  appearance:none;font:inherit;text-align:center;white-space:nowrap;
 }
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg{
-  appearance:none;border:0;background:transparent;font:inherit;text-align:left;
-  flex:1 1 auto;min-width:var(--dtpl-tl-node-w);cursor:pointer;
-  display:flex;flex-direction:column;gap:3px;padding:0 0 2px;
-  /* The one thing that changes per state is the fill, so the 无起点 gradient
-     below can fade whichever fill the state chose instead of duplicating it. */
-  --tl-fill:color-mix(in srgb,var(--dtpl-fg) 12%,transparent);
-  /* The dot sits ON the bar, so it has to clear the BAR's composite, not the
-     card's: fg-3 measured 2.48:1 there, fg-2 gives 3.88:1. */
-  --tl-node:var(--dtpl-fg-2);
+[data-plugin="dsh-tokbook"] button.dtpl-tl-node{
+  border:0;background:transparent;padding:0;margin:0;cursor:pointer;
+  /* A <button> with a definite height centres its content box vertically (UA
+     button layout) — and this box is the whole track high, so on the rows whose
+     left end carries a node (the 无起点 segment anchored at 首记) the 首记 label
+     landed 12px low, in the middle row, while the plain <span> ends stayed on
+     top. Making the button a column flex container takes that centring away:
+     justify-content:flex-start puts the label back at the box's top. */
+  display:flex;flex-direction:column;justify-content:flex-start;
 }
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg-k{
-  /* fg-2, not fg-3: this label carries the axis's PRIMARY content (when the
-     price changed), and 9px text needs 4.5:1 — measured 3.71:1 on fg-3. */
+/* Every node but the two ends is centred on the dot it belongs to. */
+[data-plugin="dsh-tokbook"] .dtpl-tl-node:not([data-cap]){transform:translateX(-50%);}
+/* A 调价 date hangs BELOW the rail (24–36px); the bracket's own two labels stay
+   ABOVE it (0–12px, the node box's natural top) — they name the range's ends, not
+   one of the dots, so they read as the axis's caps rather than as two more
+   nodes. */
+[data-plugin="dsh-tokbook"] .dtpl-tl-node-k{
+  display:block;margin-top:24px;
   font-size:9px;line-height:12px;color:var(--dtpl-fg-2);
-  font-variant-numeric:tabular-nums;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;
+  font-variant-numeric:tabular-nums;
 }
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg-bar{
-  position:relative;
-  display:block;width:100%;height:11px;
-  border-radius:3px;corner-shape:round;
-  background:var(--tl-fill);
-}
-/* The node: a dot where this interval begins, so 「几号调的价」 reads as a point
-   and 「这段价管多久」 reads as the bar. A boundary that came BEFORE the axis's
-   left end keeps one too: at that left end the price WAS in force (that is what
-   the cap marks), so leaving its block unmarked made the front of the axis read
-   as dead space. Its dot is hollow — that is how "its real date sits off this
-   axis" looks. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg:not([data-open="true"]) .dtpl-tl-seg-bar::before{
-  content:'';position:absolute;left:-2.5px;top:3px;
+[data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap] .dtpl-tl-node-k{margin-top:0;}
+/* The dot sits ON the rail: 5px at 16px over a 3px line at 17px centres both at
+   18.5. fg-2, not fg-3: the dot is a non-text object and needs 3:1 against what
+   it sits on (D-016 measured fg-3 at 2.48:1 here). */
+[data-plugin="dsh-tokbook"] .dtpl-tl-dot{
+  position:absolute;top:16px;left:50%;
   width:5px;height:5px;border-radius:50%;box-sizing:border-box;
-  background:var(--tl-node);
+  background:var(--dtpl-fg-2);transform:translateX(-50%);
 }
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-before="true"] .dtpl-tl-seg-bar::before{
-  background:transparent;border:1.5px solid var(--tl-node);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg-tag{
-  font-size:9px;line-height:12px;font-weight:600;white-space:nowrap;
-  color:var(--dtpl-fg-2);min-height:12px;
-}
-/* An interval with no start: the bar dissolves into the left edge instead of
-   beginning there. This is the whole point of the axis — a boundary that is not
-   drawn is a boundary that does not exist. It has to hold for the 当前生效 fill
-   too, which is the case where 无起点 actually shows up. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-open="true"] .dtpl-tl-seg-bar{
-  border-top-left-radius:0;border-bottom-left-radius:0;
-  background:linear-gradient(to right,transparent 0%,var(--tl-fill) 30%);
-}
-/* Every block starts with a crisp left edge. For a boundary that predates the
-   axis's left end the edge is that left end (the cap marks where this price
-   already applied), and the label keeps the 「◀ date」 that says its real date is
-   off the axis — having no tick at all is what made the front stretch look
-   empty. A block whose boundary IS the left end keeps the edge too, and prints
-   no date of its own: the cap above it names that instant. Its date keeps full
-   readability; the hollow dot carries the "off the axis" part. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg:not([data-open="true"]) .dtpl-tl-seg-bar{
-  border-left:1px solid color-mix(in srgb,var(--dtpl-fg) 30%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-active="true"]{
-  --tl-fill:color-mix(in srgb,var(--dtpl-accent) 45%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-active="true"] .dtpl-tl-seg-bar{
-  border-left-color:var(--dtpl-accent);
-}
-/* Hierarchy by weight, not by dimming: the price in force is the row's answer,
-   so its date is the boldest text on the axis while every other date keeps
-   passing contrast. The accent stays on the fill and the dot — accent as 9px
-   text on the card reaches only 4.33:1, under the 4.5:1 this tag needs. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-active="true"] .dtpl-tl-seg-k{
+/* The two ends hold their labels inside the track — the first one starts at its
+   left edge, the last one ends at its right edge — and their dots sit on those
+   very edges. They ARE the bracket, so nothing pushes them inward. */
+[data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap="start"]{left:0;text-align:left;}
+[data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap="today"]{left:auto;right:0;text-align:right;}
+[data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap="start"] .dtpl-tl-dot{left:0;}
+[data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap="today"] .dtpl-tl-dot{left:100%;}
+/* The price in force today: the one node that is a state and not only a date.
+   Accent (3.72:1 on the card, D-016) plus a wider dot — the cue is not carried
+   by color alone, and the row and the segment list still say it in words. */
+[data-plugin="dsh-tokbook"] .dtpl-tl-node[data-active="true"] .dtpl-tl-node-k{
   color:var(--dtpl-fg);font-weight:600;
 }
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-active="true"] .dtpl-tl-seg-tag{color:var(--dtpl-fg);}
-/* On the accent fill the accent dot would measure 2.14:1 — the node reads as a
-   point only when it is darker than what it sits on. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-active="true"]{--tl-node:var(--dtpl-fg);}
-/* Written but idle: dashed, washed out, and past the 今天 tick — still a NODE
-   (a written 调价), so it keeps its dot. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-future="true"]{
-  --tl-node:var(--dtpl-warn);
+[data-plugin="dsh-tokbook"] .dtpl-tl-node[data-active="true"] .dtpl-tl-dot{
+  top:15.5px;width:6px;height:6px;background:var(--dtpl-accent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-future="true"] .dtpl-tl-seg-bar{
-  background:transparent;
-  border:.5px dashed color-mix(in srgb,var(--dtpl-fg) 28%,transparent);
-  border-radius:3px;
+/* Hover wakes the node up: the date and the dot ARE the control's body, so they
+   have to show it is one. Focus: a 2px ring with an offset, the size WCAG 2.2's
+   focus-appearance asks for; a 1px hairline was too easy to miss on a 5px dot.
+   Nothing here animates, so there is no reduced-motion branch to take. */
+[data-plugin="dsh-tokbook"] button.dtpl-tl-node:hover .dtpl-tl-node-k{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] button.dtpl-tl-node:hover .dtpl-tl-dot{
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--dtpl-fg) 18%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg[data-future="true"] .dtpl-tl-seg-tag{color:var(--tl-warn-text);}
-/* Hover wakes the bar up rather than recoloring the label only: the bar IS the
-   control's visual body, and hover must not be the only cue that it is one
-   (the label turns strong, and the fill gains a hairline). */
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg:hover .dtpl-tl-seg-k{color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg:hover .dtpl-tl-seg-bar{
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dtpl-fg) 24%,transparent);
-}
-/* Focus: a 2px ring with an offset, the size WCAG 2.2's focus-appearance asks
-   for — a 1px hairline was too easy to miss on an 11px bar. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg:focus-visible{outline:none;}
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg:focus-visible .dtpl-tl-seg-k{color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-tl-seg:focus-visible .dtpl-tl-seg-bar{
+[data-plugin="dsh-tokbook"] button.dtpl-tl-node:focus-visible{outline:none;}
+[data-plugin="dsh-tokbook"] button.dtpl-tl-node:focus-visible .dtpl-tl-node-k{color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] button.dtpl-tl-node:focus-visible .dtpl-tl-dot{
   outline:2px solid var(--dtpl-accent);outline-offset:2px;
 }
-/* 今天: the axis's right end. A tick, so a future segment reads as "to the
-   right of now" rather than as one more boundary in the same series. Its label
-   rides the DATE row with every other time label — parked at the bottom it left
-   the axis's corners blank, which read as a missing label rather than as empty
-   space. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-now{
-  flex:none;display:flex;align-items:flex-start;
-  align-self:stretch;padding:0 5px 0 6px;
-  border-left:.5px dashed var(--dtpl-border);
-  font-size:9px;line-height:12px;color:var(--dtpl-fg-2);white-space:nowrap;
-}
-/* 首记: the axis's LEFT end — this row's first ledger record at the price file's
-   own precision (the hour it falls in), not the earliest boundary the price file
-   drew. It is a TICK and nothing else: a label cell here would hold its width in
-   the bar row (the track is one flex row of stacked cells, not two rows) and
-   read as a gap between the left end and the first bar. The instant it stands
-   for is named in the sentence under the axis. 今天 has the matching tick at the
-   other end. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-cap{
-  flex:none;align-self:stretch;
-  border-right:.5px dashed var(--dtpl-border);
-}
-/* Account the price table does not reach: a region of the axis, not a badge —
-   it is the money half of this axis, and the only place a PRICED row admits it
-   is not pricing its whole history. Neutral when the row has no price at all
-   (the 价格未知 badge already owns that). It is NOT a node (no 调价 happened),
-   so it carries no dot. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-gap{
-  flex:1 1 auto;min-width:var(--dtpl-tl-node-w);
-  display:flex;flex-direction:column;gap:3px;padding:0 0 2px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-tl-gap .dtpl-tl-seg-bar{
-  background:repeating-linear-gradient(135deg,
-    color-mix(in srgb,var(--dtpl-fg) 14%,transparent) 0 4px,
-    transparent 4px 8px);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tl-gap[data-warn="true"] .dtpl-tl-seg-k,
-[data-plugin="dsh-tokbook"] .dtpl-tl-gap[data-warn="true"] .dtpl-tl-seg-tag{color:var(--tl-warn-text);}
-[data-plugin="dsh-tokbook"] .dtpl-tl-gap[data-warn="true"] .dtpl-tl-seg-bar{
-  background:repeating-linear-gradient(135deg,
-    color-mix(in srgb,var(--dtpl-warn) 26%,transparent) 0 4px,
-    transparent 4px 8px);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tl-note{
-  margin:0;font-size:10px;line-height:15px;color:var(--dtpl-fg-2);
-}
-/* The one sentence on this axis that costs money. */
-[data-plugin="dsh-tokbook"] .dtpl-tl-note [data-warn="true"]{color:var(--tl-warn-text);}
 `

@@ -133,8 +133,9 @@ const PRICING_FIXTURE = {
       route: 'deepseek-official', label: 'DeepSeek', billing: 'metered', records: 6159,
       models: [
         { model: 'deepseek-v4-flash', configured: true, records: 322,
-          // 有账本时间跨度,而且有 40 次账落在最早那段的起点之前(见时间轴上的
-          // 「40 次无价」标记):这是价格表唯一会承认"钱没覆盖全史"的地方。
+          // 有账本时间跨度,而且有 40 次账落在最早那段价的起点之前(计 ¥0)。D-019 之后
+          // 这条事实不再上轴(轴只画区间内的调价节点),所以这一行是「首记 → 今天 + 三个
+          // 节点」的样子,而那 40 次只留在行内与下方列表里。
           firstAt: Date.UTC(2026, 6, 20), lastAt: Date.UTC(2026, 8, 11), unpriced: 40,
           segments: [
           { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
@@ -147,9 +148,8 @@ const PRICING_FIXTURE = {
               { days: 'weekdays', start: 14, end: 18, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
             ] },
         ] },
-        // 真实的一例(维护者 2026-09-12 截图里的行):首记 08-25,最早那段却写 08-21
-        // ——边界落在轴的左端之外,块要在轴起点拿到刻度 + 空心点,否则轴最前面一段
-        // 看起来是空的。
+        // 首记 08-25,最早那段却写 08-21:那个边界落在轴的区间之外,按 D-019 不上轴,
+        // 所以轴上只有 09-10 一个节点(左端仍是首记,不是价段边界)。
         { model: 'deepseek-v4-flash-vision-exp', configured: true, records: 3092,
           firstAt: Date.UTC(2026, 7, 25), lastAt: Date.UTC(2026, 8, 6), unpriced: 0,
           segments: [
@@ -157,7 +157,7 @@ const PRICING_FIXTURE = {
           { from: '2026-09-10', inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 },
         ] },
         // 密集调价史:8 个节点挤在三周内(含同一天两个),用来看"节点之间的最小
-        // 间隔"与横向滚动——节点不会被压到一起。
+        // 间隔":靠得太近的节点被摊开,8 个仍然排得下(两端钉死,轴不横向滚动)。
         { model: 'deepseek-v4.1-flash', configured: true, records: 899,
           firstAt: Date.UTC(2026, 7, 18, 2), lastAt: Date.UTC(2026, 8, 12, 6), unpriced: 0,
           segments: [
@@ -170,20 +170,20 @@ const PRICING_FIXTURE = {
           { from: '2026-09-08', inputPerMillion: 2.5, outputPerMillion: 7 },
           { from: '2026-09-10', inputPerMillion: 3, outputPerMillion: 8 },
         ] },
-        // 首记在生效时间之后:那格的边界画不到轴上(标签写成「◀ 2026-09-01」),
-        // 这是"边界不咬账本"的常态——轴左端仍是首记,不是价段边界。
+        // 首记在生效时间之后:那个边界在区间之外、区间里没有别的调价,所以按 D-019
+        // 整条轴都不画(只有首记与今天时,空轨道说不了行内四档价没说过的事)。
         { model: 'deepseek-v4-pro', configured: true, records: 2745,
           firstAt: Date.UTC(2026, 8, 5, 3), lastAt: Date.UTC(2026, 8, 11, 10), unpriced: 0,
           segments: [
           { from: '2026-09-01', inputPerMillion: 4.5, outputPerMillion: 13.5, cacheWritePerMillion: 0.15 },
         ] },
-        // 账本没记过这条串(还没调用过):没有首记可锚,价段仍是无起点,轴上左缘渐隐
-        // (D-017——有账的行上这个状态已经被首记锚定取代)。
+        // 账本没记过这条串(还没调用过):没有首记,轴画不出来(价段仍是无起点,
+        // 这一行的时间只在行内与列表中)。
         { model: 'deepseek-flash', configured: true, records: 0, segments: [
           { from: null, inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 },
         ] },
-        // 有价、但账本没记过:同样是"没有首记",但价段写了日期,所以轴从这段价自己的边界
-        // 起算,并在轴下写明「没有首记可锚」(D-016 第二次修订)。
+        // 有价、但账本没记过:同样没有首记,所以同样不画轴——价段自己的日期只在下方
+        // 列表里出现。
         { model: 'deepseek-v4-flash-vision', configured: true, records: 0, segments: [
           { from: '2026-08-18', inputPerMillion: 1.5, outputPerMillion: 4.5 },
         ] },
@@ -192,8 +192,8 @@ const PRICING_FIXTURE = {
     {
       route: 'commandcode', label: 'commandcode', billing: 'subscription', records: 3232,
       models: [
-        // 播种时无起点段按首记整点锚上(D-017):行上印「价段自 … 起」,轴上的第一段
-        // 拿到一枚刻度(锚点通常比首记早几十分钟,所以走 `◀ 日期` + 空心点那一支)。
+        // 播种时无起点段按首记整点锚上(D-017):行上印「价段自 … 起」,轴上那颗点落在
+        // 左端——锚定时刻就是左端本身,所以这个节点折进「首记」那个标签,不再重复一个日期。
         { model: 'deepseek/deepseek-v4-flash', configured: true, records: 2964,
           firstAt: Date.UTC(2026, 8, 6, 11, 3), lastAt: Date.UTC(2026, 8, 8, 11, 2), unpriced: 0,
           segments: [
@@ -210,8 +210,8 @@ const PRICING_FIXTURE = {
           segments: [
           { from: null, inputPerMillion: 0.8, outputPerMillion: 2.8 },
         ] },
-        // 没有价、但有账:抽屉里只报账本自己的跨度,不报"全部计 ¥0"
-        // (那是「价格未知」徽标的事),也不该动用警示色。
+        // 没有价、但有账:整行没有价,轴上没有可画的调价,所以不画轴——「全部计 ¥0」
+        // 是「价格未知」徽标的事,抽屉里也不该动用警示色。
         { model: 'mimo-v2.5', configured: true, records: 83,
           firstAt: Date.UTC(2026, 7, 17, 4), lastAt: Date.UTC(2026, 7, 17, 9), unpriced: 83,
           segments: [] },
@@ -224,8 +224,8 @@ const PRICING_FIXTURE = {
     {
       route: 'dots-ai', label: '小红书', billing: 'metered', records: 560,
       models: [
-        // 无起点段 + 完整覆盖:锚到首记整点后,轴上不该出现任何「无价」标记,最前面那一段
-        // 在自己的真实边界上拿到刻度(D-017)。
+        // 无起点段 + 完整覆盖:锚到首记整点后,轴上那颗点就落在左端(锚定时刻与左端是
+        // 同一刻),不出现第二个日期(D-017 + D-019)。
         { model: 'dots3-note-prev', configured: true, records: 644,
           firstAt: Date.UTC(2026, 7, 19, 3), lastAt: Date.UTC(2026, 7, 27, 9), unpriced: 0,
           segments: [

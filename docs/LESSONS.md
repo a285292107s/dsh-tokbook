@@ -1,6 +1,6 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
 
 > 本文件整理本次「UI 优化 + 全中文 + 对齐 DSH 官方设置按钮样式」迭代中踩过的坑与结论，
 > 供后续维护 / 继续开发时对照。结构统一按 **现象 → 根因 → 修复 / 正确做法** 组织。
@@ -208,10 +208,49 @@
   每个请求用独立随机文件名。
 - 判"选择器是否命中"：读 computed `background-color` / `border` / `height`，若为 UA 默认值
   （`rgb(107,107,107)` / `2px outset` / 25.5px），就是样式没命中。
+- **「当前标签页」会漂**:用户自己在浏览时,桥接的 current tab 可能已经不是宿主页——`evaluate`
+  会落到别的页面上,表现是"什么都查不到"（返回 `null` 或空值）而不是报错。**每次 evaluate /
+  screenshot 前先 `find_tab`**(拿完整 URL,如 `http://127.0.0.1:3080/`)。
+- **预览台要在每次 `pnpm build` 之后重启**:`scripts/preview-overlay.mjs` 在**启动时**就把
+  `lib/client.js` 读进内存(`readFileSync`),之后再构建,页面拿到的仍是旧 bundle——看现象会误判成
+  "改动没生效"。重启时还要确认端口真的空了:`job_kill` 杀掉的是外层 shell,`node` 子进程可能还占着
+  8931,新进程直接 `EADDRINUSE` 退出;用 `Get-NetTCPConnection -LocalPort 8931 -State Listen`
+  看 `OwningProcess`,必要时 `Stop-Process`。
 
 ---
 
-## 7. 一页速查（Checklist）
+## 7. `<button>` 会把内容垂直居中——固定高度的绝对定位按钮会踩到
+
+### 现象
+
+时间轴的节点是 `position:absolute; height:100%` 的 `<button>`，里面是「日期」+「圆点」。
+同一套 CSS 下，纯 `<span>` 的端点标签停在轨道**上方**，而**有段可点的**那一端（无起点段锚到首记，
+折成节点）标签整整低了 12px，跑进中间那排。
+
+### 根因
+
+`<button>` 的 UA 布局会把**内容盒垂直居中**——Chrome 里 `display:block` 也一样居中，
+`align-items:flex-start`、`padding-top` 都改不动。盒子是整条轨道高（36px），内容只有 12px，
+于是被居中到 12–24px：CSS 写的 `margin-top` 没有被违反，只是它不再是位置的决定者。
+
+### 修复
+
+把按钮变成**列向 flex 容器**，UA 的居中就不再介入：
+
+```css
+[data-plugin="dsh-tokbook"] button.dtpl-tl-node{
+  display:flex;flex-direction:column;justify-content:flex-start;
+}
+```
+
+三种候选实测：`display:flex;flex-direction:column;justify-content:flex-start` ✅ 标签回到
+0–12px；`align-items:flex-start` ❌（不是 flex 容器，无效果）；`box-sizing:border-box;
+padding-top:24px` ❌（居中照旧）。**判据**：固定高度 + 绝对定位 + 靠 margin/padding 定位内容的
+按钮，先量内容盒的实际 y，别相信 margin。
+
+---
+
+## 8. 一页速查（Checklist）
 
 - [ ] 选择器：元素自身带 `data-plugin` → 用复合 `[data-plugin].class`；真子元素 → 用后代 `[data-plugin] .class`。
 - [ ] 改 UI（client）后：`pnpm build` 落盘 `lib/client.js` → 刷新浏览器取新 rev（client-hmr 活着时可能 ≤500ms 自动热更，加分项非保证）。
@@ -222,4 +261,6 @@
 - [ ] 图标用内联 SVG；文案用中文；给可访问名字与 `aria-pressed`/`aria-label`。
 - [ ] 对齐 DSH 外观：用 `--dsw-*` 令牌复刻，别 import 私有 CSS module。
 - [ ] client 入口无 `export default`；esbuild 加 `charset:'utf8'`。
-- [ ] 用 kimi-webbridge 时：先 `snapshot`，再 `evaluate` 读 computed style。
+- [ ] 用 kimi-webbridge 时：先 `snapshot`，再 `evaluate` 读 computed style；**每次调用前先 `find_tab`**（当前标签页会漂）。
+- [ ] 用 `scripts/preview-overlay.mjs` 看效果：**每次 `pnpm build` 后重启预览台**（它在启动时读一次 bundle），并确认 8931 端口已释放。
+- [ ] 绝对定位 + 固定高度的 `<button>`：内容会被 UA 布局**垂直居中**；要贴顶就 `display:flex;flex-direction:column;justify-content:flex-start`（见 §7）。

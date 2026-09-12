@@ -14,6 +14,7 @@ import {
   type ModelDraft, type PriceDraft, type SegmentDraft,
 } from '../src/client/pricing/draft.ts'
 import { hourStartMs, slotsOverlap } from '../src/price-format.ts'
+import { axisNodes, labelWidth, placeNodes } from '../src/client/pricing/axis.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routeLabels, routesFromSettings } from '../src/route-catalog.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
@@ -224,6 +225,59 @@ console.log('ledger lens: what the 价格表 says the ledger did')
     },
   })
   check('a 无起点 segment leaves nothing unpriced', open.byRouteModel.get('deepseek-official')?.get('deepseek-v4-flash')?.unpriced === 0)
+}
+
+console.log('调价史 axis: nodes inside the bracket, labels kept apart')
+{
+  const segment = (id: number, from: string): SegmentDraft => ({
+    id, from, input: '1', output: '4', cacheRead: '', cacheWrite: '', slots: [], note: '',
+  })
+  const row = (over: Partial<ModelDraft>): ModelDraft => ({
+    model: 'm', configured: true, records: 3, firstAt: dayMillis('2026-08-25', 19), segments: [], ...over,
+  })
+  const now = dayMillis('2026-09-20', 12)
+
+  check('a row the ledger never billed has no axis', axisNodes(row({ records: 0, firstAt: undefined }), null, now) === null)
+  // Nothing between the two ends is nothing to draw: no 首记, 无起点, a boundary
+  // before 首记 or one after 今天 all leave the axis undrawn.
+  check('an axis with no 调价 inside its bracket is not drawn at all',
+    axisNodes(row({ segments: [segment(1, ''), segment(2, '2026-08-01'), segment(3, '2026-09-25')] }), null, now) === null)
+
+  // A 调价 taking effect at 首记 IS the left end: one instant, one label.
+  const one = axisNodes(row({ segments: [segment(1, '2026-08-25T19:00')] }), 1, now)
+  check('a boundary at 首记 folds into the left end',
+    one?.length === 2 && one[0]!.label === '首记 2026-08-25 19:00' && one[0]!.segmentId === 1 && one[0]!.active === true,
+    JSON.stringify(one))
+  check('the right end is 今天', one?.[1]!.label === '今天' && one[1]!.cap === 'today' && one[1]!.ratio === 1)
+
+  // A boundary outside the bracket is not a change this history saw, so it is
+  // neither a node nor a reason to skip the nodes that are inside it.
+  const three = axisNodes(row({
+    segments: [
+      segment(1, '2026-08-01'), segment(2, '2026-09-05'),
+      segment(3, '2026-09-10T12:00'), segment(4, '2026-09-25'),
+    ],
+  }), 3, now)
+  check('only the 调价 inside the bracket are nodes',
+    three?.map(node => node.label).join(' | ') === '首记 2026-08-25 19:00 | 2026-09-05 | 2026-09-10 12:00 | 今天',
+    JSON.stringify(three?.map(node => node.label)))
+  check('a node carries its segment, and only the price in force is 当前生效',
+    three?.[2]!.segmentId === 3 && three[2]!.active === true && three[1]!.active === false)
+
+  // Placement: the ends never move, the order never changes, and labels that can
+  // keep the minimum gap do.
+  const labels = ['首记 2026-08-25 19:00', '2026-08-26', '2026-08-28', '今天']
+  const widths = labels.map(labelWidth)
+  const spots = placeNodes([0, 0.02, 0.05, 1], widths, 600)
+  const boxes = spots.map((x, index): [number, number] => index === 0
+    ? [0, widths[0]!]
+    : index === spots.length - 1 ? [x - widths[index]!, x] : [x - widths[index]! / 2, x + widths[index]! / 2])
+  check('both ends are pinned to the track', spots[0] === 0 && spots[spots.length - 1] === 600, JSON.stringify(spots))
+  check('crowded labels are pushed apart, in order',
+    boxes.every((box, index) => index === 0 || box[0]! - boxes[index - 1]![1]! >= 6 - 1e-6), JSON.stringify(boxes))
+  const many = placeNodes(Array.from({ length: 8 }, () => 0.5), Array.from({ length: 8 }, () => 86), 600)
+  check('an axis too crowded for the gap still keeps every node inside the track, in order',
+    many.every((x, index) => x >= 0 && x <= 600 && (index === 0 || x >= many[index - 1]!)), JSON.stringify(many))
 }
 
 console.log('peak/off-peak slots and hourly effective instants')
