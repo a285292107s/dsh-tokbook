@@ -28,7 +28,7 @@
 | 四档价 | `inputPerMillion` / `outputPerMillion` / `cacheReadPerMillion` / `cacheWritePerMillion`(¥/M;价段里 cache 档省略 = 按输入价;**峰谷时段里省略 = 沿用该段全天价**) |
 | 计费性质 | `$billing`:路由 → `metered` / `subscription`(省略 = metered) |
 | 仅账本 | 卡内模型不在 settings / 适配器目录里,只有账本记过(`configured: false`) |
-| 模型名称 | `PricingModelView.name`:settings `models[].name` → 适配器目录的 `name`;没有就只显示精确模型串(与模型选择器一致) |
+| 模型名称 | `PricingModelView.name`:settings `models[].name` → 适配器目录的 `name`;行上**只显示其一**——有名字显示名字,没有才显示精确模型串(与模型选择器一致);精确串仍可从悬停、抽屉抬头与单元格读屏名读到 |
 | 价格未知 | 该 (路由, 模型) 没有价段(暂按 ¥0,**不是免费**) |
 | 实际支出 / 订阅价值 | `billing: metered` / `subscription` 两个桶(`spend` / `subscriptionValue`) |
 | 按工作区 | overview 的 `byWorkspace`(`WorkspaceUsageRow[]`)——每个工作区一行累计 |
@@ -108,7 +108,8 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   settings profile 的 `models[].name` 优先,其次适配器目录(`ctx.llm.listModels()`)的 `name`;
   与精确串相同或两处都没有名字时**省略**——此时该串自己就是标签,与模型选择器的回落一致
   (`provider/model`)。**仅账本**行与只写在价格文件里的串**没有**名字(账本与价格文件不带名),
-  所以它们显示精确串,且不会因为别处同名而被误标。
+  所以它们显示精确串,且不会因为别处同名而被误标。行上**只印其中一个**(有名印名、无名印串),
+  精确串仍留在悬停、抽屉抬头与四档价单元格的读屏名里。
 - 每一行还带**账本自己的三个数**(可选,来自下面的「账本 N 次」透镜):`firstAt?` / `lastAt?`
   (该行第一笔与最后一笔记录的时刻)与 **`unpriced?`**——**有多少笔记录在它自己的时刻上不被
   任何价段覆盖**,也就是**计 ¥0** 的那部分。三者**同时省略** = 透镜没读到(无记录或读账本失败),

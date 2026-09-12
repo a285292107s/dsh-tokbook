@@ -195,19 +195,12 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-idle{
   color:var(--dtpl-warn);background:color-mix(in srgb,var(--dtpl-warn) 12%,transparent);
 }
-/* Provenance line: the exact billing string, then the facts about the price.
-   The string is what the ledger keys on, so it yields LAST — the trailing
-   facts ellipsize first when the column runs out. */
+/* Provenance line: what the price is and how much the ledger billed with it. The
+   row's identity is NOT repeated here — it is on the line above, once. */
 [data-plugin="dsh-tokbook"] .dtpl-price-meta{
   display:flex;align-items:baseline;gap:5px;min-width:0;
   font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-model{
-  flex:0 1 auto;min-width:0;
-  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-sep{flex:none;color:var(--dtpl-fg-dim);}
 [data-plugin="dsh-tokbook"] .dtpl-price-meta-text{
   flex:0 1000 auto;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;

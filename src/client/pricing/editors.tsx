@@ -300,10 +300,12 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
   const issue = rowIssue(row)
   const live = inForceToday(shown)
   const slots = shown === null ? 0 : effectiveSlots(shown).length
-  // The model picker's split, applied to a price row: the human name is the
-  // label, the exact string stays the identity (it is the billing key, so it
-  // remains on screen rather than living in a tooltip). A string nothing names
-  // — a 仅账本 row, or one only the price file mentions — is its own label.
+  // The row's identity, split the way the model picker splits it — but only ONE
+  // of the two is ever printed: the human name when something names the string,
+  // the exact string itself otherwise (a 仅账本 row, or one only the price file
+  // mentions). Showing both was showing the same thing twice. The exact string is
+  // still the ledger's billing key, so it stays reachable: on hover over the
+  // label, in the drawer's own header, and in every cell's accessible name.
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
   const meta: string[] = []
   if (shown !== null) meta.push(fmtRowFrom(shown.from))
@@ -341,12 +343,13 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
     <>
       <div className="dtpl-price-row" data-dirty={dirty} data-unpriced={unpriced} data-open={open}>
         <div className="dtpl-price-id">
-          {/* Line 1 is IDENTITY (name, or the exact string when nothing names
-              it) plus the flags that change how the four numbers read. Line 2
-              is PROVENANCE: the exact billing string, then the facts about the
-              price. Splitting them this way is what lets a long model string
-              live on the full width of the column instead of sharing one line
-              with the name and getting clipped to `deepseek-v4-f…`. */}
+          {/* Line 1 is IDENTITY — the display name when something names this
+              string, else the exact string itself — plus the flags that change
+              how the four numbers read. Line 2 is PROVENANCE: when this price
+              took effect, how much the ledger billed, its note. One identity,
+              one line: printing the name AND the string said the same thing
+              twice, and the identity column is the one place with room to spare
+              for a long string. */}
           <span className="dtpl-price-name">
             <span
               className="dtpl-price-title"
@@ -364,8 +367,6 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
             {dirty && <span className="dtpl-price-badge dtpl-price-badge-dirty">未保存</span>}
           </span>
           <span className="dtpl-price-meta">
-            {named && <span className="dtpl-price-model" title={row.model}>{row.model}</span>}
-            {named && meta.length > 0 && <span className="dtpl-price-sep" aria-hidden="true">·</span>}
             {meta.length > 0 && (
               <span className="dtpl-price-meta-text" title={metaTitle}>{meta.join(' · ')}</span>
             )}
