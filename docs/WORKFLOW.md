@@ -94,8 +94,11 @@ D-011 之后实测的痛点:`LedgerOverlay.tsx` 曾到 ~1300 行(壳 + 五 tab +
 
 ## 8. 并行功能:车道与 worktree
 
-单个功能在飞时留在主检出(那里有实时反馈环路)。**同时有两个及以上功能在飞时,第 2 个起
-必须进 `git worktree`**——在同一个目录里交错编辑,是唯一会静默毁掉另一个功能的那类冲突。
+主检出的价值是实时反馈环路(改完 `pnpm build` → 刷新浏览器),所以**能证明它空闲时才占它;
+证不明就进 `git worktree`**。不要问「现在有几个功能在飞」——那不可观测:一个新会话看不到别的
+会话的意图,`git status` 干净也不等于没人(对方可能正在思考、或刚提交完)。下一节的两个信号都
+只是**近似**,所以默认取保守侧:误判的代价是多开一个 worktree,而它实测很便宜(建目录瞬时、
+`pnpm test` 连依赖都不用装)。
 
 ### 为什么主检出不能并行(本仓库的事实,不是习惯)
 
@@ -105,6 +108,43 @@ D-011 之后实测的痛点:`LedgerOverlay.tsx` 曾到 ~1300 行(壳 + 五 tab +
   告警;README「一个数据目录,一个写入进程」)。
 - `tsconfig` 收 `src/**`、host HMR 的 `root` 是主检出——所以 **worktree 建在仓库外**,否则被
   构建与 watch 扫到,还会让「哪份是线上」不可判。
+
+### 进车道前:判断主检出上有没有别的 AI 在跑
+
+**A. 同 workspace 的会话日志新鲜度——最接近「有 AI 正在执行」。** DSH 在 turn 进行中**实时**
+追加会话日志,按 cwd 分组存放,所以「正在跑 turn」严格等于「日志刚被写过」:
+`<DSH_HOME>/sessions/--<projectKey(cwd)>--/<sessionId>/session.v3.jsonl.zstd`。
+`projectKey` 是 DSH 自己的会话存储规则(把 `\` `/` `:` 折叠成一个 `-`,再包成 `--…--`,超 251
+字符会截断);`$env:DSH_SESSION_ID` 就是自己的 id,排除掉自己:
+
+```powershell
+$cwd = git rev-parse --show-toplevel
+$key = '--' + (($cwd -replace '[:\\/]+','-') -replace '^-+','') + '--'
+Get-ChildItem (Join-Path $env:DSH_HOME "sessions\$key") -Directory | ForEach-Object {
+  $log = Get-ChildItem $_.FullName -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  [pscustomobject]@{ AgeSec=[int]((Get-Date)-$log.LastWriteTime).TotalSeconds; Bytes=$log.Length
+                     Session=$_.Name; Self=($_.Name -eq $env:DSH_SESSION_ID) }
+} | Sort-Object AgeSec | Select-Object -First 5
+```
+
+**隔 ~20s 再跑一遍,比较 `Bytes`**——一个卡在长工具调用里的 turn 会让日志安静几分钟,单看阈值会把
+「正忙」读成「空闲」,两次采样才分得开。该判据实测有效:跑 turn 的会话日志 mtime 与当前时间同秒,
+而闲置会话是几十分钟前的,没有任何心跳去刷新它们。
+
+**B. 工作树脏不脏、脏得新不新。** `git status --short` 非空、且被改文件的 mtime 很近 ⇒ 有人在改
+(或上一轮留下的、打算接着做的 WIP)。它分不清这两者,所以一律按占用处理。
+
+**盲区——所以它是「降低踩踏」,不是互斥保证。**
+
+| 情形 | A | B | 后果 |
+|---|---|---|---|
+| 对方在思考 / 长工具调用中,还没落盘 | 两次采样都静止 | 干净 | **漏判** |
+| 对方的 cwd 在 worktree,却改 main | 不在主检出这一组里 | 脏 | **漏判** |
+| 对方只是读 main(例如回答一个问题) | 命中 | 干净 | 误判为占用——代价是一个多余 worktree,接受 |
+| 对方在两次 turn 之间空闲,树是脏的 | 静止 | 脏 | 按占用处理 |
+
+**合成判据。** A 命中或 B 命中 → 视为主检出被占,**进 worktree**;两者都干净 → 主检出可用,并照
+§3 保持「同 commit 改文档」——别长时间留一棵脏树,那正是下一个人读到的占用信号。
 
 ### 车道分工
 
@@ -146,8 +186,8 @@ pnpm install      # 只有 pnpm typecheck / pnpm build 需要;pnpm test 不装�
 
 ### AI 并行子代理
 
-同一条规则:父代理开 worktree、分配分支,**每个子代理只在自己的 worktree 里改**,不碰主检出;
-rebase、合并、合后门禁都归父代理,子代理之间不互相代管目录。
+同一条规则:父代理**先按上一节做 A/B 读数**,再决定留主检出还是给子代理开 worktree;每个子代理
+只在自己的 worktree 里改,不碰主检出。rebase、合并、合后门禁都归父代理,子代理之间不互相代管目录。
 
 ### 不要做
 
@@ -156,7 +196,10 @@ rebase、合并、合后门禁都归父代理,子代理之间不互相代管目�
   合并到 main,在主检出看。
 - 不要为建/删 worktree 养脚本:两条 git 命令(install 只在要 build / typecheck 时),包一层
   只是多一个维护面。
-- 不要给单个在飞的功能也开 worktree:白付一次目录切换 + 合并,还丢掉 HMR 快反馈。
+- 不要跳过 A/B 读数就占主检出;反过来,读数干净时也别多开 worktree——白付一次目录切换 + 合并,
+  还丢掉 HMR 快反馈。
+- 不要为判断车道占用引入锁 / 声明文件:启发式 + 保守默认已覆盖常见情形,而声明只对守约的会话
+  有效、还得再处理过期。真出现两个会话踩同一个目录,再照那次的证据加,不提前造。
 
 ## 参考
 
