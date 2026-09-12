@@ -7,8 +7,6 @@
  * @module dsh-tokbook/client/format
  */
 
-import type { UsageRecord } from '../types.ts'
-
 /** A day key shifted by N days; the host names its day files the same way. */
 export function shiftDayKey(day: string, delta: number): string {
   const [year, month, date] = day.split('-').map(Number)
@@ -30,39 +28,6 @@ export function localDayKey(): string {
 export function shortDay(day: string): string {
   const [, month, date] = day.split('-')
   return `${Number(month)}/${Number(date)}`
-}
-
-/** Session ids are long opaque slugs; the visible line keeps a readable head. */
-export function shortId(id: string): string {
-  return id.length <= 12 ? id : `${id.slice(0, 12)}…`
-}
-
-/** Provider-neutral failure codes gain a Chinese gloss; unknown codes show raw. */
-const FAILURE_LABELS: Record<string, string> = {
-  RATE_LIMIT: '限流',
-  QUOTA: '配额不足',
-  TIMEOUT: '超时',
-  CONNECTION: '连接中断',
-  NETWORK: '网络错误',
-  AUTH: '鉴权失败',
-  SERVER: '服务端错误',
-  PROTOCOL: '协议错误',
-  MODEL_NOT_FOUND: '模型不可用',
-  CONTEXT: '上下文超限',
-}
-
-export function failureCodeLabel(code: string | undefined): string {
-  if (code === undefined || code === '') return '失败'
-  const label = FAILURE_LABELS[code]
-  return label === undefined ? code : `${code} ${label}`
-}
-
-/** Total tokens of one record ('' usage rows count 0). Aggregated rows use the
- *  host's `totalsTokens` (`../types.ts`) — one implementation, both halves. */
-export function usageTotal(r: UsageRecord): number {
-  const u = r.usage
-  if (u === undefined) return 0
-  return u.inputTokens + (u.cacheReadTokens ?? 0) + (u.cacheWriteTokens ?? 0) + u.outputTokens
 }
 
 /** Model share of total tokens, clamped to 0–100. */

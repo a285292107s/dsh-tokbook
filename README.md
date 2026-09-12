@@ -8,7 +8,8 @@ DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把�
 半区通过**侧边栏 footer 按钮**(route A:`sidebar.footer.action`)把它展示出来,按钮弹出
 **浮窗**(`shell.overlay`),内含汇总卡(**今日词元** + 较近7天日均涨跌参照 + 今日成本)、
 今日词元构成(四桶 + 缓存命中率)、按日 token 趋势图、按模型拆分
-(含成本)、**按通道的 tab**(每个通道路由一张卡,卡头用本机配置里的显示名
+(含成本)、按工作区累计(每个工作区一行:累计词元 + 请求数 + 金额,最近有操作的在前面,
+没有工作区目录的用量收在一行「未归属」)、**按通道的 tab**(每个通道路由一张卡,卡头用本机配置里的显示名
 命名、路由键作次要小字,并标出该通道的计费性质「按量 / 订阅」;内含该路由下各模型的
 token/成本,可切换 今日 / 昨天 / 近7天 / 近30天 窗口)、**价格表 tab**(每个路由键一张卡,
 生效时间 + 四档全天价 + 峰谷时段全部由你自己写),以及**订阅额度 tab**
@@ -43,7 +44,7 @@ src/
                       实例/重启间共享)
   sync.ts             首次启动 + 手动历史回填(幂等)
   sync-state.ts       首次运行标记 + 持久化同步基线
-  stats.ts            聚合(totals/byDay/byHour/(provider,model)/recent)+ 折叠 + 缓存
+  stats.ts            聚合(totals/byDay/byHour/(provider,model))+ 折叠 + 缓存
   price-format.ts     价格表时间轴的纯规则(整点生效 / 每日时段 / 星期几 / 冲突),
                       host 与 browser 共用,保证「草稿能存 = 写入能收」
   pricing.ts          唯一价格表(路由 → 模型串 → 价段:生效时刻 + 全天价 + 峰谷时段)
@@ -51,6 +52,8 @@ src/
   pricing-view.ts     价格表 tab 的卡片装配(路由目录 ∪ 账本 ∪ 价格文件)
   route-catalog.ts    路由目录:本机设置文档(settings)× 运行时适配器注册表(ctx.llm)
   by-provider.ts      纯通道卡片聚合(通道用量 tab)
+  workspaces.ts       纯按工作区累计聚合(用量总览「按工作区」;会话 cwd ↔ 工作区注册表
+                      的读时连接 + 未归属兜底)
   quota.ts            官方额度归一化 + 内置计划身份
   quota-official.ts   key 解析 + 各通道官方用量抓取器
   routes.ts           host 精确 Fetch 路由 /tokbook/overview、/tokbook/rescan、
@@ -64,7 +67,7 @@ src/
     styles/           CSS 分片:tokens/footer/overlay/ledger/method/provider/quota/pricing/shared
     FooterButton.tsx  sidebar.footer.action 触发器
     LedgerOverlay.tsx shell.overlay 浮窗外壳(五 tab + 焦点/快捷键)
-    LedgerView.tsx    用量总览 tab(今日英雄卡 + 构成 + 趋势 + 按模型 + 最近)
+    LedgerView.tsx    用量总览 tab(今日英雄卡 + 构成 + 趋势 + 按模型 + 按工作区)
     ProviderPanel.tsx 通道用量 tab
     MethodDoc.tsx     统计口径 tab
     pricing/

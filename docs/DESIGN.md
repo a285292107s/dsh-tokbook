@@ -1,6 +1,6 @@
 # dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。
 > 本文档是第一期的**调研结论 + 技术选型 + 框架设计**。调研依据仅两个权威来源：
@@ -478,9 +478,14 @@ dsh-tokbook/
 ### 2. 统计聚合（新增）
 
 `stats.ts` 在读取时把记录折叠为 `totals` / `byDay` / `byHour` / `byModel` /
-`rateRows`（每 (day, model, rate) 一格，便于无重读地过滤与重新计价）/ `recent`。
+`rateRows`（每 (day, model, rate) 一格，便于无重读地过滤与重新计价）。
 冻结日前文件从磁盘 `rollup.json` 取，今天热文件实时读；解析后的日文件在进程内存缓存
 （冻结文件常驻，今天文件按 size/mtime 重读）。
+
+**按工作区不在折叠里**：账本行只记 `sessionId`，工作区是**读时连接**出来的（会话 header
+的 `cwd` ↔ 工作区注册表的规范路径，见 `src/workspaces.ts`），因此它既不进 `rollup.json`
+也不进 token-only 汇总——挂载点变了、注册表改了，下一次读取就是新的归属，历史一行都不用
+重写（与价格层同一条思路）。
 
 ### 3. 成本计价（第三期 = 当前）
 
@@ -508,7 +513,8 @@ dsh-tokbook/
 仍走 `sidebar.footer.action` 按钮 + `shell.overlay` 浮窗（纯 slot 注册，不受允许列表
 限制），但浮窗内容升级为：汇总卡（**今日词元** + 较近 7 天日均涨跌参照 + **今日支出**）、
 **今日词元构成**（四桶 + 缓存命中率）、
-**按天词元趋势图**、**按模型拆分（词元 + 费用 + 占比条）**、最近记录与价格未知模型提示。
+**按天词元趋势图**、**按模型拆分（词元 + 费用 + 占比条）**、**按工作区累计**（每个工作区
+一行：累计词元 + 请求数 + 金额 + 占比条，最近有操作的在前面，「未归属」收尾）与价格未知模型提示。
 金额恒以人民币（¥）展示。
 
 汇总卡的主角是**今日词元**而不是累计：累计单调递增、永不触发任何决策，只在首访时证明

@@ -39,7 +39,7 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
   font-size:12px;line-height:18px;color:var(--dtpl-fg-2);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-value b{color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;}
-/* 订阅价值 amount used inside model/provider/recent rows: value styled
+/* 订阅价值 amount used inside model/provider/workspace rows: value styled
    distinctly from spend so a subscription-channel amount never reads as cash. */
 [data-plugin="dsh-tokbook"] .dtpl-sub-amt{color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;}
 [data-plugin="dsh-tokbook"] .dtpl-sub-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-3);margin-left:3px;}
@@ -139,76 +139,23 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 [data-plugin="dsh-tokbook"] .dtpl-val{color:var(--dtpl-fg);font-size:13px;line-height:20px;font-variant-numeric:tabular-nums;white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-cost{color:var(--dtpl-fg-2);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;white-space:nowrap;}
 
-/* ── recent records ─────────────────────────────────────────────────────── */
-[data-plugin="dsh-tokbook"] .dtpl-recent-sec{margin-bottom:14px;}
-[data-plugin="dsh-tokbook"] .dtpl-recent-head{
-  display:flex;align-items:baseline;justify-content:space-between;gap:12px;
-  margin:0 0 6px;
+/* ── workspaces ─────────────────────────────────────────────────────────── */
+[data-plugin="dsh-tokbook"] .dtpl-ws-sec{margin-bottom:14px;}
+/* The identity line under the workspace title: the directory, then the two
+   facts that make "most recent first" legible. The directory yields (ellipsis)
+   under pressure; the facts never do — a clipped "最近 …" would read as a
+   broken number. */
+[data-plugin="dsh-tokbook"] .dtpl-ws-meta{
+  display:flex;align-items:baseline;gap:6px;min-width:0;
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
 }
-[data-plugin="dsh-tokbook"] .dtpl-recent-head .dtpl-sec-title{margin:0;}
-[data-plugin="dsh-tokbook"] .dtpl-recent-head-sum{
-  flex:none;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
-  font-variant-numeric:tabular-nums;white-space:nowrap;
+[data-plugin="dsh-tokbook"] .dtpl-ws-path{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-[data-plugin="dsh-tokbook"] .dtpl-recent{
-  list-style:none;margin:0;padding:0;
-  display:flex;flex-direction:column;
-  border-top:.5px solid var(--dtpl-hairline);
+[data-plugin="dsh-tokbook"] .dtpl-ws-sep{flex:none;color:var(--dtpl-fg-dim);}
+[data-plugin="dsh-tokbook"] .dtpl-ws-facts{
+  flex:none;font-variant-numeric:tabular-nums;white-space:nowrap;
 }
-/* One row: time | body (model+badges / meta) | tokens | cost. Two visible
-   lines per record carry the "what/where" story; the hover holds the audit. */
-[data-plugin="dsh-tokbook"] .dtpl-recent-row{
-  display:grid;
-  grid-template-columns:minmax(52px,auto) minmax(0,1fr) auto auto;
-  align-items:center;column-gap:10px;
-  min-height:44px;padding:5px 6px;
-  border-bottom:.5px solid var(--dtpl-hairline);
-  cursor:default;
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-row:last-child{border-bottom:none;}
-[data-plugin="dsh-tokbook"] .dtpl-recent-time{
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
-  font-variant-numeric:tabular-nums;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-body{
-  display:flex;flex-direction:column;gap:2px;min-width:0;
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-main{
-  display:flex;align-items:center;gap:6px;min-width:0;
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-model{
-  color:var(--dtpl-fg);font-size:12px;line-height:18px;font-weight:500;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-meta{
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-badge{
-  flex:none;font-size:10px;line-height:14px;font-weight:500;
-  padding:0 5px;border-radius:5px;corner-shape:round;
-}
-[data-plugin="dsh-tokbook"] .dtpl-badge-compact{
-  color:var(--dtpl-accent);
-  background:color-mix(in srgb,var(--dtpl-accent) 12%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-badge-fail{
-  color:var(--dtpl-err);
-  background:color-mix(in srgb,var(--dtpl-err) 12%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-tokens{
-  color:var(--dtpl-fg);font-size:12px;line-height:18px;
-  font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-cost{
-  color:var(--dtpl-accent);font-size:12px;line-height:18px;font-weight:600;
-  font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;
-  min-width:52px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-recent-fail .dtpl-recent-model{color:var(--dtpl-err);}
-[data-plugin="dsh-tokbook"] .dtpl-recent-fail .dtpl-recent-meta{color:color-mix(in srgb,var(--dtpl-err) 70%,var(--dtpl-fg-3));}
-[data-plugin="dsh-tokbook"] .dtpl-recent-fail .dtpl-recent-tokens,
-[data-plugin="dsh-tokbook"] .dtpl-recent-fail .dtpl-recent-cost{color:var(--dtpl-fg-3);font-weight:400;}
 
 /* ── notes ──────────────────────────────────────────────────────────────── */
 [data-plugin="dsh-tokbook"] .dtpl-note{font-size:12px;line-height:18px;color:var(--dtpl-fg-2);margin:0 0 10px;}

@@ -1,8 +1,8 @@
 /**
  * Host→browser data path for dsh-tokbook: exact HTTP routes on the host
  * webserver, registered through `ctx.webServer.register({ kind:'exact', ... })`.
- * The overview (costed summary + per-day trend + per-model + recent) is served
- * as a plain JSON route the browser floating window `fetch`es from; a second
+ * The overview (costed summary + per-day trend + per-model + per-workspace) is
+ * served as a plain JSON route the browser floating window `fetch`es from; a second
  * route lets the scan button force an authoritative re-sync; a third route
  * serves the Provider-usage tab's per-provider cards for one selectable
  * look-back window (`?range=…` — exact routes match on pathname, so the query

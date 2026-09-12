@@ -2,8 +2,9 @@
 // Run with: node --experimental-strip-types scripts/smoke.ts
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow, costRecentEntries } from '../src/stats.ts'
+import { join, resolve, sep } from 'node:path'
+import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow } from '../src/stats.ts'
+import { pathKey, workspaceRows } from '../src/workspaces.ts'
 import { billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, EARLIEST, instantKey, instantMs, parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_FILE, rateKeyAt, ratesAt, readPriceFile, writePriceFile } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import {
@@ -68,7 +69,6 @@ console.log('summarize / totals')
   check('cacheRead sum', sum.total.cacheReadTokens === 60)
   check('2 day rows', sum.byDay.length === 2)
   check('2 model rows', sum.byModel.length === 2)
-  check('recent capped+desc', sum.recent.length === 4 && sum.recent[0]!.time >= sum.recent[1]!.time && sum.recent[0]!.time >= sum.recent[3]!.time)
   const merged = mergeSummaries(summarizeRecords(records.slice(0, 2)), summarizeRecords(records.slice(2)))
   check('merge equals full', merged.total.requests === 3 && merged.total.inputTokens === 340 && merged.byModel.length === 2)
 }
@@ -521,31 +521,66 @@ console.log('route catalog (settings ∪ live registry)')
   check('labels prefer the document displayName', labels['dots-ai'] === '小红书' && labels['opencode-go'] === 'OpenCode Go')
 }
 
-console.log('costRecentEntries (recent-window per-row cost)')
+console.log('workspaceRows (cumulative usage per workspace)')
 {
-  const pricing = { 'deepseek-official': { 'deepseek-chat': [
-    { from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5, cacheWritePerMillion: 1 } },
-  ] } }
-  const t = dayMillis('2026-01-01', 10)
-  const recs: UsageRecord[] = [
-    { requestId: 'paid', time: t, sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-chat', usage: { inputTokens: 1_000_000, outputTokens: 500_000, cacheReadTokens: 200_000, cacheWriteTokens: 100_000 } },
-    { requestId: 'unpriced', time: t, sessionId: 's2', provider: 'deepseek-official', model: 'no-such-model', usage: { inputTokens: 10, outputTokens: 10 } },
-    { requestId: 'nousage', time: t, sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-chat' },
-    { requestId: 'fail', time: t, sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-chat', kind: 'failure', failureCode: 'RATE_LIMIT' },
-    { requestId: 'compact', time: t, sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-chat', kind: 'compaction', usage: { inputTokens: 100_000, outputTokens: 50_000 } },
+  const pricing = {
+    'deepseek-official': { 'deepseek-chat': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
+    'opencode-go': { 'deepseek-chat': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
+  }
+  const billing = { 'opencode-go': 'subscription' as const }
+  const resolveRate = (r: UsageRecord) => rateKeyAt(pricing, r.provider, r.model, r.time)
+  const harness = resolve('tokbook-smoke', 'harness')
+  const wiki = resolve('tokbook-smoke', 'wiki')
+  const cold = resolve('tokbook-smoke', 'cold')
+  // Paths are built with `resolve` so the join is exercised with the platform's
+  // own spelling instead of a hard-coded Windows form.
+  const workspaces = [
+    { id: 'w-harness', title: 'harness', path: harness },
+    { id: 'w-wiki', title: 'wiki', path: wiki },
+    { id: 'w-cold', title: 'cold', path: cold },
   ]
-  const costed = costRecentEntries(recs, pricing, {})
-  check('entries keep request ids + order', costed.map(e => e.requestId).join(',') === 'paid,unpriced,nousage,fail,compact')
-  // 2 + 4 + 0.1 + 0.1 = 6.2 (the smoke costOf baseline), compaction 0.2 + 0.4 = 0.6
-  const paid = costed.find(e => e.requestId === 'paid')
-  check('per-row cost of a full-bucket request', paid !== undefined && Math.abs(paid.cost - 6.2) < 1e-9, `got ${paid?.cost}`)
-  const compact = costed.find(e => e.requestId === 'compact')
-  check('compaction priced like a request', compact !== undefined && Math.abs(compact.cost - 0.6) < 1e-9, `got ${compact?.cost}`)
-  check('unpriced model bills ¥0', costed.find(e => e.requestId === 'unpriced')?.cost === 0)
-  check('request without usage bills ¥0', costed.find(e => e.requestId === 'nousage')?.cost === 0)
-  check('failure row bills ¥0', costed.find(e => e.requestId === 'fail')?.cost === 0)
-  const subscribed = costRecentEntries([recs[0]!], pricing, { 'deepseek-official': 'subscription' })
-  check('a subscription route bills 订阅价值, not cash', subscribed[0]?.spend === 0 && Math.abs((subscribed[0]?.subscriptionValue ?? 0) - 6.2) < 1e-9)
+  const cwd = new Map<string, string>([
+    // The same directory in another spelling (separator + `.`): one workspace.
+    ['s-new', harness + sep + '.'],
+    ['s-old', wiki],
+    // A directory no registry entry owns, and a session whose log is gone.
+    ['s-loose', resolve('tokbook-smoke', 'loose')],
+    // A registered workspace that only ever failed: no consumption to show.
+    ['s-cold', cold],
+  ])
+  const t = (day: number): number => dayMillis(`2026-03-0${String(day)}`, 9)
+  const recs: UsageRecord[] = [
+    { requestId: 'a', time: t(1), sessionId: 's-old', provider: 'deepseek-official', model: 'deepseek-chat', usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+    { requestId: 'b', time: t(2), sessionId: 's-new', provider: 'opencode-go', model: 'deepseek-chat', usage: { inputTokens: 1_000_000, outputTokens: 0 } },
+    { requestId: 'f', time: t(2), sessionId: 's-new', provider: 'deepseek-official', model: 'deepseek-chat', usage: { inputTokens: 500_000, outputTokens: 0 } },
+    { requestId: 'c', time: t(3), sessionId: 's-loose', provider: 'deepseek-official', model: 'deepseek-chat', usage: { inputTokens: 500_000, outputTokens: 0 } },
+    { requestId: 'd', time: t(4), sessionId: 's-gone', provider: 'deepseek-official', model: 'deepseek-chat', usage: { inputTokens: 250_000, outputTokens: 0 } },
+    { requestId: 'e', time: t(5), sessionId: 's-cold', provider: 'deepseek-official', model: 'deepseek-chat', kind: 'failure', failureCode: 'QUOTA' },
+  ]
+  const rows = workspaceRows(recs, workspaces, id => cwd.get(id), pricing, resolveRate, billing)
+  // w-harness was last used 03-02 and w-wiki 03-01, so "most recent first"
+  // puts them in that order; the 未归属 catch-all (03-04) closes the list, and
+  // w-cold (failure rows only) has no consumption and gets no row.
+  check('rows: most recent first, 未归属 last, consumption-less workspace skipped',
+    rows.map(r => r.id).join(',') === 'w-harness,w-wiki,', rows.map(r => r.id).join(','))
+  check('a differently spelled cwd joins its workspace', rows[0]?.title === 'harness' && rows[0]?.tokens === 1_500_000,
+    `${rows[0]?.title} ${String(rows[0]?.tokens)}`)
+  check('a workspace spanning routes keeps both money buckets',
+    Math.abs((rows[0]?.spend ?? -1) - 1) < 1e-9 && Math.abs((rows[0]?.subscriptionValue ?? -1) - 2) < 1e-9,
+    `spend ${String(rows[0]?.spend)} value ${String(rows[0]?.subscriptionValue)}`)
+  check('a metered-only workspace bills cash, not 订阅价值',
+    Math.abs((rows[1]?.spend ?? 0) - 2) < 1e-9 && Math.abs(rows[1]?.subscriptionValue ?? -1) < 1e-9)
+  check('one 未归属 row holds every unclaimed record',
+    rows[2]?.title === '未归属' && rows[2]?.path === '' && rows[2]?.tokens === 750_000
+    && Math.abs((rows[2]?.spend ?? -1) - 1.5) < 1e-9 && rows[2]?.lastAt === t(4),
+    `tokens ${String(rows[2]?.tokens)} spend ${String(rows[2]?.spend)}`)
+  // Its failure stays in the skipped workspace's group: a workspace with no
+  // consumption must not have its failures silently re-bucketed into 未归属.
+  check('a failure-only workspace gets no row and is not re-bucketed',
+    rows.length === 3 && rows[2]?.totals.failures === 0)
+  check('the rows reconcile with the ledger totals',
+    rows.reduce((sum, row) => sum + row.tokens, 0) === totalsTokens(summarizeRecords(recs, resolveRate).total))
+  check('pathKey normalizes spelling', pathKey(harness + sep + '.') === pathKey(harness))
 }
 
 console.log('day file naming')
@@ -604,7 +639,6 @@ console.log('end-to-end: real-shaped DSH events -> JSONL ledger -> aggregate -> 
         && summary.byModel.some(r => r.provider === 'deepseek' && r.model === 'deepseek-reasoner' && r.totals.requests === 1)
         && summary.byModel.some(r => r.provider === '' && r.model === 'deepseek-reasoner' && r.totals.failures === 2),
       `got ${summary.byModel.map(r => `${r.provider}|${r.model}|r${String(r.totals.requests)}f${String(r.totals.failures)}`).join(',')}`)
-    check('recent has rows', summary.recent.length === 5)
     check('totalTokens matches buckets', totalsTokens(costed.total) === 3780, `got ${totalsTokens(costed.total)}`)
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -1152,12 +1186,6 @@ console.log('dual-bucket cost: spend vs subscriptionValue')
     check('byDay spend sums to spend', Math.abs(daySpend - costed.spend) < 1e-9, `got ${daySpend}`)
     check('byDay value sums to subscriptionValue', Math.abs(dayValue - costed.subscriptionValue) < 1e-9, `got ${dayValue}`)
     check('the day row carries ¥2 / ¥3', costed.byDay.length === 1 && costed.byDay[0]!.spend === 2 && costed.byDay[0]!.subscriptionValue === 3)
-    const recent = costRecentEntries(recs, pricing, billing)
-    const officialRecent = recent.find(r => r.requestId === 'official-1')
-    const opencodeRecent = recent.find(r => r.requestId === 'opencode-1')
-    check('recent metered row: spend', officialRecent?.cost === 2 && officialRecent?.spend === 2 && officialRecent?.subscriptionValue === 0)
-    check('recent subscription row: value', opencodeRecent?.cost === 2 && opencodeRecent?.subscriptionValue === 2 && opencodeRecent?.spend === 0)
-    check('recent unattributed row: ¥0', recent.find(r => r.requestId === 'direct-1')?.cost === 0)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

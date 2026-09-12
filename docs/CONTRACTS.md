@@ -1,6 +1,6 @@
 # Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
 
 其他代码与 browser 半区必须**分毫不差**依赖的事实的唯一家园:host 路由与 wire JSON、
 插件配置、消费的 `session/event` 类型、数据目录文件布局。
@@ -31,6 +31,8 @@
 | 模型名称 | `PricingModelView.name`:settings `models[].name` → 适配器目录的 `name`;没有就只显示精确模型串(与模型选择器一致) |
 | 价格未知 | 该 (路由, 模型) 没有价段(暂按 ¥0,**不是免费**) |
 | 实际支出 / 订阅价值 | `billing: metered` / `subscription` 两个桶(`spend` / `subscriptionValue`) |
+| 按工作区 | overview 的 `byWorkspace`(`WorkspaceUsageRow[]`)——每个工作区一行累计 |
+| 未归属 | `byWorkspace` 里 `id: ''` 的那一行:会话没有工作区目录、或目录未注册为工作区的记录 |
 | 通道路由键 | provider route key(账本里的通道标识) |
 | 通道名称 | 卡头显示名:settings profile 的 `displayName` → 适配器给的名字 → 路由键 |
 | 按量 / 订阅 | 卡片计费芯片,由该路由的 `$billing` 推出 |
@@ -48,7 +50,7 @@
 
 | 方法 | 路径 | Query / body | 成功载荷(类型见 `src/types.ts`) |
 |---|---|---|---|
-| `GET` | `/tokbook/overview` | — | `TokBookOverview`(带成本的汇总 + 趋势 + 按模型 + 最近记录 + 新鲜度) |
+| `GET` | `/tokbook/overview` | — | `TokBookOverview`(带成本的汇总 + 趋势 + 按模型 + 按工作区 + 新鲜度) |
 | `POST` | `/tokbook/rescan` | — | `RescanView` = `{ status: 'running'\|'skipped', lastSyncAt: number\|null }` |
 | `GET` | `/tokbook/usage` | `range` ∈ `today` \| `yesterday` \| `last7` \| `last30`(缺失/未知 → `400 {error}`) | `ProviderUsageView` |
 | `GET` | `/tokbook/quota` | — | `QuotaView` = `{ providers: string[], alert?: boolean }` — 仅已启用计划;`alert` 只读持久化快照,无网络 |
@@ -167,6 +169,16 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
 - `byDay` 每行除 token 汇总外还带该日 `spend` / `subscriptionValue`(`attachCosts` 从
   rate rows 按天折叠得出)。token-only 汇总与磁盘 rollup 里没有这两个字段——成本层每次
   读取都从 rate rows 重新推导,所以价格表改动后逐日金额自动跟着变。
+- overview 还带 **`byWorkspace`**:每个工作区一行**累计**(词元 / 请求数 / 双桶金额 /
+  最近一次记录时刻),最近有操作的在前,`id: ''` 的「未归属」行收尾。归属是**读时连接**:
+  账本行只有 `sessionId`,host 拿会话列表里该会话 header 的 `cwd` 去比工作区注册表
+  (`ctx.workspaceRegistry`)的规范路径——正是注册表自己的成员判据,所以**从未被 attach**
+  的会话(子代理、别处 resume 来的)也按它创建时的目录归属,归档(archive)不影响归属、
+  累计照算。没有 `cwd`、或目录不是已注册工作区的记录落进那一行「未归属」,因此**各工作区
+  之和恒等于账本累计**(词元与两个金额桶都对得上)。只记过失败尝试的工作区不出行(没有
+  任何消耗,与通道卡片同一条规则)。**宿主没挂载工作区注册表时该数组为空**,界面不显示
+  这一节——绝不把「无从归属」渲染成一屏「未归属」。金额与词元走与其他面相同的汇总 + 成本
+  层(`summarizeRecords` + `attachCosts`),所以三处口径一致。
 
 ## 配置
 
@@ -238,7 +250,7 @@ unlink 目标)。**例外**:`pricing.json` 先把上一版 rename 成 `.bak` 再
   `billing: subscription` 路由(订阅价值,非现金);UI 不得把后者当作支出展示。
 - 计费性质以**通道路由**为单位(`$billing` 的一条),省略 = metered;它作用于该路由的全部
   历史(与旧口径一致:改 `$billing` 会同时改变历史的分桶)。
-- rollup 带 `schemaVersion: 4` 与 `pricingRevision`;旧版本(v1/v2/v3)或签名不符读作缺失、
+- rollup 带 `schemaVersion: 5` 与 `pricingRevision`;旧版本(v1–v4)或签名不符读作缺失、
   由日文件重建。
 - 额度卡只展示官方通道数据;`unconfigured`/`error` 卡便宜地即时重推,从不当作
   "最近已知"持久化。

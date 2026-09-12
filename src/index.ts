@@ -34,7 +34,7 @@ import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  BillingMap, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, TokenSummary, UsageRecord,
+  BillingMap, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, RateKey, TokBookConfig, TokBookOverview, TokenSummary, UsageRecord, WorkspaceUsageRow,
 } from './types.ts'
 import { UNPRICED_KEY, totalsTokens } from './types.ts'
 import { coercePlansConfig, validateConfig } from './config.ts'
@@ -44,10 +44,11 @@ import { modelOfEvent, providerOfEvent, recordOfEvent, type SessionEventLike } f
 import { autoSyncIfNeeded, listPersistenceSnapshots, syncHistory, type SyncPersistence } from './sync.ts'
 import { readSyncProgress, writeSyncProgress } from './sync-state.ts'
 import {
-  attachCosts, buildSummary, clearRecordCache, costRecentEntries, listDayFiles, rangeDayWindow, readCachedRecords,
+  attachCosts, buildSummary, clearRecordCache, listDayFiles, rangeDayWindow, readCachedRecords,
   readRecordsByDayRange, snapshotBaseline, staleSessionIds, warmRecordCache,
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
+import { workspaceRows, type WorkspaceRef } from './workspaces.ts'
 import {
   parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
   type PriceParse,
@@ -70,6 +71,16 @@ const QUOTA_TTL_MS = 30_000
 interface SessionLike { readonly id: string }
 interface EventStream {
   on(event: 'session/event', listener: (session: SessionLike, event: SessionEventLike) => void): void
+}
+/** Minimal face of the workspace registry service (`ctx.workspaceRegistry`):
+ *  the durable workspace records the 按工作区 section joins against. */
+interface WorkspaceLike {
+  readonly id: string
+  readonly title: string
+  readonly path: string
+}
+interface WorkspaceRegistryLike {
+  list(): readonly WorkspaceLike[]
 }
 /** Minimal face of the host logger service (absent on some hosts → console). */
 interface LoggerLike {
@@ -296,7 +307,9 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * Ensure the ledger is current before an overview read. A cheap metadata
+   * Ensure the ledger is current before an overview read, and hand back the
+   * session-header listing that read needs (every session's `cwd`, which the
+   * 按工作区 section joins against the workspace registry). A cheap metadata
    * probe decides what needs syncing. The signature set is seeded from the
    * persisted baseline (this process's own previous syncs, or an earlier
    * process's), so after a restart only sessions whose persisted log changed
@@ -304,11 +317,13 @@ export class TokenUsageBook extends Service {
    * while the web server was down" case walks nothing. Without a usable
    * baseline (first install, torn file) every session is walked once
    * (history backfill + post-restart catch-up), then a fresh baseline is
-   * written. Idempotent (request-id dedupe); a run in flight is skipped.
+   * written. Idempotent (request-id dedupe); a run already in flight is not
+   * started again — the listing is still returned, so the caller's join sees
+   * the same headers the run is folding.
    */
-  async ensureFresh(): Promise<void> {
+  async ensureFresh(): Promise<readonly PersistenceSnapshotLike[]> {
     const persistence = this.persistence
-    if (persistence === undefined || this.syncing) return
+    if (persistence === undefined) return []
     await this.baselineReady
     let snapshots: readonly PersistenceSnapshotLike[]
     try {
@@ -320,12 +335,14 @@ export class TokenUsageBook extends Service {
       this.logger.error('[tokbook] persistence list probe failed:', error)
       snapshots = []
     }
+    if (this.syncing) return snapshots
     const stale = staleSessionIds(this.syncedOnce, this.syncedBySession, snapshots)
     if (stale.length === 0) {
       this.syncStatus = 'done'
-      return
+      return snapshots
     }
     await this.doSync(snapshots, stale)
+    return snapshots
   }
 
   /** The authoritative walk: fold the (changed) persisted logs into the
@@ -388,10 +405,11 @@ export class TokenUsageBook extends Service {
     })
   }
 
-  /** Current aggregated overview snapshot (costed, with per-day trend). */
+  /** Current aggregated overview snapshot (costed, with per-day trend and the
+   *  per-workspace cumulative section). */
   async overview(): Promise<TokBookOverview> {
     // Authoritative refresh first, so the ledger reflects persisted sessions.
-    await this.ensureFresh()
+    const snapshots = await this.ensureFresh()
     const { table, billing, revision } = await readPriceFile(this.dir, this.logger)
     const resolve: RateResolver = (record) => rateKeyAt(table, record.provider, record.model, record.time)
     const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger, { pricingRevision: revision })
@@ -408,21 +426,19 @@ export class TokenUsageBook extends Service {
       }
       if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
     }
-    // The recent window resolves each row at its own timestamp, the same rule
-    // the totals folded in, so a single row's ¥ in the 最近记录 list is exactly
-    // the amount the aggregates counted — split into its two buckets.
-    // Read-time + additive: no ledger/rollup change, and a price edit re-prices
-    // the list on the next overview read.
-    const recent = costRecentEntries(costed.recent, table, billing)
-    // Slim wire payload: the price table, the rateRows and the byHour rows are
-    // host-side concerns the floating window never renders; the cost layer has
-    // already been folded into the cost fields.
-    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, recent: _recent, ...slim } = costed
-    void _pricing; void _rateRows; void _byHour; void _recent
+    // Cumulated per workspace, joined on the session header's cwd at read time
+    // (no ledger row carries a workspace, so history is attributed
+    // retroactively). Empty when the host mounts no workspace registry.
+    const byWorkspace = this.workspaceUsage(records, snapshots, table, billing, resolve)
+    // Slim wire payload: the price table and the rateRows are host-side
+    // concerns the floating window never renders; the cost layer has already
+    // been folded into the cost fields.
+    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, ...slim } = costed
+    void _pricing; void _rateRows; void _byHour
     return {
       ...slim,
       sessions,
-      recent,
+      byWorkspace,
       totalTokens: totalsTokens(costed.total),
       updatedAt: Date.now(),
       records: records.length,
@@ -432,6 +448,36 @@ export class TokenUsageBook extends Service {
       syncStatus: this.syncStatus,
       syncError: this.syncError,
     }
+  }
+
+  /**
+   * The 按工作区 rows of one overview read: the ledger's records folded by the
+   * workspace each record's session belongs to. The join needs both live host
+   * seams — the workspace registry (title + canonical path) and the session
+   * headers (`cwd`) — so a host that mounts no registry gets no section rather
+   * than a page of 未归属. A session absent from the listing (its log is gone)
+   * contributes no `cwd` and its records land in 未归属.
+   */
+  private workspaceUsage(
+    records: readonly UsageRecord[],
+    snapshots: readonly PersistenceSnapshotLike[],
+    pricing: PricingTable,
+    billing: BillingMap,
+    resolve: RateResolver,
+  ): WorkspaceUsageRow[] {
+    const registry = this.workspaceRegistry()
+    if (registry === undefined) return []
+    const cwdBySession = new Map<string, string>()
+    for (const snap of snapshots) {
+      const cwd = snap.header.cwd
+      if (typeof cwd === 'string' && cwd !== '') cwdBySession.set(snap.header.id, cwd)
+    }
+    const workspaces: WorkspaceRef[] = registry.list().map(workspace => ({
+      id: String(workspace.id),
+      title: workspace.title,
+      path: workspace.path,
+    }))
+    return workspaceRows(records, workspaces, id => cwdBySession.get(id), pricing, resolve, billing)
   }
 
   /** Per-provider view of one look-back window, the payload of the
@@ -467,6 +513,13 @@ export class TokenUsageBook extends Service {
   /** The host LLM seam (`ctx.llm`), or undefined when unmounted. */
   private llm(): LlmLike | undefined {
     return this.hostCtx.get('llm') as LlmLike | undefined
+  }
+
+  /** The host workspace registry (`ctx.workspaceRegistry`), or undefined when
+   *  unmounted. Read reflectively for the same reason as `settings`/`llm`:
+   *  this read-only view must not throw when a service is absent. */
+  private workspaceRegistry(): WorkspaceRegistryLike | undefined {
+    return this.hostCtx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
   }
 
   /**

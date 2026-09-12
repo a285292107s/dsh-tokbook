@@ -1,20 +1,20 @@
 /**
  * 用量总览 tab content: today's hero, the four-bucket split, the daily trend,
- * the per-model breakdown and the recent list. Shell (tabs, dialog chrome,
- * rescan footer) lives in `LedgerOverlay.tsx`.
+ * the per-model breakdown and the cumulative per-workspace section. Shell
+ * (tabs, dialog chrome, rescan footer) lives in `LedgerOverlay.tsx`.
  *
  * @module dsh-tokbook/client/LedgerView
  */
 
 import type {
-  CostedModelRow, RecentLedgerEntry, TokBookOverview, UsageDayRow, UsageTotals,
+  CostedModelRow, TokBookOverview, UsageDayRow, UsageTotals, WorkspaceUsageRow,
 } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import type { PricingFocus } from './contract.ts'
 import { UsageGlyph } from './icons.tsx'
 import {
-  failureCodeLabel, formatDateTime, formatHitRate, formatMoney, formatRelative, formatTokens,
-  localDayKey, share, shiftDayKey, shortDay, shortId, usageTotal,
+  formatDateTime, formatHitRate, formatMoney, formatRelative, formatTokens,
+  localDayKey, share, shiftDayKey, shortDay,
 } from './format.ts'
 
 /** Days in the trend window; the window never starts before the first record. */
@@ -210,125 +210,97 @@ function ModelBreakdown({ byModel, totalTokens, money }: {
   )
 }
 
-/** Newest visible ledger rows: payload holds 20, scanning stops at 10. */
-const RECENT_VISIBLE = 10
-
-function RecentList({ records, unpricedModels, money }: {
-  records: readonly RecentLedgerEntry[]
-  unpricedModels: readonly string[]
+/**
+ * Cumulative tokens per workspace, most recently used first. The host joins
+ * every ledger row's session against the workspace registry and the session
+ * headers (see `src/workspaces.ts`), so this section is a read-time projection
+ * of the very ledger the totals above describe — the ¥ of a row is the same
+ * amount every other surface bills, split into its two buckets.
+ *
+ * The 未归属 row closes the list: it holds the records no registered workspace
+ * claims, which is what keeps the rows adding back up to 累计词元. It is a
+ * reconciliation line, not a project, so "most recent first" does not apply.
+ */
+function WorkspaceBreakdown({ rows, totalTokens, money }: {
+  rows: readonly WorkspaceUsageRow[]
+  totalTokens: number
   money: (value: number) => string
 }) {
-  if (records.length === 0) return null
-  const rows = records.slice(0, RECENT_VISIBLE)
-  const unpriced = new Set(unpricedModels)
-  const sumSpend = rows.reduce((acc, r) => acc + r.spend, 0)
-  const sumValue = rows.reduce((acc, r) => acc + r.subscriptionValue, 0)
+  if (rows.length === 0) return null
   return (
-    <section className="dtpl-recent-sec">
-      <header className="dtpl-recent-head">
-        <h2 className="dtpl-sec-title">最近记录</h2>
-        <span className="dtpl-recent-head-sum">
-          近 {rows.length} 条 · 实际 {money(sumSpend)}
-          {sumValue > 0 ? ` · 订阅价值 ${money(sumValue)}` : ''}
+    <section className="dtpl-ws-sec">
+      <div className="dtpl-sec-head">
+        <h2 className="dtpl-sec-title">按工作区</h2>
+        <span
+          className="dtpl-sec-aside"
+          title="每个工作区的累计词元（全账本）。记录按会话的创建目录归属到工作区；没有工作区目录、或目录未注册为工作区的记录归入「未归属」。"
+        >
+          全账本累计 · 最近有操作在前
         </span>
-      </header>
-      <ul className="dtpl-recent">
-        {rows.map((r) => (
-          <RecentRow key={r.requestId} record={r} unpriced={unpriced.has(r.model)} money={money} />
+      </div>
+      <div className="dtpl-models">
+        {rows.map(row => (
+          <div
+            className="dtpl-row"
+            key={row.id === '' ? 'unattributed' : row.id}
+            title={workspaceDetail(row, money)}
+          >
+            <div className="dtpl-model">
+              <span className="dtpl-model-name">{row.title}</span>
+              {/* The directory yields (ellipsis) under pressure; the two facts
+                  never do — a clipped "最近 …" would read as a broken number. */}
+              <span className="dtpl-ws-meta">
+                {row.path !== '' && (
+                  <>
+                    <span className="dtpl-ws-path" title={row.path}>{row.path}</span>
+                    <span className="dtpl-ws-sep" aria-hidden="true">·</span>
+                  </>
+                )}
+                <span className="dtpl-ws-facts">
+                  {row.totals.requests} 请求 · 最近 {formatRelative(row.lastAt)}
+                </span>
+              </span>
+              <span className="dtpl-model-bar" role="presentation">
+                <span className="dtpl-model-bar-fill" style={{ width: `${share(row.tokens, totalTokens)}%` }} />
+              </span>
+            </div>
+            <div className="dtpl-model-nums">
+              <span className="dtpl-val">{formatTokens(row.tokens)}</span>
+              {/* A workspace spans channels, so BOTH money buckets can be
+                  non-zero at once — unlike a model row, which one route scopes
+                  to a single bucket. Each non-zero bucket is therefore named,
+                  and a fully unpriced workspace still shows ¥0.00 (价格未知 is
+                  a 口径, never a free ride). */}
+              <span className="dtpl-cost">
+                {row.spend > 0 && <span>{money(row.spend)}</span>}
+                {row.spend > 0 && row.subscriptionValue > 0 && <span aria-hidden="true"> · </span>}
+                {row.subscriptionValue > 0 && (
+                  <><b className="dtpl-sub-amt">{money(row.subscriptionValue)}</b><em className="dtpl-sub-k">订阅价值</em></>
+                )}
+                {row.spend === 0 && row.subscriptionValue === 0 && <span>{money(0)}</span>}
+              </span>
+            </div>
+          </div>
         ))}
-      </ul>
+      </div>
     </section>
   )
 }
 
-/**
- * One 最近记录 row: when it happened, which model/provider/session, what kind
- * of call it was (request / compaction / failure), and what it cost. Visible
- * lines answer at a glance; the hover tooltip carries the full audit trail —
- * complete session/request ids and the four-bucket split (a cache-heavy row is
- * otherwise easy to misread as expensive). Failed attempts bill nothing, so
- * their token/cost cells show an em dash instead of pretending "0".
- */
-function RecentRow({ record, unpriced, money }: {
-  record: RecentLedgerEntry
-  unpriced: boolean
-  money: (value: number) => string
-}) {
-  const failed = record.kind === 'failure'
-  const detail = recentDetail(record, money)
-  const costTitle = failed ? undefined
-    : unpriced ? '模型价格未知，暂按 ¥0 计' : undefined
-  return (
-    <li
-      className={`dtpl-recent-row${failed ? ' dtpl-recent-fail' : ''}`}
-      title={detail}
-    >
-      <span className="dtpl-recent-time">{formatRelative(record.time)}</span>
-      <span className="dtpl-recent-body">
-        <span className="dtpl-recent-main">
-          <span className="dtpl-recent-model">{record.model || '—'}</span>
-          {record.kind === 'compaction' && (
-            <span className="dtpl-recent-badge dtpl-badge-compact">压缩</span>
-          )}
-          {failed && (
-            <span className="dtpl-recent-badge dtpl-badge-fail">失败</span>
-          )}
-        </span>
-        <span className="dtpl-recent-meta">{recentMeta(record)}</span>
-      </span>
-      <span className="dtpl-recent-tokens">{failed ? '—' : formatTokens(usageTotal(record))}</span>
-      <span
-        className="dtpl-recent-cost"
-        title={costTitle}
-      >
-        {failed ? '—' : record.subscriptionValue > 0 && record.spend === 0
-          ? <><b className="dtpl-sub-amt">{money(record.subscriptionValue)}</b><em className="dtpl-sub-k">订阅价值</em></>
-          : money(record.cost)}
-      </span>
-    </li>
-  )
-}
-
-/** The visible meta line of one row: provider · short session id (failure
- * rows lead with the failure label). Bucket details stay on the hover. */
-function recentMeta(record: RecentLedgerEntry): string {
-  const parts: string[] = []
-  if (record.kind === 'failure') {
-    parts.push(failureCodeLabel(record.failureCode))
-  }
-  if (record.provider !== undefined && record.provider !== '') {
-    parts.push(record.provider)
-  }
-  parts.push(`会话 ${shortId(record.sessionId)}`)
-  return parts.join(' · ')
-}
-
-/** The hover audit trail of one row: kind, model/provider/session/request ids,
- * wall time, the four-bucket split and the billed ¥. */
-function recentDetail(record: RecentLedgerEntry, money: (value: number) => string): string {
-  const head = record.kind === 'failure'
-    ? `失败尝试${record.failureCode !== undefined ? ` · ${failureCodeLabel(record.failureCode)}` : ''}`
-    : record.kind === 'compaction'
-      ? '上下文压缩 summarize 调用'
-      : '模型请求'
-  const lines = [
-    head,
-    `模型 ${record.model || '(未知)'}`,
-    `通道 ${record.provider ?? '(未知)'}`,
-    `会话 ${record.sessionId}`,
-    `请求 ${record.requestId}`,
-    `时间 ${formatDateTime(record.time)}`,
-  ]
-  const usage = record.usage
-  if (usage !== undefined) {
-    lines.push(
-      `输入 ${formatTokens(usage.inputTokens)} · 输出 ${formatTokens(usage.outputTokens)}`
-      + ` · 缓存读取 ${formatTokens(usage.cacheReadTokens ?? 0)} · 缓存写入 ${formatTokens(usage.cacheWriteTokens ?? 0)}`,
-      `共 ${formatTokens(usageTotal(record))} 词元`,
-      `费用 ${money(record.cost)}`,
-    )
-  }
-  return lines.join('\n')
+/** The hover audit trail of one workspace row: identity, cumulative token
+ * split, requests/failures, both money buckets and when it was last used. */
+function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => string): string {
+  const totals = row.totals
+  const failed = totals.failures ?? 0
+  return [
+    row.path === '' ? '未归属用量' : `工作区 ${row.title}`,
+    row.path === '' ? '会话没有工作区目录，或目录未注册为工作区。' : `目录 ${row.path}`,
+    `累计 ${formatTokens(row.tokens)} 词元 · ${totals.requests} 请求${failed > 0 ? ` · ${failed} 失败` : ''}`,
+    `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
+    + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
+    `实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`,
+    `最近一次 ${formatDateTime(row.lastAt)}`,
+  ].join('\n')
 }
 
 export function LedgerView({ overview, onOpenPricing }: {
@@ -422,6 +394,8 @@ export function LedgerView({ overview, onOpenPricing }: {
 
           <ModelBreakdown byModel={overview.byModel} totalTokens={overview.totalTokens} money={money} />
 
+          <WorkspaceBreakdown rows={overview.byWorkspace} totalTokens={overview.totalTokens} money={money} />
+
           {(overview.total.compactions ?? 0) > 0 && (
             <p className="dtpl-note">其中包含 {overview.total.compactions} 次上下文压缩 summarize 调用。</p>
           )}
@@ -430,10 +404,6 @@ export function LedgerView({ overview, onOpenPricing }: {
               价格未知的模型（暂按 ¥0 计，不是免费）：{overview.unpricedModels.join('、')}
               <button type="button" className="dtpl-pricing-empty-link" onClick={() => onOpenPricing('unpriced')}>去定价</button>
             </p>
-          )}
-
-          {overview.recent.length > 0 && (
-            <RecentList records={overview.recent} unpricedModels={overview.unpricedModels} money={money} />
           )}
         </>
       )}

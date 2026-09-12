@@ -4,7 +4,8 @@
  * The token ledger records ONE row per provider-billed model call (the
  * `assistant/message` provider `usage`, plus compaction summarize calls and
  * failed attempts), then aggregates the rows into totals, per-day, per-hour,
- * per-model and per-(day, model, provider, rate) cells. Cost is an additive
+ * per-model, per-workspace and per-(day, model, provider, rate) cells. Cost is
+ * an additive
  * layer computed through a (route, model) price resolution — a hand-written
  * price table (¥ per million tokens) whose time axis has two levels: the
  * effective instant of a segment (local date, or local date + exact hour) and,
@@ -296,23 +297,32 @@ export interface PricingView {
 }
 
 /**
- * One ledger row of the overview's 最近记录 slice: a {@link UsageRecord}
- * with the billed amounts (¥) of that single request folded in. The amounts
- * are server-derived read-time fields — they re-price whenever the price table
- * changes and never touches the ledger/rollup format. Failure rows and
- * unpriced rows carry 0. `cost` is kept as the sum (spend + subscriptionValue)
- * so older clients that read only `cost` still see a total; the two buckets
- * let new clients show 实际支出 and 订阅价值 separately.
+ * One workspace row of the overview's 按工作区 section: every ledger record
+ * whose session belongs to one workspace, folded with the same summary + cost
+ * layer the rest of the overview uses. Attribution is a READ-TIME join — the
+ * ledger row stores only `sessionId`, and the workspace of a session is the
+ * `cwd` in its persisted header (see `src/workspaces.ts`) — so no ledger row
+ * carries a workspace and history is attributed retroactively.
  */
-export interface RecentLedgerEntry extends UsageRecord {
-  /** Sum of the two buckets (¥); 0 = unpriced, no usage reported, or a failed
-   * attempt that billed no tokens. Compatibility field. */
-  cost: number
-  /** Real spend (¥): the amount of rows whose billing is `metered`. */
+export interface WorkspaceUsageRow {
+  /** Workspace id; '' for the catch-all 未归属 row. */
+  id: string
+  /** Display title: the workspace's own title, or 未归属. */
+  title: string
+  /** Canonical directory path; '' on the 未归属 row (its records span
+   *  directories, or name none at all). */
+  path: string
+  /** Cumulative totals over the whole ledger (failures included, as in every
+   *  other totals row). */
+  totals: UsageTotals
+  /** Sum of the four buckets. */
+  tokens: number
+  /** Real spend (¥) over the whole ledger; unpriced records count 0. */
   spend: number
-  /** Subscription value (¥, non-cash): the amount of rows whose billing is
-   * `subscription`. */
+  /** Subscription value (¥, non-cash) over the whole ledger. */
   subscriptionValue: number
+  /** Newest record time of this row — the sort key (最近有操作在前). */
+  lastAt: number
 }
 
 /** One per-day × per-model × per-provider × per-rate aggregation row. */
@@ -332,7 +342,6 @@ export interface TokenSummary {
   byHour: UsageHourRow[]
   byModel: UsageModelRow[]
   rateRows: UsageRateRow[]
-  recent: UsageRecord[]
 }
 
 /** A per-model row carrying its billed amounts (¥). `cost` is the sum of the
@@ -456,15 +465,17 @@ export interface ProviderUsageView {
  * cost layer has already been folded into `spend` / `subscriptionValue` /
  * `totalCost` / `byModel[].*`.
  */
-export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour' | 'recent'> {
+export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour'> {
   /** Distinct sessions that contributed records. */
   sessions: number
   /** Sum of the four provider buckets (input + cacheRead + cacheWrite + output). */
   totalTokens: number
   /** When the snapshot was computed, epoch ms. */
   updatedAt: number
-  /** Newest ledger rows (newest first), each carrying its own billed ¥. */
-  recent: RecentLedgerEntry[]
+  /** Cumulative usage per workspace, most recently used first; the 未归属 row
+   *  (records no registered workspace claims) closes the list. Empty when the
+   *  host mounts no workspace registry. */
+  byWorkspace: WorkspaceUsageRow[]
   /** Total records read from the ledger (diagnostics). */
   records: number
   /** Number of day files the ledger holds (diagnostics). */

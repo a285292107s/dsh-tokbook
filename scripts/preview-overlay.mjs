@@ -84,22 +84,22 @@ const overview = {
     { provider: 'opencode-go', model: 'deepseek-v4-flash', totals: mk(800_000, 900_000, 120_000, 34), cost: 2.4, spend: 0, subscriptionValue: 2.4 },
   ],
   rateRows: [],
-  recent: [
-    { requestId: 'r-01', time: Date.now() - 3 * 60_000, sessionId: 'session-abc-1234567890', model: 'deepseek-chat', provider: 'deepseek', usage: mk(4_120, 61_300, 1_842), cost: 0.0132, spend: 0.0132, subscriptionValue: 0 },
-    { requestId: 'r-02', time: Date.now() - 26 * 60_000, sessionId: 'session-abc-1234567890', model: 'deepseek-reasoner', provider: 'deepseek', usage: mk(9_840, 12_000, 3_310), cost: 0.0412, spend: 0.0412, subscriptionValue: 0 },
-    { requestId: 'r-03', time: Date.now() - 70 * 60_000, sessionId: 'session-xyz', model: 'deepseek-chat', provider: 'deepseek', kind: 'compaction', usage: mk(1_260, 0, 4_110), cost: 0.008, spend: 0.008, subscriptionValue: 0 },
-    { requestId: 'r-04', time: Date.now() - 140 * 60_000, sessionId: 'session-xyz', model: 'deepseek-chat', provider: 'deepseek', kind: 'failure', failureCode: 'RATE_LIMIT', cost: 0, spend: 0, subscriptionValue: 0 },
-    { requestId: 'r-05', time: Date.now() - 3 * 3_600_000, sessionId: 'session-abc-1234567890', model: 'deepseek-chat', provider: 'deepseek', usage: mk(2_270, 44_900, 960), cost: 0.0066, spend: 0.0066, subscriptionValue: 0 },
-    { requestId: 'r-06', time: Date.now() - 26 * 3_600_000, sessionId: 'session-old', model: 'deepseek-chat', provider: 'deepseek', usage: mk(3_715, 88_210, 2_204), cost: 0.0109, spend: 0.0109, subscriptionValue: 0 },
-    { requestId: 'r-07', time: Date.now() - 40 * 60_000, sessionId: 'session-go', model: 'deepseek-v4-flash', provider: 'opencode-go', usage: mk(6_000, 7_000, 900), cost: 0.021, spend: 0, subscriptionValue: 0.021 },
+  // 按工作区：最近有操作在前，未归属收尾（id ''），tokens = 四桶之和。
+  // 第一行故意跨两条计费性质的路由（实际支出 + 订阅价值同时非零），因为工作区
+  // 不像模型行那样被限定在单个金额桶里。
+  byWorkspace: [
+    { id: 'w-harness', title: 'deepseek-harness', path: 'C:\\Users\\28529\\Desktop\\deepseek-harness', totals: mk(1_510_000, 6_100_000, 402_000, 198), tokens: 8_012_000, spend: 3.87, subscriptionValue: 1.2, lastAt: Date.now() - 3 * 60_000 },
+    { id: 'w-wiki', title: 'zzz wiki', path: 'C:\\Users\\28529\\Desktop\\zzz wiki', totals: mk(800_000, 900_000, 120_000, 34), tokens: 1_820_000, spend: 0, subscriptionValue: 2.4, lastAt: Date.now() - 5 * 3_600_000 },
+    { id: 'w-plugins', title: 'dsh-plugins', path: 'C:\\Users\\28529\\Desktop\\dsh-plugins', totals: mk(410_000, 210_000, 84_000, 16), tokens: 704_000, spend: 1.12, subscriptionValue: 0, lastAt: Date.now() - 26 * 3_600_000 },
+    { id: '', title: '未归属', path: '', totals: mk(50_000, 120_000, 8_000, 7), tokens: 178_000, spend: 0, subscriptionValue: 0, lastAt: Date.now() - 40 * 60_000 },
   ],
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
-  totalCost: 7.39,
+  totalCost: 8.59,
   spend: 4.99,
-  subscriptionValue: 2.4,
+  subscriptionValue: 3.6,
   unpricedModels: [],
   pricing: {},
-  totalTokens: 8_716_000,
+  totalTokens: 10_714_000,
   currency: 'CNY',
   usdExchangeRate: 7.2,
   updatedAt: Date.now() - 60_000,
@@ -115,7 +115,7 @@ const overview = {
 const emptyOverview = {
   ...overview,
   total: { ...overview.total, ...mk(0, 0, 0, 0), compactions: 0, failures: 0 },
-  byDay: [], byModel: [], recent: [],
+  byDay: [], byModel: [], byWorkspace: [],
   totalTokens: 0, totalCost: 0, spend: 0, subscriptionValue: 0, records: 0, files: 0,
   lastEventAt: null, lastSyncAt: null, syncStatus: 'idle', sessions: 0,
 }

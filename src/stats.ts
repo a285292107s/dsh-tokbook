@@ -1,13 +1,12 @@
 /**
  * Stats computation of the token-book: read the per-day files and fold the
- * records into totals, per-day rows, per-hour rows, per-(provider, model)
- * rows, and a bounded recent window — keeping one row per (day, model,
- * provider, rate identity) so every record is billed at the price its own
- * timestamp resolved to (see pricing.ratesAt).
- * Frozen (pre-today) day files are served from the on-disk rollup; only
- * today's file is read on every call. Parsed day files are cached in process
- * memory (frozen files stay resident; today's file is re-read when its
- * size/mtime changes).
+ * records into totals, per-day rows, per-hour rows and per-(provider, model)
+ * rows — keeping one row per (day, model, provider, rate identity) so every
+ * record is billed at the price its own timestamp resolved to (see
+ * pricing.ratesAt). Frozen (pre-today) day files are served from the on-disk
+ * rollup; only today's file is read on every call. Parsed day files are cached
+ * in process memory (frozen files stay resident; today's file is re-read when
+ * its size/mtime changes).
  *
  * @module dsh-tokbook/stats
  */
@@ -15,22 +14,20 @@
 import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DAY_SETS } from './price-format.ts'
-import { coerceRecord, parseRecord } from './usage-record.ts'
+import { parseRecord } from './usage-record.ts'
 import {
-  type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type RecentLedgerEntry, type SlotRef, type TokenSummary,
+  type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type SlotRef, type TokenSummary,
   type UsageDayRow, type UsageHourRow, type UsageModelRow, type UsageRateRow, type UsageRecord,
   type UsageTotals, UNPRICED_KEY,
 } from './types.ts'
-import { billingOf, costOf, priceOfKey, ratesAt } from './pricing.ts'
-
-/** Bounded recent window length: only the newest records cross the wire. */
-export const RECENT_LIMIT = 20
+import { billingOf, costOf, priceOfKey } from './pricing.ts'
 
 /** One persisted-session snapshot as the staleness probe reads it: the header
  * plus, when the backend provides one, a cheap change token (a plain-header
- * `list()` fallback carries no `revision`). */
+ * `list()` fallback carries no `revision`). The header's `cwd` is the join key
+ * of the overview's 按工作区 section, so the same listing serves both. */
 export interface PersistenceSnapshotLike {
-  header: { id: string }
+  header: { id: string; cwd?: string }
   revision?: unknown
 }
 
@@ -310,12 +307,11 @@ export async function warmRecordCache(dir: string, now?: () => Date, logger?: St
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
-/** Rollup format version. v4 keys every rate row by the effective instant of
- *  the price segment that applied AND the exception slot that applied inside it
- *  (v3 knew only the segment's date); a rollup of any other version is treated
- *  as absent and rebuilt from the day files, so a format change can never
- *  silently mis-merge rows. */
-export const ROLLUP_SCHEMA_VERSION = 4
+/** Rollup format version. v5 dropped the cached `recent` window (v4 kept the
+ *  newest rows for the overview's 最近记录 list); a rollup of any other version
+ *  is treated as absent and rebuilt from the day files, so a format change can
+ *  never silently mis-merge rows. */
+export const ROLLUP_SCHEMA_VERSION = 5
 
 export interface RollupFile {
   schemaVersion: number
@@ -330,7 +326,6 @@ export interface RollupFile {
   byHour: UsageHourRow[]
   byModel: UsageModelRow[]
   rateRows: UsageRateRow[]
-  recent: UsageRecord[]
 }
 
 const ROLLUP_FIELDS = ['requests', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const
@@ -369,7 +364,6 @@ function isRollupFile(value: unknown): value is RollupFile {
     && Array.isArray(rollup.byHour)
     && Array.isArray(rollup.byModel)
     && Array.isArray(rollup.rateRows)
-    && Array.isArray(rollup.recent)
 }
 
 /** Load the rollup of one data directory. A missing, malformed, or invalid
@@ -397,10 +391,7 @@ export async function readRollup(
   }
   if (!isRollupFile(value)) return null
   if (value.pricingRevision !== pricingRevision) return null
-  const recent = (value.recent as unknown[])
-    .map(coerceRecord)
-    .filter((record): record is UsageRecord => record !== null)
-  return { ...value, recent }
+  return value
 }
 
 /** Persist the rollup atomically (temp file + rename), so a crash mid-write
@@ -541,7 +532,6 @@ export function summarizeRecords(records: readonly UsageRecord[], resolve: RateR
   const hours = new Map<string, UsageTotals>()
   const models = new Map<string, UsageModelRow>()
   const rated = new Map<string, UsageRateRow>()
-  const recent: UsageRecord[] = []
   for (const record of records) {
     addUsage(total, record)
     const day = dayKey(record.time)
@@ -570,14 +560,11 @@ export function summarizeRecords(records: readonly UsageRecord[], resolve: RateR
       ?? { day, model: record.model, provider: record.provider ?? '', rate, totals: emptyTotals() }
     addUsage(cell.totals, record)
     rated.set(rowKey, cell)
-    if (recent.length === RECENT_LIMIT) recent.shift()
-    recent.push(record)
   }
   const byDay: UsageDayRow[] = dayRows(days)
   const byHour: UsageHourRow[] = hourRows(hours)
   const byModel: UsageModelRow[] = modelRows(models)
-  recent.sort((left, right) => right.time - left.time)
-  return { total, byDay, byHour, byModel, rateRows: rateRowsSorted(rated.values()), recent }
+  return { total, byDay, byHour, byModel, rateRows: rateRowsSorted(rated.values()) }
 }
 
 /** Merge two summaries into one. Order-independent and associative. */
@@ -618,16 +605,12 @@ export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSu
     addTotals(cell.totals, row.totals)
     rated.set(key, cell)
   }
-  const recent = [...left.recent, ...right.recent]
-    .sort((a, b) => b.time - a.time)
-    .slice(0, RECENT_LIMIT)
   return {
     total,
     byDay: dayRows(days),
     byHour: hourRows(hours),
     byModel: modelRows(models),
     rateRows: rateRowsSorted(rated.values()),
-    recent,
   }
 }
 
@@ -709,47 +692,7 @@ export function attachCosts(
     byHour: summary.byHour,
     byModel,
     rateRows: summary.rateRows,
-    recent: summary.recent,
   }
-}
-
-/**
- * Price the recent-window ledger rows for the floating window's 最近记录 list:
- * each request is billed at the segment in force at its own timestamp, so a
- * single row's ¥ is exactly the amount the totals folded in — and its two
- * buckets (`spend` / `subscriptionValue`) show which side of the ledger it sits
- * on. Deliberately read-time and additive: nothing is persisted, and a price
- * table change re-prices the list on the next read. Rows that bill nothing
- * carry 0 — a failed attempt (no tokens ever billed), a request with no
- * provider-reported usage, or a (route, model) nothing prices.
- */
-export function costRecentEntries(
-  recent: readonly UsageRecord[],
-  pricing: PricingTable,
-  billing: BillingMap = {},
-): RecentLedgerEntry[] {
-  return recent.map((record) => {
-    const usage = record.usage
-    if (usage === undefined) return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
-    const hit = ratesAt(pricing, record.provider, record.model, record.time)
-    if (hit === null) return { ...record, cost: 0, spend: 0, subscriptionValue: 0 }
-    // Cost the four buckets as the totals layer would (absent cache buckets
-    // read as 0, never NaN).
-    const amount = costOf({
-      requests: 0,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      cacheReadTokens: usage.cacheReadTokens ?? 0,
-      cacheWriteTokens: usage.cacheWriteTokens ?? 0,
-    }, hit)
-    const subscription = billingOf(billing, record.provider) === 'subscription'
-    return {
-      ...record,
-      cost: amount,
-      spend: subscription ? 0 : amount,
-      subscriptionValue: subscription ? amount : 0,
-    }
-  })
 }
 
 /** Build the full stats payload for one data directory: the rollup over every
@@ -768,7 +711,7 @@ export async function buildSummary(
   const pricingRevision = options.pricingRevision ?? ''
   const today = dayKey(now().getTime())
   const rollup = (await readRollup(dir, logger, pricingRevision))
-    ?? { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', pricingRevision, total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [], recent: [] }
+    ?? { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', pricingRevision, total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [] }
   const cold: string[] = []
   const hot: string[] = []
   for (const name of await listDayFiles(dir)) {

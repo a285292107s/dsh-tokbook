@@ -45,10 +45,12 @@ export interface SyncProgressTick {
  * Per-session listing item as the sync reads it: the immutable header plus,
  * when the backend provides one, a cheap change token (equal revisions mean an
  * unchanged log). `revision` is optional — `listSnapshots()` provides it, a
- * plain `list()` fallback does not (every session then counts as stale).
+ * plain `list()` fallback does not (every session then counts as stale). The
+ * header's `cwd` rides along because the overview's 按工作区 section joins the
+ * ledger against it (see `src/workspaces.ts`).
  */
 export interface PersistenceSnapshotLike {
-  header: { id: string }
+  header: { id: string; cwd?: string }
   revision?: unknown
 }
 
@@ -75,7 +77,12 @@ function normalizeSnapshot(value: unknown): PersistenceSnapshotLike | null {
   const header = (typeof raw.header === 'object' && raw.header !== null ? raw.header : raw) as Record<string, unknown>
   if (typeof header.id !== 'string' || header.id === '') return null
   return {
-    header: header as { id: string },
+    // Only the two fields this module declares are copied out, so a foreign
+    // backend cannot smuggle a non-string `cwd` into the workspace join.
+    header: {
+      id: header.id,
+      ...(typeof header.cwd === 'string' && header.cwd !== '' ? { cwd: header.cwd } : {}),
+    },
     ...(raw.revision !== undefined ? { revision: raw.revision } : {}),
   }
 }

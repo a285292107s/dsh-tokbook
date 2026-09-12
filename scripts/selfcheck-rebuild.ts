@@ -107,7 +107,7 @@ console.log('rollup: derived-state lossless rebuild')
     await rm(join(dir, 'rollup.json'), { force: true })
     const rebuilt = await buildSummary(dir, never, resolve, quiet)
     const key = (s: typeof first) => JSON.stringify({
-      total: s.total, byDay: s.byDay, byHour: s.byHour, byModel: s.byModel, rateRows: s.rateRows, recent: s.recent,
+      total: s.total, byDay: s.byDay, byHour: s.byHour, byModel: s.byModel, rateRows: s.rateRows,
     })
     check('deleted rollup rebuilds losslessly', key(first) === key(rebuilt))
 
@@ -119,7 +119,8 @@ console.log('rollup: derived-state lossless rebuild')
     // A v1 rollup (no `schemaVersion`) is a format-change migration: it must
     // read as absent and rebuild under the current shape (v4 rate rows carry the
     // effective instant of the segment that applied AND the exception slot that
-    // applied inside it), never silently merge rows across providers or slots.
+    // applied inside it; v5 dropped the cached recent window), never silently
+    // merge rows across providers or slots.
     const v1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
     delete v1.schemaVersion
     // The stored rateRows lack `provider`; strip it to simulate a real v1 file.
@@ -136,14 +137,14 @@ console.log('rollup: derived-state lossless rebuild')
     check('v1 rollup rebuilds losslessly to the current shape', key(first) === key(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined))
     // The rebuilt file carries the current schema version.
     const afterV1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
-    check('rebuilt rollup is stamped schemaVersion 4', afterV1.schemaVersion === 4)
+    check('rebuilt rollup is stamped schemaVersion 5', afterV1.schemaVersion === 5)
 
     // And both agree with a direct full aggregation of the raw day files.
     const all = await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', never, quiet)
     const direct = summarizeRecords(all, resolve)
     const eqDirect = JSON.stringify(direct) === key(first)
     if (!eqDirect) {
-      for (const field of ['byDay', 'byHour', 'byModel', 'rateRows', 'recent'] as const) {
+      for (const field of ['byDay', 'byHour', 'byModel', 'rateRows'] as const) {
         const a = JSON.stringify(direct[field])
         const b = JSON.stringify(first[field])
         if (a !== b) {
