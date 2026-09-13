@@ -1,6 +1,6 @@
 # 文档索引 — dsh-tokbook
 
-> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-13 · supersedes: —
 
 本仓库所有文档文件的地图。动手前先读你要触及领域的条目,然后**只读那一份**。本文件
 的存在是为了让 [`AGENTS.md`](../AGENTS.md) 与你的第一跳保持精简:根文件只放面包屑,
@@ -14,7 +14,7 @@
 | [`README.md`](../README.md) | entry + operations | current | 第一站:范围、布局、构建、安装、配置 |
 | `docs/INDEX.md` | map(本文件) | current | 在文档间导航 |
 | [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts | current | 改动 host 路由、wire JSON 形状、配置键、会话事件或数据目录文件时——在同一 commit 更新它;`scripts/selfcheck-docs.ts` 会强制路由表同步 |
-| [`docs/DECISIONS.md`](DECISIONS.md) | decisions(ADR 日志) | current | 改架构或落下持久决策时——在同一 commit 追加条目 |
+| [`docs/DECISIONS.md`](DECISIONS.md) | decisions(ADR 日志) | current | 改架构、价格/计价、额度或界面结构,或落下任何持久决策时——**先读顶部索引表**,再定点读 1–3 条,不要整份通读;在同一 commit 追加条目 |
 | [`docs/DESIGN.md`](DESIGN.md) | reason / background | current | "为什么":DSH 机制背景、一期框架、二期重构说明、硬约束。顶部「阅读指南」区分历史与现状 |
 | [`docs/HMR.md`](HMR.md) | lessons / reference | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
 | [`docs/LESSONS.md`](LESSONS.md) | lessons | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |

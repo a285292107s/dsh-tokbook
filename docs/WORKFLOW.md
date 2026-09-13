@@ -1,6 +1,6 @@
 # 迭代维护工作流 — dsh-tokbook
 
-> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
+> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-13 · supersedes: —
 
 > **用法**:接到任何功能迭代 / 修复任务时,按本文件走一遍。目标:功能不断演进时,文档与
 > 代码在**同一 commit** 保持同步,契约不漂移,文档永不明目张胆滞后于代码。它与
@@ -15,8 +15,8 @@
      [`CONTRACTS.md`](CONTRACTS.md);
    - 改账本 / 去重 / 折叠路径前:先读 [`HMR.md`](HMR.md);
    - 改 `src/pricing.ts` / `stats.ts` / 价格相关 wire 前:先读
-     [`DECISIONS.md`](DECISIONS.md) **D-011**(当前手工价表形态)与
-     [`CONTRACTS.md`](CONTRACTS.md) 的价格/计价段;不要沿用已被 D-011 取代的
+     [`DECISIONS.md`](DECISIONS.md) **顶部的当前决策索引表**,再读 **D-011**(当前手工价表形态)
+     与 [`CONTRACTS.md`](CONTRACTS.md) 的价格/计价段;不要沿用已被 D-011 取代的
      云端镜像/通道覆盖层决策。
 
 ## 2. 大功能先落 PLAN,小改动直接做
@@ -32,7 +32,7 @@
 |---|---|---|
 | host 路由(`/tokbook/*`) | `CONTRACTS.md` · Host 路由表 | `selfcheck-docs` 机器双向校验 |
 | wire JSON 形状、配置键、消费的会话事件、数据目录文件布局 | `CONTRACTS.md` 相应节 | 人工(`selfcheck-docs` 只查路由 token) |
-| 持久架构决策(含取代旧决策) | `DECISIONS.md` 追加 `D-NNN`,旧条目标 `superseded` | 人工 |
+| 持久架构决策(含取代旧决策) | `DECISIONS.md` 追加 `D-NNN` + 顶部索引表一行,旧条目状态行降级并**双向**链接 | `selfcheck-docs` 机器校验(状态行 / 取代双向 / 索引表) |
 | 功能面(范围 / 布局 / 配置示例 / 状态) | `README.md` | 人工 |
 | 机制坑 / 教训 / HMR 边界 | `LESSONS.md` / `HMR.md` | 人工 |
 | 被编辑过的任何文档 | 刷新 `last-reviewed` 日期 | 人工(selfcheck 只查格式) |
@@ -44,12 +44,16 @@
 ## 4. 门禁
 
 提交前跑 `pnpm selfcheck`(含 docs 自检):路由双向比对、INDEX 链接可达、全部受管文档带
-合法 Doc meta。红 = 当场修文档再重跑,绿才提交。
+合法 Doc meta、`DECISIONS.md` 的状态行可解析且取代关系双向、索引表与正文逐格一致。
+红 = 当场修文档再重跑,绿才提交。
 
 ## 5. 状态生命周期回顾
 
 - `current` = 描述现状;`superseded` = 已被替换(移入 `docs/archive/` 或原位标注并链接
-  取代者);`draft` = 未完成。
+  取代者);`draft` = 未完成。`DECISIONS.md` 内部多一档 **`partially superseded`** = 条目里
+  仍有生效的规则、另一部分已被取代(见 §7)。
+- `DECISIONS.md` 的条目状态行是**机器可解析**的(`Status` / `supersedes` / `superseded-by`),
+  取代关系双向记录;顶部索引表是正文的投影。三者由 `selfcheck-docs` 强制(见 §3、§4)。
 - **已落地**的计划 / 过程文档 → `superseded` + 移入 `docs/archive/`。没有文档可以默默
   滞后于代码:若某份文档无法保持真实,删除或归档它,而不是让它日后毒化上下文。
 
@@ -91,6 +95,41 @@ D-011 之后实测的痛点:`LedgerOverlay.tsx` 曾到 ~1300 行(壳 + 五 tab +
 - 不要在拆分时顺手加配置开关、事件总线、通用「panel registry」。
 - 不要为「可能再长出一个 tab」预留空目录或空模块。
 - 不要把一行逻辑切成三层 import。
+
+### 同一把尺子用在文档上:决策条目 ≤ 40 行
+
+`DECISIONS.md` 是**决策日志**,不是设计文档——它自己的契约是「指针 + 要点」。按内容分家:
+
+| 内容 | 去处 |
+|---|---|
+| 决策本身、迫使它成立的背景、它取代了什么、代价与取舍 | `DECISIONS.md` 条目(**≤ 40 行**) |
+| 契约(wire 形状 / 配置键 / 路由 / 数据文件 / 界面词表) | [`CONTRACTS.md`](CONTRACTS.md) |
+| 机制推理、当前界面规格、实测出来的尺寸与对比度 | [`DESIGN.md`](DESIGN.md) |
+| 踩坑与取舍对照(某个 CSS 写法、某个 loader 行为) | [`LESSONS.md`](LESSONS.md) |
+
+**怎么数。** 从状态行数到条目末尾(含空行);标题与 `---` 分隔线不计。
+
+**为什么是契约而不是口味。** 索引表让读者只为「它需要的那 1–3 条」付钱,而单条体量决定这一跳
+有多贵:一条 125 行的条目会把一次 300 行的定点阅读变成 1000 行。2026-09-13 已把两条最大的越界
+条目落地:**D-013 112 → 40 行、D-016 125 → 25 行**(界面规格搬进 [`DESIGN.md`](DESIGN.md) §3.1,
+已被取代的过程叙述直接删)。
+
+**现有的越界条目(碰到它们时顺手拆,不专门开一轮)。** 拆的方向就是上表那一列:
+
+| 条目 | 行 | 状态 | 越界的是什么 / 该去哪 |
+|---|---|---|---|
+| D-014 | 84 | current | 官方文档证据与逐通道判定 → 证据进 `DESIGN.md`,判定规则本就在 `CONTRACTS.md` |
+| D-019 | 60 | current | 时间轴的界面规格 → `DESIGN.md` §3.1(与 D-013 同源) |
+| D-005 | 52 | superseded | 纯历史,只留结论即可压到 ~15 行 |
+| D-018 | 50 | current | 「界面修订」一段 → `DESIGN.md` |
+| D-008 | 47 | superseded | 纯历史 |
+| D-011 | 45 | partially superseded | 「影响与已知取舍」可压 |
+| D-009 | 44 | superseded | 纯历史 |
+| D-017 / D-020 | 41 | current | 刚越线,再涨就拆 |
+
+**怎么做。** 条目里留 3–5 行摘要 + 指针,细节搬去它该在的文件。搬的**只是仍然生效的规格**;
+已被后续决策取代的过程叙述(试了 A、又试了 B 的流水账)直接删——它在 git 历史里,留着就是
+`AGENTS.md` 说的「让文档日后毒化上下文」。新条目从写下第一行起就守住 40 行。
 
 ## 8. 并行功能:车道与 worktree
 
@@ -177,7 +216,7 @@ pnpm install      # 只有 pnpm typecheck / pnpm build 需要;pnpm test 不装�
 
 | 文件 | 冲突形态 | 规则 |
 |---|---|---|
-| `docs/DECISIONS.md` | 双方各追加,`D-NNN` 撞号 | 按 main 尾号重编号,并同步引用该编号的 CONTRACTS / README 行 |
+| `docs/DECISIONS.md` | 双方各追加,`D-NNN` 撞号;顶部索引表同区域冲突 | 按 main 尾号重编号,并同步引用该编号的 CONTRACTS / README 行与**顶部索引表那一行** |
 | `docs/CONTRACTS.md` 路由表 | 双方各加一行 | 取并集;`selfcheck-docs` 与 `src/routes.ts` 双向比对,漏并一条就红 |
 | `src/client/styles.ts` | 分片拼接顺序是级联契约 | **不取并集重排**,由人定序后写死 |
 | `src/types.ts` / `src/index.ts` / `src/routes.ts` | 追加到同一 seam | 两功能改的是**同一个 seam**时**不并行**,排队做 |
