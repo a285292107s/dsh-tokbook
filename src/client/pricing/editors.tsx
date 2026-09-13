@@ -278,7 +278,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
   const issue = rowIssue(row)
   const live = inForceToday(shown)
   const slots = shown === null ? 0 : effectiveSlots(shown).length
-  // 行的身份**只打印一个**：有人命名该串时显示展示名，否则显示精确串本身。精确串仍是账本的计费键，保持可达：hover 标签、抽屉自身头部、每个单元格的无障碍名称。
+  // 行的身份**只打印一个**：有人命名该串时显示展示名，否则显示精确串本身。精确串仍是账本的计费键，保持可达：hover 标签与每个单元格的无障碍名称。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
   const meta: string[] = []
   if (shown !== null) meta.push(fmtRowFrom(shown.from))
@@ -361,10 +361,6 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
       </div>
       {open && (
         <div className="dtpl-price-history">
-          <div className="dtpl-price-history-head">
-            <span className="dtpl-price-history-model">{row.model}</span>
-            <span className="dtpl-price-history-colid">生效时间 → 全天价（¥/百万词元）→ 峰谷时段</span>
-          </div>
           {/* 轴统领它索引的列表：哪个区间在计费、边界在哪、今天之后是什么、价够不到账本的哪部分。 */}
           <PriceTimeline row={row} activeId={shown === null ? null : shown.id} />
           {sortedSegments(row).map((segment, index) => (

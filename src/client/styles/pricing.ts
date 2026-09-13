@@ -251,15 +251,6 @@ export const CSS_PRICING = `/* 价格表 tab */
   border-top:.5px dashed var(--dtpl-border);
   background:transparent;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-history-head{
-  display:flex;justify-content:space-between;gap:10px;
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-3);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-history-model{
-  min-width:0;font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);
-  overflow-wrap:anywhere;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-history-colid{flex:none;font-variant-numeric:tabular-nums;}
 [data-plugin="dsh-tokbook"] .dtpl-price-seg{
   display:flex;flex-direction:column;gap:5px;
   padding:6px 8px;border-radius:9px;corner-shape:round;
