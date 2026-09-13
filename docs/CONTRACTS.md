@@ -1,6 +1,6 @@
 # Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-13 · supersedes: —
 
 其他代码与 browser 半区必须**分毫不差**依赖的事实的唯一家园:host 路由与 wire JSON、
 插件配置、消费的 `session/event` 类型、数据目录文件布局。
@@ -30,6 +30,7 @@
 | 仅账本 | 卡内模型不在 settings / 适配器目录里,只有账本记过(`configured: false`) |
 | 模型名称 | `PricingModelView.name`:settings `models[].name` → 适配器目录的 `name`;行上**只显示其一**——有名字显示名字,没有才显示精确模型串(与模型选择器一致);精确串仍可从悬停、抽屉抬头与单元格读屏名读到 |
 | 价格未知 | 该 (路由, 模型) 没有价段(暂按 ¥0,**不是免费**) |
+| 用量未知 | 计费调用没有通道上报的 `usage`(`assistant/message` 多为中途取消的请求,`compaction/summary` 是没回报用量的 summarize):仍写行、仍计入请求次数(summarize 另计一次压缩),四桶一个都不加——计 0 是**未知**而非零消耗(`UsageTotals.usageUnknown`,概览与通道卡显示「用量未知 N」) |
 | 实际支出 / 订阅价值 | `billing: metered` / `subscription` 两个桶(`spend` / `subscriptionValue`) |
 | 按工作区 | overview 的 `byWorkspace`(`WorkspaceUsageRow[]`)——每个工作区一行累计 |
 | 未归属 | `byWorkspace` 里 `id: ''` 的那一行:会话没有工作区目录、或目录未注册为工作区的记录 |
@@ -204,11 +205,18 @@ profile patch 中的 `plugins.tokbook`,类型为 `TokBookConfig` + `PlanConfig`
 
 | 事件 | 记为 | 说明 |
 |---|---|---|
-| `assistant/message` | `kind: request` | 成功调用;行 id = message id(去重键);携带通道上报的 `usage` 桶 |
-| `compaction/summary` | `kind: compaction` | 仅在 `recordCompaction` 开启时;其自身是一次计费调用 |
+| `assistant/message` | `kind: request` | 成功调用;行 id = message id(去重键);携带通道上报的 `usage` 桶。通道没上报时(中途取消的请求)行照写、四桶不加,由 `usageUnknown` 计数 |
+| `compaction/summary` | `kind: compaction` | 仅在 `recordCompaction` 开启时;其自身是一次计费调用。缺 `usage` 时同样写行、由 `usageUnknown` 计数 |
 | `turn/end`(reason `error`) | `kind: failure` | 失败尝试——只进 `failures` 维度,不计 token/费用 |
 | `llm/retry` | `kind: failure` | 失败尝试——只进 `failures` 维度 |
 | `request/context`(+ `assistant/message`) | 不写行 | 维护会话最后已知的 `model`/`provider`,用于给失败行归属 |
+
+- **用量未知 ≠ 0**:计费调用没有 `usage` 时仍写行、仍计入 `requests`(summarize 还计一次
+  `compactions`),但四桶一个都不加——`UsageTotals.usageUnknown` 单独计数,概览以「用量未知 N」
+  标出(只在 >0 时占行),通道卡的请求行同样带一句。与「价格未知 ≠ 免费」同一条原则,只是对象
+  从价格换成用量。**不估算、不猜测**:这类调用的 token 数在日志里根本不存在(客户端在 usage
+  分片到达前就断了),所以没有可恢复的数字。**两条都要写行**:丢行等于让一次计费调用连同它的
+  用量一起消失,那比「用量未知」更不可查。
 
 ## 数据目录
 
@@ -238,6 +246,13 @@ unlink 目标)。**例外**:`pricing.json` 先把上一版 rename 成 `.bak` 再
 - 去重身份是 `requestId`(`assistant` message id,或合成的
   `compaction:<session>:<seq>` / `failure:<session>:<seq>`);同一进程内重叠写者共享
   同一个去重集与同一条串行追加队列。
+- 计费调用缺 `usage` 时计入 `requests`(summarize 另计 `compactions`)与 `usageUnknown` 两个
+  维度,对四桶的贡献是**未知**而非 0(见上「用量未知 ≠ 0」);该计数参与冻结日折叠,与其余
+  totals 字段同一条重建路径。
+- **金额层不区分「用量未知」,但把它说出来**:这些行按 0 词元计成 ¥0,所以 `spend` /
+  `subscriptionValue` 对它们偏低。这不是靠拆桶解决的——金额没有「未知」这个值——而是靠
+  **可见**:概览以「用量未知 N」标出这些调用,并在注记里说明金额按 ¥0 计、不是免费;通道卡的
+  请求行同样带「用量未知 N」。静默的 ¥0 才算违反「未知 ≠ 0」,标注过的 ¥0 不违反。
 - 价格改动在**读取时**重新计价历史——不重写账本;计价入口是 (路由, 模型, 记录时间戳)
   两级解析(`priceAt` 取该时刻生效的价段,`slotAt` 再取该段内该时刻生效的峰谷时段;都没有就是
   价格未知)。费率行的身份是**当时生效的价段的生效时刻 + 那一刻生效的峰谷时段**(时段身份 =
@@ -250,8 +265,8 @@ unlink 目标)。**例外**:`pricing.json` 先把上一版 rename 成 `.bak` 再
   `billing: subscription` 路由(订阅价值,非现金);UI 不得把后者当作支出展示。
 - 计费性质以**通道路由**为单位(`$billing` 的一条),省略 = metered;它作用于该路由的全部
   历史(与旧口径一致:改 `$billing` 会同时改变历史的分桶)。
-- rollup 带 `schemaVersion: 5` 与 `pricingRevision`;旧版本(v1–v4)或签名不符读作缺失、
-  由日文件重建。
+- rollup 带 `schemaVersion: 6` 与 `pricingRevision`;旧版本(v1–v5)或签名不符读作缺失、
+  由日文件重建(v6 起 `usageUnknown` 参与折叠,旧 rollup 少了这个计数,故必须重建)。
 - 额度卡只展示官方通道数据;`unconfigured`/`error` 卡便宜地即时重推,从不当作
   "最近已知"持久化。
 - 额度卡**先回答「什么在管这个账户」**(`gate`),再展示数字:窗口只约束订阅内含的月度额度,

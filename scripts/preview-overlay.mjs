@@ -64,6 +64,7 @@ function days(n) {
         cacheWriteTokens: 0,
         compactions: seed % 5 === 0 ? 1 : 0,
         failures: seed % 7 === 0 ? 1 : 0,
+        usageUnknown: seed % 3 === 0 ? 1 : 0,
       },
     })
   }
@@ -75,7 +76,7 @@ const mk = (inputTokens, cacheReadTokens, outputTokens, requests = 1) => ({
 })
 
 const overview = {
-  total: { requests: 214, ...mk(1_920_000, 6_310_000, 486_000, 214), compactions: 6, failures: 3 },
+  total: { requests: 214, ...mk(1_920_000, 6_310_000, 486_000, 214), compactions: 6, failures: 3, usageUnknown: 5 },
   byDay: days(14),
   byHour: [],
   byModel: [
@@ -114,7 +115,7 @@ const overview = {
 
 const emptyOverview = {
   ...overview,
-  total: { ...overview.total, ...mk(0, 0, 0, 0), compactions: 0, failures: 0 },
+  total: { ...overview.total, ...mk(0, 0, 0, 0), compactions: 0, failures: 0, usageUnknown: 0 },
   byDay: [], byModel: [], byWorkspace: [],
   totalTokens: 0, totalCost: 0, spend: 0, subscriptionValue: 0, records: 0, files: 0,
   lastEventAt: null, lastSyncAt: null, syncStatus: 'idle', sessions: 0,

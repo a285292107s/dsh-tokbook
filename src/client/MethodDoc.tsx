@@ -102,7 +102,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">中途取消 / 出错的请求</span>
-                <span className="dtpl-doc-gap-item-desc">已经发出去、但没等到厂商回复的那部分文字，厂商可能照常计费，本账本却拿不到用量。</span>
+                <span className="dtpl-doc-gap-item-desc">已经发出去、但没等到厂商回复的那部分文字，厂商可能照常计费，本账本却拿不到用量。这类调用仍计入请求次数，并在概览里以「<b>用量未知 N</b>」单独标出——计入次数、不冒充 0 词元，金额也因此按 ¥0 计（<b>不是免费</b>）。</span>
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">不走会话记录的调用</span>

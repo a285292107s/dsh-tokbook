@@ -48,6 +48,12 @@ export interface UsageTotals {
   compactions?: number
   failures?: number
   failuresByCode?: Record<string, number>
+  /** 组内**用量未知**的计费调用数：通道没回报 `usage`（或回报的桶非法）。
+   *  这类调用计入 `requests`，却没有 token 可加——它们对四桶的贡献是**未知**，
+   *  不是零消耗，所以单独计数而不是让它们混进 0。`assistant/message` 与
+   *  `compaction/summary` 都会走到这里（后者的行在缺 `usage` 时同样落盘）。
+   *  旧 rollup 省略（读作 0）。 */
+  usageUnknown?: number
 }
 
 /** 按日聚合行，本地日期 `YYYY-MM-DD`。 */
@@ -336,6 +342,9 @@ export interface ProviderUsageCard {
   models: ProviderModelUsage[]
   requests: number
   compactions: number
+  /** 窗口内**用量未知**的计费调用数（通道没上报 `usage`）：计入 `requests` 与
+   *  `compactions`，但没有词元可加，金额因此按 ¥0 计——**不是免费**。 */
+  usageUnknown: number
 }
 
 /** Provider 用量路由的 wire 载荷。精简只读：只跨过聚合卡。 */

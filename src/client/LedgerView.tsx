@@ -215,6 +215,15 @@ export function LedgerView({ overview, onOpenPricing }: {
               <span className="dtpl-meta"><b className="dtpl-meta-n">{overview.sessions}</b> 会话</span>
               <span className="dtpl-meta"><b className="dtpl-meta-n">{overview.total.requests}</b> 请求</span>
               <span className={`dtpl-meta${(overview.total.failures ?? 0) > 0 ? ' dtpl-meta-warn' : ''}`}><b className="dtpl-meta-n">{(overview.total.failures ?? 0)}</b> 失败</span>
+              {/* 只在有这类调用时占行：它限定的是下面那个「累计词元」数字——那几次调用的用量未知，所以累计值比实际略少。 */}
+              {(overview.total.usageUnknown ?? 0) > 0 && (
+                <span
+                  className="dtpl-meta dtpl-meta-warn"
+                  title={`${String(overview.total.usageUnknown)} 次计费调用没有拿到通道上报的用量（多为中途取消的请求）：计入请求次数，但没有词元可加——是「未知」，不是 0。所以「累计词元」比实际略少。原因见「统计口径」。`}
+                >
+                  <b className="dtpl-meta-n">{overview.total.usageUnknown}</b> 用量未知
+                </span>
+              )}
               <span className="dtpl-meta"><b className="dtpl-meta-n">{formatTokens(overview.totalTokens)}</b> 累计词元</span>
               <span className="dtpl-meta">
                 <b className="dtpl-meta-n">{money(overview.spend)}</b> 累计实际支出
@@ -255,6 +264,14 @@ export function LedgerView({ overview, onOpenPricing }: {
             <p className="dtpl-note">
               价格未知的模型（暂按 ¥0 计，不是免费）：{overview.unpricedModels.join('、')}
               <button type="button" className="dtpl-pricing-empty-link" onClick={() => onOpenPricing('unpriced')}>去定价</button>
+            </p>
+          )}
+          {/* 金额侧的同一个口径问题：用量未知的调用无从计价，所以它们按 ¥0 进入支出——
+              与「价格未知」同形地说明，而不是让那个 0 冒充真实花费。 */}
+          {(overview.total.usageUnknown ?? 0) > 0 && (
+            <p className="dtpl-note">
+              其中 {overview.total.usageUnknown} 次调用用量未知（通道没上报）：只计次数、不计词元，
+              金额也按 ¥0 计——是「不知道」，不是免费。
             </p>
           )}
         </>

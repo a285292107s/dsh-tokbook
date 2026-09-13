@@ -67,17 +67,18 @@ export function recordFromMessage(event: SessionEventLike, sessionId: string): U
 }
 
 /** 为一条 `compaction/summary` 事件构建日志行。summarize 的 provider 调用与
- * 普通请求同价计费。usage 缺失或非法时返回 null（不可用于计价）。 */
-export function recordFromCompaction(event: SessionEventLike, sessionId: string): UsageRecord | null {
+ * 普通请求同价计费。usage 缺失或非法时**仍写行**，只是没有桶：它照样计一次
+ * 请求与一次压缩，并进入 `usageUnknown`（未知 ≠ 0）。丢行等于让一次计费调用
+ * 连同它的用量一起消失——那比「用量未知」更不可查。 */
+export function recordFromCompaction(event: SessionEventLike, sessionId: string): UsageRecord {
   const usage = projectUsage(event.data?.usage)
-  if (usage === undefined) return null
   return {
     requestId: `compaction:${sessionId}:${String(event.seq)}`,
     time: event.time,
     sessionId,
     model: event.data!.model ?? '',
     ...(event.data!.provider !== undefined ? { provider: event.data!.provider } : {}),
-    usage,
+    ...(usage !== undefined ? { usage } : {}),
     kind: 'compaction',
   }
 }

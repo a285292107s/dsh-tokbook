@@ -71,6 +71,7 @@ export function providerCards(
       models,
       requests: summary.total.requests,
       compactions: summary.total.compactions ?? 0,
+      usageUnknown: summary.total.usageUnknown ?? 0,
     })
   }
   cards.sort((left, right) =>

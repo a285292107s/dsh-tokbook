@@ -162,6 +162,7 @@ function ProviderCard({ card, money, labels }: {
           <span className="dtpl-provider-meta">
             {label !== undefined && <><span className="dtpl-provider-key">{card.provider}</span> · </>}
             {card.requests} 请求{card.compactions > 0 ? ` · ${card.compactions} 压缩` : ''}
+            {card.usageUnknown > 0 ? ` · 用量未知 ${card.usageUnknown}` : ''}
             {card.unpricedModels.length > 0 ? ` · 价格未知 ${card.unpricedModels.join('、')}` : ''}
           </span>
         </div>

@@ -461,7 +461,11 @@ dsh-tokbook/
 - 改为**监听 `session/event` 的 `assistant/message` provider `usage`**，每条付费
   模型调用记**一行** JSONL（`requestId` = assistant message id，去重键）；并额外记录
   `compaction/summary`（压缩 summarize 调用）、`turn/end`(error) 与 `llm/retry`
-  （失败尝试，计入 `failures` 维度）。`request/context` / `assistant/message` 用来
+  （失败尝试，计入 `failures` 维度）。**没上报 `usage`** 的计费调用（中途取消的请求、
+  没回报用量的 summarize）同样记一行、计入请求次数，但不加任何桶——它计入
+  `usageUnknown`，概览与通道卡以「用量未知 N」标出（未知 ≠ 0，与「价格未知 ≠ 免费」
+  同一条原则；金额仍按 ¥0 计，由概览注记说明）。丢行比「用量未知」更不可查，所以两条
+  路径都落行。`request/context` / `assistant/message` 用来
   维护会话最后已知的 `model`/`provider`，给失败行归属。
 - 存储：**按本地日期的 `usage-YYYY-MM-DD.jsonl`**（`~/.dsh/tokbook/` 可配 `path`），
   追加式 + 串行队列 + 进程级 request-id 去重；`refileByEventDay()` 修正放错日的行。

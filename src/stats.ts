@@ -272,7 +272,7 @@ export async function warmRecordCache(dir: string, now?: () => Date, logger?: St
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
-export const ROLLUP_SCHEMA_VERSION = 5
+export const ROLLUP_SCHEMA_VERSION = 6
 
 export interface RollupFile {
   schemaVersion: number
@@ -376,6 +376,7 @@ export function emptyTotals(): UsageTotals {
     cacheWriteTokens: 0,
     compactions: 0,
     failures: 0,
+    usageUnknown: 0,
   }
 }
 
@@ -387,6 +388,7 @@ function addTotals(target: UsageTotals, source: UsageTotals): void {
   target.cacheWriteTokens += source.cacheWriteTokens
   target.compactions = (target.compactions ?? 0) + (source.compactions ?? 0)
   target.failures = (target.failures ?? 0) + (source.failures ?? 0)
+  target.usageUnknown = (target.usageUnknown ?? 0) + (source.usageUnknown ?? 0)
   const codes = source.failuresByCode
   if (codes !== undefined) {
     const merged = target.failuresByCode ?? {}
@@ -450,8 +452,8 @@ function hourRowKey(hour: string, model: string): string {
   return `${hour}\n${model}`
 }
 
-/** 把一条记录折入 totals；没有 provider usage 的记录仍计入 request，失败记录
- * 只计入 `failures` 维度。 */
+/** 把一条记录折入 totals；没有 provider usage 的记录仍计入 request，并计一次
+ *  `usageUnknown`（未知 ≠ 0），失败记录只计入 `failures` 维度。 */
 function addUsage(totals: UsageTotals, record: UsageRecord): void {
   if (record.kind === 'failure') {
     totals.failures = (totals.failures ?? 0) + 1
@@ -466,7 +468,12 @@ function addUsage(totals: UsageTotals, record: UsageRecord): void {
     totals.compactions = (totals.compactions ?? 0) + 1
   }
   const usage = record.usage
-  if (usage === undefined) return
+  if (usage === undefined) {
+    // 通道没回报用量（多为中途取消的请求）：调用确实发生了，所以计入次数，
+    // 但没有 token 可加——单独计数，绝不把它当成一次零消耗的调用。
+    totals.usageUnknown = (totals.usageUnknown ?? 0) + 1
+    return
+  }
   totals.inputTokens += usage.inputTokens
   totals.outputTokens += usage.outputTokens
   if (usage.cacheReadTokens !== undefined) totals.cacheReadTokens += usage.cacheReadTokens

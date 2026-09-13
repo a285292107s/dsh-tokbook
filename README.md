@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-13 · supersedes: —
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费
 模型调用——`assistant/message` 通道的 `usage`(外加压缩 summarize 调用与失败尝试)
@@ -155,6 +155,10 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折叠
   调用),`recordCompaction` 开启时记录。
 - **`turn/end`**(reason `error`)与 **`llm/retry`** — 失败尝试,计入 `failures` 维度
   (无 token,所以永远不会虚增 token 总量)。
+- **用量未知** — 通道没上报 `usage` 的计费调用(中途取消的请求、或没回报用量的 summarize)
+  仍记一行、仍计入请求次数,但没有 token 可加。它们在概览与通道卡上以「用量未知 N」标出
+  ——**不按 0 词元冒充**:不知道 ≠ 零消耗,与「价格未知」同一条原则;金额同样按 ¥0 计,
+  概览的注记会说明这一点。口径见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md)。
 
 首次启动时插件回填安装前发生的历史请求(幂等、按行 id 去重);浮窗里的**重新扫描按钮**
 可强制一次权威重同步。读路径也会用**廉价的按需探测**自我纠正:每次 overview 读取先问
@@ -431,7 +435,7 @@ plugins:
   切 tab 或关窗前会先把待写改动落盘,Ctrl/Cmd+S 可立刻冲刷。保存后下次读取即重新计价全部历史。
 - **Browser 半区**:侧边栏 footer 按钮 + shell overlay 浮窗,内含汇总卡(**今日词元** +
   较近7天日均涨跌参照 + 今日实际支出/订阅价值,零值的桶不占行;元数据行放
-  会话/请求/失败/累计词元/累计支出)、
+  会话/请求/失败/用量未知(有则显示)/累计词元/累计支出)、
   今日词元构成(四桶 + 缓存命中率;缓存写入不是该账本的维度时不渲染该格)、按日趋势图、
   带金额的按 （通道，模型） 拆分、近期记录,以及
   **按通道的 tab**:每个通道路由一张卡(卡头用配置里的显示名),展示其下各模型的 token/双桶

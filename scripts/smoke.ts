@@ -52,6 +52,18 @@ console.log('record projection')
   const turnEnd = { type: 'turn/end', time: 1730000000000, seq: 7, data: { reason: { kind: 'error', error: { code: 'RATE_LIMIT' } } } }
   const failRec = recordOfEvent(turnEnd as never, 's1', 'deepseek-chat', true)
   check('turn/end error projects a failure', failRec?.kind === 'failure' && failRec.failureCode === 'RATE_LIMIT' && failRec.usage === undefined)
+  // An interrupted call the channel never reported usage for: the row is still
+  // written (the call happened) with no usage — 未知, not a zero-token call.
+  const interrupted = { type: 'assistant/message', time: 1730000000000, seq: 9, data: { message: { id: 'a2', source: { provider: 'deepseek', model: 'deepseek-chat' } }, interrupted: true } }
+  const interruptedRec = recordOfEvent(interrupted as never, 's1', 'deepseek-chat', true)
+  check('a usage-less assistant/message still projects a request',
+    interruptedRec?.requestId === 'a2' && interruptedRec.kind === undefined && interruptedRec.usage === undefined)
+  // A summarize call the channel never reported usage for: dropping the row would
+  // erase a billed call, so it lands with no buckets instead.
+  const bareSummary = { type: 'compaction/summary', time: 1730000000000, seq: 11, data: { provider: 'deepseek', model: 'deepseek-chat' } }
+  const bareSummaryRec = recordOfEvent(bareSummary as never, 's1', 'deepseek-chat', true)
+  check('a usage-less compaction still lands a row',
+    bareSummaryRec?.requestId === 'compaction:s1:11' && bareSummaryRec.kind === 'compaction' && bareSummaryRec.usage === undefined)
 }
 
 console.log('summarize / totals')
@@ -648,14 +660,19 @@ console.log('end-to-end: real-shaped DSH events -> JSONL ledger -> aggregate -> 
   try {
     const log = new UsageLog(dir, { error: () => {} })
     // DSH-shaped session events: request/context, assistant/message (usage),
-    // another assistant/message, a compaction/summary, a turn/end failure.
+    // another assistant/message, an interrupted assistant/message the channel
+    // reported no usage for, a compaction/summary, then two failures.
     const events: SessionEventLike[] = [
       { type: 'request/context', time: dayMillis('2026-02-01', 9), seq: 0, data: { provider: 'deepseek', model: 'deepseek-chat' } },
       { type: 'assistant/message', time: dayMillis('2026-02-01', 9), seq: 1, data: { message: { id: 'msg-1', source: { provider: 'deepseek', model: 'deepseek-chat' } }, usage: { inputTokens: 1200, outputTokens: 300, cacheReadTokens: 500 } } },
       { type: 'assistant/message', time: dayMillis('2026-02-01', 10), seq: 2, data: { message: { id: 'msg-2', source: { provider: 'deepseek', model: 'deepseek-reasoner' } }, usage: { inputTokens: 900, outputTokens: 660, cacheWriteTokens: 100 } } },
-      { type: 'compaction/summary', time: dayMillis('2026-02-01', 11), seq: 3, data: { provider: 'deepseek', model: 'deepseek-chat', usage: { inputTokens: 80, outputTokens: 40 } } },
-      { type: 'llm/retry', time: dayMillis('2026-02-01', 11), seq: 4, data: { provider: 'deepseek', failure: { code: 'RATE_LIMIT', message: 'rate' } } },
-      { type: 'turn/end', time: dayMillis('2026-02-01', 11), seq: 5, data: { reason: { kind: 'error', error: { code: 'QUOTA', message: 'q' } } } },
+      { type: 'assistant/message', time: dayMillis('2026-02-01', 10), seq: 3, data: { message: { id: 'msg-3', source: { provider: 'deepseek', model: 'deepseek-reasoner' } }, interrupted: true } },
+      { type: 'compaction/summary', time: dayMillis('2026-02-01', 11), seq: 4, data: { provider: 'deepseek', model: 'deepseek-chat', usage: { inputTokens: 80, outputTokens: 40 } } },
+      { type: 'llm/retry', time: dayMillis('2026-02-01', 11), seq: 5, data: { provider: 'deepseek', failure: { code: 'RATE_LIMIT', message: 'rate' } } },
+      { type: 'turn/end', time: dayMillis('2026-02-01', 11), seq: 6, data: { reason: { kind: 'error', error: { code: 'QUOTA', message: 'q' } } } },
+      // A summarize call whose provider reported no usage: it must still land a
+      // row (counted as a request + a compaction + 用量未知).
+      { type: 'compaction/summary', time: dayMillis('2026-02-01', 12), seq: 7, data: { provider: 'deepseek', model: 'deepseek-chat' } },
     ]
     let recorded = 0
     let model = ''
@@ -666,7 +683,7 @@ console.log('end-to-end: real-shaped DSH events -> JSONL ledger -> aggregate -> 
       // Dedupe the compaction by a stable seq-derived id; live rows dedupe on request id.
       if (rec !== null && await log.record(rec)) recorded += 1
     }
-    check('records landed in the JSONL ledger', recorded === 5, `got ${recorded}`)
+    check('records landed in the JSONL ledger', recorded === 7, `got ${recorded}`)
 
     // The price table keys on (route, model): the e2e ledger's rows carry the
     // `deepseek` provider, so that is the route the table prices.
@@ -678,9 +695,10 @@ console.log('end-to-end: real-shaped DSH events -> JSONL ledger -> aggregate -> 
     const costed = attachCosts(summary, table)
     check('totals: input', summary.total.inputTokens === 2180, `got ${summary.total.inputTokens}`)
     check('totals: output', summary.total.outputTokens === 1000, `got ${summary.total.outputTokens}`)
-    check('totals: requests = 3 (2 assistant + 1 compaction)', summary.total.requests === 3, `got ${summary.total.requests}`)
-    check('totals: compactions = 1', summary.total.compactions === 1)
+    check('totals: requests = 5 (2 assistant + 1 interrupted + 2 compactions)', summary.total.requests === 5, `got ${summary.total.requests}`)
+    check('totals: compactions = 2', summary.total.compactions === 2)
     check('totals: failures = 2 (retry + turnEnd)', summary.total.failures === 2, `got ${summary.total.failures}`)
+    check('totals: usageUnknown = 2 (interrupted call + usage-less summarize)', summary.total.usageUnknown === 2, `got ${String(summary.total.usageUnknown)}`)
     check('cost is non-zero', costed.totalCost > 0, `got ${costed.totalCost}`)
     check('byDay populated', summary.byDay.length === 1 && totalsTokens(summary.byDay[0]!.totals) === 3780, `got ${totalsTokens(summary.byDay[0]!.totals)}`)
     // Aggregation identity is (provider, model): the two deepseek rows group
@@ -689,10 +707,10 @@ console.log('end-to-end: real-shaped DSH events -> JSONL ledger -> aggregate -> 
     // row under the '' provider — never silently merged into the billed rows.
     check('byModel split by (provider, model)',
       summary.byModel.length === 3
-        && summary.byModel.some(r => r.provider === 'deepseek' && r.model === 'deepseek-chat' && r.totals.requests === 2)
-        && summary.byModel.some(r => r.provider === 'deepseek' && r.model === 'deepseek-reasoner' && r.totals.requests === 1)
+        && summary.byModel.some(r => r.provider === 'deepseek' && r.model === 'deepseek-chat' && r.totals.requests === 3 && r.totals.usageUnknown === 1)
+        && summary.byModel.some(r => r.provider === 'deepseek' && r.model === 'deepseek-reasoner' && r.totals.requests === 2 && r.totals.usageUnknown === 1)
         && summary.byModel.some(r => r.provider === '' && r.model === 'deepseek-reasoner' && r.totals.failures === 2),
-      `got ${summary.byModel.map(r => `${r.provider}|${r.model}|r${String(r.totals.requests)}f${String(r.totals.failures)}`).join(',')}`)
+      `got ${summary.byModel.map(r => `${r.provider}|${r.model}|r${String(r.totals.requests)}u${String(r.totals.usageUnknown)}f${String(r.totals.failures)}`).join(',')}`)
     check('totalTokens matches buckets', totalsTokens(costed.total) === 3780, `got ${totalsTokens(costed.total)}`)
   } finally {
     await rm(dir, { recursive: true, force: true })

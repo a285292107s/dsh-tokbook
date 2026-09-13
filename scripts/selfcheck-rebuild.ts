@@ -94,6 +94,11 @@ console.log('rollup: derived-state lossless rebuild')
       rec('m3', '2026-01-03', 11, 'deepseek-chat', { inputTokens: 800, outputTokens: 500 }),
       { ...rec('c1', '2026-01-03', 12, 'deepseek-chat', { inputTokens: 60, outputTokens: 20 }), kind: 'compaction' as const },
       { ...rec('f1', '2026-01-03', 12, 'deepseek-chat'), kind: 'failure' as const, failureCode: 'RATE_LIMIT' },
+      // A billed call the channel never reported usage for (an interrupted
+      // request), and a summarize call likewise missing usage: both are counted
+      // in requests/usageUnknown and contribute no tokens.
+      rec('m4', '2026-01-04', 9, 'deepseek-chat'),
+      { ...rec('c2', '2026-01-04', 10, 'deepseek-chat'), kind: 'compaction' as const },
     ]
     const log = new UsageLog(dir, quiet)
     for (const row of rows) await log.record(row)
@@ -137,7 +142,12 @@ console.log('rollup: derived-state lossless rebuild')
     check('v1 rollup rebuilds losslessly to the current shape', key(first) === key(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined))
     // The rebuilt file carries the current schema version.
     const afterV1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
-    check('rebuilt rollup is stamped schemaVersion 5', afterV1.schemaVersion === 5)
+    check('rebuilt rollup is stamped schemaVersion 6', afterV1.schemaVersion === 6)
+    // The unknown-usage counter is part of the frozen fold: it must survive the
+    // rollup round-trip, not silently read back as 0.
+    check('用量未知 survives the rollup round-trip',
+      first.total.usageUnknown === 2 && rebuilt.total.usageUnknown === 2 && fromV1.total.usageUnknown === 2,
+      `first=${String(first.total.usageUnknown)} rebuilt=${String(rebuilt.total.usageUnknown)} v1=${String(fromV1.total.usageUnknown)}`)
 
     // And both agree with a direct full aggregation of the raw day files.
     const all = await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', never, quiet)
