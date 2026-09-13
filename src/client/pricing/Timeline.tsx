@@ -1,30 +1,7 @@
 /**
- * The 调价史 drawer's axis: ONE row's 调价 as dated nodes, between the two ends
- * of its own history — 首记 on the left, 今天 on the right.
+ * 调价史抽屉的轴：一行自己的调价以带日期的节点呈现，夹在首记与今天之间。
  *
- * What is on the axis is only what the axis is for. A node is a 调价 that took
- * effect INSIDE this row's own history, and its date hangs UNDER its dot, while
- * the bracket's two ends — 首记 and 今天 — name themselves ABOVE the rail; the row
- * above already carries the price in force, its 未生效/峰谷 badges and its record
- * count, and the segment list below repeats every date in full. So there are no
- * bars (their width never stood for a duration — the axis has no scale), no
- * state tags beside the nodes, no 「未覆盖」 block and no sentence under the axis:
- * each of those said something twice, or said it in the one place where it could
- * not be read as a position. What is left is a rail, a dot per 调价, and the two
- * dates that bracket them.
- *
- * The ends are the bracket and never move (see `axis.ts` for how a boundary
- * outside it is treated). A row with nothing to put between them has no axis at
- * all: no 首记 to anchor on (the ledger never billed it), or no 调价 inside the
- * bracket (a bare rail between two dates is not a timeline). The dates are
- * time-proportional but pushed apart to a minimum gap, which is why the track is
- * measured (`ResizeObserver`) rather than laid out in percentages: the gap that
- * keeps two labels from piling up is a width in px, not a fraction of whatever
- * the drawer happens to be.
- *
- * A node with a segment behind it is a button — the axis is navigation, not
- * decoration — and it lands on that segment's 生效时间 field, which is also where
- * the date would be edited.
+ * 轴上只放轴该放的东西——没有柱（柱宽从不代表时长）、节点旁没有状态标签。日期按时间比例但被推开到最小间距，故轨道用 `ResizeObserver` 实测而非百分比布局。有段可去的节点是按钮——轴是导航而非装饰。
  *
  * @module dsh-tokbook/client/pricing/Timeline
  */
@@ -33,10 +10,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { axisNodes, labelWidth, placeNodes } from './axis.ts'
 import type { ModelDraft } from './draft.ts'
 
-/** Focus the segment editor block the axis points at. The ids come from
- *  `SegmentEditor`'s own `seg-<id>-from` — an empty 生效时间 field is exactly
- *  where a 无起点 segment gets its date, so landing there is the whole gesture.
- *  The smooth scroll is skipped for users who asked for reduced motion. */
+/** 聚焦轴指向的段编辑器块。空的生效时间字段正是无起点段获得日期的地方。偏好 reduced motion 的用户跳过平滑滚动。 */
 function jumpToSegment(id: number): void {
   const input = document.getElementById(`seg-${String(id)}-from`)
   if (input === null) return
@@ -45,23 +19,18 @@ function jumpToSegment(id: number): void {
   input.focus()
 }
 
-/** The axis of one row's 调价史. Renders nothing when there is no axis to draw —
- *  see {@link axisNodes}: the row and its segment list already say everything
- *  about a price that this history never saw change. */
+/** 一行调价史的轴。无轴可画时不渲染任何内容——见 {@link axisNodes}。 */
 export function PriceTimeline({ row, activeId }: {
-  /** The row: its segments, and the ledger facts the host sent with it. */
+  /** 该行：它的段，以及宿主随行发送的账本事实。 */
   row: ModelDraft
-  /** The segment the row's four cells edit, marked 当前生效. */
+  /** 行内四个单元格编辑的段，标记为当前生效。 */
   activeId: number | null
 }) {
-  // One instant per row version: the right end is 今天, and where it falls is
-  // read once per render rather than per node.
+  // 每行版本一个时刻：右端是今天，位置按每次渲染读取而非按节点读取。
   const nodes = useMemo(() => axisNodes(row, activeId, Date.now()), [row, activeId])
   const trackRef = useRef<HTMLDivElement | null>(null)
   const [trackWidth, setTrackWidth] = useState(0)
-  // Measured, not assumed: the minimum gap between two labels is a px width, so
-  // the drawer's own width has to be known — and it changes when the window
-  // does. A layout effect keeps the first paint already placed.
+  // 实测而非假设：两个标签之间的最小间距是像素宽度。layout effect 使首帧就已定位。
   useLayoutEffect(() => {
     const track = trackRef.current
     if (track === null) return
@@ -83,8 +52,7 @@ export function PriceTimeline({ row, activeId }: {
         <span className="dtpl-tl-rail" aria-hidden="true" />
         {nodes.map((node, index) => {
           const id = node.segmentId
-          // The ends are placed by the stylesheet (left edge / right edge); every
-          // other node is centred on the dot `placeNodes` gave it.
+          // 两端由样式表定位；其余节点居中于 `placeNodes` 给出的圆点。
           const style = node.cap === null ? { left: `${String(spots[index])}px` } : undefined
           const what = `${node.label} 起生效${node.active ? '（当前生效）' : ''}`
           if (id === null) {

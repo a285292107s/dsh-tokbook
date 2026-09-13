@@ -1,40 +1,9 @@
 /**
- * The 订阅额度 card's markup: one card's shell (identity + freshness + gauge +
- * refresh), its ok bodies and its state panels.
+ * 订阅额度卡的标记：壳（身份 + 新鲜度 + 仪表 + 刷新）、ok 正文与状态面板。
  *
- * Card anatomy (see `QuotaCard` in types):
- *  - header identity: a ring gauge leads on the left in place of a monogram,
- *    followed by provider + plan/account context. The ring answers one fixed
- *    question — this month's budget used (Command Code: the monthly credit
- *    pool; OpenCode Go: the official `monthly` window) — and names itself
- *    with a small visible caption beneath the number, so it never silently
- *    means a different window; a card with no monthly measure falls back to
- *    its tightest rolling window, still captioned. On the right sits the
- *    "更新于 HH:mm" freshness label driven by `fetchedAt` (the time of the
- *    official fetch, so a cached render is honest about its age), in front
- *    of the per-card refresh control (or a state chip).
- *  - ok body, top to bottom:
- *    1. one meter row per budget window (amount windows show used/cap +
- *       remaining $; percent-only windows show used % + remaining % on the
- *       same skeleton) — Command Code ends with a "本月额度" meter row built
- *       from the monthly credit pool (see `monthlyAllowanceWindow`), so every
- *       budget reads identically;
- *    2. a thin period-activity strip (completed calls / success / tokens),
- *       only when the provider reports a usage summary.
- *  - non-subscription gates: a card whose account has no in-force subscription
- *    renders a different body, because the provider's rolling windows pace an
- *    in-force plan's included monthly credits only. `gate: 'balance'` (a lapsed
- *    plan, or a pay-as-you-go account) hides the window rows, drops the ring (a
- *    balance has no denominator) and leads with the credit balance and its
- *    sources — including the top-up/free credits that outlive a plan.
- *    `gate: 'none'` (OpenCode Go: valid key, no subscription, and an endpoint
- *    that reports no balance at all) shows the state and nothing else, since
- *    there is no number this card could honestly put on screen.
- *  - unconfigured / error states: a state chip in the header + an explanatory
- *    panel (hint names the fix / reason).
+ * 环回答固定问题——本月预算已用多少——并在数字下方自报指代，绝不静默换窗口。非订阅 gate 渲染不同正文（余额没有分母，不画环）。
  *
- * The data half (fetch, freshness budget, auto-refresh) lives in
- * `QuotaPanel.tsx`; the arithmetic these views render lives in `metrics.ts`.
+ * 数据半区在 `QuotaPanel.tsx`；算术在 `metrics.ts`。
  *
  * @module dsh-tokbook/client/quota/QuotaCard
  */
@@ -48,9 +17,7 @@ import {
   ringPressure, toneOf, type QuotaTone,
 } from './metrics.ts'
 
-/** The card's shell: a header (identity + freshness + gauge/chip + refresh),
- * then either the loading placeholder, an error/hint panel, or the data
- * body. */
+/** 卡的壳：头部（身份 + 新鲜度 + 仪表/标签 + 刷新），然后是加载占位、错误/提示面板或数据正文。 */
 export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   provider: string
   card: QuotaCard | null
@@ -63,8 +30,7 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   const ctx = ok && card !== null ? planContext(card) : ''
   const ring = ok && card !== null ? ringPressure(card) : undefined
   const state = card?.state ?? 'loading'
-  // One-shot click feedback: re-trigger the pop animation on every press even
-  // though the button flips to `disabled` (spinner) immediately after.
+  // 一次性点击反馈：按钮立刻切到 `disabled`（spinner）后，每次按下仍能重新触发弹出动画。
   const [popTick, setPopTick] = useState(0)
 
   const handleRefresh = () => {
@@ -108,11 +74,7 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
             aria-label={`刷新 ${title} 用量`}
             title="刷新此卡片"
           >
-            {/* The wrapper owns the one-shot click pop; remounting it via `key`
-                restarts the animation on every press even though the button
-                flips to disabled (spinner) in the same render. The glyph
-                inside keeps the rotation spinner — separate elements, so the
-                two transform animations never fight. */}
+            {/* 外层 wrapper 拥有一次性点击弹出动画；经 `key` remount 使每次按下都重新启动。内部图标保持旋转 spinner——两个独立元素。 */}
             <span key={popTick} className={`dtpl-quota-refresh-anim${popTick > 0 ? ' dtpl-quota-refresh-pop' : ''}`}>
               <RefreshGlyph className={`dtpl-quota-refresh-ico${loading ? ' dtpl-spin' : ''}`} />
             </span>
@@ -141,9 +103,7 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
         </div>
       ) : (
         <>
-          {/* A rendered card is never replaced by a fetch error: a failed
-              in-place refresh keeps the last-known numbers and reports the
-              failure as a note above them. */}
+          {/* 已渲染的卡绝不被拉取错误替换：失败的就地刷新保留最近一次已知数字，并以提示形式报告失败。 */}
           {error !== null && (
             <p className="dtpl-quota-stale" role="status">刷新失败（{error}），当前显示上次官方数据</p>
           )}
@@ -154,10 +114,7 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   )
 }
 
-/** The data body of an ok card. Top to bottom: budget-window meter rows
- * (Command Code appends its monthly-allowance meter, plus its top-up balance
- * when it has one), activity strip. The freshness label lives in the header
- * next to the refresh control. A balance-gated card gets a different body. */
+/** ok 卡的数据正文：预算窗口 meter 行、活动条。余额门控的卡获得不同正文。 */
 function QuotaCardBody({ card }: { card: QuotaCard }) {
   if (card.gate === 'balance') return <QuotaBalanceBody card={card} />
   if (card.gate === 'none') return <QuotaNoSubscriptionBody card={card} />
@@ -181,13 +138,7 @@ function QuotaCardBody({ card }: { card: QuotaCard }) {
   )
 }
 
-/** Body of a `none`-gated card: no in-force subscription *and* no balance the
- *  provider's endpoint reports (OpenCode Go exposes window percentages only).
- *  There is nothing this card can put a number on, so it says the state and how
- *  to get out of it — the one thing it must not do is draw the windows, whose
- *  percentages would read as headroom the account does not have. This is the
- *  same instinct as the `unconfigured` / `error` panels, but the state is not a
- *  failure: the key is valid and the provider answered. */
+/** `none` 门控卡的正文：无生效订阅且 provider 端点不报任何余额。绝不能画窗口——那些百分比会被读成账户并不拥有的余量。 */
 function QuotaNoSubscriptionBody({ card }: { card: QuotaCard }) {
   return (
     <div className="dtpl-quota-msg dtpl-quota-msg-muted">
@@ -199,13 +150,7 @@ function QuotaNoSubscriptionBody({ card }: { card: QuotaCard }) {
   )
 }
 
-/** Body of a balance-gated card: the account has no in-force subscription, so
- *  the rolling windows are not a bound it is under and are hidden, and the ring
- *  goes with them (no denominator). What replaces them is the number the
- *  provider actually gates on — the credit balance, of which top-up and free
- *  credits survive a lapsed plan and included monthly credits do not — so the
- *  sources are spelled out rather than folded into one amount the user cannot
- *  check against the billing page. */
+/** 余额门控卡的正文：滚动窗口不是它承受的约束故隐藏，环也去掉（无分母）。充值和免费额度在计划过期后存活，来源逐项列出。 */
 function QuotaBalanceBody({ card }: { card: QuotaCard }) {
   return (
     <>
@@ -222,13 +167,7 @@ function QuotaBalanceBody({ card }: { card: QuotaCard }) {
   )
 }
 
-/** The credit sources as one compact line (`月额度 $x · 已购 $y · 赠送 $z`).
- *  These used to be fetched and then never rendered: the balance that decides
- *  whether a lapsed account can still call anything was invisible. On a
- *  balance-gated card all three are named; on an in-force card only the extras
- *  are (the included monthly pool is already the 本月额度 meter). A source the
- *  provider reports as exactly zero is left out — and a line with nothing left
- *  to say is dropped, since the balance above it already reads `$0.00`. */
+/** 额度来源的一行紧凑展示。余额门控卡列出全部三项；生效订阅卡只列额外项。恰好零的来源省略。 */
 function CreditSources({ credits, extraOnly = false }: {
   credits: NonNullable<QuotaCard['credits']>
   extraOnly?: boolean
@@ -245,10 +184,7 @@ function CreditSources({ credits, extraOnly = false }: {
   return <p className="dtpl-quota-sources">{extraOnly ? `额外余额 ${text}` : text}</p>
 }
 
-/** One budget window, on one skeleton for both data shapes: label + used
- * metric on the first line, a tone meter, then remaining + reset. Money
- * windows (Command Code) show used/cap and a $-remaining; percent-only
- * windows (OpenCode Go) show used % and a remaining %. */
+/** 一个预算窗口，两种数据形状共用同一骨架：金额窗口显示已用/上限 + $ 剩余；仅百分比窗口显示已用 % + 剩余 %。 */
 function QuotaWindowRow({ window }: { window: QuotaWindowView }) {
   const pct = window.usagePercent
   const tone = toneOf(pct)
@@ -287,10 +223,7 @@ function QuotaWindowRow({ window }: { window: QuotaWindowView }) {
   )
 }
 
-/** Optional period-activity stat strip (Command Code): completed calls +
- * success + tokens. Slimmer than the budget meters above — this answers "is
- * my usage healthy / where did the money go", not the "how much is left"
- * question the window rows own. */
+/** 可选的周期活动统计条：完成请求 + 成功率 + 词元。回答「用量健康吗」，不是窗口行的「还剩多少」。 */
 function ActivityStrip({ usage }: { usage: NonNullable<QuotaCard['usage']> }) {
   const cells: Array<{ value: string; key: string; warn?: string }> = []
   if (usage.completed !== undefined) {
@@ -325,12 +258,7 @@ function ActivityStrip({ usage }: { usage: NonNullable<QuotaCard['usage']> }) {
   )
 }
 
-/** Ring gauge heading the card's identity row (where the plan monogram used
- * to be). The ring stroke carries the tone and the used-% number is centered
- * *inside* the ring; the budget that % refers to (normally 本月 — see
- * `ringPressure`) is written as a small caption beneath the number, so the
- * ring never silently means a different window. The same text feeds the
- * accessible name / tooltip. */
+/** 卡身份行的环形仪表。百分比指代的预算以小标题写在数字下方，环绝不静默换窗口。同一文本喂给无障碍名称 / tooltip。 */
 function QuotaGauge({ pct, tone, cap }: { pct: number; tone: QuotaTone; cap: string }) {
   const p = Math.max(0, Math.min(100, pct))
   const R = 15.5
@@ -360,7 +288,7 @@ function QuotaGauge({ pct, tone, cap }: { pct: number; tone: QuotaTone; cap: str
   )
 }
 
-/** Loading placeholder shaped like the real card (reserved geometry). */
+/** 形状像真卡的加载占位（预留几何）。 */
 function QuotaCardSkeleton() {
   return (
     <div className="dtpl-quota-sk-body" aria-hidden="true">

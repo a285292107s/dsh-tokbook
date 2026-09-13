@@ -1,8 +1,7 @@
-/** styles.ts fragment: footer. Concatenated in order by `injectStyles`. */
-export const CSS_FOOTER = `/* ── sidebar footer trigger ─────────────────────────────────────────────── */
-/* Mirrors the settings trigger geometry (ui-settings-general SettingsRoot):
-   a full-width 42px bar in the wide column, and a 36px round icon control on
-   the 56px rail. */
+/** styles.ts 片段：footer。由 `injectStyles` 按序拼接。 */
+export const CSS_FOOTER = `/* 侧边栏入口按钮 */
+/* 对齐设置入口的几何（ui-settings-general SettingsRoot）：宽栏里一条全宽
+   42px bar，56px rail 上一个 36px 圆形图标钮。 */
 [data-plugin="dsh-tokbook"].dtpl-footer{
   flex:1;min-width:0;
   display:flex;align-items:center;gap:8px;
@@ -22,7 +21,7 @@ export const CSS_FOOTER = `/* ── sidebar footer trigger ──────�
 [data-plugin="dsh-tokbook"].dtpl-footer[aria-pressed="true"]{color:var(--dsw-alias-brand-primary,#4d6bfe);}
 [data-plugin="dsh-tokbook"] .dtpl-foot-ico{width:16px;height:16px;flex:none;}
 [data-plugin="dsh-tokbook"].dtpl-footer.dtpl-rail .dtpl-foot-ico{width:18px;height:18px;}
-/* Icon wrap holds the 告急 badge; the wrap itself is invisible geometry. */
+/* 图标容器托着「告急」角标；容器本身只是隐形几何。 */
 [data-plugin="dsh-tokbook"] .dtpl-foot-ico-wrap{position:relative;display:inline-flex;flex:none;align-items:center;justify-content:center;}
 [data-plugin="dsh-tokbook"] .dtpl-foot-alert{
   position:absolute;top:-1px;right:-1px;
@@ -33,7 +32,7 @@ export const CSS_FOOTER = `/* ── sidebar footer trigger ──────�
 [data-plugin="dsh-tokbook"] .dtpl-foot-label{overflow:hidden;white-space:nowrap;}
 [data-plugin="dsh-tokbook"].dtpl-footer:focus-visible{outline:2px solid var(--dtpl-accent);outline-offset:2px;}
 
-/* ── focus ring (shared) ────────────────────────────────────────────────── */
+/* 焦点环（共享） */
 [data-plugin="dsh-tokbook"] :focus-visible{
   outline:2px solid var(--dtpl-accent);outline-offset:2px;
 }

@@ -1,27 +1,7 @@
 /**
- * 价格表 tab of the token-book floating window.
+ * 词元账本浮窗的价格表 tab。
  *
- * ONE card per provider route, ONE row per model the route can be billed for —
- * the two things the ledger actually names. Every price is hand-written: four
- * whole-day ¥/M buckets plus the instant they take effect (an exact local hour,
- * so several dated segments make a 调价史), and — one level down, inside the
- * drawer — the daily 例外时段 that override the whole-day price for an hour
- * range (峰谷价). A row with no segment is 价格未知 and bills ¥0. A row the
- * ledger already billed is never left with an undated price: an unwritten 生效
- * 时间 is anchored at that row's first record (`anchoredRow`).
- *
- * There is no save button and no revert: any change — a rate, an effective
- * date, a segment, the 按量 / 订阅 switch — is written automatically a beat
- * after you stop typing, and a write that cannot go through is retried by the
- * next edit. What is on disk is therefore the only state, so the toolbar just
- * reports it (保存中 / 已保存 / 未保存+原因 / 保存失败+原因 with 重试).
- *
- * Reading order:
- *   · 工具栏 — search (model string / route key / route label), a 价格未知
- *     filter, and the save state of the file;
- *   · 路由卡片 — the route's display name and key, its 计费性质 switch (按量 /
- *     订阅), and one row per model: where the string came from (配置 / 仅账本),
- *     账本次数, the price in force, and 定价 / 改价 to open its segments.
+ * 没有保存按钮也没有撤销：任何变更在停止输入一拍后自动写入。磁盘上的内容是唯一状态，工具栏只报告它。账本已计费过的行绝不留下无日期的价（`anchoredRow`）。
  *
  * @module dsh-tokbook/client/pricing/PricingPanel
  */
@@ -36,37 +16,33 @@ import {
 import { RouteCard } from './editors.tsx'
 
 export interface PricingPanelProps {
-  /** Called after a successful save so the parent can refresh the overview. */
+  /** 保存成功后通知父级刷新总览。 */
   onChanged: () => void
-  /** Reports whether the tab currently holds unsaved staged edits (drives the
-   *  tab dot). Not cleared on unmount: the drafts outlive the panel. */
+  /** 报告 tab 当前是否有未保存的暂存改动（驱动 tab 圆点）。不在 unmount
+   *  时清除：草稿跨面板存活。 */
   onDirtyChange?: (dirty: boolean) => void
-  /** A cross-tab request (the overview's 价格未知 note) to open on one filter. */
+  /** 跨 tab 请求（概览的价格未知备注）以某个筛选打开。 */
   focus?: PricingFocus | null
-  /** Called once `focus` has been applied. */
+  /** `focus` 被应用后调用一次。 */
   onFocusHandled?: () => void
 }
 
-/** How long the tab waits after the last keystroke before writing. Long enough
- *  to coalesce one row's four numbers, short enough to feel immediate. */
+/** 最后一次按键后 tab 等待多久才写入。足够长以合并一行的四个数字，足够短以感觉即时。 */
 const AUTO_SAVE_DELAY_MS = 600
 
-/** What the footer says about the file on disk. */
+/** footer 关于磁盘文件的状态。 */
 type SaveState =
   | { kind: 'clean' }
   | { kind: 'pending' }
   | { kind: 'saving' }
   | { kind: 'saved'; at: number }
-  /** The draft itself is not writable yet (a required number is empty). The
-   *  file still holds the last good state; the next edit retries. */
+  /** 草稿本身尚不可写（必填数字为空）。文件仍持有最后的好状态；下次编辑重试。 */
   | { kind: 'invalid'; message: string }
-  /** The host refused or the request failed; nothing was written. */
+  /** 宿主拒绝或请求失败；未写入任何内容。 */
   | { kind: 'error'; message: string }
 
 /**
- * A draft that has not reached disk survives a panel unmount (switching tabs,
- * or closing the floating window), so an auto-save that has not fired yet — or
- * one the host refused — is never silently dropped.
+ * 尚未到达磁盘的草稿在面板 unmount 后存活（切 tab、关浮窗），使尚未触发的自动保存——或被宿主拒绝的保存——绝不被悄悄丢弃。
  */
 interface Staged {
   view: PricingView
@@ -111,7 +87,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
 
   const changes = useMemo(() => stagedChanges(draft, baseline), [draft, baseline])
 
-  // Refs the debounced writer reads, so a save never captures a stale draft.
+  // 防抖写入器读的 ref，保存绝不捕获过期草稿。
   const draftRef = useRef(draft)
   draftRef.current = draft
   const baselineRef = useRef(baseline)
@@ -121,14 +97,14 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
   const againRef = useRef(false)
   const aliveRef = useRef(true)
 
-  /** Adopt a fresh view as both the render source and the baseline. */
+  /** 把新视图同时采纳为渲染源和基线。 */
   const seed = useCallback((next: PricingView) => {
     setView(next)
     setDraft(draftFromView(next))
     setBaseline(baselinesOf(next))
   }, [])
 
-  // First mount: a draft that never reached disk wins over the host's file.
+  // 首次挂载：从未到达磁盘的草稿优先于宿主文件。
   useEffect(() => {
     if (staged !== null) return
     let alive = true
@@ -145,7 +121,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     return () => { alive = false }
   }, [seed])
 
-  // The overview's 价格未知 note jumps straight to the filter.
+  // 概览的价格未知备注直接跳到筛选。
   useEffect(() => {
     if (focus !== 'unpriced') return
     setUnknownOnly(true)
@@ -153,10 +129,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
   }, [focus, onFocusHandled])
 
   /**
-   * Write the whole file. Refuses (without writing) while the draft is not yet
-   * valid, so a half-typed number cannot block or corrupt the rest; the debounce
-   * effect retries as soon as the draft changes again. Saves are serialized:
-   * a change made while a write is in flight queues one more, newest last.
+   * 写入整个文件。草稿尚无效时拒绝（不写入），使半输入的数字不能阻塞或破坏其余内容；防抖 effect 在草稿再次变化时重试。保存串行化：在飞的写入期间发生的变更排队一次。
    */
   const writeNow = useCallback(async (): Promise<void> => {
     if (stagedChanges(draftRef.current, baselineRef.current) === 0) return
@@ -164,9 +137,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       againRef.current = true
       return
     }
-    // Freeze the draft this PUT writes. The live ref may already hold later
-    // keystrokes by the time the response lands; advancing the baseline to
-    // those would mark unsent edits as saved and skip the queued rewrite.
+    // 冻结本次 PUT 写入的草稿。响应落地时 live ref 可能已持有更晚的按键。
     const snapshot = draftRef.current
     const composed = composePriceBody(snapshot)
     if (!composed.ok) {
@@ -181,9 +152,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       if (aliveRef.current) setSave({ kind: 'error', message: result.error })
       return
     }
-    // Baseline always moves to what was just written, even after unmount —
-    // the flush-on-leave write must leave `staged` clean or the next mount
-    // re-saves the same body and shows a false dirty mark.
+    // 基线始终推进到刚写入的内容，即使已 unmount——离场前的 flush 写入必须让 `staged` 保持干净。
     const nextBaseline = baselineOfDraft(snapshot)
     baselineRef.current = nextBaseline
     if (staged !== null) {
@@ -198,8 +167,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       }
       return
     }
-    // Keep the local draft as the source of truth — re-seeding from the response
-    // would remount the inputs the user may still be typing in.
+    // 本地草稿保持为唯一真源——从响应重新播种会 remount 用户可能仍在输入的输入框。
     setBaseline(nextBaseline)
     setSave({ kind: 'saved', at: Date.now() })
     onChanged()
@@ -209,11 +177,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     }
   }, [onChanged])
 
-  // Auto-save: any change re-arms a short timer; the last change wins. The
-  // writer is read through a ref so a parent re-render (which hands down a new
-  // callback identity) can never starve the debounce. Editing back to the state
-  // on disk drops a pending/invalid report — a `saved` or `error` report stays
-  // until something actually happens.
+  // 自动保存：任何变更重置短计时器；最后一次变更胜出。写入器经 ref 读取，使父级 re-render 绝不会饿死防抖。
   const writeRef = useRef(writeNow)
   writeRef.current = writeNow
   useEffect(() => {
@@ -235,8 +199,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     }
   }, [changes, draft])
 
-  // A draft that never reached disk is kept for the next mount; a clean one is
-  // dropped so the next mount reads the host's file.
+  // 从未到达磁盘的草稿留给下次挂载；干净的丢弃，使下次挂载读宿主文件。
   useEffect(() => {
     if (view === null) return
     staged = changes > 0 ? { view, draft, baseline } : null
@@ -244,7 +207,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
 
   useEffect(() => { onDirtyChange?.(changes > 0) }, [changes, onDirtyChange])
 
-  // Leaving the tab (or closing the window) must not strand a pending write.
+  // 离开 tab（或关闭浮窗）不能搁浅一次待写的保存。
   useEffect(() => {
     aliveRef.current = true
     return () => {
@@ -279,7 +242,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     })
   }, [])
 
-  /** Open/close one row's 调价史 (one at a time: the list never sprawls). */
+  /** 打开/关闭一行的调价史（一次只开一个：列表不铺开）。 */
   const toggleRow = useCallback((route: string, model: string) => {
     setOpenKey(current => (current === rowKey(route, model) ? null : rowKey(route, model)))
   }, [])
@@ -293,7 +256,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     })
   }, [])
 
-  // Ctrl/Cmd+S flushes a pending write immediately (the file saves anyway).
+  // Ctrl/Cmd+S 立即 flush 待写的保存（文件本来也会自动保存）。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -327,7 +290,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     return count
   }, [draft])
 
-  /** Close a row's drawer when its card folds, so nothing hides unfolded. */
+  /** 卡折叠时关闭其抽屉，避免内容藏在折叠后面。 */
   useEffect(() => {
     if (openKey === null) return
     const route = openKey.split('\u0000')[0] ?? ''
@@ -342,15 +305,13 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
       const models = new Map<string, ModelDraft>()
       for (const [model, row] of card.models) {
         if (unknownOnly && !isUnpriced(row)) continue
-        // The search covers what the row shows: the human name, the exact model
-        // string, and — when the whole route matches — every row of it.
+        // 搜索覆盖行显示的内容：展示名、精确模型串，以及整个 route 匹配时其下所有行。
         if (needle !== '' && !routeHit
           && !model.toLowerCase().includes(needle)
           && !(row.name ?? '').toLowerCase().includes(needle)) continue
         models.set(model, row)
       }
-      // A filtered card shows the rows the filter kept, whatever its fold
-      // state: hiding a match behind a fold would read as "no result".
+      // 有筛选时卡片显示筛选保留的行，忽略折叠状态：把匹配藏在折叠后面会被读成「无结果」。
       if (models.size === 0) continue
       out.push(needle !== '' || unknownOnly ? { ...card, models } : card)
     }
@@ -434,8 +395,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
   )
 }
 
-/** What the footer says about the file: the save state first, the table's own
- *  size when there is nothing to report. */
+/** footer 关于文件的说法：先报保存状态，无可报告时显示表自身的规模。 */
 function saveStateText(save: SaveState, priced: number): string {
   switch (save.kind) {
     case 'pending': return '待保存…'

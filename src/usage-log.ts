@@ -1,33 +1,14 @@
 /**
- * Durable JSONL store of the token-book: per-local-day files, a serialized
- * append queue, and the process-wide request-id dedupe set that both the live
- * hook and the history sync share. A row lands in the day file of its event
- * time (`record.time` in local Y-M-D), never the wall clock of the append —
- * live events and history backfill share that rule.
+ * token-book 的持久 JSONL 存储：按本地日的分文件、串行追加队列，以及 live hook
+ * 与 history sync 共享的进程级 request-id 去重集。一行落在其事件时间的分日文件
+ * （`record.time` 的本地 Y-M-D），绝不是追加时的墙钟。
  *
- * State scoping: the mutable dedupe/queue state is keyed by DATA DIRECTORY,
- * not by UsageLog instance, so every `UsageLog` of one directory that shares
- * THIS module copy also shares one dedupe set and one serialized append queue.
- * That covers same-process overlap: a dependency's dispose → auto-reload, a
- * second instance over service isolation, or a second `TokenUsageBook`
- * constructed while an earlier instance still has queued appends in flight
- * (all within the same loaded module object). Because the JSONL files are the
- * shared resource, the guard around them must be shared too for those writers.
- *
- * This sharing does NOT survive a module-level HMR reload: the cordis-plugin-hmr
- * host reload clears the module cache and re-imports the plugin entry, so the
- * re-created module gets a FRESH `dirs` map. An old instance being disposed
- * keeps flushing through its own (old) queue while the new instance starts its
- * own — the two do not share a dedupe set. Overlap safety across that boundary
- * comes from the disk, not from this map: the new instance re-derives its
- * dedupe set from the on-disk rows before its first write (see `UsageLog.record`),
- * so rows the old instance already landed are not re-appended; a request id
- * re-delivered while the old flush is still in flight is the residual (rare)
- * risk window.
- *
- * A process restart starts with an empty map; the first write of that directory
- * re-derives the dedupe set from the on-disk rows first (see `UsageLog.record`),
- * so a fresh process never re-appends rows that already landed.
+ * 状态作用域：可变的去重/队列状态按**数据目录**键控，而非按 UsageLog 实例——
+ * 同一目录、且共享**本模块副本**的所有 `UsageLog` 也共享一个去重集与一个串行
+ * 追加队列。这种共享**不能**跨过模块级 HMR reload：cordis-plugin-hmr 宿主
+ * reload 清空模块缓存并重新 import 插件入口，重建的模块得到一份**全新的** `dirs`
+ * 映射。跨该边界的重叠安全来自磁盘，而非本映射：新实例在首次写入前从磁盘行
+ * 重建去重集。进程重启以空映射开始；该目录的首次写入会先从磁盘行重建去重集。
  *
  * @module dsh-tokbook/usage-log
  */
@@ -39,10 +20,9 @@ import type { UsageRecord } from './types.ts'
 
 const DAY_FILE = /^usage-\d{4}-\d{2}-\d{2}\.jsonl$/u
 
-/** Test for this store's per-day file names; the migration shares the naming contract. */
+/** 本存储的分日文件名测试；migration 共享命名契约。 */
 export { DAY_FILE }
 
-/** Day-file name for a local-time date, e.g. `usage-2026-01-15.jsonl`. */
 export function dayFileName(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -50,7 +30,7 @@ export function dayFileName(date: Date): string {
   return `usage-${year}-${month}-${day}.jsonl`
 }
 
-/** Day-file name of a record's event time, matching {@link dayFileName}. */
+/** 记录事件时间的分日文件名，与 {@link dayFileName} 一致。 */
 export function dayFileNameOf(time: number): string {
   return dayFileName(new Date(time))
 }
@@ -60,20 +40,16 @@ function dayFilePath(dir: string, time: number): string {
 }
 
 /**
- * Mutable state of ONE data directory within this process: the dedupe set,
- * the serialized append queue, and the directory readiness/scanned flags.
- * Shared by every UsageLog of that directory that holds THIS module copy (see
- * the module doc) — e.g. a second instance constructed over the same loaded
- * module while the first still has appends in flight shares this state instead
- * of starting from zero. A module-level HMR reload replaces this whole map
- * (fresh module object); the disk, not this map, is the guard across that.
+ * 本进程内**一个**数据目录的可变状态：去重集、串行追加队列、目录就绪/已扫描
+ * 标志。持有**本模块副本**的该目录的所有 UsageLog 共享。模块级 HMR reload
+ * 替换整个映射；跨该边界的守卫是磁盘，不是本映射。
  */
 interface DirState {
   seen: Set<string>
   queue: Promise<void>
   ready: Promise<void> | undefined
   scanned: boolean
-  /** In-flight {@link DirState} rebuild; concurrent callers await it. */
+  /** 在途的 {@link DirState} 重建；并发调用方 await 它。 */
   scanning: Promise<void> | undefined
 }
 
@@ -93,24 +69,18 @@ function stateOf(dir: string): DirState {
   return created
 }
 
-/**
- * Forget one directory's (or every directory's) in-process state. A test /
- * restart seam: a real process restart starts with an empty map, and this
- * reproduces that so a fresh UsageLog over the same directory re-derives the
- * dedupe set from disk exactly like a restarted host would.
- */
+/** 忘掉一个（或全部）目录的进程内状态。测试 / 重启缝：真实进程重启以空映射
+ *  开始，本函数复现这一点。 */
 export function resetUsageLogState(dir?: string): void {
   if (dir === undefined) dirs.clear()
   else dirs.delete(dir)
 }
 
 /**
- * Append-only per-day JSONL log with request-id dedupe.
+ * 带 request-id 去重的按日 append-only JSONL 日志。
  *
- * Ordering: every append (and a refile pass) runs on one per-directory promise
- * chain, so concurrent callers land in call order. Dedupe: a request id is
- * claimed synchronously before its append is queued; a failed append releases
- * the claim, so the row can be retried later.
+ * 顺序：每次追加（以及 refile）都跑在每目录的一条 promise 链上。去重：request
+ * id 在追加入队前同步认领；追加失败会释放认领，行可在稍后重试。
  */
 export class UsageLog {
   private readonly dir: string
@@ -123,23 +93,19 @@ export class UsageLog {
     this.state = stateOf(dir)
   }
 
-  /** Whether a request id is already known to this directory's log. */
+  /** 该目录的日志是否已知某 request id。 */
   has(requestId: string): boolean {
     return this.state.seen.has(requestId)
   }
 
-  /** Settle every queued append of this directory. The chain never rejects
-   * (each task absorbs its own failure), so this is the quiescence point a
-   * data-directory move waits on before reading the files. */
+  /** 结算该目录所有排队的追加。链从不 reject（每个任务吸收自身失败）。 */
   flush(): Promise<void> {
     return this.state.queue
   }
 
   /**
-   * Rebuild the dedupe set from every existing day file, once per directory
-   * per process (later calls are a no-op). Malformed lines are skipped;
-   * unreadable files are skipped the same way; a failed listing leaves the
-   * flag unset so the next call retries.
+   * 从所有已有分日文件重建去重集，每目录每进程一次（后续调用为空操作）。畸形
+   * 行跳过；不可读文件同样跳过；listing 失败时标志不置位，下次调用会重试。
    */
   async scan(): Promise<void> {
     const state = this.state
@@ -155,7 +121,7 @@ export class UsageLog {
     await pending
   }
 
-  /** The actual scan; {@link scan} wraps it with the in-flight guard. */
+  /** 实际扫描；{@link scan} 用在途守卫包一层。 */
   private async doScan(): Promise<void> {
     const state = this.state
     state.ready ??= mkdir(this.dir, { recursive: true }).then(() => undefined)
@@ -187,16 +153,13 @@ export class UsageLog {
   }
 
   /**
-   * Persist one record unless its request id was already written.
-   * @returns true when the row was appended, false when deduped.
+   * 持久化一条记录，除非其 request id 已写过。
+   * @returns 行已追加为 true；去重掉为 false。
    *
-   * The first write of a directory in this process first loads the on-disk
-   * rows into the dedupe set, so a restarted host never re-appends rows that
-   * already landed. A failing listing never gates a write away — a broken data
-   * directory must not drop live records — so in that (already degraded) case
-   * the row is written and a later idempotent rescan cleans up. Never rejects:
-   * a scan failure degrades to an unscanned write, exactly like the old
-   * always-in-memory path.
+   * 本进程对某目录的首次写入先加载磁盘行到去重集，因此重启宿主从不重追加
+   * 已落地的行。listing 失败绝不能挡住写入——坏数据目录不得丢掉实时记录——
+   * 故在该（已降级）情形下行仍写出，稍后的幂等 rescan 会清理。从不 reject：
+   * 扫描失败降级为未扫描写入，与旧的常驻内存路径一致。
    */
   record(record: UsageRecord): Promise<boolean> {
     const state = this.state
@@ -204,15 +167,15 @@ export class UsageLog {
     const scan = state.scanning ?? this.beginScan()
     return scan
       .catch((error: unknown) => {
-        // A scan failure (unreadable data dir) must not gate live writes away.
+        // 扫描失败（不可读数据目录）不得挡住实时写入。
         this.logger.error('[tokbook] cannot rebuild dedupe set; writing without it:', error)
       })
       .then(() => this.enqueue(record))
   }
 
-  /** Start (or await) the one-shot on-disk dedupe rebuild. Callers that must
-   * not have the write gated on it use {@link record}; callers that need a
-   * settled set before a batch (history sync) await {@link scan} instead. */
+  /** 启动（或等待）一次性的磁盘去重重建。不得让写入被它挡住的调用方用
+   *  {@link record}；批量前需要已结算集合的（history sync）改为 await
+   *  {@link scan}。 */
   private beginScan(): Promise<void> {
     const state = this.state
     const pending = this.doScan().finally(() => {
@@ -222,30 +185,30 @@ export class UsageLog {
     return pending
   }
 
-  /** Claim + queue one append against the (already settled) dedupe set. */
+  /** 对着（已结算的）去重集认领 + 排队一次追加。 */
   private enqueue(record: UsageRecord): Promise<boolean> {
     const state = this.state
     if (state.seen.has(record.requestId)) return Promise.resolve(false)
-    // Claim before queueing: a concurrent call with the same id dedupes here.
+    // 入队前认领：带同一 id 的并发调用在此去重。
     state.seen.add(record.requestId)
     const task = state.queue.then(async () => {
       await this.ensureDir()
       await this.appendOnce(record)
     })
-    // A failed append must not poison the chain for later rows.
+    // 追加失败不得毒化后续行的链。
     state.queue = task.catch(() => {})
     return task
       .then(() => true)
       .catch((error: unknown) => {
-        // Release the claim so a later sync can retry this row.
+        // 释放认领，稍后的 sync 可以重试该行。
         state.seen.delete(record.requestId)
         this.logger.error('[tokbook] append failed:', error)
         return false
       })
   }
 
-  /** Move rows that sit in the wrong day file onto `dayFileNameOf(record.time)`.
-   * Idempotent; runs on the append queue so a live write cannot interleave. */
+  /** 把落在错误分日文件中的行挪到 `dayFileNameOf(record.time)`。
+   *  幂等；跑在追加队列上，实时写入无法交错。 */
   refileByEventDay(): Promise<number> {
     let moved = 0
     const state = this.state
@@ -266,8 +229,8 @@ export class UsageLog {
     await state.ready
   }
 
-  /** Append one row, self-healing once when the directory vanished after the
-   * cached creation. The destination is the local day of {@link UsageRecord.time}. */
+  /** 追加一行；缓存创建后目录消失时自愈一次。目标是
+   *  {@link UsageRecord.time} 的本地日。 */
   private async appendOnce(record: UsageRecord): Promise<void> {
     const path = dayFilePath(this.dir, record.time)
     try {
@@ -313,8 +276,8 @@ async function rewriteDayFile(dir: string, name: string, records: UsageRecord[])
   await rename(tmp, target)
 }
 
-/** Redistribute parsed rows onto the day file their event time names.
- * Malformed lines stay in the source file so a bad row is never dropped. */
+/** 把已解析的行重新分配到其事件时间命名的分日文件。畸形行留在源文件，坏行
+ *  绝不被丢掉。 */
 async function refileDayFiles(dir: string, logger: { error(...args: unknown[]): void }): Promise<number> {
   let names: string[]
   try {

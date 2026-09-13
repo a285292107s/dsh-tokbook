@@ -1,8 +1,8 @@
 /**
- * 通道用量 tab: one card per provider route over a selectable window.
+ * 通道用量 tab：每个 provider route 一张卡，窗口可选。
  *
- * Data comes from `GET /tokbook/usage?range=…`. Deliberately independent of
- * the overview store — the tab stays usable even while the overview failed.
+ * 数据来自 `GET /tokbook/usage?range=…`。刻意独立于总览 store——
+ * 总览失败时本 tab 仍可用。
  *
  * @module dsh-tokbook/client/ProviderPanel
  */
@@ -12,7 +12,7 @@ import type { ProviderRange, ProviderUsageCard, ProviderUsageView } from '../typ
 import { UsageGlyph } from './icons.tsx'
 import { formatMoney, formatTokens, share } from './format.ts'
 
-/** Provider-usage window ids in display order. */
+/** 回看窗口 id，按展示顺序。 */
 const RANGE_IDS: ReadonlyArray<ProviderRange> = ['today', 'yesterday', 'last7', 'last30']
 
 const RANGE_LABELS: Record<ProviderRange, string> = {
@@ -30,33 +30,31 @@ const RANGE_DAY_LABELS: Record<ProviderRange, string> = {
 }
 
 /**
- * The 通道用量 tab of the floating window: one card per provider, each
- * listing the models that provider billed inside the selected look-back
- * window (今日 / 昨天 / 近7天 / 近30天), with token totals and cost. Data
- * comes from its own exact route `/tokbook/usage?range=…` (the overview's
- * payload keys models by model id alone, which would merge one model billed by
- * several providers); each loaded range is cached so switching back costs no
- * refetch.
+ * 浮窗的通道用量 tab：每个 provider 一张卡，列出该通道在选定回看窗口
+ * （今日 / 昨天 / 近7天 / 近30天）内计费过的模型，含词元合计与金额。
+ * 数据来自自身路由 `/tokbook/usage?range=…`（总览的 payload 仅按 model id
+ * 键控，会合并多个 provider 计费的同名模型）；每个已加载的 range 有缓存，
+ * 切换回来不重新拉取。
  */
 export function ProviderPanel() {
   const [range, setRange] = useState<ProviderRange>('last7')
   const [views, setViews] = useState<ReadonlyMap<ProviderRange, ProviderUsageView>>(() => new Map())
   const [error, setError] = useState<string | null>(null)
   const activeRef = useRef(0)
-  // Ref mirror of the cache so `load` stays referentially stable (its identity
-  // must not churn on every successful fetch, or the fetch effect re-fires).
+  // 缓存的 ref 镜像，使 `load` 保持引用稳定（每次成功拉取都换新引用
+  // 会重跑 fetch effect）。
   const viewsRef = useRef(views)
   viewsRef.current = views
 
   const load = useCallback(async (target: ProviderRange, force?: boolean) => {
-    if (!force && viewsRef.current.has(target)) return // cached — switching back is free
+    if (!force && viewsRef.current.has(target)) return // 已缓存——切换回来免费
     const token = ++activeRef.current
     setError(null)
     try {
       const res = await fetch(`/tokbook/usage?range=${target}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const view = await res.json() as ProviderUsageView
-      if (token !== activeRef.current) return // a newer switch superseded us
+      if (token !== activeRef.current) return // 被更新的切换取代
       setViews((current) => {
         const next = new Map(current)
         next.set(target, view)
@@ -68,13 +66,12 @@ export function ProviderPanel() {
     }
   }, [])
 
-  // Fetch once per selected range; stale responses after a switch are dropped.
+  // 每个选中的 range 拉取一次；切换后的过期响应被丢弃。
   useEffect(() => {
     void load(range)
   }, [range, load])
 
-  // Bump the active token when the panel unmounts (tab switch) so an in-flight
-  // response never updates state of an unmounted panel.
+  // 面板卸载（tab 切换）时推进 active token，防止在飞的响应更新已卸载面板。
   useEffect(() => () => { activeRef.current += 1 }, [])
 
   const view = views.get(range)
@@ -127,13 +124,12 @@ export function ProviderPanel() {
 }
 
 /**
- * One provider card: header (channel + totals) over its model rows.
+ * 一张 provider 卡：头部（通道 + 合计）在模型行之上。
  *
- * The header names the channel the way the 价格表 tab does — the settings
- * profile's `displayName` first (else the adapter's provider name), with the
- * route key beneath it. The billing chip states what the card's money means:
- * 按量 = cash spend, 订阅 = value folded at hand-written rates. Billing is a
- * route fact (`$billing`), so every model on the card agrees.
+ * 头部命名通道的方式与价格表 tab 一致——settings 的 `displayName` 优先
+ * （否则适配器的 provider 名），route key 作为副标题。计费标签说明卡上
+ * 金额的含义：按量 = 现金支出，订阅 = 按手工价表折算的价值。计费是 route
+ * 事实（`$billing`），故卡上所有模型一致。
  */
 function ProviderCard({ card, money, labels }: {
   card: ProviderUsageCard
@@ -142,8 +138,8 @@ function ProviderCard({ card, money, labels }: {
 }) {
   const cardTokens = card.tokens
   const label = labels[card.provider]
-  // Billing is a ROUTE fact (the price table's `$billing`), so every model of a
-  // card agrees; a route nothing declares is metered, like `billingOf` reads it.
+  // 计费是 ROUTE 事实（价表的 `$billing`），卡上所有模型一致；无人声明的
+  // route 读作 metered，与 `billingOf` 一致。
   const subscription = card.models.some(model => model.billing === 'subscription')
   const billingTag = subscription ? '订阅' : '按量'
   const billingTitle = subscription
@@ -204,7 +200,7 @@ function ProviderCard({ card, money, labels }: {
   )
 }
 
-/** Placeholder for a range whose first fetch is in flight. */
+/** 首次拉取进行中的占位。 */
 function ProviderSkeleton() {
   return (
     <div className="dtpl-skeleton" aria-hidden="true">

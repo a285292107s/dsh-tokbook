@@ -1,46 +1,37 @@
 /**
- * Pure rules of the 订阅额度 cards: what each number means and how it reads.
+ * 订阅额度卡的纯规则：头部环概括的是哪个预算、月度额度如何变成窗口形行、已用百分比映射到什么色调。
  *
- * No React and no fetch — these are the derivations the card views render
- * (which budget the header ring summarizes, how a monthly allowance becomes a
- * window-shaped row, the tone a used-% maps to) together with the small text
- * builders that belong to them. Split out so the card's arithmetic reads
- * without the component tree around it: `QuotaPanel.tsx` owns the data,
- * `QuotaCard.tsx` owns the markup.
+ * 无 React、无 fetch——`QuotaPanel.tsx` 拥有数据，`QuotaCard.tsx` 拥有标记。
  *
  * @module dsh-tokbook/client/quota/metrics
  */
 
 import type { QuotaCard, QuotaWindowView } from '../../types.ts'
 
-/** What a window bar / gauge may be colored as. */
+/** 窗口条 / 仪表可着的色调。 */
 export type QuotaTone = 'ok' | 'warn' | 'danger'
 
-/** Tone by used percent: green < 60, amber < 85, red beyond. */
+/** 已用百分比到色调：绿 < 60，琥珀 < 85，红更远。 */
 export function toneOf(pct: number): QuotaTone {
   if (pct >= 85) return 'danger'
   if (pct >= 60) return 'warn'
   return 'ok'
 }
 
-/** Sum of the three credit sources the provider reports — the same
- *  `remainingCredits` the reference implementation derives, and the whole of
- *  what bounds an account with no in-force subscription. */
+/** provider 报告的三个额度来源之和——与参考实现推导的
+ *  `remainingCredits` 相同，也是无生效订阅账户的全部约束。 */
 export function balanceUsd(credits: QuotaCard['credits']): number {
   if (credits === undefined) return 0
   return (credits.monthlyUsd ?? 0) + (credits.purchasedUsd ?? 0) + (credits.freeUsd ?? 0)
 }
 
-/** Top-up + free credits: the part of the balance that outlives a plan and
- *  that the provider spends *first* once a rolling window is hit, so it
- *  explains a card whose monthly pool still reads as untouched. */
+/** 充值 + 免费额度：计划过期后仍存活、且在滚动窗口触发时 provider **优先**扣除的那部分余额。 */
 export function extraCreditsUsd(credits: NonNullable<QuotaCard['credits']>): number {
   return (credits.purchasedUsd ?? 0) + (credits.freeUsd ?? 0)
 }
 
-/** Shared math for the Command Code monthly allowance: remaining pool (the
- * provider-reported monthly credits), spent this cycle, and the implied total
- * (remaining + spent). null when the card reports no credit pool. */
+/** Command Code 月度额度的共享算术：剩余池（provider 报告的月度额度）、
+ * 本周期已花、以及隐含总量（剩余 + 已花）。卡未报额度池时为 null。 */
 function allowanceState(card: QuotaCard): {
   remaining: number
   spent?: number
@@ -65,12 +56,7 @@ function allowanceState(card: QuotaCard): {
   }
 }
 
-/** Command Code's monthly credit pool as a *window-shaped* meter row (id
- * `monthlyAllowance`), appended after the rolling window rows so every
- * budget on the card reads identically: label + used/total on the first
- * line, a tone meter, then remaining $ + reset. Needs a real period spend
- * (`usage.costUsd`) to form the total/percent — when only the remaining pool
- * is reported there is nothing to draw, so the row is omitted. */
+/** Command Code 的月度额度池，以**窗口形**的 meter 行呈现（id `monthlyAllowance`）。需要真实的周期已花才能构成总量/百分比——只报了剩余池时无东西可画，故省略该行。 */
 export function monthlyAllowanceWindow(card: QuotaCard): QuotaWindowView | null {
   const a = allowanceState(card)
   if (a === null || a.spent === undefined || a.total === undefined) return null
@@ -85,24 +71,9 @@ export function monthlyAllowanceWindow(card: QuotaCard): QuotaWindowView | null 
   }
 }
 
-/** What the header ring summarizes. The ring answers one *fixed* question —
- * how much of the month's budget the account has used — instead of whichever
- * rolling window happens to be tightest. A "worst window" headline made the
- * referent ambiguous (the user could not tell 5 小时 / 本周 / 本月 apart, and
- * the % jumped when a rolling window reset even though nothing was spent).
- *
- * Command Code reports no official monthly window, so its monthly measure is
- * the credit-pool allowance (`allowanceState` — the same 本月额度 the body
- * row draws). OpenCode Go reports an official `monthly` window. Only when a
- * card carries no monthly measure at all does the ring fall back to the
- * tightest rolling window — and `cap` then names that window, so the ring's
- * referent is never implicit. */
+/** 头部环概括的内容。环回答**固定的**问题——账户用掉了本月预算的多少——而不是恰好最紧的滚动窗口（「最差窗口」标题会让指代模糊）。只有完全没有月度度量时环才回落到最紧的滚动窗口——且 `cap` 随之命名那个窗口。 */
 export function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; cap: string } | undefined {
-  // Nothing to be a percentage *of*: a non-subscription card is not under its
-  // window limits at all, and the body hides or omits those rows — so a ring
-  // drawn from one (or from the fallback below) would summarize a number the
-  // card does not show. A balance has no denominator, so it is shown as an
-  // amount instead (see QuotaBalanceBody); a `none` card has no number at all.
+  // 非订阅卡不受窗口限额约束，正文隐藏或省略那些行——从其中之一画环会概括一个卡上不显示的数字。余额没有分母，故以金额形式展示。
   if (card.gate !== undefined && card.gate !== 'subscription') return undefined
   const monthly = card.windows.find((w) => w.id === 'monthly')
   if (monthly !== undefined) {
@@ -120,7 +91,7 @@ export function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; c
   return { pct: worst.usagePercent, tone: toneOf(worst.usagePercent), cap: worst.label }
 }
 
-/** "重置" countdown text of one window. */
+/** 一个窗口的「重置」倒计时文本。 */
 export function resetLabel(window: QuotaWindowView): string {
   if (window.resetAt === null) return '—'
   const ms = window.resetAt - Date.now()
@@ -134,9 +105,7 @@ export function resetLabel(window: QuotaWindowView): string {
   return hours > 0 ? `${days} 天 ${hours} 小时后重置` : `${days} 天后重置`
 }
 
-/** Account/plan context for the card subtitle (e.g. `user · GOAT`). Billing
- *  resets live on the window rows (Command Code's monthly-allowance meter
- *  shows its own countdown), so the subtitle stays identity-only. */
+/** 卡副标题的账户/计划上下文。计费重置住在窗口行上，故副标题只放身份。 */
 export function planContext(card: QuotaCard): string {
   const bits: string[] = []
   const account = card.account?.name
@@ -157,12 +126,12 @@ export function planContext(card: QuotaCard): string {
   return bits.join(' · ')
 }
 
-/** USD money format (wire amounts are already USD). */
+/** USD 金额格式（wire 上的金额已是 USD）。 */
 export function money(value: number): string {
   return `$${value.toFixed(2)}`
 }
 
-/** HH:mm of a fetch timestamp, shown next to the card's refresh control. */
+/** 拉取时间戳的 HH:mm，显示在卡的刷新控件旁。 */
 export function formatClock(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }

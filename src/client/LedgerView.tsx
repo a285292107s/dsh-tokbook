@@ -1,7 +1,5 @@
 /**
- * 用量总览 tab content: today's hero, the four-bucket split, the daily trend
- * and the 按模型 / 按工作区 breakdown switch (which lives in `Breakdowns.tsx`).
- * Shell (tabs, dialog chrome, rescan footer) lives in `LedgerOverlay.tsx`.
+ * 用量总览 tab 内容：今日 hero、四桶构成、每日趋势，以及按模型 / 按工作区的拆分切换（拆分体在 `Breakdowns.tsx`）。
  *
  * @module dsh-tokbook/client/LedgerView
  */
@@ -16,14 +14,13 @@ import {
   localDayKey, shiftDayKey, shortDay,
 } from './format.ts'
 
-/** Days in the trend window; the window never starts before the first record. */
+/** 趋势窗口天数；窗口不早于首条记录。 */
 const TREND_DAYS = 14
 
-/** Complete days compared against today. Today itself is excluded, so a busy
- * day cannot pull its own baseline up. */
+/** 与今天对比的完整天数。排除今天本身，避免忙碌的一天拉高自己的基线。 */
 const BASELINE_DAYS = 7
 
-/** Today's ledger row when it has one; the zero row otherwise. */
+/** 今天有账本行时用它；否则用零行。 */
 const ZERO_TOTALS: UsageTotals = {
   requests: 0,
   inputTokens: 0,
@@ -41,7 +38,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
-/** Everything the hero and the bucket tiles need, all in one window (today). */
+/** hero 和桶瓦片所需的一切，都在今天这一个窗口内。 */
 interface TodayHero {
   totals: UsageTotals
   tokens: number
@@ -64,10 +61,7 @@ function todayHero(overview: TokBookOverview): TodayHero {
 }
 
 /**
- * The one line that turns today's number into a judgement. Withheld rather
- * than approximated: a ledger younger than the baseline window would average
- * missing days in as zero and make a normal day read as a spike, so a young
- * ledger shows no ratio at all.
+ * 把今日数字变成判断的那一行。宁可不给也不近似：账本短于基线窗口时，平均会把缺失的天当作零拉进来，让正常的一天看起来像尖峰。
  */
 function todayReference(overview: TokBookOverview, today: string, todayTokens: number): TodayHero['reference'] {
   const byDay = new Map(overview.byDay.map(entry => [entry.day, totalsTokens(entry.totals)]))
@@ -83,8 +77,7 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
   const average = sum / BASELINE_DAYS
   if (average <= 0) return todayTokens === 0 ? noRecord : null
 
-  // A zero today needs the baseline as its context; a percentage off zero
-  // would be noise dressed up as a signal.
+  // 零天需要基线做上下文；从零算出的百分比只是噪音披上了信号的外衣。
   if (todayTokens === 0) {
     return {
       label: `近${BASELINE_DAYS}天日均`,
@@ -109,11 +102,7 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
 }
 
 /**
- * Daily total-token column chart over a continuous calendar window. The host's
- * `byDay` only carries days that have records, so the window is rebuilt here:
- * a day without records becomes a zero slot instead of disappearing, which
- * would silently compress the time axis and overstate continuity. Every column
- * carries its own value label, so reading the chart never depends on hovering.
+ * 连续日历窗口内的每日词元柱状图。宿主的 `byDay` 只带有点记录的天，故窗口在此重建：无记录的天变成零柱而不是消失——否则时间轴会被悄悄压缩。每根柱自带数值标签，读图不依赖 hover。
  */
 function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   if (days.length === 0) return null
@@ -142,9 +131,7 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
           const tokens = values[index]!
           const isPeak = index === peakIndex
           const edge = index === 0 ? ' is-start' : index === slots.length - 1 ? ' is-end' : ''
-          // The label rides the column, not the plot: its offset is the same
-          // expression that sizes the fill, so the number always sits 2px above
-          // its own bar (and on the baseline for a zero day, which has none).
+          // 标签骑在柱上而非图区上：偏移量与填充高度同表达式，数字永远停在自己的柱上方 2px。
           const columnH = tokens > 0 ? `max(2px, ${String(Math.round((tokens / max) * 100))}%)` : '0px'
           return (
             <div className="dtpl-bar" key={day} title={`${day}\n${formatTokens(tokens)}`}>
@@ -187,12 +174,7 @@ export function LedgerView({ overview, onOpenPricing }: {
     today.cacheReadTokens,
     today.inputTokens + today.cacheReadTokens + today.cacheWriteTokens,
   )
-  // Whether cache-write is a dimension of THIS ledger at all. Decided per
-  // install, not per day: the aggregate cannot tell "reported 0" from "not
-  // reported" (UsageFields marks it optional, UsageTotals does not), and a
-  // per-day decision would make the grid reflow whenever the channel mix
-  // changes. A zero bucket therefore means "not a dimension here", not "0
-  // tokens today".
+  // 缓存写入是否是本账本的维度。按安装决定而非按天：聚合无法区分「上报了 0」与「未上报」，按天决定会让通道组合变化时网格 reflow。零桶因此表示「本安装不关心这一维」。
   const showCacheWrite = overview.byDay.some(row => row.totals.cacheWriteTokens > 0)
 
   return (
@@ -215,11 +197,7 @@ export function LedgerView({ overview, onOpenPricing }: {
                   {hero.reference.value !== undefined && <> <b>{hero.reference.value}</b></>}
                 </span>
               )}
-              {/* One line per bucket that has something to say; when neither
-                  does, a muted zero holds the row so it never silently
-                  disappears. The zero never borrows the accent color: a
-                  subscription-only day has no cash spend, and the meaningful
-                  number beside it must not read as cash. */}
+              {/* 有话可说的桶各占一行；两者都无话时用一个灰色零撑住行。零从不借强调色：纯订阅日没有现金支出。 */}
               <span className="dtpl-hero-money">
                 {(hero.spend > 0 || hero.subscriptionValue === 0) && (
                   <span className={`dtpl-hero-cost${hero.spend > 0 ? '' : ' dtpl-hero-cost-zero'}`}>
@@ -245,8 +223,7 @@ export function LedgerView({ overview, onOpenPricing }: {
             </div>
           </div>
 
-          {/* One window on the first screen: these tiles break the hero number
-              down, so they are today's — not lifetime. */}
+          {/* 首屏只有一个窗口：这些瓦片拆解的是 hero 数字，所以是今天的——不是累计的。 */}
           <div className="dtpl-sec-head">
             <h2 className="dtpl-sec-title">今日词元构成</h2>
             {hitRate !== null && (
@@ -286,7 +263,7 @@ export function LedgerView({ overview, onOpenPricing }: {
   )
 }
 
-/** Placeholder blocks while the first fetch is in flight; reserves layout space. */
+/** 首次拉取进行中的占位块；预留布局空间。 */
 export function LedgerSkeleton() {
   return (
     <div className="dtpl-skeleton" aria-hidden="true">

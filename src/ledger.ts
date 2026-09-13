@@ -1,10 +1,6 @@
 /**
- * Data-directory resolution for dsh-tokbook.
- *
- * The durable per-day token ledger lives under the resolved data directory
- * (default `$DSH_HOME/tokbook`, else `~/.dsh/tokbook`). The dir can be
- * overridden through the `path` config key so a user can point the book at an
- * existing `dsh-token-usage`-style store.
+ * 数据目录解析与「一目录一写进程」属主标记。默认 `$DSH_HOME/tokbook`，
+ * 否则 `~/.dsh/tokbook`；`path` 配置可指向既有存储。
  *
  * @module dsh-tokbook/ledger
  */
@@ -13,9 +9,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 
-/** Resolve the data directory: an explicit `path` wins; otherwise
- * `$DSH_HOME/tokbook` (a blank `$DSH_HOME` counts as unset), else
- * `~/.dsh/tokbook`. */
+/** 显式 `path` 优先；空白 `$DSH_HOME` 视为未设。 */
 export function defaultDataDir(configPath: string | undefined): string {
   if (configPath !== undefined && configPath !== '') return configPath
   const envHome = process.env.DSH_HOME
@@ -25,9 +19,7 @@ export function defaultDataDir(configPath: string | undefined): string {
   return join(base, 'tokbook')
 }
 
-/** The owner marker file inside a data directory. Its presence records which
- * host process last wrote the ledger; a second live process pointing at the
- * same directory is warned on startup (see {@link warnIfForeignOwner}). */
+/** 属主标记；第二个存活宿主指向同一目录时启动告警。 */
 export const OWNER_FILE = 'owner.json'
 
 interface OwnerMarker {
@@ -35,27 +27,19 @@ interface OwnerMarker {
   startedAt: number
 }
 
-/** Whether a pid is a live process on this host. Best-effort: any failure
- * reading the process (permission, exotic platform) reads as "not alive". */
+/** 尽力而为：权限/平台失败读作「不存活」。 */
 function pidIsAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
     return true
   } catch (error) {
-    // ESRCH = no such process. Anything else (EPERM = exists but not ours)
-    // still means the process IS alive.
+    // ESRCH = 无此进程。其他（EPERM = 存在但不是我们的）仍意味着进程存活。
     return (error as NodeJS.ErrnoException).code === 'EPERM'
   }
 }
 
-/**
- * Startup guard for the "one data directory, one writing process" assumption.
- * Reads the directory's owner marker; when it names a LIVE foreign pid, logs a
- * warning that two hosts are writing the same ledger (JSONL appends would be
- * safe per-row, but rollup/cache/refile races are not). A marker from a dead
- * process (a crash) is stale and only logged as info. Never throws.
- */
+/** 外来存活 pid → 告警（rollup/cache/refile 会竞态；JSONL 逐行追加本身安全）。从不抛。 */
 export async function warnIfForeignOwner(
   dir: string,
   logger: { warn?(...args: unknown[]): void; info?(...args: unknown[]): void } = console,
@@ -76,17 +60,16 @@ export async function warnIfForeignOwner(
       logger.info?.(`[tokbook] data directory ${dir} has a stale owner marker (pid ${String(pid)} is gone); this instance takes over.`)
     }
   } catch {
-    // No marker (first run) or unreadable: nothing to warn about.
+    // 无标记（首次运行）或不可读：无可警告。
   }
 }
 
-/** Write this process's owner marker into the data directory, best-effort.
- * Failure is never fatal (the guard is advisory). */
+/** 把本进程的属主标记写入数据目录，尽力而为。失败从不致命（守卫只是建议性的）。 */
 export async function writeOwnerMarker(dir: string): Promise<void> {
   try {
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, OWNER_FILE), JSON.stringify({ pid: process.pid, startedAt: Date.now() } satisfies OwnerMarker), 'utf8')
   } catch {
-    // Advisory only.
+    // 仅建议性。
   }
 }

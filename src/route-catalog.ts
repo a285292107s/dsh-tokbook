@@ -1,34 +1,25 @@
 /**
- * The route catalog of the 价格表 tab: which provider routes exist and which
- * models each can currently be billed for.
+ * 价格表 tab 的 route catalog：哪些 provider route 存在，各自当前可对哪些
+ * model 计费。
  *
- * The source of truth is the local configuration — the DSH settings document
- * (`llm-pi-ai.providers` for every pi-ai route, `llm-deepseek` for the single
- * direct DeepSeek route) — joined with the LIVE adapter registry, so a route
- * that is registered without being written in the document (a plugin-minted
- * route) still gets a card, and the adapter's own catalog fills in the models
- * of a route whose profile lists none. Whatever neither source knows (a route
- * the ledger billed, a string that only carries a hand-written price) is added
- * by `readPricingView`, which owns the union.
+ * 真源是 settings 文档与活的适配器 registry 联合；两个源都不知道的（账本
+ * 计过费的 route、只带手写价格的串）由 `readPricingView` 补入。
  *
  * @module dsh-tokbook/route-catalog
  */
 
 import type { ModelEntry, RouteCatalogEntry } from './types.ts'
 
-/** The one route the direct DeepSeek adapter owns (`dsh-llm-deepseek`). */
+/** 直连 DeepSeek 适配器（`dsh-llm-deepseek`）拥有的唯一 route。 */
 export const DEEPSEEK_ROUTE = 'deepseek-official'
 
 const PI_AI_NS = 'llm-pi-ai'
 const DEEPSEEK_NS = 'llm-deepseek'
 
-/** Minimal face of the host settings seam (`ctx.settings`). */
 export interface SettingsLike {
   get(ns: string): unknown
 }
 
-/** Minimal face of the host LLM seam (`ctx.llm`). `listModels` carries the
- *  adapter's own display names, the same ones the model picker shows. */
 export interface LlmLike {
   listProviders(): readonly { id: string; name: string }[]
   listModels(provider: string): Promise<readonly { id: string; name?: string }[]>
@@ -45,10 +36,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-/** The models of one `models:` list — entries are `{ id, name? }` objects in
- *  the settings document, a bare string also counts (a hand-trimmed section).
- *  The name is kept: it is what the model picker labels the row with, and the
- *  price table shows it the same way (exact string as the identity beneath). */
+/** settings 文档中的条目是 `{ id, name? }` 对象，裸字符串也算（手工精简过的
+ *  节）。保留 name：模型选择器用它标行，价格表同样展示。 */
 function modelEntries(value: unknown): ModelEntry[] {
   if (!Array.isArray(value)) return []
   const out: ModelEntry[] = []
@@ -66,7 +55,7 @@ function modelEntries(value: unknown): ModelEntry[] {
   return out
 }
 
-/** The routes and models the settings document alone declares. */
+/** 仅 settings 文档声明的 route 与 model。 */
 export function routesFromSettings(settings: SettingsLike | undefined): RouteCatalogEntry[] {
   if (settings === undefined) return []
   const entries: RouteCatalogEntry[] = []
@@ -80,8 +69,8 @@ export function routesFromSettings(settings: SettingsLike | undefined): RouteCat
       entries.push({ route, label: displayName !== '' ? displayName : '', models: modelEntries(raw?.models) })
     }
   }
-  // The direct adapter owns exactly ONE route and writes no route key into the
-  // document: the namespace's presence is what says it is mounted.
+  // 直连适配器恰好拥有**一个** route，且不在文档里写 route key：命名空间的
+  // 存在本身即表示它已挂载。
   const deepseek = asRecord(settings.get(DEEPSEEK_NS))
   if (deepseek !== null) {
     entries.push({ route: DEEPSEEK_ROUTE, label: '', models: modelEntries(deepseek.models) })
@@ -89,10 +78,9 @@ export function routesFromSettings(settings: SettingsLike | undefined): RouteCat
   return entries
 }
 
-/** Route → display name, without asking any adapter for its model list: the
- *  settings profiles' `displayName` first, then the registered adapter's
- *  provider name. The 通道用量 cards head with this; a route neither source
- *  names is simply absent and the card falls back to the route key. */
+/** route → 展示名，不向任何适配器要模型列表：settings profile 的
+ *  `displayName` 优先，其次已注册适配器的 provider 名。通道用量卡以此为题；
+ *  两个源都不命名的 route 直接缺席，卡回落到 route key。 */
 export function routeLabels(
   settings: SettingsLike | undefined,
   llm: LlmLike | undefined,
@@ -114,9 +102,8 @@ export function routeLabels(
   return labels
 }
 
-/** Merge the settings routes with the live adapter registry. A registry route
- *  the document does not carry becomes a card of its own; a route whose
- *  configured model list is empty asks its adapter. */
+/** 合并 settings route 与活的适配器 registry。文档未携带的 registry route 成为
+ *  自己的一张卡；配置模型列表为空的 route 询问其适配器。 */
 export async function collectRoutes(
   settings: SettingsLike | undefined,
   llm: LlmLike | undefined,
@@ -133,8 +120,8 @@ export async function collectRoutes(
     }
     return entry
   }
-  /** Add one model, keeping the first name a source gave it (the settings
-   *  document's name is the user's own wording and wins over the adapter's). */
+  /** 加一个模型，保留某个源给出的第一个名字（settings 文档的名字是用户自己的
+   *  措辞，优先于适配器的）。 */
   const add = (models: Map<string, ModelEntry>, model: ModelEntry): void => {
     const seen = models.get(model.id)
     if (seen === undefined) models.set(model.id, model)
@@ -155,9 +142,8 @@ export async function collectRoutes(
   }
   for (const provider of providers) {
     const acc = ensure(provider.id, provider.name)
-    // The configured list is the user's declaration and wins; only a route that
-    // declares no models asks its adapter (which answers from its own registry,
-    // never the network).
+    // 配置列表是用户的声明，优先；只有未声明模型的 route 才询问适配器
+    // （后者从自身 registry 回答，从不联网）。
     if (acc.models.size > 0 || llm === undefined) continue
     try {
       for (const model of await llm.listModels(provider.id)) {

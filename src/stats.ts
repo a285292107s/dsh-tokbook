@@ -1,12 +1,8 @@
 /**
- * Stats computation of the token-book: read the per-day files and fold the
- * records into totals, per-day rows, per-hour rows and per-(provider, model)
- * rows — keeping one row per (day, model, provider, rate identity) so every
- * record is billed at the price its own timestamp resolved to (see
- * pricing.ratesAt). Frozen (pre-today) day files are served from the on-disk
- * rollup; only today's file is read on every call. Parsed day files are cached
- * in process memory (frozen files stay resident; today's file is re-read when
- * its size/mtime changes).
+ * token-book 的 stats 计算：读各分日文件，折成 totals、按日 / 按小时 /
+ * 按 (provider, model) 行——并保留一行 (日, 模型, provider, rate 身份)。
+ * 已冻结的分日文件从落盘 rollup 提供；只有今日文件每次调用都读。解析后的
+ * 分日文件缓存在进程内存。
  *
  * @module dsh-tokbook/stats
  */
@@ -22,23 +18,19 @@ import {
 } from './types.ts'
 import { billingOf, costOf, priceOfKey } from './pricing.ts'
 
-/** One persisted-session snapshot as the staleness probe reads it: the header
- * plus, when the backend provides one, a cheap change token (a plain-header
- * `list()` fallback carries no `revision`). The header's `cwd` is the join key
- * of the overview's 按工作区 section, so the same listing serves both. */
+/** 陈旧探针读到的持久化会话快照：header，加上（后端有的话）廉价的变更令牌
+ * （纯 header 的 `list()` 回落不带 `revision`）。header 的 `cwd` 是概览「按
+ * 工作区」节的 join 键，故同一次 listing 服务两者。 */
 export interface PersistenceSnapshotLike {
   header: { id: string; cwd?: string }
   revision?: unknown
 }
 
 /**
- * Build the "known synced through" signature map from a snapshot listing:
- * every snapshot that carries a change token maps `id → String(revision)`.
- * Snapshots without a revision (a plain-header `list()` fallback) are left
- * out, so a session with no change token can never be trusted fresh — it is
- * walked again on every probe (request-id dedupe keeps that idempotent).
- * Shared by the in-memory book-keeping and the on-disk sync baseline, so
- * both derive the same map from the same listing.
+ * 从快照 listing 构建「已同步到哪」的签名映射：每个带变更令牌的快照映射
+ * `id → String(revision)`。没有 revision 的快照（纯 header `list()` 回落）被
+ * 跳过——没有变更令牌的会话永远不可信任为「新鲜」，每次探针都会再走一遍
+ * （request-id 去重保证幂等）。
  */
 export function snapshotBaseline(snapshots: readonly PersistenceSnapshotLike[]): Map<string, string> {
   const baseline = new Map<string, string>()
@@ -50,23 +42,9 @@ export function snapshotBaseline(snapshots: readonly PersistenceSnapshotLike[]):
 }
 
 /**
- * Which persisted sessions carry work the ledger does not yet hold. Cheap —
- * it reads only per-session metadata (`listSnapshots()`'s opaque `revision`;
- * equal revisions mean an unchanged log). A session whose id has no recorded
- * signature (brand-new, or recorded by an older run that never folded it), a
- * session whose revision drifted since the recorded signature (a changed or
- * appended log), and a session with no change token at all (cannot be
- * trusted fresh) are all returned. The signature map is the union of the
- * in-memory book-keeping and the persisted cross-process baseline: after a
- * restart it is loaded from disk, so an unchanged session is NOT walked again
- * — only sessions that genuinely changed while the process was down (or are
- * new) come back stale. A session deleted from persistence drops out of the
- * change set (there is nothing left to sync) and the next baseline reset
- * removes it from the record. An empty result means the ledger is current.
- *
- * `syncedOnce` is kept for callers without a persisted baseline (first
- * install, torn baseline): when false, every snapshot is stale so the
- * fallback full walk runs and a fresh baseline can be written.
+ * 哪些持久化会话带着账本尚未持有的工作。廉价——只读每会话元数据。
+ * 会话 id 无记录签名、revision 相对记录签名漂移、以及完全没有变更令牌的
+ * 会话都会返回。`syncedOnce` 为 false 时每个快照都算陈旧（首次安装、基线撕裂）。
  */
 export function staleSessionIds(
   syncedOnce: boolean,
@@ -81,17 +59,13 @@ export function staleSessionIds(
       out.push(id)
       continue
     }
-    // No change token → we cannot tell; walk again (the dedupe makes the
-    // re-fold a no-op for unchanged logs).
+    // 无变更令牌 → 无法判断；再走一遍（去重使对未变日志的重折叠为空操作）。
     if (snap.revision === undefined || syncedBySession.get(id) !== String(snap.revision)) out.push(id)
   }
   return out
 }
 
-/**
- * Whether any persisted session carries work the ledger does not yet hold —
- * the boolean form of {@link staleSessionIds} for a plain skip/-sync gate.
- */
+/** {@link staleSessionIds} 的布尔形，供朴素的 skip/-sync 门使用。 */
 export function isLedgerStale(
   syncedOnce: boolean,
   syncedBySession: ReadonlyMap<string, string>,
@@ -100,22 +74,21 @@ export function isLedgerStale(
   return staleSessionIds(syncedOnce, syncedBySession, snapshots).length > 0
 }
 
-/** Resolves the rate identity one record was billed at. */
+/** 解析一条记录计费所依据的 rate 身份。 */
 export type RateResolver = (record: UsageRecord) => RateKey
 
-/** Logger face used across the stats module (duck-typed). */
+/** stats 模块使用的 logger 面（duck-typed）。 */
 export type StatsLogger = { error(...args: unknown[]): void; info?(...args: unknown[]): void }
 
 const consoleLogger: StatsLogger = console
 
 const DAY_FILE = /^usage-(\d{4}-\d{2}-\d{2})\.jsonl$/u
 
-/** The date part of a day-file name, or null for a foreign name. */
+/** 分日文件名中的日期部分；外来文件名为 null。 */
 export function fileDay(name: string): string | null {
   return DAY_FILE.exec(name)?.[1] ?? null
 }
 
-/** Local date key of a clock reading, matching the day-file naming convention. */
 function dayKey(time: number): string {
   const date = new Date(time)
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -129,23 +102,19 @@ function hourKey(time: number): string {
   return `${dayKey(time)}T${hour}`
 }
 
-/** Local-midnight epoch of a day key. */
 function dayStart(day: string): number {
   const [year, month, date] = day.split('-').map(Number)
   return new Date(year!, month! - 1, date!).getTime()
 }
 
-/** Local date key of an epoch offset (n days back from a reference key). */
 function dayKeyOffset(day: string, back: number): string {
   const [year, month, date] = day.split('-').map(Number)
   return dayKey(new Date(year!, month! - 1, date! - back).getTime())
 }
 
-/** The inclusive local-day bounds of a Provider-usage window: the first and
- * last day key covered, given the local date of "now". `today` covers the
- * running day only; `yesterday` the previous day; `last7`/`last30` count back
- * whole calendar days including today (so a day with no records is skipped by
- * the file reader, never miscounted). */
+/** Provider 用量窗口的本地日闭区间：给定「现在」的本地日期，返回覆盖的首日与
+ * 末日键。`today` 只盖当日；`yesterday` 盖前一天；`last7`/`last30` 向前数整个
+ * 日历日（含今日）。 */
 export function rangeDayWindow(range: ProviderRange, now: () => Date = () => new Date()): { fromDay: string; toDay: string } {
   const to = dayKey(now().getTime())
   const back = range === 'yesterday' ? 2 : range === 'last7' ? 7 : range === 'last30' ? 30 : 1
@@ -153,7 +122,7 @@ export function rangeDayWindow(range: ProviderRange, now: () => Date = () => new
 }
 
 // ---------------------------------------------------------------------------
-// Record cache (process-memory parse of day files)
+// 记录缓存（分日文件的进程内存解析）
 // ---------------------------------------------------------------------------
 
 interface FileEntry {
@@ -177,7 +146,7 @@ function stateOf(dir: string): DirCache {
   return created
 }
 
-/** Drop cached parses. A missing `dir` clears every directory (test seam). */
+/** 丢弃缓存的解析。省略 `dir` 清空所有目录（测试缝）。 */
 export function clearRecordCache(dir?: string): void {
   if (dir === undefined) dirs.clear()
   else dirs.delete(dir)
@@ -197,7 +166,7 @@ async function readDayFile(dir: string, name: string, logger: StatsLogger = cons
   return records
 }
 
-/** List the data directory's day-file names in ascending date order ([] when absent). */
+/** 列出数据目录中按日期升序的分日文件名（目录不存在时为 []）。 */
 export async function listDayFiles(dir: string): Promise<string[]> {
   let names: string[]
   try {
@@ -218,10 +187,8 @@ async function fileStamp(dir: string, name: string): Promise<{ size: number; mti
   }
 }
 
-/** Load one day file through the directory cache: frozen (pre-today) files are
- * append-only history, so their first parse is the last; today's file is
- * re-read when its size/mtime changed since the cached parse. Returns the
- * cached records when the cache is warm and current, else a fresh parse. */
+/** 经目录缓存加载一个分日文件：冻结（今日之前）文件是只追加的历史，首次解析
+ * 即最终；今日文件在 size/mtime 相对缓存解析变化时重读。 */
 async function loadFileCached(cache: DirCache, dir: string, name: string, hot: boolean, logger: StatsLogger): Promise<UsageRecord[]> {
   const cached = cache.files.get(name)
   if (!hot && cached !== undefined) return cached.records
@@ -254,8 +221,8 @@ async function loadDir(dir: string, cache: DirCache, now: () => Date, logger: St
   return out
 }
 
-/** Read every day file into records, serving frozen files from memory after
- * the first parse. An absent data directory yields an empty list. */
+/** 读入所有分日文件为记录，冻结文件首次解析后从内存提供。数据目录不存在时
+ * 返回空列表。 */
 export async function readCachedRecords(dir: string, now: () => Date = () => new Date(), logger: StatsLogger = consoleLogger): Promise<UsageRecord[]> {
   const cache = stateOf(dir)
   if (cache.inflight !== undefined) return cache.inflight
@@ -267,11 +234,9 @@ export async function readCachedRecords(dir: string, now: () => Date = () => new
 }
 
 /**
- * Read the records of one inclusive local-day window `[fromDay, toDay]`, the
- * reader behind the Provider-usage tab. Only day files inside the window are
- * touched (frozen ones served from the shared parse cache), so a 7/30-day
- * window never costs a full-history decode. A data directory without the
- * window's files yields an empty list; `fromDay > toDay` also reads nothing.
+ * 读闭区间 `[fromDay, toDay]` 内的记录——Provider 用量 tab 背后的读取器。
+ * 只碰窗口内的分日文件（冻结文件走共享解析缓存），故 7/30 天窗口从不付出全史
+ * 解码的代价。
  */
 export async function readRecordsByDayRange(
   dir: string,
@@ -296,30 +261,24 @@ export async function readRecordsByDayRange(
   return out
 }
 
-/** Populate the cache for one directory so the first stats poll is a memory hit. */
+/** 预热一个目录的缓存，使首次 stats 轮询是内存命中。 */
 export async function warmRecordCache(dir: string, now?: () => Date, logger?: StatsLogger): Promise<void> {
   await readCachedRecords(dir, now, logger)
 }
 
 // ---------------------------------------------------------------------------
-// Rollup (derived aggregate of frozen day files)
+// Rollup（冻结分日文件的派生聚合）
 // ---------------------------------------------------------------------------
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
-/** Rollup format version. v5 dropped the cached `recent` window (v4 kept the
- *  newest rows for the overview's 最近记录 list); a rollup of any other version
- *  is treated as absent and rebuilt from the day files, so a format change can
- *  never silently mis-merge rows. */
 export const ROLLUP_SCHEMA_VERSION = 5
 
 export interface RollupFile {
   schemaVersion: number
   upto: string
-  /** Signature of the price file these rate rows were folded under. A rate row
-   *  is keyed by a value derived FROM the price table, so a different price file
-   *  makes every frozen row meaningless — the rollup is then rebuilt from the
-   *  day files. Empty = no price file. */
+  /** 这些 rate 行所折叠的价文件签名。rate 行以**源自价表**的值为键，不同价
+   *  文件使每个冻结行失去意义——此时 rollup 从分日文件重建。空 = 无价文件。 */
   pricingRevision: string
   total: UsageTotals
   byDay: UsageDayRow[]
@@ -337,7 +296,6 @@ function isTotals(value: unknown): value is UsageTotals {
 }
 
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/u
-const HOUR_KEY = /^\d{4}-\d{2}-\d{2}T\d{2}$/u
 
 function isSlotRef(value: unknown): value is SlotRef {
   if (typeof value !== 'object' || value === null) return false
@@ -366,10 +324,9 @@ function isRollupFile(value: unknown): value is RollupFile {
     && Array.isArray(rollup.rateRows)
 }
 
-/** Load the rollup of one data directory. A missing, malformed, or invalid
- * rollup reads as null — the caller then rebuilds it from the day files. A
- * rollup folded under a DIFFERENT price file is invalid too: its rate rows name
- * segments of a table that no longer exists. */
+/** 加载一个数据目录的 rollup。缺失、畸形或非法的 rollup 读作 null——调用方
+ * 随后从分日文件重建。在**不同**价文件下折叠的 rollup 同样非法：其 rate 行
+ * 命名的是已不存在的表的段。 */
 export async function readRollup(
   dir: string,
   logger: StatsLogger = consoleLogger,
@@ -394,11 +351,9 @@ export async function readRollup(
   return value
 }
 
-/** Persist the rollup atomically (temp file + rename), so a crash mid-write
- * leaves either the old or the new rollup, never a torn one. The target is
- * unlinked first: Windows rename-over-existing fails intermittently. The
- * current schema version is stamped, so an old-format rollup reads as absent
- * and rebuilds. */
+/** 原子落盘 rollup（临时文件 + rename），写中崩溃只会留下旧的或新的，绝非
+ * 撕裂的。先 unlink 目标：Windows 覆盖 rename 间歇失败。盖上当前 schema 版本，
+ * 旧格式 rollup 读作不存在并重建。 */
 export async function writeRollup(dir: string, rollup: RollupFile): Promise<void> {
   const target = join(dir, ROLLUP_FILE_NAME)
   const tmp = join(dir, `${ROLLUP_FILE_NAME}.tmp`)
@@ -408,10 +363,10 @@ export async function writeRollup(dir: string, rollup: RollupFile): Promise<void
 }
 
 // ---------------------------------------------------------------------------
-// Aggregation
+// 聚合
 // ---------------------------------------------------------------------------
 
-/** Zeroed totals; requests counts rows, the token buckets sum reported usage. */
+/** 置零的 totals。 */
 export function emptyTotals(): UsageTotals {
   return {
     requests: 0,
@@ -476,8 +431,7 @@ function rateRowsSorted(rows: Iterable<UsageRateRow>): UsageRateRow[] {
           : compareKeys(left.rate, right.rate))
 }
 
-/** The provider key of one record for aggregation identity ('' = unattributed,
- * displayed as "(未知)" at the surface). */
+/** 一条记录在聚合身份中的 provider 键（'' = 未归属，界面上显示「(未知)」）。 */
 function providerKey(provider: string | undefined): string {
   return provider ?? ''
 }
@@ -486,10 +440,7 @@ function modelMapKey(provider: string | undefined, model: string): string {
   return `${providerKey(provider)}\n${model}`
 }
 
-/** The aggregation identity of one rate row: the segment instant, plus the
- *  exception slot that applied inside it (`-` = the segment's whole-day
- *  price). Two rows of one (day, model, provider) therefore never mix a peak
- *  hour with an off-peak one. */
+/** 一行 rate 行的聚合身份：段时刻 + 段内生效的例外时段（`-` = 段的全天价）。 */
 function rateRowKey(day: string, model: string, provider: string | undefined, rate: RateKey): string {
   const slot = rate.slot === undefined || rate.slot === null ? '-' : `${String(rate.slot.start)}:${rate.slot.days}`
   return `${day}\n${model}\n${providerKey(provider)}\n${String(rate.from)}\n${slot}`
@@ -499,8 +450,8 @@ function hourRowKey(hour: string, model: string): string {
   return `${hour}\n${model}`
 }
 
-/** Fold one record into totals; a record without provider usage still counts a
- * request, and a failure record counts only the `failures` dimension. */
+/** 把一条记录折入 totals；没有 provider usage 的记录仍计入 request，失败记录
+ * 只计入 `failures` 维度。 */
 function addUsage(totals: UsageTotals, record: UsageRecord): void {
   if (record.kind === 'failure') {
     totals.failures = (totals.failures ?? 0) + 1
@@ -522,10 +473,9 @@ function addUsage(totals: UsageTotals, record: UsageRecord): void {
   if (usage.cacheWriteTokens !== undefined) totals.cacheWriteTokens += usage.cacheWriteTokens
 }
 
-/** Fold records into the token-summary shape, one rate row per (day, model,
- * provider, rate identity) the resolver assigns, and one model row per
- * (provider, model) pair — the same model string billed by two providers must
- * NOT merge, because the price and billing nature are provider-specific. */
+/** 把记录折成 token-summary 形状：resolver 指定的每个 (日, 模型, provider,
+ * rate 身份) 一行 rate 行，每个 (provider, model) 一行模型行——同一 model 串被
+ * 两个 provider 计费时**不得**合并，因为价格与计费性质是 provider 特有的。 */
 export function summarizeRecords(records: readonly UsageRecord[], resolve: RateResolver = () => UNPRICED_KEY): TokenSummary {
   const total = emptyTotals()
   const days = new Map<string, UsageTotals>()
@@ -538,9 +488,8 @@ export function summarizeRecords(records: readonly UsageRecord[], resolve: RateR
     const dayTotals = days.get(day) ?? emptyTotals()
     addUsage(dayTotals, record)
     days.set(day, dayTotals)
-    // An unattributed failure (`model === ''`) still folds into totals and
-    // byDay; it stays out of byModel / byHour — a blank table row would
-    // pretend we know the route.
+    // 未归属失败（`model === ''`）仍计入 totals 与 byDay；不进 byModel / byHour
+    // ——空白表格行会假装我们知道 route。
     if (record.model !== '') {
       const hour = hourKey(record.time)
       const hourTotals = hours.get(hourRowKey(hour, record.model)) ?? emptyTotals()
@@ -567,7 +516,7 @@ export function summarizeRecords(records: readonly UsageRecord[], resolve: RateR
   return { total, byDay, byHour, byModel, rateRows: rateRowsSorted(rated.values()) }
 }
 
-/** Merge two summaries into one. Order-independent and associative. */
+/** 合并两个 summary 为一个。与顺序无关、可结合。 */
 export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSummary {
   const total = emptyTotals()
   addTotals(total, left.total)
@@ -614,17 +563,13 @@ export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSu
   }
 }
 
-/** Attach the cost layer to a token-only summary: every rate row is priced by
- * looking its (route, model, rate identity) back up in the current price table
- * — the row's identity is the effective instant of the segment that applied
- * plus the exception slot that applied inside it, so a rate edit re-prices
- * history without a rebuild. Each row's amount lands in the bucket its ROUTE's
- * billing names: `metered` routes accumulate into `spend`, `subscription`
- * routes into `subscriptionValue`; `totalCost` stays the sum of both. Rows the
- * table cannot price cost ¥0 and their model strings surface in
- * `unpricedModels` — that covers both a (route, model) nothing prices and a row
- * whose own identity (a segment instant, or an exception slot that was moved or
- * deleted) the table no longer holds. */
+/** 给纯 token summary 叠上成本层：每个 rate 行以其 (route, model, rate 身份)
+ *  在当前价表回查定价——行的身份是当时生效段的生效时刻 + 段内生效的例外时段，
+ *  故改价无需重建即可重算历史。每行金额落入其 **route** 计费性质命名的桶：
+ *  `metered` 累进 `spend`，`subscription` 累进 `subscriptionValue`；
+ *  `totalCost` 仍是两者之和。表无法定价的行计 ¥0，其 model 串进入
+ *  `unpricedModels`——既覆盖无人定价的 (route, model)，也覆盖自身身份（段时刻，
+ *  或被移动/删除的例外时段）表里已不存在的行。 */
 export function attachCosts(
   summary: TokenSummary & { dataDir: string },
   pricing: PricingTable,
@@ -642,8 +587,7 @@ export function attachCosts(
   for (const row of summary.rateRows) {
     const prices = priceOfKey(pricing, row.provider, row.model, row.rate)
     if (prices === null) {
-      // An unattributed failure's blank model string stays out, the way it stays
-      // out of byModel.
+      // 未归属失败的空白 model 串不进，与它不进 byModel 一致。
       if (row.model !== '') unpriced.add(row.model)
       continue
     }
@@ -695,12 +639,11 @@ export function attachCosts(
   }
 }
 
-/** Build the full stats payload for one data directory: the rollup over every
- * frozen day file merged with a fresh read of today's file.
+/** 构建一个数据目录的完整 stats 载荷：所有冻结分日文件的 rollup 合并今日文件
+ * 的新鲜读取。
  *
- * `pricingRevision` is the price file signature the caller resolved rates
- * against; a rollup folded under a different one is discarded and rebuilt, so a
- * price edit re-prices every frozen day. */
+ * `pricingRevision` 是调用方解析 rate 所依据的价文件签名；在不同签名下折叠的
+ * rollup 会被丢弃并重建，因此改价会重算每个冻结日。 */
 export async function buildSummary(
   dir: string,
   now: () => Date = () => new Date(),

@@ -1,93 +1,55 @@
 /**
- * styles.ts fragment: the 调价史 drawer's axis (`Pricing/Timeline.tsx`).
+ * styles.ts 片段：调价史抽屉里的时间轴（`Pricing/Timeline.tsx`）。
  *
- * The axis is a rail with dated nodes on it: 首记 and 今天 label the two ends
- * ABOVE the rail, one dot per 调价 sits on it with its date UNDER it. Nothing
- * else — the bar-per-segment, the state tags and the note under the axis are gone
- * (the module doc in `Timeline.tsx` says why), so this fragment no longer borrows
- * the ledger trend chart's language: all it has to make legible is one horizontal
- * line, N dots and N dates.
- *
- * Cascade order is part of the contract (`client/styles.ts`): this fragment
- * follows the pricing one and only adds `.dtpl-tl-*`, so it cannot disturb it.
+ * 轨道只是量尺：轨、点、标签都按 JS 量出的宽度定位（最小间距是像素宽度，百分比挡不住两个标签在窄抽屉里叠在一起）。级联顺序是契约：本片段跟在 pricing 之后，只加 `.dtpl-tl-*`。
  */
 export const CSS_PRICING_TIMELINE = `
 [data-plugin="dsh-tokbook"] .dtpl-tl{padding:1px 0 0;}
-/* The track is only a measuring box: the rail, the dots and the labels are all
-   placed against the width JS measured (a minimum gap is a px width, and a
-   percentage cannot keep two labels from piling up in a narrow drawer). Three
-   rows, top to bottom: the bracket's two labels (首记 / 今天), the rail with its
-   dots, and the 调价 dates — 12 + 5 + 3 + 4 + 12 = 36px. */
+/* 轨道只是量尺：轨、点、标签都按 JS 量出的宽度定位（最小间距是像素宽度，百分比挡不住两个标签在窄抽屉里叠在一起）。自上而下三行：括号的两个标签、带点的轨、调价日期——12 + 5 + 3 + 4 + 12 = 36px。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-track{position:relative;height:36px;}
-/* The rail is the skin's tertiary label color, not a wash of the foreground: it
-   has to READ as the line the dates hang from (a 22% mix measured ~2:1 on the
-   card and all but vanished), while staying subordinate to the dots. fg-3 is the
-   token for exactly that — 3.18:1 on a light card (D-016) and 6.2:1 on this dark
-   one. 3px, not a hairline: at 1px it read as a stray rule rather than as the
-   axis the nodes are threaded on (2px still read thin beside the 5px dots). */
+/* 轨用皮肤的三级文字色，而不是前景色的稀释洗色：它必须读成日期挂靠的那条线。3px，不是 hairline：1px 读起来像一条游离分隔线。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-rail{
   position:absolute;left:0;right:0;top:17px;height:3px;
   border-radius:1.5px;background:var(--dtpl-fg-3);
 }
-/* One node: its dot on the rail, its date UNDER it. A node with a segment behind
-   it is a button (the axis is navigation, not decoration); an end with no 调价 on
-   it is a plain element, so the pointer never promises a jump that does not
-   exist. The box is the whole track high, which is what makes a 5px dot a 36px
-   target. */
+/* 一个节点：点在轨上，日期挂在点下方。背后有分段的节点是 button（轴是导航，不是装饰）。盒子占满整个轨道高度——这才让 5px 的点拥有 36px 热区。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-node{
   position:absolute;top:0;left:0;height:100%;
   appearance:none;font:inherit;text-align:center;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] button.dtpl-tl-node{
   border:0;background:transparent;padding:0;margin:0;cursor:pointer;
-  /* A <button> with a definite height centres its content box vertically (UA
-     button layout) — and this box is the whole track high, so on the rows whose
-     left end carries a node (the 无起点 segment anchored at 首记) the 首记 label
-     landed 12px low, in the middle row, while the plain <span> ends stayed on
-     top. Making the button a column flex container takes that centring away:
-     justify-content:flex-start puts the label back at the box's top. */
+  /* 有确定高度的 <button> 会把内容盒垂直居中（UA button 布局）——而这盒子占满整个轨道高度，所以在左端带节点的行上首记标签会沉到 12px 低处。把 button 改成 column flex 容器可以取消居中。 */
   display:flex;flex-direction:column;justify-content:flex-start;
 }
-/* Every node but the two ends is centred on the dot it belongs to. */
+/* 两端以外的每个节点都以自己所属的点为中心。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-node:not([data-cap]){transform:translateX(-50%);}
-/* A 调价 date hangs BELOW the rail (24–36px); the bracket's own two labels stay
-   ABOVE it (0–12px, the node box's natural top) — they name the range's ends, not
-   one of the dots, so they read as the axis's caps rather than as two more
-   nodes. */
+/* 调价日期挂在轨下方（24–36px）；括号自己的两个标签留在上方——它们命名的是区间的两端，不是某个点。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-node-k{
   display:block;margin-top:24px;
   font-size:9px;line-height:12px;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap] .dtpl-tl-node-k{margin-top:0;}
-/* The dot sits ON the rail: 5px at 16px over a 3px line at 17px centres both at
-   18.5. fg-2, not fg-3: the dot is a non-text object and needs 3:1 against what
-   it sits on (D-016 measured fg-3 at 2.48:1 here). */
+/* 点落在轨上：5px 在 16px 处、3px 的线在 17px 处，两者中心都在 18.5。fg-2，不是 fg-3：点是非文字物体，需要与所处表面 3:1。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-dot{
   position:absolute;top:16px;left:50%;
   width:5px;height:5px;border-radius:50%;box-sizing:border-box;
   background:var(--dtpl-fg-2);transform:translateX(-50%);
 }
-/* The two ends hold their labels inside the track — the first one starts at its
-   left edge, the last one ends at its right edge — and their dots sit on those
-   very edges. They ARE the bracket, so nothing pushes them inward. */
+/* 两端把标签收在轨道内——第一个从左缘起，最后一个到右缘止。它们本身就是括号，所以没有任何东西往里推。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap="start"]{left:0;text-align:left;}
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap="today"]{left:auto;right:0;text-align:right;}
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap="start"] .dtpl-tl-dot{left:0;}
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap="today"] .dtpl-tl-dot{left:100%;}
-/* The price in force today: the one node that is a state and not only a date.
-   Accent (3.72:1 on the card, D-016) plus a wider dot — the cue is not carried
-   by color alone, and the row and the segment list still say it in words. */
+/* 今日生效价：唯一一个既是状态又不仅是日期的节点。accent 色加更宽的点——提示不单靠颜色，行与分段列表里仍用文字再说一遍。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-active="true"] .dtpl-tl-node-k{
   color:var(--dtpl-fg);font-weight:600;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-active="true"] .dtpl-tl-dot{
   top:15.5px;width:6px;height:6px;background:var(--dtpl-accent);
 }
-/* Hover wakes the node up: the date and the dot ARE the control's body, so they
-   have to show it is one. Focus: a 2px ring with an offset, the size WCAG 2.2's
-   focus-appearance asks for; a 1px hairline was too easy to miss on a 5px dot.
-   Nothing here animates, so there is no reduced-motion branch to take. */
+/* 悬停唤醒节点：日期和点就是这个控件的身体，必须显示「这是一个整体」。焦点：2px 环 + offset，即 WCAG 2.2 focus-appearance 要求的尺寸。 */
 [data-plugin="dsh-tokbook"] button.dtpl-tl-node:hover .dtpl-tl-node-k{color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] button.dtpl-tl-node:hover .dtpl-tl-dot{
   box-shadow:0 0 0 2px color-mix(in srgb,var(--dtpl-fg) 18%,transparent);

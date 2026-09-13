@@ -1,4 +1,4 @@
-/** styles.ts fragment: tokens. Concatenated in order by `injectStyles`. */
+/** styles.ts 片段：tokens。由 `injectStyles` 按序拼接。 */
 export const CSS_TOKENS = `
 [data-plugin="dsh-tokbook"]{
   --dtpl-fg:var(--dsw-alias-label-primary,#1f2328);
@@ -13,11 +13,10 @@ export const CSS_TOKENS = `
   --dtpl-surface:var(--dsw-alias-bg-layer-1,#ffffff);
   --dtpl-border:var(--dsw-alias-border-l2,rgba(0,0,0,.12));
   --dtpl-hairline:var(--dsw-alias-border-l1,rgba(0,0,0,.08));
-  /* --dsw-corner-shape is a superellipse SHAPE keyword (superellipse(1.5)),
-     never a length - feeding it into border-radius makes the declaration
-     invalid and the radius collapse to 0 on real DSH skins. Keep radius as a
-     plain length; DSH's own 'corner-shape' universal rule adds the curvature
-     on top, and full-round shapes pair 'corner-shape:round' locally. */
+  /* --dsw-corner-shape 是超椭圆形状关键字（superellipse(1.5)），绝不是长度——
+     喂进 border-radius 会让声明失效、在真实 DSH 皮肤上圆角塌成 0。半径保持
+     纯长度；曲率由 DSH 自己的 'corner-shape' 通用规则叠加，全圆形状再在
+     局部配 'corner-shape:round'。 */
   --dtpl-radius:20px;
   --dtpl-radius-sm:9px;
   --dtpl-ok:var(--dsw-alias-state-success-primary,#1a7f37);

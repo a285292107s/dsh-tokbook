@@ -1,10 +1,10 @@
-/** styles.ts fragment: quota. Concatenated in order by `injectStyles`. */
-export const CSS_QUOTA = `/* ── quota tab (订阅额度) ────────────────────────────────────────────────── */
+/** styles.ts 片段：quota。由 `injectStyles` 按序拼接。 */
+export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sec{display:flex;flex-direction:column;gap:10px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-intro{
   margin:0;font-size:12px;line-height:20px;color:var(--dtpl-fg-2);
 }
-/* Segmented auto-refresh control: label + pill options + live state. */
+/* 自动刷新：标签 + pill 选项 + 实时状态。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh{
   display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   padding:6px 10px;
@@ -39,14 +39,14 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-state.dtpl-quota-autorefresh-live{color:var(--dtpl-ok);}
 
 [data-plugin="dsh-tokbook"] .dtpl-quota-cards{display:flex;flex-direction:column;gap:12px;}
-/* One provider card: a soft washed panel; body sections separated by hairlines. */
+/* 单个通道卡片：柔和洗底；正文各节用 hairline 分隔。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-card{
   padding:14px 16px 12px;
   border-radius:var(--dtpl-radius-sm);corner-shape:round;
   background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
   box-shadow:inset 0 0 0 .5px var(--dtpl-hairline);
 }
-/* Card header: identity (ring gauge + name/sub) | state chip + refresh. */
+/* 卡片头：身份（环形量规 + 名称/副行）| 状态 chip + 刷新。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-head{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
   margin-bottom:12px;
@@ -54,8 +54,7 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
 [data-plugin="dsh-tokbook"] .dtpl-quota-id{
   display:flex;align-items:center;gap:10px;min-width:0;
 }
-/* Reserved slot for the leading monthly ring gauge; keeps the title from
-   shifting when a card is loading / errored / unconfigured (no ring). */
+/* 月度环形量规的预留槽；加载 / 出错 / 未配置（无环）时标题不位移。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-state-gap{
   flex:none;width:44px;height:44px;
 }
@@ -72,7 +71,7 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   display:flex;align-items:center;gap:8px;flex:none;
   min-width:0;
 }
-/* Per-card refresh: compact icon button, disabled while a fetch is in flight. */
+/* 单卡刷新：紧凑图标钮，请求在飞时禁用。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh{
   display:inline-flex;align-items:center;justify-content:center;
   width:28px;height:28px;padding:0;
@@ -82,9 +81,7 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh:hover:not(:disabled){background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh:disabled{opacity:.45;cursor:default;}
-/* The wrapper owns the one-shot click "pop": remounting it (via React key)
-   restarts the animation on every press. Separate from the glyph so the
-   loading spinner (rotation) below never cancels it. */
+/* 外层容器拥有一次性点击「pop」：靠 React key 重挂载。与字形分离，这样下面的加载 spinner（旋转）不会互相抵消。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim{
   display:inline-flex;align-items:center;justify-content:center;
 }
@@ -92,7 +89,7 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   animation:dtpl-refresh-pop .35s cubic-bezier(.34,1.56,.64,1);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-ico{width:15px;height:15px;display:block;}
-/* State chips (unconfigured / fetch error). */
+/* 状态 chip（未配置 / 拉取失败）。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-chip{
   flex:none;display:inline-flex;align-items:center;gap:6px;
   height:22px;padding:0 10px;
@@ -111,19 +108,12 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   color:var(--dtpl-err);
   background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);
 }
-/* Balance-gate chip (无生效订阅): not an error — the account still works, it is
-   just no longer paced by a plan's rolling windows — so it reads as a caution
-   rather than a failure. */
+/* 余额门控 chip（无生效订阅）：不是错误——账号仍可用，只是不再按套餐滚动窗口节奏。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-chip-gate{
   color:var(--dtpl-warn);
   background:color-mix(in srgb,var(--dtpl-warn) 12%,transparent);
 }
-/* Monthly-budget ring gauge. Sits in the header identity slot on the card's
-   leading edge (where the plan monogram used to be): the ring stroke carries
-   the tone and the used-% number is centered *inside* the ring, with the
-   budget it refers to (本月 by default — see ringPressure) as a small
-   caption beneath the number, so the ring never silently means a different
-   window. */
+/* 月度预算环形量规。环描边带色调，已用 % 数字居中在环*内*，它所指的预算以小号说明挂在数字下方，环从不静默地换含义。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge{
   position:relative;flex:none;width:44px;height:44px;
   color:var(--dtpl-fg);
@@ -149,12 +139,11 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   font-style:normal;font-size:8px;line-height:1;font-weight:600;
   color:var(--dtpl-fg-3);margin-left:.5px;
 }
-/* Small caption naming the budget the ring summarizes (本月 / a fallback
-   window label). Muted so the tone-colored number stays the focal point. */
+/* 命名这个环所汇总的预算的小号说明。弱化，让色调数字仍是焦点。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-cap{
   font-size:8px;line-height:1;font-weight:600;color:var(--dtpl-fg-3);
 }
-/* In-card message panel (load failure / unconfigured / fetch error). */
+/* 卡内消息面板（加载失败 / 未配置 / 拉取失败）。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg{
   display:flex;flex-direction:column;align-items:flex-start;gap:2px;
   padding:10px 12px;margin:2px 0 6px;
@@ -171,7 +160,7 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   overflow-wrap:anywhere;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg .dtpl-retry{margin-top:6px;}
-/* Stale-while-revalidate note above an ok body. */
+/* ok 正文上方的 stale-while-revalidate 提示。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-stale{
   margin:0 0 8px;padding:6px 10px;
   border-radius:7px;corner-shape:round;
@@ -179,7 +168,7 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   color:var(--dtpl-warn);
   font-size:11px;line-height:16px;
 }
-/* Meter rows: one per budget window, on one skeleton for every data shape. */
+/* 用量条：每个预算窗口一行，所有数据形态共用同一骨架。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-windows{display:flex;flex-direction:column;gap:12px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-window{display:flex;flex-direction:column;gap:5px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-window-line1{
@@ -220,8 +209,7 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-reset-limited{color:var(--dtpl-err);font-weight:600;}
-/* Balance-gated body: the credit balance leads where the meters would be. A
-   balance has no denominator, so there is no percentage to draw and no ring. */
+/* 余额门控正文：余额顶在用量条该在的位置。余额没有分母，没有百分比可画，也没有环。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance{display:flex;align-items:baseline;gap:8px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-v{
   color:var(--dtpl-fg);font-size:22px;line-height:26px;font-weight:700;
@@ -233,14 +221,12 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-note{
   margin:6px 0 0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
 }
-/* Credit sources (月额度 / 已购 / 赠送): one compact line under the balance —
-   and under the meters for an in-force card that carries top-up credits. */
+/* 额度来源（月额度 / 已购 / 赠送）：余额下的一行紧凑说明——带加购额度的生效卡则在用量条下方。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sources{
   margin:8px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
   font-variant-numeric:tabular-nums;
 }
-/* Usage-summary activity strip (Command Code): mini K/V cells, at the bottom
-   of an ok body as the "how was this period" context under the meter rows. */
+/* 用量摘要活动条：迷你 K/V 格，放在 ok 正文底部，作为用量条下方「这段时间怎么样」的语境。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-stats{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;
   margin-top:12px;padding-top:12px;
@@ -262,15 +248,12 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-stat-k{color:var(--dtpl-fg-3);font-size:11px;line-height:16px;}
-/* Freshness label in the card header, before the refresh button: when the
-   official numbers were fetched (honesty for cached renders). Raised from the
-   footnote size/dim tone it used to have — it now sits on the card's washed
-   panel next to an interactive control, so it must be plainly legible. */
+/* 卡片头刷新钮前的新鲜度标签：官方数字何时拉回。从原先的脚注尺寸/弱化色调抬上来——它现在坐在卡片洗底面板上、紧挨可交互控件。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-updated{
   color:var(--dtpl-fg-2);font-size:11px;line-height:16px;font-weight:500;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
-/* Loading placeholder shaped like a card body. */
+/* 卡片正文形状的加载占位。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-body{display:flex;flex-direction:column;gap:8px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-card{height:150px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-line{height:14px;width:55%;border-radius:5px;}
@@ -280,7 +263,7 @@ export const CSS_QUOTA = `/* ── quota tab (订阅额度) ──────�
   margin:10px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
 }
 
-/* 价格未知 note's cross-tab link (overview → 价格表 with that filter on). */
+/* 「价格未知」提示的跨 tab 链接（总览 → 价格表，带着该筛选）。 */
 [data-plugin="dsh-tokbook"] .dtpl-pricing-empty-link{
   appearance:none;border:0;background:transparent;padding:0;
   font:inherit;font-size:inherit;color:var(--dtpl-accent);

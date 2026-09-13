@@ -1,36 +1,17 @@
 /**
- * Official-usage fetchers for the 订阅额度 tab.
+ * 订阅额度 tab 的官方用量拉取器。
  *
- * The tab shows *account-level* subscription usage, and the only correct
- * source for that is the provider's own account API — a local ledger cannot
- * see usage from other tools/devices sharing the same subscription key. This
- * module resolves the key through the DSH credentials service
- * (`ctx.credentials`, the same seam the provider adapters use — a key the
- * user stored in the Models/settings page lives there under the reference
- * name the provider's `apiKeyEnv` declares, e.g. `COMMANDCODE_API_KEY` /
- * `OPENCODE_GO_API_KEY`), then fetches the provider's official usage endpoint.
+ * tab 展示**账户级**订阅用量，其唯一正确来源是 provider 自己的账户 API——
+ * 本地账本看不到共享同一订阅 key 的其他工具/设备的用量。本模块经 DSH 凭据
+ * 服务（`ctx.credentials`）解析 key，然后拉取 provider 的官方用量端点。
  *
- * Endpoints (both mirror what the respective official CLIs use; see the
- * source notes):
- *  - Command Code (mirrors dsh-commandcode-provider / the official `cmd` CLI):
- *      GET {base}/alpha/whoami
- *      GET {base}/alpha/usage/summary?since=<current period start>
- *      GET {base}/alpha/billing/credits        → credits + windowLimits{fiveHour,weekly}
- *      GET {base}/alpha/billing/subscriptions  → plan identity + period
- *    Auth: `Authorization: Bearer <key>` + CLI version / environment headers.
- *    The card also carries its usage *gate* (`QuotaGate`): whether an in-force
- *    subscription — and therefore the rolling windows and monthly pool — is
- *    what bounds the account, or only its credit balance.
- *  - OpenCode Go (live endpoint — see cc-switch #6433 / dsh-opencode-go-usage):
- *      GET https://opencode.ai/zen/go/v1/usage  → { usage: {
- *           rolling|weekly|monthly: { status, percent, resetsAt } } }
- *    Auth: `Authorization: Bearer <key>` (+ a browser User-Agent, since the
- *    endpoint sits behind Cloudflare). 401 = bad key (an `error` card);
- *    403 = valid key without a Go subscription (Zen and Go share the workspace
- *    key), answered as a `gate: 'none'` state card rather than a failure.
+ * Command Code：`/alpha/whoami` + `/alpha/billing/credits` + `/alpha/billing/subscriptions`
+ * + `/alpha/usage/summary`；认证 `Authorization: Bearer <key>` + CLI 版本头。
+ * OpenCode Go：`https://opencode.ai/zen/go/v1/usage`；认证 Bearer key + 浏览器
+ * User-Agent（端点在 Cloudflare 后面）。401 = 坏 key；403 = 有效 key 但无 Go
+ * 订阅（Zen 与 Go 共享 workspace key），答为 `gate: 'none'` 状态卡而非失败。
  *
- * Every fetch is best-effort and short-timeout; failures surface as an
- * `error` card rather than throwing.
+ * 每次拉取尽力而为、短超时；失败以 `error` 卡露出而不是抛。
  *
  * @module dsh-tokbook/quota-official
  */
@@ -42,31 +23,21 @@ import {
   windowFromCreditsBlock, windowFromUsagePercent,
 } from './quota.ts'
 
-/** One fetcher's face: a raw usage snapshot for one plan key. */
-export interface OfficialQuota {
-  account?: { name?: string }
-  planInfo?: QuotaCard['planInfo']
-  usage?: QuotaUsageSummary
-  credits?: QuotaCreditPool
-  windows: QuotaCard['windows']
-}
-
 /**
- * The credential seam a fetcher consumes. The host wires this to
- * `ctx.credentials.resolve` (the DSH credential provider), so a key stored in
- * the Models page / settings is found under the reference the plan names.
- * Resolving is intentionally async and returns the raw value only.
+ * 拉取器消费的凭据缝。宿主将其接到 `ctx.credentials.resolve`（DSH 凭据
+ * provider），因此 Models 页 / settings 里存的 key 能在计划命名的引用下被找到。
+ * 解析刻意异步，且只返回原始值。
  */
 export interface CredentialResolver {
   resolve(ref: string): Promise<string | undefined>
 }
 
 export interface QuotaFetchDeps {
-  /** Config for the provider's plan (may carry an apiKey literal override). */
+  /** 该 provider 计划的配置（可带 apiKey 字面量覆盖）。 */
   plan?: PlanConfig
-  /** Logger face (duck-typed). */
+  /** logger 面（duck-typed）。 */
   logger?: { error(...args: unknown[]): void; warn?(...args: unknown[]): void }
-  /** The DSH credentials seam (`ctx.credentials`). Absent → no key resolves. */
+  /** DSH 凭据缝（`ctx.credentials`）。缺席 → 无 key 可解析。 */
   credentials?: CredentialResolver
 }
 
@@ -85,17 +56,15 @@ function num(value: unknown): number | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Key resolution
+// Key 解析
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the API key for one built-in provider from the DSH credentials
- * seam. The reference name is `plans[<key>].apiKeyEnv` when set, else the
- * provider default (`COMMANDCODE_API_KEY`, `OPENCODE_GO_API_KEY`) — exactly
- * the name the provider adapter's settings page writes through the
- * credentials service. A literal `plans[<key>].apiKey` (config) wins for
- * explicit/test overrides. No seam → undefined (the caller shows an
- * `unconfigured` card).
+ * 从 DSH 凭据缝解析一个内置 provider 的 API key。引用名是设置了的
+ * `plans[<key>].apiKeyEnv`，否则是 provider 默认（`COMMANDCODE_API_KEY`、
+ * `OPENCODE_GO_API_KEY`）——正是 provider 适配器 settings 页经凭据服务写入的
+ * 名字。配置里的字面量 `plans[<key>].apiKey` 优先，供显式/测试覆盖。无缝 →
+ * undefined（调用方展示 `unconfigured` 卡）。
  */
 export async function resolvePlanApiKey(
   provider: string,
@@ -112,22 +81,21 @@ export async function resolvePlanApiKey(
   try {
     const value = await credentials.resolve(envName)
     if (value !== undefined && value !== '') return value
-  } catch (error) {
-    // A failing seam must not crash the quota fetch; treat as unconfigured.
-    // The host logs the underlying cause.
+  } catch {
+    // 缝失败不得崩掉额度拉取；当作 unconfigured。宿主记下底层原因。
   }
   return undefined
 }
 
 // ---------------------------------------------------------------------------
-// Command Code official fetch
+// Command Code 官方拉取
 // ---------------------------------------------------------------------------
 
 const COMMAND_CODE_API_BASE = 'https://api.commandcode.ai'
 const COMMAND_CODE_CLI_VERSION = '1.47.0'
 
-/** One `/alpha/*` path with its query params; empty/absent values drop out.
- * `orgId` scopes the billing endpoints, `since` scopes the usage summary. */
+/** 一个 `/alpha/*` 路径及其查询参数；空/缺席值剔除。`orgId` 圈定 billing
+ *  端点，`since` 圈定用量摘要。 */
 function ccPath(path: string, params: Record<string, string | undefined>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -137,17 +105,16 @@ function ccPath(path: string, params: Record<string, string | undefined>): strin
   return query === '' ? path : `${path}?${query}`
 }
 
-/** A raw timestamp field as a string, for a query param the API takes
- * verbatim (`since`): the provider may report it as an ISO string or as an
- * epoch, and passing it back unchanged is the only reading that fits both. */
+/** 原始时间戳字段作字符串，供 API 原样接受的查询参数（`since`）：provider
+ *  可能报 ISO 串或 epoch，原样传回是唯一两边都合适的读法。 */
 function rawTimestamp(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim() !== '') return value.trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return undefined
 }
 
-/** Fetch one Command Code `/alpha/*` endpoint, returning its parsed body or
- * `{ status }` on failure. */
+/** 拉取一个 Command Code `/alpha/*` 端点，返回解析后的 body，失败时返回
+ *  `{ status }`。 */
 async function ccGet(
   path: string,
   key: string,
@@ -175,19 +142,19 @@ async function ccGet(
   }
 }
 
-/** Whether an `/alpha/*` result body indicates an auth failure. */
+/** `/alpha/*` 结果体是否表示认证失败。 */
 function isAuthFailure(body: Record<string, unknown> | { __httpStatus: number }): boolean {
   if ('__httpStatus' in body) return body.__httpStatus === 401
   return body.error === 'invalid-key' || body.message === 'Unauthorized'
 }
 
-/** Friendly display name for a Command Code plan id (falls back to the id). */
+/** Command Code 计划 id 的友好展示名（回落到 id）。 */
 function commandCodePlanName(planId: string): string | undefined {
   const normalized = planId.toLowerCase().replace(/_/g, '-')
   return COMMAND_CODE_PLAN_NAMES[normalized]
 }
 
-/** Set the plan identity + card title from a raw plan node / id. */
+/** 从原始计划节点 / id 设定计划身份与卡标题。 */
 function attachPlanInfo(card: QuotaCard, raw: Record<string, unknown> | undefined, fallbackPlanId?: string): void {
   const planInfo = planInfoFromSubscriptions(raw ?? {})
     ?? (fallbackPlanId !== undefined ? planInfoFromSubscriptions({ planId: fallbackPlanId }) : undefined)
@@ -199,22 +166,18 @@ function attachPlanInfo(card: QuotaCard, raw: Record<string, unknown> | undefine
   else if (display !== undefined) card.title = display
 }
 
-/** Fetch the Command Code account usage (whoami + usage/summary +
- * billing/credits + billing/subscriptions). Returns the normalized card or
- * an `error`/`unconfigured` card. */
+/** 拉取 Command Code 账户用量（whoami + usage/summary + billing/credits +
+ *  billing/subscriptions）。返回归一后的卡，或 `error`/`unconfigured` 卡。 */
 export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<QuotaCard> {
   const key = await resolvePlanApiKey(COMMAND_CODE_PROVIDER, deps.plan, deps.credentials)
   if (key === undefined) return unconfiguredCard(COMMAND_CODE_PROVIDER)
   const logger = deps.logger
 
-  // whoami first — it names the org the billing endpoints are scoped to — then
-  // credits + subscriptions concurrently, then the usage summary last, because
-  // only subscriptions knows the current period start. The summary is scoped to
-  // that period (`since`): it is the spend side of the monthly-allowance math,
-  // so it must belong to the same cycle as the credit pool it is read against.
-  // (Verified by hand: period spend + remaining pool ≈ the plan's monthly
-  // credits.) The ordering costs one extra round trip, which the tab's
-  // stale-while-revalidate first paint never waits on.
+  // whoami 先行——它命名 billing 端点所圈定的 org——然后 credits 与
+  // subscriptions 并发，用量摘要最后，因为只有 subscriptions 知道当前周期起点。
+  // 摘要以该周期为界（`since`）：它是月度额度算术的花费一侧，必须与所对照的
+  // 余额池属同一周期。（手工验证：周期花费 + 剩余池 ≈ 计划的月度 credits。）
+  // 该顺序多花一次往返，tab 的 stale-while-revalidate 首屏从不等待它。
   const whoami = await ccGet('/alpha/whoami', key, logger)
   const whoamiBody = isRecord(whoami) && !('__httpStatus' in whoami) ? whoami : undefined
   const orgId = whoamiBody !== undefined && isRecord(whoamiBody.org) ? str(whoamiBody.org.id) : undefined
@@ -222,9 +185,8 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
     ccGet(ccPath('/alpha/billing/credits', { orgId }), key, logger),
     ccGet(ccPath('/alpha/billing/subscriptions', { orgId }), key, logger),
   ])
-  // Did the subscriptions endpoint *answer*? Not the same question as "is there
-  // a plan node": it also has no node when the call itself failed, and the two
-  // demand opposite readings (see the gate block below).
+  // subscriptions 端点**是否回答了**？与「有没有计划节点」不是同一问题：
+  // 调用本身失败时也没有节点，两者要求相反读法（见下方 gate 块）。
   const subscriptionBody = isRecord(subscription) && !('__httpStatus' in subscription) ? subscription : undefined
   const subscriptionNode = subscriptionBody !== undefined && isRecord(subscriptionBody.data)
     ? subscriptionBody.data
@@ -235,7 +197,7 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
     logger,
   )
 
-  // Classify a total auth failure across the endpoints that must succeed.
+  // 在必须成功的端点上判定整体认证失败。
   const bodies = [whoami, usage, credits, subscription]
   if (bodies.every(isAuthFailure)) {
     return errorCard(COMMAND_CODE_PROVIDER, '官方接口拒绝了该 key（401）——请检查 Command Code API key。')
@@ -249,14 +211,14 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
     fetchedAt: Date.now(),
   }
 
-  // whoami → account.
+  // whoami → account。
   if (isRecord(whoami) && !('__httpStatus' in whoami)) {
     const user = isRecord(whoami.user) ? whoami.user : undefined
     const name = str(user?.userName) ?? str(user?.name)
     if (name !== undefined && name !== '') card.account = { name }
   }
 
-  // usage/summary → usage summary.
+  // usage/summary → usage summary。
   if (isRecord(usage) && !('__httpStatus' in usage)) {
     const summary: QuotaUsageSummary = {}
     const completed = num(usage.completedCount)
@@ -274,8 +236,8 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
     if (Object.keys(summary).length > 0) card.usage = summary
   }
 
-  // billing/credits → credits + window limits. The credits node may carry a
-  // planId fallback when the subscriptions endpoint is unavailable.
+  // billing/credits → credits + 窗口限额。credits 节点可能在 subscriptions
+  // 端点不可用时提供 planId 回落。
   let creditsPlanId: string | undefined
   if (isRecord(credits) && !('__httpStatus' in credits)) {
     const creditsNode = isRecord(credits.credits) ? credits.credits : undefined
@@ -301,35 +263,30 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
     }
   }
 
-  // billing/subscriptions → plan identity (fall back to credits.planId).
+  // billing/subscriptions → 计划身份（回落到 credits.planId）。
   if (subscriptionNode !== undefined) {
     attachPlanInfo(card, subscriptionNode, creditsPlanId)
   } else if (creditsPlanId !== undefined) {
     attachPlanInfo(card, undefined, creditsPlanId)
   }
 
-  // What the numbers above *mean* depends on whether a subscription is in
-  // force. The rolling windows and the monthly pool pace an in-force plan's
-  // included credits only; with no subscription the provider gates usage by
-  // the credit balance alone and the windows do not apply. So the card names
-  // its gate instead of letting leftover window numbers read as budget.
+  // 上面数字**意味着什么**取决于是否有生效订阅。滚动窗口与月度池只限制生效
+  // 计划所含的 credits；无订阅时 provider 仅按余额约束用量，窗口不适用。故卡
+  // 说出自己的 gate，而不是让残留的窗口数字读作预算。
   //
-  // The gate is read ONLY from the endpoint that carries the evidence: `status`
-  // and `periodEnd` exist in `billing/subscriptions` and nowhere else, so that
-  // call failing means "unknown", never "no subscription". Deriving a lapsed
-  // plan off a 5xx would hide windows the account is still under *and say so in
-  // words*. Left unset, the gate defaults to `subscription` and the card
-  // renders exactly what it rendered before this gate existed, until a later
-  // refresh actually answers.
+  // gate **只**从携带证据的端点读：`status` 与 `periodEnd` 只存在于
+  // `billing/subscriptions`，该调用失败意味着「未知」，绝非「无订阅」。从 5xx
+  // 推出计划已失效，既会藏掉账户仍在其下的窗口，**还会用文字说出来**。未设定
+  // 时 gate 默认为 `subscription`，卡渲染与 gate 出现之前完全相同，直到稍后
+  // 刷新真正答上。
   if (subscriptionBody !== undefined) {
     card.gate = quotaGate(card.planInfo)
     if (card.gate === 'balance') {
       card.gateNote = balanceGateNote(card.planInfo)
-      // A `balance` gate promises a balance to show. When `billing/credits` did
-      // not answer either there is no number to put in the windows' place, and
-      // an absent one renders as `$0.00` — a claim we cannot support. That is
-      // the same "nothing to show" case as OpenCode Go's, so it takes the same
-      // gate rather than inventing a zero.
+      // `balance` 门承诺有余额可展示。当 `billing/credits` 也没答上时，没有
+      // 数字可放在窗口的位置，而缺席的余额会渲染成 `$0.00`——我们无法支持的
+      // 断言。与 OpenCode Go 的「无物可展示」是同一情形，故取同一 gate，而
+      // 不是编造零。
       if (card.credits === undefined) {
         card.gate = 'none'
         card.gateNote = `${card.gateNote}（本次未取到余额，暂无法显示可用量）`
@@ -344,7 +301,7 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
 }
 
 // ---------------------------------------------------------------------------
-// OpenCode Go official fetch
+// OpenCode Go 官方拉取
 // ---------------------------------------------------------------------------
 
 const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage'
@@ -357,9 +314,9 @@ interface GoUsageWindow {
   resetInSec?: unknown
 }
 
-/** Normalize a raw OpenCode Go usage body (`{ usage: { rolling, weekly,
- * monthly } }`, each `{ status, percent, resetsAt }`) into a quota card.
- * Pure and exported so the parse is unit-tested without network. */
+/** 把原始 OpenCode Go 用量体（`{ usage: { rolling, weekly, monthly } }`，各
+ *  `{ status, percent, resetsAt }`）归一成额度卡。纯函数并导出，解析可无网
+ *  单测。 */
 export function parseOpenCodeGoUsage(body: Record<string, unknown>, now: number = Date.now()): QuotaCard {
   const usage = isRecord(body.usage) ? body.usage : body
   const rolling = isRecord(usage.rolling) ? usage.rolling as GoUsageWindow : undefined
@@ -370,10 +327,9 @@ export function parseOpenCodeGoUsage(body: Record<string, unknown>, now: number 
     plan: OPENCODE_GO_PROVIDER,
     title: BUILTIN_PLAN_TITLES[OPENCODE_GO_PROVIDER]!,
     state: 'ok',
-    // Window percentages *are* this plan's limits (5-hour = 20% of a model's
-    // monthly allowance, weekly = 50%, monthly = 100%), so a card with windows
-    // is subscription-gated. Stated explicitly so the client never has to infer
-    // the gate from the presence of a field.
+    // 窗口百分比**就是**该计划的限额（5 小时 = 模型月度额度的 20%，周 = 50%，
+    // 月 = 100%），故带窗口的卡是 subscription 门。显式写出，client 永不必
+    // 从某字段的有无推断 gate。
     gate: 'subscription',
     windows: [],
     fetchedAt: Date.now(),
@@ -384,10 +340,9 @@ export function parseOpenCodeGoUsage(body: Record<string, unknown>, now: number 
   return card
 }
 
-/** Fetch the OpenCode Go official usage (three windows: rolling/weekly/
- * monthly, percent + reset only). The live endpoint answers
- * `{ usage: { rolling|weekly|monthly: { status, percent, resetsAt } } }`
- * (verified via cc-switch and the dsh-opencode-go-usage plugin). */
+/** 拉取 OpenCode Go 官方用量（三个窗口：rolling/weekly/monthly，仅百分比 +
+ *  重置）。live 端点答 `{ usage: { rolling|weekly|monthly: { status, percent,
+ *  resetsAt } } }`（经 cc-switch 与 dsh-opencode-go-usage 插件验证）。 */
 export async function fetchOpenCodeGoQuota(deps: QuotaFetchDeps = {}): Promise<QuotaCard> {
   const key = await resolvePlanApiKey(OPENCODE_GO_PROVIDER, deps.plan, deps.credentials)
   if (key === undefined) return unconfiguredCard(OPENCODE_GO_PROVIDER)
@@ -399,8 +354,8 @@ export async function fetchOpenCodeGoQuota(deps: QuotaFetchDeps = {}): Promise<Q
       headers: {
         accept: 'application/json',
         authorization: `Bearer ${key}`,
-        // The endpoint sits behind Cloudflare; a browser User-Agent avoids
-        // being dropped (error 1010) — same fix cc-switch / cost-meter use.
+        // 端点在 Cloudflare 后面；浏览器 User-Agent 避免被丢（error 1010）
+        // ——与 cc-switch / cost-meter 的同一修法。
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
       },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -409,12 +364,10 @@ export async function fetchOpenCodeGoQuota(deps: QuotaFetchDeps = {}): Promise<Q
       return errorCard(OPENCODE_GO_PROVIDER, '官方接口拒绝了该 key（401）——请检查 OpenCode Go API key。')
     }
     if (response.status === 403) {
-      // Documented as "valid key, no Go subscription" — Zen and Go share the
-      // same workspace key, so this is not an auth failure and not an outage:
-      // the account simply has no Go plan in force (never subscribed, or it
-      // ended). Answered as a state, so the tab shows what is true instead of
-      // 「查询失败」. This endpoint reports window percentages only, so unlike
-      // Command Code there is no balance to put in the windows' place.
+      // 文档化为「有效 key、无 Go 订阅」——Zen 与 Go 共享同一 workspace key，
+      // 故这不是认证失败也不是故障：账户只是没有生效中的 Go 计划（从未订阅，
+      // 或已结束）。答为状态，tab 展示真相而不是「查询失败」。此端点只报窗口
+      // 百分比，与 Command Code 不同，没有余额可放在窗口的位置。
       return noSubscriptionCard(
         OPENCODE_GO_PROVIDER,
         '该 key 有效，但当前没有生效中的 OpenCode Go 订阅（未订阅或已过期）——订阅后点右上角刷新即可恢复显示。',
@@ -438,8 +391,7 @@ export async function fetchOpenCodeGoQuota(deps: QuotaFetchDeps = {}): Promise<Q
   return card
 }
 
-/** Fetch official usage for one built-in provider. Unknown provider → an
- * `error` card. */
+/** 为一个内置 provider 拉取官方用量。未知 provider → `error` 卡。 */
 export async function fetchOfficialQuota(provider: string, deps: QuotaFetchDeps = {}): Promise<QuotaCard> {
   if (provider === COMMAND_CODE_PROVIDER) return fetchCommandCodeQuota(deps)
   if (provider === OPENCODE_GO_PROVIDER) return fetchOpenCodeGoQuota(deps)

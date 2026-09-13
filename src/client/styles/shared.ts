@@ -1,7 +1,6 @@
-/** styles.ts fragment: shared. Concatenated in order by `injectStyles`. */
-export const CSS_SHARED = `/* ── dark-skin fallback tuning ──────────────────────────────────────────── */
-/* Tokens carry most of the load; these only adjust fallback-adjacent washes
-   that need slightly more lift on dark surfaces. */
+/** styles.ts 片段：shared。由 `injectStyles` 按序拼接。 */
+export const CSS_SHARED = `/* 深色皮肤兜底微调 */
+/* Token 已承担大部分配色；这里只抬高深色表面上需要多一点提亮的邻近洗色。 */
 body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-hero{
   background:linear-gradient(135deg,
     color-mix(in srgb,var(--dtpl-accent) 16%,transparent),
@@ -14,17 +13,14 @@ body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
   background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
 }
 
-/* ── selection ──────────────────────────────────────────────────────────── */
+/* 选中态 */
 [data-plugin="dsh-tokbook"] .dtpl-body ::selection{
   background:color-mix(in srgb,var(--dtpl-accent) 25%,transparent);
 }
 
-/* ── responsive ─────────────────────────────────────────────────────────── */
+/* 窄屏 */
 @media (max-width:640px){
-  /* Bottom sheet: explicit choice instead of a half-centered 94dvh dialog.
-     Full-bleed width, anchored to the bottom edge with only the top corners
-     rounded (the native mobile sheet idiom), still a fixed height + the same
-     single internal scroll region. */
+  /* 底部抽屉：主动选择，而不是半吊子的居中 94dvh 对话框。全宽、贴底，只圆上角（原生移动端 sheet 习惯）。 */
   [data-plugin="dsh-tokbook"].dtpl-overlay{padding:0;align-items:flex-end;}
   [data-plugin="dsh-tokbook"] .dtpl-card{
     width:100%;height:min(94dvh,94vh);
@@ -34,32 +30,27 @@ body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
   }
   [data-plugin="dsh-tokbook"] .dtpl-head{padding:14px 16px 10px;}
   [data-plugin="dsh-tokbook"] .dtpl-tabs{margin:0 16px 4px;}
-  /* Five tabs do not fit a phone width: let the row scroll instead of clipping
-     the last tab off the card edge. */
+  /* 五个 tab 塞不进手机宽度：让行横向滚动，而不是把最后一个裁出卡片。 */
   [data-plugin="dsh-tokbook"] .dtpl-tabs{overflow-x:auto;scrollbar-width:none;}
   [data-plugin="dsh-tokbook"] .dtpl-tabs::-webkit-scrollbar{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-tab{flex:0 0 auto;}
   [data-plugin="dsh-tokbook"] .dtpl-body{padding:12px 16px 14px;}
   [data-plugin="dsh-tokbook"] .dtpl-foot{padding:10px 16px 12px;}
   [data-plugin="dsh-tokbook"] .dtpl-hero{flex-direction:column;align-items:flex-start;gap:8px;}
-  /* The meta line turns horizontal on a narrow sheet; let its items wrap as
-     units instead of running off the card edge. */
+  /* meta 行在窄 sheet 上改横排；按单元换行，而不是溢出卡片边缘。 */
   [data-plugin="dsh-tokbook"] .dtpl-hero-meta{flex-direction:row;flex-wrap:wrap;gap:8px 12px;align-items:baseline;}
-  /* Method doc: stack the multi-column groups on narrow sheets. */
+  /* 统计口径文档：窄 sheet 上多列组改单列。 */
   [data-plugin="dsh-tokbook"] .dtpl-doc-facts{grid-template-columns:1fr;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-buckets{grid-template-columns:1fr;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-gap{grid-template-columns:1fr;}
 
-  /* Pricing: four rate columns plus the model identity do not fit a phone.
-     Stack the row — identity, then a 2×2 grid of labelled cells, then the
-     disclosure — and drop the column header, which no longer lines up. */
+  /* 价格表：四列费率加模型身份塞不进手机。整行改为堆叠——身份、再 2×2 带标签的格子、再展开钮——并去掉已对不齐的列头。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-cols{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-price-row{
     grid-template-columns:minmax(0,1fr) auto;row-gap:6px;
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-id{grid-column:1;}
-  /* The disclosure is the only way into a row's price history, so on a touch
-     sheet it gets a full 44px target instead of the 26px pointer-sized one. */
+  /* 展开钮是进入一行调价史的唯一入口，触控 sheet 上给完整 44px 热区。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-more{
     grid-column:2;grid-row:1;width:44px;height:44px;font-size:12px;
   }
@@ -80,16 +71,14 @@ body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{opacity:1;}
 }
 
-/* ── motion (shared tokens; respect reduced motion) ─────────────────────── */
+/* 动效（共享 keyframes；尊重 reduced motion） */
 @media (prefers-reduced-motion:no-preference){
   [data-plugin="dsh-tokbook"].dtpl-overlay{animation:dtpl-fade .16s ease-out;}
   [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop .16s ease-out;}
   [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transform-origin:bottom;}
 }
 @media (prefers-reduced-motion:no-preference) and (max-width:640px){
-  /* Sheet idiom: the pop animation translates a centered dialog up 8px, which
-     is meaningless for a full-width sheet pinned to the bottom edge — slide it
-     up out of the viewport instead (with a fade riding along). */
+  /* sheet 习语：居中弹窗的 pop 动画是向上平移 8px，对贴底全宽 sheet 无意义——改为从视口下方滑入。 */
   [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-sheet .22s cubic-bezier(.32,.72,0,1);}
 }
 @keyframes dtpl-fade{from{opacity:0}}

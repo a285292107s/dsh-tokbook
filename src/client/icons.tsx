@@ -1,17 +1,10 @@
 /**
- * Inline SVG glyphs for dsh-tokbook.
- *
- * The browser bundle must NOT runtime-import a non-baseline package (bundle
- * purity gate), so we ship a couple of tiny stroke-style icons here. They keep
- * one visual language (2px stroke, round caps/joins) so the plugin reads as a
- * single, consistent icon set — no emoji or text glyphs as icons.
- *
- * Both glyphs inherit `currentColor` and take a `className` for sizing.
+ * 内联 SVG 图标。bundle 禁止运行时 import 非基线包，故自带描边图标
+ * （2px、圆端点）；继承 `currentColor`，尺寸由 `className` 控制。
  *
  * @module dsh-tokbook/client/icons
  */
 
-/** Usage / column chart glyph (footer trigger + overlay title). */
 export function UsageGlyph({ className }: { className?: string }) {
   return (
     <svg
@@ -33,7 +26,6 @@ export function UsageGlyph({ className }: { className?: string }) {
   )
 }
 
-/** Dismiss / close glyph for the overlay. */
 export function CloseGlyph({ className }: { className?: string }) {
   return (
     <svg
@@ -53,7 +45,6 @@ export function CloseGlyph({ className }: { className?: string }) {
   )
 }
 
-/** Refresh / re-sync glyph for the scan button. */
 export function RefreshGlyph({ className }: { className?: string }) {
   return (
     <svg

@@ -1,25 +1,11 @@
 /**
- * First-run marker and the persisted sync baseline of the token-book.
+ * token 账本的首次启动 marker 与持久化同步基线。
  *
- * The first-run marker (`initialized.marker`) gates the one-shot automatic
- * history backfill exactly like before: it runs once per data directory
- * (when the marker is absent), then persists the marker so later startups
- * skip the walk. A crash between the sync and the marker write leaves the
- * marker absent, so the next startup re-runs the sync — a no-op thanks to
- * request-id dedupe.
- *
- * The sync baseline (`sync-progress.json`) is the cross-process memory of the
- * host's in-memory `syncedBySession` map: which persisted session had been
- * folded through which change token (`revision`) at the last authoritative
- * sync. Persisting it lets a restarted process trust the previous run's
- * signature instead of re-walking every session log on the first read — the
- * freshness probe then only re-walks sessions whose revision drifted since.
- * The baseline is written only AFTER a successful sync, so a signature never
- * outruns the ledger contents it covers; a session that changed while the
- * process was down carries an older signature and is re-walked (idempotent
- * via request-id dedupe). A missing, torn, or malformed baseline reads as
- * null and the caller falls back to the conservative full walk, then rewrites
- * a fresh baseline.
+ * 首次启动 marker（`initialized.marker`）门控一次性自动历史回填。同步基线
+ * （`sync-progress.json`）是 host 内存 `syncedBySession` map 的跨进程记忆：
+ * 上次权威同步时各持久化会话折叠到了哪个变更 token。基线只在同步成功之后写，
+ * 因此签名绝不会跑在它所覆盖的账本内容之前。缺失、撕裂或畸形的基线读作 null，
+ * 调用方回落到保守全量走，再重写一份新基线。
  *
  * @module dsh-tokbook/sync-state
  */
@@ -31,7 +17,7 @@ const MARKER = 'initialized.marker'
 const PROGRESS_FILE = 'sync-progress.json'
 const PROGRESS_TMP = 'sync-progress.json.tmp'
 
-/** Whether the automatic history sync has already run for this directory. */
+/** 本目录是否已跑过自动历史同步。 */
 export async function isInitialized(dir: string): Promise<boolean> {
   try {
     await readFile(join(dir, MARKER), 'utf8')
@@ -41,8 +27,8 @@ export async function isInitialized(dir: string): Promise<boolean> {
   }
 }
 
-/** Persist the marker (atomically: temp + rename; the target is unlinked
- * first because Windows rename-over-existing fails intermittently). */
+/** 持久化 marker（原子：temp + rename；目标先 unlink，因为 Windows 上
+ *  rename-over-existing 会间歇失败）。 */
 export async function markInitialized(dir: string): Promise<void> {
   const target = join(dir, MARKER)
   const tmp = join(dir, `${MARKER}.tmp`)
@@ -52,11 +38,7 @@ export async function markInitialized(dir: string): Promise<void> {
   await rename(tmp, target)
 }
 
-/** On-disk sync baseline: per-session revision signatures recorded at the
- * last successful authoritative sync. `syncedAt` is informational (debugging,
- * data-status); `sessions` maps a persisted session id to the opaque change
- * token (`revision`) the snapshot listing reported when that session's log
- * was last folded into the ledger. */
+/** 落盘同步基线：上次成功权威同步时记下的各会话 revision 签名。 */
 export interface SyncProgressFile {
   syncedAt: number
   sessions: Record<string, string>
@@ -73,11 +55,8 @@ function isProgressFile(value: unknown): value is SyncProgressFile {
 }
 
 /**
- * Read the persisted sync baseline. A missing, malformed, or partially
- * unusable file reads as null — never a partial map, so a torn write can
- * never make the probe trust signatures for only some sessions. A null
- * baseline means "no trustworthy cross-process memory": the caller walks
- * everything once (idempotent) and then rewrites a fresh baseline.
+ * 读持久化同步基线。缺失、畸形或部分不可用的文件读作 null——绝不返回
+ * 部分 map，使撕裂写永远无法让探针只信任部分会话的签名。
  */
 export async function readSyncProgress(dir: string): Promise<SyncProgressFile | null> {
   let text: string
@@ -95,8 +74,8 @@ export async function readSyncProgress(dir: string): Promise<SyncProgressFile | 
   return isProgressFile(value) ? value : null
 }
 
-/** Persist the sync baseline atomically (temp + rename; the target is
- * unlinked first for Windows rename-over-existing). */
+/** 原子持久化同步基线（temp + rename；目标先 unlink，兼容 Windows 上的
+ *  rename-over-existing）。 */
 export async function writeSyncProgress(dir: string, progress: SyncProgressFile): Promise<void> {
   const target = join(dir, PROGRESS_FILE)
   const tmp = join(dir, PROGRESS_TMP)

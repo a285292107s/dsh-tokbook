@@ -1,23 +1,7 @@
 /**
- * The pure rules of the 调价史 axis (`Timeline.tsx`): which instants become
- * nodes, and where each labelled node sits on the track.
+ * 调价史轴（`Timeline.tsx`）的纯规则：哪些时刻成为节点，每个带标签的节点落在轨道上的哪里。
  *
- * The axis brackets ONE row's own history: its left end is 首记 (the row's first
- * ledger record, taken at the price file's hourly precision), its right end is
- * 今天. A boundary outside that bracket is not a change this history saw — one
- * dated before 首记 was already in force when the history began, and one dated
- * after today has not taken effect yet — so only the 调价 INSIDE it are nodes. A
- * row the ledger never billed has no bracket to draw, and a bracket with no 调价
- * in it has nothing to draw either: either way there is no axis.
- *
- * Positions are time-proportional, with one correction: two 调价 a day apart in a
- * half-year history land on the same pixel, so neighbouring labels are pushed
- * apart until they clear a minimum gap. The distance between nodes is therefore
- * approximate — the axis is read as an ORDER of 调价, not as a scale — while both
- * ends stay exactly where they are: 首记 and 今天 never move, and the axis never
- * scrolls sideways. When even the minimum gap does not fit, the gap shrinks.
- *
- * Pure: no React, no DOM. `scripts/smoke.ts` holds the invariants.
+ * 轴括住**一行自己的历史**：左端是首记，右端是今天。括号外的边界不是这段历史看到的变更。位置按时间比例，但相邻标签会被推开直到满足最小间距——轴被当作调价的**顺序**读取、不是比例尺。纯逻辑：无 React、无 DOM。
  *
  * @module dsh-tokbook/client/pricing/axis
  */
@@ -25,32 +9,27 @@
 import { hourStartMs, instantKey } from '../../price-format.ts'
 import { isBlankSegment, segmentInstant, sortedSegments, type ModelDraft } from './draft.ts'
 
-/** One labelled point of the axis. */
+/** 轴上一个带标签的点。 */
 export interface AxisNode {
-  /** Where it falls inside the bracket, 0 = 首记 … 1 = 今天, before spacing. */
+  /** 在括号内的位置，0 = 首记 … 1 = 今天（间距修正前）。 */
   ratio: number
-  /** What is printed under it. */
+  /** 节点下方打印的文字。 */
   label: string
-  /** The segment clicking it jumps to; null on a cap no 调价 falls on. */
+  /** 点击跳转的目标段；端帽上无调价时为 null。 */
   segmentId: number | null
-  /** The price in force today takes effect here. */
+  /** 今天生效的价格从这里开始。 */
   active: boolean
-  /** This node is one of the bracket's two ends. */
+  /** 本节点是括号两端之一。 */
   cap: 'start' | 'today' | null
 }
 
-/** A node label's width, in px, near enough to space labels apart with: at 9px,
- *  tabular figures measure ~0.49em and CJK ~1em (measured in the browser). The
- *  estimate is per character instead of measured in the DOM, and deliberately
- *  errs a shade wide — it only decides how much clear space two neighbours keep,
- *  so overestimating costs a few px of gap while underestimating piles two dates
- *  on top of each other. */
+/** 一个标签的宽度（px），足以用来推开相邻标签。按字符估算而非 DOM 实测，且刻意略偏宽——估宽了多花几像素，估窄了两个日期会叠在一起。 */
 const LABEL_PX = 9
 const ASCII_EM = 0.52
-/** The clear space two neighbouring labels keep, on top of their own widths. */
+/** 两个相邻标签在自身宽度之外保留的空隙。 */
 const LABEL_GAP = 6
 
-/** How wide one label prints, in px (see the constants above). */
+/** 一个标签打印出来有多宽（px）。 */
 export function labelWidth(label: string): number {
   let em = 0
   for (const char of label) em += (char.codePointAt(0) ?? 0) > 0x2e7f ? 1 : ASCII_EM
@@ -58,17 +37,13 @@ export function labelWidth(label: string): number {
 }
 
 /**
- * The axis of one row: 首记, every 调价 that took effect inside the bracket, and
- * 今天 — or null when there is no axis to draw: the ledger knows no 首记, or no
- * 调价 landed inside the bracket.
+ * 一行的轴：首记、括号内生效的每一次调价，以及今天——无轴可画时返回 null。
  */
 export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: number): AxisNode[] | null {
   if (row.records <= 0 || row.firstAt === undefined) return null
   const start = hourStartMs(row.firstAt)
   const span = nowMs - start
-  // A 调价 exactly at 首记 IS the left end: one instant, one label — the cap's.
-  // So the first boundary to land there folds into the cap instead of doubling
-  // its date, and the cap keeps the dot (the node) that leads to that segment.
+  // 正好落在首记时刻的调价**就是**左端：一个时刻、一个标签——端帽的。
   let first: AxisNode = {
     ratio: 0, label: `首记 ${instantKey(start).replace('T', ' ')}`,
     segmentId: null, active: false, cap: 'start',
@@ -77,9 +52,7 @@ export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: numbe
   for (const segment of sortedSegments(row)) {
     if (isBlankSegment(segment)) continue
     const at = segmentInstant(segment)
-    // Not a placeable boundary: 无起点 (0 — before the history, not in it) or a
-    // half-typed date. Outside the bracket — earlier than 首记, or still ahead —
-    // is no 调价 of this history either.
+    // 不可放置的边界：无起点（0——在历史之前、不在其中）或半输入的日期。在括号外——早于首记、或仍在未来——也不是这段历史的调价。
     if (at === null || at < start || at > nowMs) continue
     const node: AxisNode = {
       ratio: span <= 0 ? 0 : (at - start) / span,
@@ -94,23 +67,15 @@ export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: numbe
     }
     inside.push(node)
   }
-  // A bracket with no 调价 in it has nothing to say: a bare rail between two dates
-  // is not a timeline, and the row's own price, badges and segment list already
-  // say everything about a price that never changed. So the axis is drawn only
-  // when a boundary really landed inside the row's history.
+  // 括号内没有调价就无话可说：两个日期之间一条光秃秃的轨不是时间线，行自身的价、徽标和段列表已经说尽了从未改过价的事实。
   if (first.segmentId === null && inside.length === 0) return null
   return [first, ...inside, { ratio: 1, label: '今天', segmentId: null, active: false, cap: 'today' }]
 }
 
 /**
- * Where each node's dot sits on a track `trackWidth` px wide, in px from the
- * track's left end — one position per node, in the order they were given.
+ * 每个节点的圆点落在 `trackWidth` px 宽轨道上的位置（距轨道左端的 px），顺序与传入一致。
  *
- * Every label is centred on its own dot, except the two ends, whose labels are
- * held inside the track (the first one starts at 0, the last one ends at the
- * track's right edge): they are the bracket, so they cannot be pushed anywhere.
- * `gap` is the clear space two neighbouring labels keep; when the labels do not
- * all fit at that width, it shrinks rather than letting the bracket scroll.
+ * 每个标签居中于自己的圆点，两端除外：它们的标签被保持在轨道内——它们是括号，不能被推到任何地方。`gap` 是两个相邻标签保留的空隙。
  */
 export function placeNodes(
   ratios: readonly number[],
@@ -121,7 +86,7 @@ export function placeNodes(
   const count = ratios.length
   if (count === 0) return []
   const clamp = (ratio: number): number => Math.min(Math.max(ratio, 0), 1)
-  // Each label's box: what the forward and backward passes below push around.
+  // 每个标签的盒子：下面前后两趟推开的就是它。
   const left = ratios.map((ratio, index) => clamp(ratio) * trackWidth - widths[index] / 2)
   left[0] = 0
   left[count - 1] = trackWidth - widths[count - 1]

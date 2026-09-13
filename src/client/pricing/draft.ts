@@ -1,26 +1,9 @@
 /**
- * Pure logic of the 价格表 tab: the editable draft of one price file, its
- * signature (for the unsaved-changes marks) and the wire body one save sends.
+ * 价格表 tab 的纯逻辑：草稿、脏标记签名、保存 wire body。
  *
- * A draft mirrors the file the host owns: route → model string → price
- * segments, each segment carrying its whole-day price plus the 峰谷时段 that
- * override it, with every number held as a STRING so a half-typed value
- * survives a keystroke. Composing the body validates it and refuses with the
- * offending location, so the host's strict parse only ever sees a good table.
- *
- * Two rules keep the tab from punishing the user for exploring:
- *   · a BLANK segment or slot is a draft, not an error — it is dropped on the
- *     way out and takes no part in validity, the dirty mark or the save, so
- *     "＋ 加一段" can never be the reason a write stops;
- *   · a 峰谷时段 may restate any subset of the four rates, so what a slot
- *     leaves empty inherits the whole-day rate of its segment — and the cell
- *     shows that inherited number as its placeholder, so nothing is invisible.
- *
- * The time axis itself (instants, hours, day sets, the overlap rule) comes from
- * `../../price-format.ts` — the very module the host writer uses, so the two
- * halves can never drift into "the draft accepted it, the write refused it".
- *
- * Deliberately React-free: this module is the testable half of the tab.
+ * 两条规则让探索不被惩罚：空白段/时段是草稿不写出去；峰谷时段可只重写
+ * 任意子集，空着的档继承全天价。时间轴规则与宿主共用 `price-format.ts`。
+ * 刻意无 React——tab 可测试的那一半。
  *
  * @module dsh-tokbook/client/pricing/draft
  */
@@ -30,14 +13,12 @@ import {
 } from '../../price-format.ts'
 import type { BillingNature, DaySet, ModelPricing, PricingSegmentInput, PricingSlotInput, PricingView } from '../../types.ts'
 
-/** The file's one reserved top-level key. Mirrors `src/pricing.ts`; the client
- *  cannot import that module (it pulls in `node:fs`). */
+/** 文件唯一的保留顶层键；镜像 `src/pricing.ts`（client 不能 import 那个，它拉了 `node:fs`）。 */
 export const BILLING_KEY = '$billing'
 
 const MAX_NOTE_LENGTH = 120
 
-/** The four ¥/M buckets of one price, as numbers, keyed like the draft fields
- *  (a bucket stays absent while it is not written). */
+/** 一份价格的四个 ¥/M 桶，数字形式，键与草稿字段一致（未填写时桶缺席）。 */
 export interface DraftRates {
   input: number
   output: number
@@ -45,11 +26,10 @@ export interface DraftRates {
   cacheWrite?: number
 }
 
-/** The four buckets of a 峰谷时段, each optional: a bucket the slot leaves
- *  empty keeps the whole-day rate of its segment. */
+/** 峰谷时段的四个桶，各自可选：时段留空的桶沿用段的全天价。 */
 export type SlotRates = Partial<DraftRates>
 
-/** Draft rate field → the wire/file field it is written as. */
+/** 草稿 rate 字段 → 写成 wire/文件的字段名。 */
 export const RATE_FIELD_NAMES: ReadonlyArray<readonly [keyof DraftRates, keyof ModelPricing]> = [
   ['input', 'inputPerMillion'],
   ['output', 'outputPerMillion'],
@@ -57,8 +37,7 @@ export const RATE_FIELD_NAMES: ReadonlyArray<readonly [keyof DraftRates, keyof M
   ['cacheWrite', 'cacheWritePerMillion'],
 ]
 
-/** The four ¥/M inputs of one editable price — a segment's whole-day price, or
- *  one of its 峰谷时段. Strings, so a half-typed number survives. */
+/** 一份可编辑价格的四个 ¥/M 输入——段的全天价或其中一个峰谷时段。字符串使半输入的数字存活。 */
 export interface RateTexts {
   input: string
   output: string
@@ -66,8 +45,7 @@ export interface RateTexts {
   cacheWrite: string
 }
 
-/** The four buckets, in the order every surface writes them, with the label a
- *  validation message names them by. */
+/** 四个桶，按所有 surface 书写顺序排列，附校验消息用的标签。 */
 const RATE_INPUTS: ReadonlyArray<readonly [keyof RateTexts, string]> = [
   ['input', '输入价'],
   ['output', '输出价'],
@@ -75,51 +53,45 @@ const RATE_INPUTS: ReadonlyArray<readonly [keyof RateTexts, string]> = [
   ['cacheWrite', '缓存写价'],
 ]
 
-/** One editable 峰谷时段: the hours and days it covers and its own rate
- *  inputs. */
+/** 一个可编辑峰谷时段：覆盖的小时与星期，以及自己的 rate 输入。 */
 export interface SlotDraft extends RateTexts {
-  /** Local React key; stable across edits so inputs do not lose focus. */
+  /** 本地 React key；编辑间稳定，输入框不丢焦点。 */
   id: number
   days: DaySet
-  /** Start hour, text (`0`–`23`). */
+  /** 开始小时，文本（`0`–`23`）。 */
   start: string
-  /** End hour, text, exclusive (`1`–`24`; `24` closes the day). */
+  /** 结束小时，文本，不含（`1`–`24`；`24` 关日）。 */
   end: string
 }
 
-/** One editable price segment. `from` is `''` for 最早一段, else `YYYY-MM-DD`
- *  (midnight) or `YYYY-MM-DDTHH:00`. */
+/** 一个可编辑价格段。`from` 为 `''` = 最早一段，否则 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:00`。 */
 export interface SegmentDraft extends RateTexts {
-  /** Local React key; stable across edits so inputs do not lose focus. */
+  /** 本地 React key；编辑间稳定，输入框不丢焦点。 */
   id: number
   from: string
-  /** 峰谷时段 layered over the whole-day price; empty = one price for the
-   *  whole day. */
+  /** 叠在全天价上的峰谷时段；空 = 仅全天价。 */
   slots: SlotDraft[]
   note: string
 }
 
-/** One editable model row of a route card. */
+/** 一张 route 卡的可编辑模型行。 */
 export interface ModelDraft {
   model: string
-  /** Human-readable name from settings / the adapter catalog; absent when
-   *  nothing names this string, and then the exact string is the label. */
+  /** settings / 适配器目录给出的展示名；无人命名该串时省略。 */
   name?: string
-  /** Settings / the adapter catalog lists this string for the route. */
+  /** settings / 适配器目录是否列出该串。 */
   configured: boolean
-  /** Ledger records naming this (route, model). */
+  /** 账本记录了该 (route, model) 的次数。 */
   records: number
-  /** When the ledger first and last billed this row, and how many of its records
-   *  no price segment covers (¥0) — read-only facts off the wire, none of which
-   *  is part of a save. Absent = the ledger lens could not be read, which is not
-   *  the same as zero. */
+  /** 账本首/末计费时刻，以及多少条记录没有价格段覆盖（¥0）——wire 上的
+   *  只读事实，都不参与保存。省略 = 读不到账本透镜，**不等于**零。 */
   firstAt?: number
   lastAt?: number
   unpriced?: number
   segments: SegmentDraft[]
 }
 
-/** One editable route card. */
+/** 一张可编辑 route 卡。 */
 export interface RouteDraft {
   route: string
   label: string
@@ -128,7 +100,7 @@ export interface RouteDraft {
   models: Map<string, ModelDraft>
 }
 
-/** The whole draft, keyed by route key. */
+/** 整份草稿，按 route key 键控。 */
 export type PriceDraft = Map<string, RouteDraft>
 
 let nextId = 1
@@ -139,72 +111,66 @@ function takeId(): number {
   return id
 }
 
-/** The local `YYYY-MM-DD` of today. */
+/** 今天的本地 `YYYY-MM-DD`。 */
 export function todayKey(now: Date = new Date()): string {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${String(now.getFullYear())}-${month}-${day}`
 }
 
-/** The effective instant a draft `from` names: `''` = 最早一段 (0), a text that
- *  is not a real instant = null. */
+/** 草稿 `from` 所指的有效时刻：`''` = 最早一段（0），非真实时刻的文本 = null。 */
 function instantOf(from: string): number | null {
   const text = from.trim()
   if (text === '') return EARLIEST
   return instantMs(text)
 }
 
-/** An hour input's number; NaN when it is not a whole-hour text. */
+/** 小时输入的数字；非整点文本时为 NaN。 */
 function hourValue(text: string): number {
   const raw = text.trim()
   return /^\d{1,2}$/u.test(raw) ? Number(raw) : Number.NaN
 }
 
-/** One slot's hours as the range the shared rules and labels take (NaN when a
- *  text is not a whole hour; validation reports that, this only feeds display
- *  and the overlap check). */
+/** 一个时段的小时，转成共享规则与标签接受的区间（非整点文本时 NaN；
+ *  校验会报错，这里只喂展示和重叠检查）。 */
 export function slotRange(slot: SlotDraft): { start: number; end: number } {
   return { start: hourValue(slot.start), end: hourValue(slot.end) }
 }
 
 // ---------------------------------------------------------------------------
-// Drafts vs prices
+// 草稿 vs 价格
 // ---------------------------------------------------------------------------
 
-/** Whether a four-rate group has nothing typed into it at all. Such a block is
- *  an unfinished draft: it takes no part in validity, the signature or the
- *  write, so clicking 「＋ 加一段价」 can never dirty a row or block a save. */
+/** 四档 rate 组是否完全没填。这样的块不参与有效性、签名或写入——「＋ 加一段价」永远不会弄脏行或阻塞保存。 */
 export function isBlankRates(holder: RateTexts): boolean {
   return RATE_INPUTS.every(([field]) => holder[field].trim() === '')
 }
 
-/** Whether one 峰谷时段 carries no price yet. */
+/** 一个峰谷时段是否还没有价。 */
 export function isBlankSlot(slot: SlotDraft): boolean {
   return isBlankRates(slot)
 }
 
-/** Whether one segment carries no price yet (its slots and note are empty too). */
+/** 一个段是否还没有价（时段和备注也为空）。 */
 export function isBlankSegment(segment: SegmentDraft): boolean {
   return isBlankRates(segment) && segment.note.trim() === '' && segment.slots.every(isBlankSlot)
 }
 
-/** The slots of one segment that actually carry a price. */
+/** 一个段里实际带价的时段。 */
 export function effectiveSlots(segment: SegmentDraft): SlotDraft[] {
   return segment.slots.filter(slot => !isBlankSlot(slot))
 }
 
-/** The segments of one row that actually carry a price — everything the tab
- *  writes, marks dirty or validates reads from these. */
+/** 一行里实际带价的段——tab 写入、弄脏标记、校验都只读这些。 */
 export function effectiveSegments(model: ModelDraft): SegmentDraft[] {
   return model.segments.filter(segment => !isBlankSegment(segment))
 }
 
 // ---------------------------------------------------------------------------
-// Seeding
+// 播种
 // ---------------------------------------------------------------------------
 
-/** A segment prefilled from an existing one (or from nothing) and dated today —
- *  the shape 「加一段价」 starts from. */
+/** 从已有段（或从无）预填并日期定在今天的段——「加一段价」的起始形状。 */
 export function newSegment(seed: Partial<Omit<SegmentDraft, 'id'>> = {}): SegmentDraft {
   return {
     id: takeId(),
@@ -218,8 +184,8 @@ export function newSegment(seed: Partial<Omit<SegmentDraft, 'id'>> = {}): Segmen
   }
 }
 
-/** A fresh 峰谷时段: 09:00–12:00 每天 (the shape a peak window starts from) and
- *  no rates yet — every bucket it leaves empty inherits the whole-day price. */
+/** 一个新的峰谷时段：09:00–12:00 每天（峰谷窗口的起始形状），尚无费率——
+ *  留空的桶继承全天价。 */
 export function newSlot(seed: Partial<Omit<SlotDraft, 'id'>> = {}): SlotDraft {
   return {
     id: takeId(),
@@ -233,9 +199,7 @@ export function newSlot(seed: Partial<Omit<SlotDraft, 'id'>> = {}): SlotDraft {
   }
 }
 
-/** A copy of one 峰谷时段 placed right AFTER it with the same length, so
- *  「复制」 never lands on top of the slot it copies (which would always be a
- *  clash). If there is no room left in the day it goes just BEFORE instead. */
+/** 一个峰谷时段的副本，紧接其**后**放置、长度相同，使「复制」永远不落在被复制的时段上。当天放不下时改放在其**前**。 */
 export function duplicateSlot(slot: SlotDraft): SlotDraft {
   const { start, end } = slotRange(slot)
   const length = isHourRange({ start, end }) ? end - start : 1
@@ -248,9 +212,7 @@ export function duplicateSlot(slot: SlotDraft): SlotDraft {
   return { ...slot, id: takeId() }
 }
 
-/** Move a slot's start hour, keeping the range valid: an end at or before the
- *  new start follows it (a one-hour window), so picking the hours never passes
- *  through a state the row would report as broken. */
+/** 移动时段的开始小时并保持区间有效：结束不晚于新开始时跟随它，选小时时不会经过行会报错的中间状态。 */
 export function withSlotStart(slot: SlotDraft, startText: string): SlotDraft {
   const start = hourValue(startText)
   if (!Number.isFinite(start)) return slot
@@ -259,8 +221,7 @@ export function withSlotStart(slot: SlotDraft, startText: string): SlotDraft {
   return { ...slot, start: String(start), end: String(nextEnd) }
 }
 
-/** Move a slot's end hour, keeping the range valid (mirror of
- *  {@link withSlotStart}). */
+/** 移动时段的结束小时并保持区间有效（{@link withSlotStart} 的镜像）。 */
 export function withSlotEnd(slot: SlotDraft, endText: string): SlotDraft {
   const end = hourValue(endText)
   if (!Number.isFinite(end)) return slot
@@ -269,9 +230,7 @@ export function withSlotEnd(slot: SlotDraft, endText: string): SlotDraft {
   return { ...slot, start: String(nextStart), end: String(end) }
 }
 
-/** An empty 最早一段 carrying one typed rate — what the first keystroke on an
- *  unpriced row writes. Its missing date does not survive: {@link anchoredRow}
- *  fills it in like every other unwritten one. */
+/** 带一个已输入 rate 的空最早一段——无定价行上第一次按键写入的内容。缺失的日期会被 {@link anchoredRow} 填上。 */
 export function blankSegment(field: keyof RateTexts, value: string): SegmentDraft {
   const segment = newSegment({ from: '' })
   segment[field] = value
@@ -308,12 +267,7 @@ function segmentDraft(segment: PricingSegmentInput): SegmentDraft {
   }
 }
 
-/** The instant an unwritten 生效时间 stands for: the local hour this row's FIRST
- *  ledger record falls in (the axis's own 首记, at the file's hourly precision).
- *  `''` leaves the price 无起点 — the row has no record to anchor on, or another
- *  segment already starts at or before that hour: the anchor may never move this
- *  price past a boundary, because the segment ORDER is what decides the price
- *  each record gets. */
+/** 未写生效时间代表的时刻：该行首条账本记录所在的本地整点。锚点永远不能把价格移到边界之外——决定每条记录取哪个价的是段**顺序**。 */
 function firstAnchor(row: ModelDraft): string {
   if (row.firstAt === undefined) return ''
   for (const segment of row.segments) {
@@ -323,13 +277,7 @@ function firstAnchor(row: ModelDraft): string {
   return instantKey(row.firstAt)
 }
 
-/** The row with its unwritten effective instant filled in. A price the ledger
- *  already billed is not left 自始生效 by default: 「这条模型从什么时候起按这个价
- *  算」 has an answer — its first record — and a price that starts when the row's
- *  history starts prices exactly the same records as one that starts at the
- *  beginning of time. Only the EARLIEST open segment takes the anchor (two
- *  prices may not start at one instant), and the row comes back unchanged when
- *  there is nothing to fill, so this can run on every change. */
+/** 把行内未写的有效时刻填上。只有**最早**的未写段才拿锚（两个价不能在同一时刻开始），无可填时原样返回，故可在每次变更时运行。 */
 export function anchoredRow(row: ModelDraft): ModelDraft {
   const at = firstAnchor(row)
   if (at === '') return row
@@ -341,7 +289,7 @@ export function anchoredRow(row: ModelDraft): ModelDraft {
   }
 }
 
-/** Seed an editable draft from one wire view. */
+/** 从一份 wire 视图播种可编辑草稿。 */
 export function draftFromView(view: PricingView): PriceDraft {
   const draft: PriceDraft = new Map()
   for (const card of view.routes) {
@@ -370,11 +318,10 @@ export function draftFromView(view: PricingView): PriceDraft {
 }
 
 // ---------------------------------------------------------------------------
-// Reading order of a row
+// 行的阅读顺序
 // ---------------------------------------------------------------------------
 
-/** The force rank of a `from`: `''` (最早一段) ranks first, a text that is not a
- *  real instant ranks last so a half-typed date never jumps to the top. */
+/** `from` 的效力排名：`''`（最早一段）排第一，非真实时刻的文本排最后，半输入的日期永远不会跳到顶部。 */
 function forceRank(from: string): number {
   const at = instantOf(from)
   return at === null ? Number.MAX_SAFE_INTEGER : at
@@ -384,20 +331,17 @@ function forceOrder(segments: readonly SegmentDraft[]): SegmentDraft[] {
   return [...segments].sort((left, right) => forceRank(left.from) - forceRank(right.from))
 }
 
-/** Every segment of one row in force order, drafts included — what the drawer
- *  renders. */
+/** 一行的全部段，按效力顺序（含草稿）——抽屉渲染的顺序。 */
 export function sortedSegments(model: ModelDraft): SegmentDraft[] {
   return forceOrder(model.segments)
 }
 
-/** The priced segments of one row in force order. */
+/** 一行的有价段，按效力顺序。 */
 function pricedSegments(model: ModelDraft): SegmentDraft[] {
   return forceOrder(effectiveSegments(model))
 }
 
-/** The segment in force at `nowMs` — what the row header prints as 当前价. Blank
- *  drafts are skipped: they price nothing, so they are never "the current
- *  price". */
+/** `nowMs` 时生效的段——行头显示的当前价。空白草稿被跳过：它们不定价。 */
 export function segmentInForce(model: ModelDraft, nowMs: number = Date.now()): SegmentDraft | null {
   let hit: SegmentDraft | null = null
   for (const segment of pricedSegments(model)) {
@@ -409,55 +353,41 @@ export function segmentInForce(model: ModelDraft, nowMs: number = Date.now()): S
   return hit
 }
 
-/** Whether a row carries no price at all (its records bill ¥0). */
+/** 一行是否完全没有价（其记录计 ¥0）。 */
 export function isUnpriced(model: ModelDraft): boolean {
   return effectiveSegments(model).length === 0
 }
 
-/** The four ¥/M buckets of a segment, as the row's fixed columns. */
+/** 一个段的四个 ¥/M 桶，作为行的固定列。 */
 export type RateField = keyof RateTexts
 
-/** The segment the row's inline cells edit: the one in force, else the earliest
- *  priced one — a price dated in the future is still the one being written. */
+/** 行内单元格编辑的段：当前生效的那段，否则最早有价的那段——未来日期的价仍然是正在被写入的那份。 */
 export function editableSegment(model: ModelDraft): SegmentDraft | null {
   return segmentInForce(model) ?? pricedSegments(model)[0] ?? null
 }
 
-/** The unfinished block the inline cells fill when the row has no price yet:
- *  the latest blank segment already in the drawer, so adding one and then
- *  typing in the row writes into THAT segment rather than creating a second. */
+/** 行无价时行内单元格填充的未完成块：抽屉里已有的**最后一个**空白段，使「先加一段、再在行内打字」写入的是**那一段**。 */
 export function pendingSegment(model: ModelDraft): SegmentDraft | null {
   const blanks = forceOrder(model.segments).filter(isBlankSegment)
   return blanks[blanks.length - 1] ?? null
 }
 
-/** Whether a segment governs the present (a future-dated one is written but
- *  idle). */
+/** 段是否管辖当下（未来日期的段已写入但闲置）。 */
 export function inForceToday(segment: SegmentDraft | null, nowMs: number = Date.now()): boolean {
   if (segment === null) return false
   const at = instantOf(segment.from)
   return at !== null && at <= nowMs
 }
 
-/** Whether a segment's effective instant is still ahead of `nowMs` — written
- *  but idle. A segment with no date never is: it applies from the beginning. */
-export function isFutureSegment(segment: SegmentDraft, nowMs: number = Date.now()): boolean {
-  const at = instantOf(segment.from)
-  return at !== null && at > nowMs
-}
-
-/** A segment's effective instant in epoch ms (`0` = 无起点), or null while its
- *  date is not a real instant. The axis compares this against the ledger's
- *  first record to place a boundary ON or OFF its left end. */
+/** 段的有效时刻（epoch ms；`0` = 无起点），日期不是真实时刻时为 null。轴用它把边界放在左端**上**或**外**。 */
 export function segmentInstant(segment: SegmentDraft): number | null {
   return instantOf(segment.from)
 }
 
-/** How one cell's value reads: `ok` (a number), `empty` (not filled yet), or
- *  `bad` (typed, but not a non-negative number). */
+/** 一个单元格的读数状态：`ok`（数字）、`empty`（尚未填）、`bad`（已输入但不是非负数字）。 */
 export type FieldState = 'ok' | 'empty' | 'bad'
 
-/** One cell's state, so the row can mark the exact field that is wrong. */
+/** 一个单元格的状态，使行能标出确切出错的字段。 */
 export function fieldState(holder: RateTexts | null, field: RateField): FieldState {
   if (holder === null) return 'empty'
   const raw = holder[field].trim()
@@ -465,8 +395,7 @@ export function fieldState(holder: RateTexts | null, field: RateField): FieldSta
   return parseRate(raw) === null ? 'bad' : 'ok'
 }
 
-/** The whole-day price of one segment, as the four texts a 峰谷时段 shows as its
- *  inherited placeholders. */
+/** 一个段的全天价，作为峰谷时段显示的继承 placeholder。 */
 export function inheritedRates(segment: SegmentDraft): RateTexts {
   return {
     input: segment.input,
@@ -477,12 +406,10 @@ export function inheritedRates(segment: SegmentDraft): RateTexts {
 }
 
 // ---------------------------------------------------------------------------
-// Validity
+// 有效性
 // ---------------------------------------------------------------------------
 
-/** The first problem of one whole-day price, or null: input and output are
- *  required, the cache buckets optional, and every filled cell a non-negative
- *  number. */
+/** 一份全天价的首个问题，或 null：输入价与输出价必填，cache 桶可选，每个已填单元格须为非负数字。 */
 function rateIssue(holder: RateTexts, prefix: string): string | null {
   for (const [field, label] of [['input', '输入价'], ['output', '输出价']] as const) {
     const state = fieldState(holder, field)
@@ -495,9 +422,7 @@ function rateIssue(holder: RateTexts, prefix: string): string | null {
   return null
 }
 
-/** The ¥/M numbers of one draft price (a segment's whole-day price), or null
- *  while a required field is not a non-negative number yet (the cache buckets
- *  are optional). */
+/** 一份草稿价格的 ¥/M 数字（段的全天价），必填字段尚非非负数字时为 null（cache 桶可选）。 */
 export function ratesOf(holder: RateTexts): DraftRates | null {
   const input = parseRate(holder.input)
   const output = parseRate(holder.output)
@@ -512,9 +437,7 @@ export function ratesOf(holder: RateTexts): DraftRates | null {
   }
 }
 
-/** The buckets one 峰谷时段 restates, or the first value that is not a number.
- *  It may restate any subset: the ones it leaves out inherit the segment's
- *  whole-day rate. */
+/** 一个峰谷时段重写的桶，或首个非数字值。可以只重写任意子集：留空的桶继承段的全天价。 */
 export function slotRates(slot: SlotDraft): { ok: true; rates: SlotRates } | { ok: false; error: string } {
   const rates: SlotRates = {}
   for (const [field, label] of RATE_INPUTS) {
@@ -527,9 +450,7 @@ export function slotRates(slot: SlotDraft): { ok: true; rates: SlotRates } | { o
   return { ok: true, rates }
 }
 
-/** The first problem of one 峰谷时段, or null. Overlap is checked against the
- *  slots shown before it, so the message names the pair that clashes; blank
- *  drafts take no part. */
+/** 一个峰谷时段的首个问题，或 null。重叠检查针对前面已显示的时段，使消息能指名冲突的一对；空白草稿不参与。 */
 function slotIssue(slot: SlotDraft, all: readonly SlotDraft[], index: number): string | null {
   const where = `第 ${String(index + 1)} 个峰谷时段`
   const { start, end } = slotRange(slot)
@@ -550,14 +471,12 @@ function slotIssue(slot: SlotDraft, all: readonly SlotDraft[], index: number): s
   return null
 }
 
-/** How one slot's coverage reads: `工作日 09:00–12:00`. */
+/** 一个时段的覆盖读法：`工作日 09:00–12:00`。 */
 export function dayLabel(slot: SlotDraft): string {
   return `${DAY_SET_LABELS[slot.days]} ${rangeLabel(slotRange(slot))}`
 }
 
-/** The one thing keeping this row out of the file, or null when it is writable:
- *  shown next to the row's own fields (never only in the footer). Unfinished
- *  drafts are not problems — they simply are not written. */
+/** 阻止这一行写入文件的唯一问题，可写时为 null：显示在行自身字段旁。未完成的草稿不是问题——它们只是不写出去。 */
 export function rowIssue(model: ModelDraft): string | null {
   const seen = new Set<number>()
   for (const segment of pricedSegments(model)) {
@@ -589,10 +508,10 @@ function parseRate(value: string): number | null {
 }
 
 // ---------------------------------------------------------------------------
-// Signatures and the wire body
+// 签名与 wire body
 // ---------------------------------------------------------------------------
 
-/** One segment as a save would write it, drafts excluded. */
+/** 一个段保存时会写成的样子，草稿被排除。 */
 function segmentSignature(segment: SegmentDraft): Record<string, unknown> {
   return {
     from: segment.from.trim() === '' ? null : segment.from.trim(),
@@ -610,56 +529,42 @@ function segmentSignature(segment: SegmentDraft): Record<string, unknown> {
   }
 }
 
-/** The signature of one model row: exactly what a save would write for it, so
- *  the tab can tell an edited row from a clean one. An unfinished draft block
- *  is not part of it — adding one leaves the row clean, exactly as the write
- *  leaves the file unchanged. */
+/** 一个模型行的签名：保存时会为它写入的确切内容，tab 据此区分已编辑行与干净行。未完成的草稿块不在其中。 */
 export function modelSignature(model: ModelDraft): string {
   return JSON.stringify(pricedSegments(model).map(segmentSignature))
 }
 
-/** The combined key of one card row. */
+/** 一张卡行的组合键。 */
 export function rowKey(route: string, model: string): string {
   return `${route}\u0000${model}`
 }
 
-/** The readable instant a `from` names, or null for 最早一段 — the segment that
- *  omits its effective instant, i.e. one that has applied to every moment. */
+/** `from` 所指的可读时刻，最早一段为 null——省略了生效时刻的段，即对每个时刻都生效过的段。 */
 function instantLabel(from: string): string | null {
   const text = from.trim()
   return text === '' ? null : text.replace('T', ' ')
 }
 
-/** How a segment's effective instant reads in the 调价史 drawer, right beside
- *  that segment's own 生效时间 field — the field that gives it a date when it
- *  has none. A segment without a date is not "the earliest of a list": its
- *  region has an OPEN LEFT END, and 无起点 is the shortest way to say that. */
+/** 段的有效时刻在调价史抽屉中的读法。无日期的段不是「列表里最早的那个」——它有开放的左端，无起点是说出这一点最短的方式。 */
 export function fmtFrom(from: string): string {
   const at = instantLabel(from)
   return at === null ? '无起点' : `${at} 起`
 }
 
-/** How a row's meta line states when the price its four cells edit took effect.
- *  That line sits beside 「账本 N 次」, so the phrase carries its own subject: a
- *  bare 「无起点」 in that position reads as a ledger time. A segment that omits
- *  `from` has no instant to print and says so, instead of dressing a state up
- *  as a date. */
+/** 行 meta 线如何陈述四个单元格所编辑价格的生效时间。短语自带主语：裸的「无起点」在该位置会被读成账本时间。 */
 export function fmtRowFrom(from: string): string {
   const at = instantLabel(from)
   return at === null ? '价段无起点（自始生效）' : `价段自 ${at} 起`
 }
 
-/** A segment's `from` as a `datetime-local` input value: midnight prints as
- *  `00:00`, since that is what a plain date means. */
+/** 段的 `from` 作为 `datetime-local` 输入值：零点打印为 `00:00`，因为纯日期就是这个意思。 */
 export function fromFieldValue(from: string): string {
   const text = from.trim()
   if (text === '') return ''
   return text.includes('T') ? text : `${text}T00:00`
 }
 
-/** The draft `from` a `datetime-local` value means: midnight keeps the short
- *  date form (so the file stays as it was), and minutes are dropped — the table
- *  resolves prices by the hour. */
+/** `datetime-local` 值所代表的草稿 `from`：零点保留短日期形式（文件保持原样），分钟被丢弃——价表按整点解析价格。 */
 export function fromFieldInput(value: string): string {
   const text = value.trim()
   const [day, time] = text.split('T')
@@ -668,8 +573,7 @@ export function fromFieldInput(value: string): string {
   return hour === '00' ? day : `${day}T${hour}:00`
 }
 
-/** One 峰谷时段 as a save writes it: the buckets it restates, the rest omitted
- *  so the whole-day rate keeps applying. */
+/** 一个峰谷时段保存时写入的内容：它重写的桶，其余省略使全天价继续生效。 */
 function slotBody(slot: SlotDraft): Record<string, unknown> {
   const body: Record<string, unknown> = {
     days: slot.days,
@@ -686,8 +590,7 @@ function slotBody(slot: SlotDraft): Record<string, unknown> {
   return body
 }
 
-/** The body one save sends: the COMPLETE desired file. Refuses with the exact
- *  location of the first problem, the way the host's own parse reports it. */
+/** 一次保存发送的 body：**完整的**目标文件。拒绝时给出首个问题的确切位置，与宿主自身解析的报错方式一致。 */
 export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<string, unknown> } | { ok: false; error: string } {
   const body: Record<string, unknown> = {}
   const billing: Record<string, BillingNature> = {}
@@ -746,11 +649,7 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
   return { ok: true, body }
 }
 
-/** The per-row and per-route baselines of one view: a row is dirty when its
- *  signature moved, a route when its billing switch did. Taken from the very
- *  draft the view seeds ({@link draftFromView}), so a rule that shapes a draft
- *  row — the 首记 anchor, for one — can never make a freshly seeded row look
- *  edited. */
+/** 一份视图的行级与 route 级基线：行签名变了即 dirty。取自视图播种的同一草稿，故首记锚定等规则绝不会让刚播种的行看起来像被编辑过。 */
 export function baselinesOf(view: PricingView): { models: Map<string, string>; billing: Map<string, BillingNature> } {
   const models = new Map<string, string>()
   const billing = new Map<string, BillingNature>()
@@ -761,9 +660,7 @@ export function baselinesOf(view: PricingView): { models: Map<string, string>; b
   return { models, billing }
 }
 
-/** The baseline a successful save establishes for a draft: exactly its own
- *  signatures, so the local draft stays the source of truth and the tab does
- *  not have to re-seed (which would remount the inputs being typed in). */
+/** 一次成功保存为草稿建立的基线：就是它自己的签名，本地草稿保持为唯一真源，tab 不必重新播种（那会 remount 正在输入的输入框）。 */
 export function baselineOfDraft(draft: PriceDraft): { models: Map<string, string>; billing: Map<string, BillingNature> } {
   const models = new Map<string, string>()
   const billing = new Map<string, BillingNature>()
@@ -776,7 +673,7 @@ export function baselineOfDraft(draft: PriceDraft): { models: Map<string, string
   return { models, billing }
 }
 
-/** How many rows (and route billing switches) differ from the baseline. */
+/** 与基线不同的行数（以及 route 计费开关数）。 */
 export function stagedChanges(
   draft: PriceDraft,
   baseline: { models: ReadonlyMap<string, string>; billing: ReadonlyMap<string, BillingNature> },
@@ -791,16 +688,7 @@ export function stagedChanges(
   return count
 }
 
-/** Whether one model row differs from the baseline. */
+/** 一个模型行是否与基线不同。 */
 export function modelDirty(route: string, row: ModelDraft, baseline: ReadonlyMap<string, string>): boolean {
   return (baseline.get(rowKey(route, row.model)) ?? '') !== modelSignature(row)
-}
-
-/** A rate as the row header prints it (trimmed, at most 4 decimals). */
-export function fmtRate(value: string | number | undefined): string {
-  const raw = typeof value === 'number' ? String(value) : (value ?? '').trim()
-  if (raw === '') return '—'
-  const parsed = Number(raw)
-  if (!Number.isFinite(parsed)) return raw
-  return String(Math.round(parsed * 10_000) / 10_000)
 }

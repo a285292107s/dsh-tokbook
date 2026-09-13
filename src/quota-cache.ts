@@ -1,20 +1,15 @@
 /**
- * Durable last-known quota snapshots for the 订阅额度 tab.
+ * 订阅额度 tab 的持久最近已知快照。
  *
- * The official quota fetch hits a provider's own account API (seconds of
- * network latency), but the number it returns changes on a minutes-to-hours
- * scale. The tab should therefore render the *last known* official numbers
- * immediately and freshen them in the background, rather than blank the card
- * behind a skeleton for the whole round trip. That needs the last-known card
- * to survive process restarts, so after every successful ('ok') official
- * fetch the host persists the card here — one small JSON file per provider
- * (`quota-<provider>.json`) in the data directory.
+ * 官方额度拉取打的是 provider 自己的账户 API（数秒网络延迟），但返回的数字
+ * 按分钟到小时的尺度变化。tab 因此应立即渲染**最近已知**的官方数字，并在
+ * 后台刷新，而不是让整轮往返都用骨架屏把卡空白化。这要求最近已知卡跨进程
+ * 重启存活，故每次成功的（'ok'）官方拉取后宿主把卡持久化到这里——数据目录中
+ * 每 provider 一个小 JSON 文件（`quota-<provider>.json`）。
  *
- * Reads are strict: a missing, torn, or malformed file reads as null, so a
- * broken write can never serve as a fake "last known" value. Only 'ok' cards
- * are ever written: an `unconfigured`/`error` card is cheap to re-derive and
- * must not mask a later recovery (a transient network failure persisted as
- * "last known" would render instantly forever).
+ * 读严格：缺失、撕裂或畸形的文件读作 null，坏写入永远不能充当假的「最近
+ * 已知」。只写 'ok' 卡：`unconfigured`/`error` 卡重推很廉价，且不得遮住稍后
+ * 的恢复（把一次瞬时网络失败持久化成「最近已知」会立刻永远渲染）。
  *
  * @module dsh-tokbook/quota-cache
  */
@@ -23,9 +18,9 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { QuotaCard } from './types.ts'
 
-/** On-disk shape of one provider's quota snapshot. */
+/** 一个 provider 额度快照的磁盘形状。 */
 export interface QuotaSnapshotFile {
-  /** When the official fetch produced this card, epoch ms. */
+  /** 官方拉取产出该卡的时刻，epoch ms。 */
   savedAt: number
   card: QuotaCard
 }
@@ -34,8 +29,7 @@ function snapshotFileName(provider: string): string {
   return `quota-${provider}.json`
 }
 
-/** Whether a parsed snapshot is trustworthy: only 'ok' cards with a sane
- * timestamp are accepted. Anything else reads as absent. */
+/** 解析后的快照是否可信：只接受带合理时间戳的 'ok' 卡。其余读作缺席。 */
 function isSnapshotFile(value: unknown): value is QuotaSnapshotFile {
   if (typeof value !== 'object' || value === null) return false
   const raw = value as Record<string, unknown>
@@ -45,8 +39,8 @@ function isSnapshotFile(value: unknown): value is QuotaSnapshotFile {
   return card.state === 'ok'
 }
 
-/** Read a provider's last-known 'ok' quota card. A missing/torn/malformed
- * snapshot reads as null — never a partial or non-'ok' card. */
+/** 读一个 provider 最近已知的 'ok' 额度卡。缺失/撕裂/畸形快照读作 null——
+ *  绝非部分或非 'ok' 卡。 */
 export async function readQuotaSnapshot(dir: string, provider: string): Promise<QuotaCard | null> {
   let text: string
   try {
@@ -63,10 +57,9 @@ export async function readQuotaSnapshot(dir: string, provider: string): Promise<
   return isSnapshotFile(value) ? value.card : null
 }
 
-/** Persist a provider's quota card atomically (temp + rename; the target is
- * unlinked first because Windows rename-over-existing fails intermittently).
- * Callers persist 'ok' cards only; a snapshot write failure is non-fatal and
- * is logged by the caller. */
+/** 原子持久化一个 provider 的额度卡（临时 + rename；先 unlink 目标——
+ *  Windows 覆盖 rename 间歇失败）。调用方只持久化 'ok' 卡；快照写失败非致命，
+ *  由调用方记日志。 */
 export async function writeQuotaSnapshot(dir: string, provider: string, card: QuotaCard): Promise<void> {
   const target = join(dir, snapshotFileName(provider))
   const tmp = join(dir, `${snapshotFileName(provider)}.tmp`)

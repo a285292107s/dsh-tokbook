@@ -1,9 +1,6 @@
-/** styles.ts fragment: pricing. Concatenated in order by `injectStyles`. */
-export const CSS_PRICING = `/* ── pricing tab (价格表) ───────────────────────────────────────────────── */
-/* The tab is a TABLE, not a form: one card per route, one row per model, the
-   four ¥/M buckets as fixed right-aligned columns so numbers compare down the
-   list. Cells read as text and become inputs on focus, the row's own line
-   carries its issue, and the drawer behind ▸ holds the 调价史. */
+/** styles.ts 片段：pricing。由 `injectStyles` 按序拼接。 */
+export const CSS_PRICING = `/* 价格表 tab */
+/* 这个 tab 是表格，不是表单：每个 route 一张卡，每个模型一行，四个 ¥/M 桶作为固定右对齐列，数字可以纵向比对。 */
 
 [data-plugin="dsh-tokbook"] .dtpl-price-sec{display:flex;flex-direction:column;gap:8px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -26,7 +23,7 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
   color:var(--dtpl-warn);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
   background:color-mix(in srgb,var(--dtpl-warn) 10%,transparent);
 }
-/* The one-time legend: what 「—」 means, said once instead of on every row. */
+/* 一次性图例：解释「—」的含义，说一遍，而不是每行都说。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-legend{
   margin:0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
 }
@@ -43,9 +40,7 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
   padding:8px 10px 8px 8px;border-bottom:.5px solid var(--dtpl-border);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-card[data-collapsed="true"] .dtpl-price-head{border-bottom:0;}
-/* The fold wraps as a UNIT rather than crushing its own counts: the route key
-   is the unpredictable value (it is whatever the user configured), so it is the
-   one allowed to ellipsize, while the summary keeps its whole text. */
+/* 折叠头作为整体换行，而不是压碎自己的计数：route key 是不可预测的值，所以只有它可以省略号截断，摘要保持完整文本。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-fold{
   appearance:none;border:0;background:transparent;text-align:left;
   flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
@@ -85,18 +80,10 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-rows{display:flex;flex-direction:column;}
 
-/* ONE rate-cell metric, defined at the tab root so the table and the 调价史
-   drawer cannot drift apart: a ¥/M cell is the same size wherever it appears.
+/* 费率格的唯一度量，定义在 tab 根上，表格与调价史抽屉不会分家。
 
-   The width is set by what a rate can BE, not by today's numbers. Measured in
-   the real font at 12px tabular figures: 0.02 / 13.5 are 22px, 0.0028 is 35px,
-   and an 8-character rate (0.003625 — DeepSeek's own historical cache-hit
-   price — or 123.4567) is 47.9px. With 7px of side padding that needs 62px, so
-   64px is the tightest safe column; ~56px would clip the 8th character.
-   Shrinking further trades a cosmetic gain for silently unreadable prices, so
-   the floor is written down here instead.
-   --dtpl-cell-pad-x is shared with the column header on purpose: the header
-   must end on the same edge as the numbers under it (see .dtpl-price-col-rate). */
+   宽度由费率能是什么决定，不是今天的数字。8 字符费率（0.003625——DeepSeek 自己的历史缓存命中价——或 123.4567）是 47.9px。加上两侧 7px 内边距需要 62px，所以 64px 是最紧的安全列宽；~56px 会裁掉第 8 个字符。
+   --dtpl-cell-pad-x 有意与列头共享：列头必须和下面的数字结束在同一边缘。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-sec{
   --dtpl-cell-pad-x:7px;
   --dtpl-rate-w:64px;
@@ -104,14 +91,9 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
   --dtpl-rates-w:calc(4 * var(--dtpl-rate-w) + 3 * var(--dtpl-rate-gap));
 }
 
-/* Every row is its own grid on the SAME tracks as the column header above it:
-   identity (grows) | four fixed rate columns | one disclosure slot.
+/* 每行是自己的网格，轨道与上方列头相同：身份（伸展）| 四个固定费率列 | 一个展开槽。
 
-   The rate track is sized to what a rate actually IS, not to the column's
-   label: a ¥/M rate is a handful of characters, so the narrowest safe column
-   (see the metric above) leaves the remaining width to the only column holding
-   unpredictable text — the model identity, which used to be squeezed to 258px
-   and clip its billing string while four 84px columns sat mostly empty. */
+   费率轨道按费率实际是什么来定，而不是按列标签：最窄的安全列宽把剩余宽度留给唯一放不可预测文本的列——模型身份。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-cols,
 [data-plugin="dsh-tokbook"] .dtpl-price-row{
   display:grid;
@@ -127,9 +109,7 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
   display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
   column-gap:var(--dtpl-rate-gap);
 }
-/* The label shares the value's right edge exactly: without this the header ends
-   at the cell's border while the number ends 7px inside it, so every column
-   reads as two edges that almost line up. */
+/* 标签与数值精确共享右边缘：否则列头结束在格子的边框，数字却结束在内侧 7px 处。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-col-rate{
   text-align:right;padding-right:var(--dtpl-cell-pad-x);
 }
@@ -138,9 +118,7 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
   scroll-margin-block:56px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-row:first-child{border-top:0;}
-/* Three row states, told apart by ONE convention: an accent BAR means
-   "unsaved", a neutral lift means "expanded", a ring means "focus".
-   The bar is never spent on anything but dirt, so it cannot be misread. */
+/* 三种行状态，靠同一条约定区分：accent 色侧条 =「未保存」，中性抬升 =「已展开」，环 =「焦点」。侧条从不花在脏以外的事情上。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-row[data-dirty="true"]{
   background:color-mix(in srgb,var(--dtpl-accent) 7%,transparent);
   box-shadow:inset 2px 0 0 var(--dtpl-accent);
@@ -159,17 +137,13 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
 [data-plugin="dsh-tokbook"] .dtpl-price-name{
   display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap;row-gap:2px;
 }
-/* The model picker's identity split, given its own line each so neither half
-   has to fight the other for width: the human NAME is the label and never
-   shrinks away; the exact model string is the identity (the billing key) and
-   gets the full column on the line below. */
+/* 模型选择器的身份拆分，各占一行，互不抢宽度：人读的 NAME 是标签、永不缩没；精确 model 字符串是身份（计费键），占下一行整宽。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-title{
   flex:0 1 auto;min-width:0;
   font-size:12px;line-height:16px;font-weight:500;color:var(--dtpl-fg);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-/* A row nothing names stands on its exact string alone, so it takes the
-   label's tone and weight rather than reading as a de-emphasized aside. */
+/* 没有名字的行只靠精确字符串站立，所以接过标签的色调和字重，而不是读成被弱化的旁注。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-title:only-child{
   color:var(--dtpl-fg);font-family:var(--dtpl-mono);
 }
@@ -186,17 +160,15 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-dirty{
   color:var(--dtpl-accent);background:color-mix(in srgb,var(--dtpl-accent) 15%,transparent);
 }
-/* 峰谷 marks the row whose four visible numbers are NOT the whole story — it
-   has to read as "there is more pricing inside" at a glance. */
+/* 峰谷标记：这一行可见的四个数字不是全部——它必须一眼读成「里面还有更多定价」。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-slot{
   color:var(--dtpl-accent);background:color-mix(in srgb,var(--dtpl-accent) 12%,transparent);
 }
-/* 未生效 is a caution, not an alarm: the price is written but idle. */
+/* 未生效是提醒，不是警报：价已写上，只是闲着。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-idle{
   color:var(--dtpl-warn);background:color-mix(in srgb,var(--dtpl-warn) 12%,transparent);
 }
-/* Provenance line: what the price is and how much the ledger billed with it. The
-   row's identity is NOT repeated here — it is on the line above, once. */
+/* 出处行：这个价是什么，以及账本用它计了多少。行的身份不在此重复——上一行已经说过一次。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-meta{
   display:flex;align-items:baseline;gap:5px;min-width:0;
   font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
@@ -205,14 +177,13 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
   flex:0 1000 auto;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-/* What is wrong with THIS row, right under its own cells. */
+/* 这一行哪里不对，紧挨在自己的格子下面。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-issue{
   margin:0;padding:2px 10px 6px 10px;
   font-size:10px;line-height:15px;color:var(--dtpl-err);
 }
 
-/* The four cells: text until focused, real inputs always (so Tab walks them).
-   Right-aligned tabular figures keep a column comparable down the whole list. */
+/* 四个格子：平时像文本，聚焦时是真输入框。右对齐等宽数字让整列可纵向比对。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-rates{
   display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
   column-gap:var(--dtpl-rate-gap);min-width:0;
@@ -266,17 +237,14 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);}
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost-danger:hover{color:var(--dtpl-err);background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);}
 
-/* The 调价史 drawer behind ▸ — the surface ladder, spelled out once:
-     page        (nothing)
-     card         fg 4%                       ← this tab's panel
-     open row     fg 7%                       ← the row it belongs to
-     drawer       NO fill, dashed seam        ← a recess, not another panel
-     .seg         --dtpl-surface (layer-1)    ← a block raised out of the recess
-     .slot        accent 6%                   ← the peak window inside the block
-   The drawer deliberately adds no wash of its own: stacking one translucent
-   fill inside another made the drawer and the card the same tone, which is why
-   a segment block used to read as the card itself. A recess is shown by the
-   seam and by the blocks standing on it. */
+/* ▸ 后面的调价史抽屉——表面阶梯：
+     page        （无）
+     card         fg 4%                       ← 本 tab 的面板
+     open row     fg 7%                       ← 它所属的展开行
+     drawer       无填充，虚线缝              ← 一个凹槽，不是另一块面板
+     .seg         --dtpl-surface (layer-1)    ← 从凹槽里抬出的块
+     .slot        accent 6%                   ← 块内的峰谷窗口
+   抽屉刻意不加自己的洗色：半透明叠半透明会让抽屉与卡片同调。凹槽靠缝线和站在上面的块来表现。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-history{
   display:flex;flex-direction:column;gap:8px;
   padding:8px 10px 12px;
@@ -319,10 +287,7 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg:hover .dtpl-price-seg-actions,
 [data-plugin="dsh-tokbook"] .dtpl-price-seg:focus-within .dtpl-price-seg-actions{opacity:1;}
-/* The drawer is a FORM, so its four rate fields use the width they are given
-   (four equal columns) while every input keeps the table's rate metric — the
-   box a rate is typed into is one size across the whole tab. Capping the input
-   rather than the column is what stops a 156px trough around a 22px number. */
+/* 抽屉是表单，所以四个费率字段用它们被给出的宽度（四等分列），而每个输入框仍保持表格的费率度量——限制输入框而不是列。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates,
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates{
   display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
@@ -339,9 +304,7 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-note{display:block;}
 [data-plugin="dsh-tokbook"] .dtpl-price-input-note{text-align:left;font-variant-numeric:normal;}
 
-/* The whole-day price of one segment is labelled, because the same four buckets
-   appear again below as exception slots: without the 00:00–24:00 range the two
-   levels would look like two rows of the same table. */
+/* 分段的全天价有标签，因为同样的四个桶会在下方再次出现作为例外时段：没有 00:00–24:00 区间，两级会看起来像同一张表的两行。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-sub{display:flex;align-items:baseline;gap:6px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-sub-k,
 [data-plugin="dsh-tokbook"] .dtpl-price-slots-k{
@@ -353,10 +316,7 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
   font-style:normal;font-family:var(--dtpl-mono);color:var(--dtpl-fg-3);
 }
 
-/* 峰谷时段 (peak/off-peak windows): one bordered row each, tinted with the
-   accent so "this hour range has its own price" reads as a separate, weightier
-   object than the whole-day price above it — not as a second row of the same
-   table. */
+/* 峰谷时段：一行一个，用 accent 色染色，让「这个小时区间有自己的价」读成比上面的全天价更独立的对象。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-slots{display:flex;flex-direction:column;gap:5px;margin-top:1px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-slot{
   display:flex;flex-direction:column;gap:5px;
@@ -390,8 +350,7 @@ export const CSS_PRICING = `/* ── pricing tab (价格表) ──────
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-history-hint{margin:0;font-size:10px;line-height:15px;color:var(--dtpl-fg-2);}
 
-/* The save state of the file, in the toolbar: it is the whole feedback loop for
-   a table that writes itself, so a failure wraps instead of being clipped. */
+/* 文件的保存状态，放在工具栏里：这是一张会自己写回的表的整个反馈回路，所以失败时要换行，而不是被裁掉。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-state{
   font-size:11px;line-height:16px;color:var(--dtpl-fg-2);overflow-wrap:anywhere;
 }

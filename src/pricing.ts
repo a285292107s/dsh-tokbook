@@ -1,28 +1,12 @@
 /**
- * The hand-written price table of the token-book.
+ * 手工价表：provider route key → 精确 model 串 → 该 pair 的价格时间轴。
  *
- * ONE file, ONE axis: `pricing.json` maps a provider route key → an exact model
- * string → that pair's price timeline. A segment is four whole-day ¥/M rates
- * plus the instant it takes effect — a local date, or a local date and an exact
- * hour — and, optionally, the exception slots that override those rates inside
- * an hour range on a day set (工作日早高峰, 周末通宵…). A record is priced by the
- * LAST segment whose effective instant has arrived, then by the slot of that
- * segment in force at the record's own local time (no slot in force = the
- * whole-day price), so backdating or re-slotting a price re-prices history and
- * no aggregation is ever rebuilt. Nothing else decides a price: there is no
- * cloud mirror and no global per-model layer — every (route, model) is the
- * user's own number, and a pair nobody priced bills ¥0 while surfacing as
- * 价格未知.
+ * 记录按「已到达的最新生效时刻」的段计价，再按该段在记录本地时间生效的时段计
+ * （无时段 = 全天价），因此改价 / 改时段只重算历史，从不重建聚合。唯一保留键
+ * `$billing`：route → 计费性质（metered = 真实消费，subscription = 订阅价值）。
  *
- * The file has exactly one reserved key, `$billing`: route → billing nature
- * (`metered` = real spend, `subscription` = folded plan value). It is a
- * channel-level fact, the same way the ledger records a channel per row.
- *
- * Reading is lenient (a malformed segment or slot is dropped, never fatal);
- * writing is strict and replaces the whole file, so a bad PUT cannot
- * half-apply. The time axis itself — instants, hours and day sets — is shared
- * with the browser half through `./price-format.ts`, so the draft the tab
- * accepts is exactly what this writer takes.
+ * 读宽松（畸形段/时段丢弃，不致命）；写严格且整文件替换，坏 PUT 不会半落地。
+ * 时间轴规则经 `./price-format.ts` 与 browser 半区共享。
  *
  * @module dsh-tokbook/pricing
  */
@@ -38,10 +22,8 @@ import type {
 } from './types.ts'
 import { UNPRICED_KEY } from './types.ts'
 
-/** The price file's name inside the data directory. */
 export const PRICING_FILE = 'pricing.json'
 
-/** The file's one reserved top-level key (route → billing nature). */
 export const PRICING_BILLING_KEY = '$billing'
 
 export { DAY_SETS, EARLIEST, dayKeyOf, dayStartMs, instantKey, instantMs } from './price-format.ts'
@@ -54,9 +36,8 @@ interface Logger {
   error(...args: unknown[]): void
 }
 
-/** The whole price file: the (route, model) timelines plus the billing map.
- *  `revision` is a content signature — the derived rollup records the revision
- *  its rate rows were folded under, and a different one rebuilds it. */
+/** 整个价文件：(route, model) 时间轴 + billing 映射。`revision` 是内容签名——
+ *  派生 rollup 记下其 rate 行所折叠的 revision，不同则重建。 */
 export interface PriceFile {
   table: PricingTable
   billing: BillingMap
@@ -64,7 +45,7 @@ export interface PriceFile {
 }
 
 // ---------------------------------------------------------------------------
-// Reading (lenient) and writing (strict)
+// 读（宽松）与写（严格）
 // ---------------------------------------------------------------------------
 
 function isRate(value: unknown): value is number {
@@ -81,8 +62,7 @@ async function readTextFile(dir: string, name: string, logger: Logger): Promise<
   }
 }
 
-/** A cheap content signature (djb2, hex): the rollup only needs to tell one
- *  price file from another, not to resist tampering. */
+/** 廉价内容签名（djb2, hex）：rollup 只需区分不同价文件，不需抗篡改。 */
 function revisionOf(text: string): string {
   let hash = 5381
   for (let index = 0; index < text.length; index += 1) {
@@ -110,9 +90,7 @@ function coerceRates(raw: Record<string, unknown>): ModelPricing | null {
   }
 }
 
-/** The rates a 峰谷时段 restates: any non-empty subset of the four buckets. A
- *  bucket it omits keeps the segment's whole-day rate, so a peak window can
- *  restate just what differs. Null = nothing rate-shaped in there at all. */
+/** 峰谷时段重述的费率：四档的任意非空子集。省略的档沿用段的全天价。 */
 function coerceSlotRates(raw: Record<string, unknown>): ModelPricing | null {
   const rates: ModelPricing = {
     ...(isRate(raw.inputPerMillion) ? { inputPerMillion: raw.inputPerMillion } : {}),
@@ -123,10 +101,8 @@ function coerceSlotRates(raw: Record<string, unknown>): ModelPricing | null {
   return Object.keys(rates).length === 0 ? null : rates
 }
 
-/** One 峰谷时段 of the file: the hours and days it covers, plus the buckets it
- *  restates. A malformed slot (bad hours, an unknown day set, no usable rate)
- *  is dropped — never applied with a guessed day set, which would silently bill
- *  every day at the exception price. */
+/** 文件中的一个峰谷时段：覆盖的小时与星期集合 + 重述的档位。畸形时段丢弃
+ *  ——绝不猜 day set 套用，否则会静默按例外价计费每一天。 */
 function coerceSlot(raw: unknown): PriceSlot | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const slot = raw as Record<string, unknown>
@@ -143,8 +119,7 @@ function coerceSlot(raw: unknown): PriceSlot | null {
   return { days, start: slot.start, end: slot.end, rates }
 }
 
-/** Ascending by start hour, overlapping slots dropped (the file's EARLIER slot
- *  wins — the read path never throws). */
+/** 按 start 升序；重叠时段丢弃——文件中较早的时段胜出（读路径从不抛）。 */
 function normalizeSlots(slots: readonly PriceSlot[]): PriceSlot[] {
   const out: PriceSlot[] = []
   for (const slot of [...slots].sort((left, right) =>
@@ -181,8 +156,7 @@ function coerceSegment(raw: unknown): PriceSegment | null {
   }
 }
 
-/** Ascending by effective instant, one segment per instant (the file's FIRST
- *  segment for a repeated instant wins — the read path never throws). */
+/** 按生效时刻升序；同一时刻只留一段——文件中该时刻的首段胜出（读路径从不抛）。 */
 function normalizeSegments(segments: readonly PriceSegment[]): PriceSegment[] {
   const out: PriceSegment[] = []
   for (const segment of [...segments].sort((left, right) => left.from - right.from)) {
@@ -193,8 +167,8 @@ function normalizeSegments(segments: readonly PriceSegment[]): PriceSegment[] {
   return out
 }
 
-/** Lenient coercion of one file body: malformed routes / models / segments are
- *  dropped (never fatal), the way the ledger reads its own day files. */
+/** 宽松解析整个文件：畸形 route / model / 段丢弃（不致命），与账本读自身分日
+ *  文件一致。 */
 export function coercePriceFile(value: unknown, logger: Logger = console): PriceFile {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     logger.error(`[tokbook] ${PRICING_FILE} is not a JSON object; treating it as empty`)
@@ -226,10 +200,8 @@ export function coercePriceFile(value: unknown, logger: Logger = console): Price
   return { table, billing, revision: '' }
 }
 
-/** The price file of one data directory. A missing / malformed file reads as
- *  an empty table (nothing is priced). The revision is the file TEXT's
- *  signature, so any edit — including one this process did not make — is
- *  visible to the derived rollup without a restart. */
+/** 读一个数据目录的价文件。缺失 / 畸形读作空表（无人定价）。revision 是文件
+ *  **文本**的签名——包括本进程未做的编辑在内，任何改动对派生 rollup 都可见。 */
 export async function readPriceFile(dir: string, logger: Logger = console): Promise<PriceFile> {
   const text = await readTextFile(dir, PRICING_FILE, logger)
   if (text === null) return { table: {}, billing: {}, revision: '' }
@@ -242,9 +214,8 @@ const SLOT_FIELDS = new Set([
   'days', 'start', 'end', 'inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion',
 ])
 
-/** Strict parse of one 峰谷时段: hours inside one local day, a known day set,
- *  and any non-empty subset of the four rates — a bucket left out keeps the
- *  segment's whole-day rate. */
+/** 严格解析一个峰谷时段：小时落在一个本地日内、day set 已知、四档费率的任意
+ *  非空子集——省略的档沿用段的全天价。 */
 function parseSlot(value: unknown, where: string): { ok: true; slot: PriceSlot } | { ok: false; error: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: `${where}必须是对象（start + end + 要覆盖的档位单价）` }
@@ -341,11 +312,10 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
   }
 }
 
-/** The verdict of one PUT body. */
+/** 一次 PUT body 的判定。 */
 export type PriceParse = { ok: true; file: PriceFile } | { ok: false; error: string }
 
-/** Strict parse of a complete desired file: every deviation is refused with the
- *  offending location, so a bad body never half-applies. */
+/** 严格解析完整目标文件：任何偏差都以出错位置拒绝，坏 body 绝不半落地。 */
 export function parsePriceInput(value: unknown): PriceParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: '价格表必须是 JSON 对象（路由 → 模型串 → 价段数组）' }
@@ -401,7 +371,7 @@ export function parsePriceInput(value: unknown): PriceParse {
   return { ok: true, file: { table, billing, revision: '' } }
 }
 
-/** One exception slot of one segment, as the file writes it. */
+/** 一段价的一个例外时段在文件中的形态。 */
 function slotBody(slot: PriceSlot): Record<string, unknown> {
   return {
     days: slot.days,
@@ -416,9 +386,8 @@ function slotBody(slot: PriceSlot): Record<string, unknown> {
   }
 }
 
-/** The file body of one price file: routes and models sorted, the reserved
- *  `$billing` section first, segments ascending by effective instant and the
- *  exception slots inside each ascending by start hour. */
+/** 价文件的文件体：route 与 model 排序，`$billing` 段在前，段按生效时刻升序，
+ *  段内例外时段按 start 小时升序。 */
 export function priceFileBody(file: PriceFile): Record<string, unknown> {
   const body: Record<string, unknown> = {}
   const billingRoutes = Object.keys(file.billing).sort((left, right) => left.localeCompare(right))
@@ -453,10 +422,8 @@ export function priceFileBody(file: PriceFile): Record<string, unknown> {
   return body
 }
 
-/** Persist the whole price file atomically (temp file + rename; the previous
- *  file is kept as `.bak` until the rename lands, because Windows
- *  rename-over-existing fails intermittently and a missing `pricing.json`
- *  must never read as an empty table). */
+/** 原子落盘整个价文件（临时文件 + rename；rename 前把旧文件挪成 `.bak`——
+ *  Windows 覆盖 rename 间歇失败，而缺失的 `pricing.json` 绝不能读作空表）。 */
 export async function writePriceFile(dir: string, file: PriceFile, logger: Logger = console): Promise<void> {
   const target = join(dir, PRICING_FILE)
   const tmp = join(dir, `${PRICING_FILE}.tmp`)
@@ -464,9 +431,8 @@ export async function writePriceFile(dir: string, file: PriceFile, logger: Logge
   try {
     await mkdir(dirname(target), { recursive: true })
     await writeFile(tmp, `${JSON.stringify(priceFileBody(file), null, 2)}\n`, 'utf8')
-    // Keep the previous file until the rename lands: a crash between remove
-    // and rename would leave pricing.json missing (read as an empty table),
-    // and an auto-save of that empty view would then erase a hand-written book.
+    // rename 落地前保留旧文件：remove 与 rename 之间崩溃会让 pricing.json
+    // 缺失（读作空表），该空视图的自动保存随后会抹掉手写价表。
     await rename(target, backup).catch(() => undefined)
     await rename(tmp, target)
   } catch (error) {
@@ -476,12 +442,11 @@ export async function writePriceFile(dir: string, file: PriceFile, logger: Logge
 }
 
 // ---------------------------------------------------------------------------
-// Resolution
+// 解析
 // ---------------------------------------------------------------------------
 
-/** The segment in force at `timeMs` for one (route, model): the last segment
- *  whose effective instant has arrived. Null = 价格未知 (nothing priced it, or
- *  the instant predates the earliest segment). */
+/** (route, model) 在 `timeMs` 生效的段：最后一个生效时刻已到达的段。
+ *  null = 价格未知（无人定价，或时刻早于最早一段）。 */
 export function priceAt(
   table: PricingTable,
   route: string | undefined,
@@ -498,10 +463,8 @@ export function priceAt(
   return hit
 }
 
-/** The exception slot of one segment in force at `timeMs` — by the instant's own
- *  local weekday and hour — or null for the segment's whole-day price. At most
- *  one slot is ever in force: the write path refuses an overlapping pair and the
- *  read path drops the later of the two. */
+/** 该段在 `timeMs` 生效的例外时段（按时刻自身的本地星期与小时），或 null =
+ *  段的全天价。任一时刻至多一个时段：写路径拒绝重叠对，读路径丢弃较晚的那个。 */
 export function slotAt(segment: PriceSegment, timeMs: number): PriceSlot | null {
   for (const slot of segment.slots ?? []) {
     if (slotCovers(slot, timeMs)) return slot
@@ -509,24 +472,21 @@ export function slotAt(segment: PriceSegment, timeMs: number): PriceSlot | null 
   return null
 }
 
-/** The identity of the slot in force at `timeMs`, or null for the whole-day
- *  price. */
+/** `timeMs` 生效时段的身份，或 null = 全天价。 */
 export function slotRefAt(segment: PriceSegment, timeMs: number): SlotRef | null {
   const slot = slotAt(segment, timeMs)
   return slot === null ? null : { start: slot.start, days: slot.days }
 }
 
-/** The ¥/M rates of one segment at `timeMs`: its whole-day price with the
- *  exception slot in force layered over it. A rate a slot omits keeps the
- *  whole-day one, so a peak slot may restate only what actually changes. */
+/** 该段在 `timeMs` 的 ¥/M：全天价叠上当时生效的例外时段。时段省略的档沿用
+ *  全天价，因此峰值时段只需重述真正变化的部分。 */
 export function ratesOfSegment(segment: PriceSegment, timeMs: number): ModelPricing {
   const slot = slotAt(segment, timeMs)
   return slot === null ? segment.rates : { ...segment.rates, ...slot.rates }
 }
 
-/** The price in force at `timeMs` for one (route, model), both levels resolved:
- *  the segment whose effective instant has arrived, then its slot for that
- *  instant's local time. Null = 价格未知. */
+/** (route, model) 在 `timeMs` 的价格，两级都解析：生效段，再取该段在时刻本地
+ *  时间的时段。null = 价格未知。 */
 export function ratesAt(
   table: PricingTable,
   route: string | undefined,
@@ -537,10 +497,9 @@ export function ratesAt(
   return segment === null ? null : ratesOfSegment(segment, timeMs)
 }
 
-/** The rate identity of one (route, model) at `timeMs` — the effective instant
- *  of the segment that applied plus the slot that applied inside it, or
- *  {@link UNPRICED_KEY}. Holds identity, never numbers, so editing a rate
- *  re-prices history on the next read. */
+/** (route, model) 在 `timeMs` 的 rate 身份——当时生效段的生效时刻 + 段内生效
+ *  的例外时段，或 {@link UNPRICED_KEY}。只存身份、不存数字，改价后下次读即
+ *  重算历史。 */
 export function rateKeyAt(
   table: PricingTable,
   route: string | undefined,
@@ -551,12 +510,10 @@ export function rateKeyAt(
   return hit === null ? UNPRICED_KEY : { from: hit.from, slot: slotRefAt(hit, timeMs) }
 }
 
-/** The price of one rate identity: look the segment's own instant back up under
- *  the current table, then the slot it names (a rate row is keyed by the segment
- *  instant and slot it was billed under, so re-pricing history needs no
- *  per-record timestamps). Null when the table no longer holds that identity —
- *  the segment instant is gone, or the named slot was moved or deleted — which
- *  reads as 价格未知 for exactly those rows. */
+/** 一个 rate 身份的价格：在当前表里回查该段的生效时刻，再找它命名的时段
+ *  （rate 行以计费时所依据的段时刻 + 时段为键，故重算历史无需每条记录的时间戳）。
+ *  表里不再持有该身份时为 null——段时刻消失，或命名的时段被移动/删除——
+ *  这些行就读作价格未知。 */
 export function priceOfKey(
   table: PricingTable,
   route: string | undefined,
@@ -572,14 +529,14 @@ export function priceOfKey(
   return slot === undefined ? null : { ...segment.rates, ...slot.rates }
 }
 
-/** The billing nature of one route: its `$billing` entry, default metered. */
+/** route 的计费性质：其 `$billing` 条目，默认 metered。 */
 export function billingOf(billing: BillingMap, route: string | undefined): BillingNature {
   if (route === undefined || route === '') return 'metered'
   return billing[route] ?? 'metered'
 }
 
-/** Billed cost of one totals row at a resolved price: each bucket at its own
- *  ¥/M rate, the cache buckets falling back to the plain input rate. */
+/** 在已解析价格下一行 totals 的计费金额：各桶按自身 ¥/M，cache 桶回落到普通
+ *  input 价。 */
 export function costOf(totals: UsageTotals, prices: ModelPricing): number {
   const M = 1_000_000
   const cacheRead = prices.cacheReadPerMillion ?? prices.inputPerMillion
@@ -589,4 +546,3 @@ export function costOf(totals: UsageTotals, prices: ModelPricing): number {
     + totals.cacheReadTokens * cacheRead
     + totals.cacheWriteTokens * cacheWrite) / M
 }
-

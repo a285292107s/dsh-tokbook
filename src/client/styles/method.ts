@@ -1,8 +1,6 @@
-/** styles.ts fragment: method. Concatenated in order by `injectStyles`. */
-export const CSS_METHOD = `/* ── method doc (统计口径 tab) ──────────────────────────────────────────── */
-/* Reading hierarchy: lede → 3-fact strip → numbered sections. Facts and
-   structural groups are washed panels so the eye lands on the summary
-   (来源/精度/完整度, ≈95%) before any caveat. */
+/** styles.ts 片段：method。由 `injectStyles` 按序拼接。 */
+export const CSS_METHOD = `/* 统计口径文档 */
+/* 阅读层级：导语 → 三事实条 → 编号小节。事实与结构组做成轻洗面板，让视线先落在摘要。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc{max-width:none;}
 [data-plugin="dsh-tokbook"] .dtpl-doc code{
   font-family:var(--dtpl-mono);font-size:.9em;
@@ -12,7 +10,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
   white-space:nowrap;
 }
 
-/* Lede: two or three short stacked lines setting the mode before detail. */
+/* 导语：两三行短句，先定调再展开细节。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede{
   display:flex;flex-direction:column;gap:3px;
   margin:0 0 12px;font-size:12px;line-height:20px;color:var(--dtpl-fg-2);
@@ -20,7 +18,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede p{margin:0;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede b{color:var(--dtpl-accent);font-weight:600;}
 
-/* 3-fact strip: 来源 / 精度 / 完整度, the last one emphasized. */
+/* 三事实条：来源 / 精度 / 完整度，最后一项加重。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-facts{
   display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
   margin-bottom:16px;
@@ -51,7 +49,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-fact-tail{color:var(--dtpl-fg-2);font-size:11px;}
 
-/* Numbered section titles: 1/2/3/4 in accent chips. */
+/* 编号小节标题：1/2/3/4 装在 accent 色块里。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-sec{margin-bottom:16px;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-title{
   display:flex;align-items:center;gap:8px;
@@ -70,7 +68,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-sub b{color:var(--dtpl-fg);font-weight:600;}
 
-/* 4-bucket tiles: 2×2 grid of plain-language definitions. */
+/* 四桶磁贴：2×2 网格的白话定义。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-buckets{
   display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
   margin-bottom:10px;
@@ -89,7 +87,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
   font-size:11.5px;line-height:17px;color:var(--dtpl-fg-2);
 }
 
-/* Sum equation: 累计词元 = 输入 + … as one wrapped pill row. */
+/* 累计公式：累计词元 = 输入 + …，做成一行可换行的 pill。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-eq{
   display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;
   margin:0 0 10px;padding:7px 12px;
@@ -101,7 +99,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
 [data-plugin="dsh-tokbook"] .dtpl-doc-eq-term{font-weight:600;color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-doc-eq-op{color:var(--dtpl-fg-3);font-weight:600;}
 
-/* 记了哪些调用: chip-led rows. */
+/* 记了哪些调用：chip 引导的行列表。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-scope{
   list-style:none;margin:0;padding:0;
   display:flex;flex-direction:column;
@@ -128,7 +126,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
   font-weight:500;
 }
 
-/* 差额从哪来: two side-by-side reasons. */
+/* 差额从哪来：并排两条原因。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-gap{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;
 }
@@ -175,7 +173,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-gap-sum b{color:var(--dtpl-accent);font-weight:700;}
 
-/* 怎么核对: the field map in one compact panel. */
+/* 怎么核对：字段映射，收进一个紧凑面板。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-map{
   display:flex;flex-direction:column;gap:5px;
   margin:2px 0 8px;padding:10px 12px;
@@ -194,7 +192,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-map-note:first-of-type{margin-top:2px;}
 
-/* Cross-tab callout: 订阅额度 is a different, official caliber. */
+/* 跨 tab 提示：订阅额度是另一套官方口径。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-quota{
   display:flex;flex-direction:column;gap:3px;
   margin:0 0 14px;padding:10px 13px;
@@ -206,7 +204,7 @@ export const CSS_METHOD = `/* ── method doc (统计口径 tab) ────�
 [data-plugin="dsh-tokbook"] .dtpl-doc-quota p{margin:0;font-size:12px;line-height:20px;color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-doc-quota b{color:var(--dtpl-accent);font-weight:600;}
 
-/* Live data-file diagnostics: one compact box. */
+/* 数据文件诊断：一个紧凑盒子。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-data{
   display:flex;flex-direction:column;gap:3px;
   margin:2px 0 6px;padding:10px 13px;

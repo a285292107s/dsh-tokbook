@@ -1,10 +1,6 @@
 /**
- * Small shared view store for the trigger button and the overlay window.
- *
- * The button and the overlay are two sibling root-scoped slot entries, so they
- * share state through one handle created in `apply` and passed to both via
- * their register `inject` factories. The store is a minimal
- * subscribe/getSnapshot object the components bind with `useSyncExternalStore`.
+ * 触发按钮与浮窗共享的 view store（经 `apply` 创建、`inject` 分发）。
+ * pricingDirty 跨 unmount 存活；quotaAlert 来自宿主快照、不走网络。
  *
  * @module dsh-tokbook/client/store
  */
@@ -15,10 +11,9 @@ export interface TokBookViewSnapshot {
   readonly open: boolean
   readonly overview: TokBookOverview | null
   readonly error: string | null
-  /** True while the 价格表 tab holds unsaved staged edits. The drafts survive
-   *  unmount, so this flag outlives the panel and drives the tab's dot. */
+  /** 未保存的价表改动；跨 unmount 存活，驱动 tab 小圆点。 */
   readonly pricingDirty: boolean
-  /** Last-known quota 告急 from the host's durable snapshots (no network). */
+  /** 最近已知的额度告急（宿主持久化快照，无网络）。 */
   readonly quotaAlert: boolean
 }
 
@@ -32,7 +27,6 @@ export interface TokBookViewStore {
   setQuotaAlert(alert: boolean): void
 }
 
-/** Create a fresh root-scoped view store (one per plugin activation). */
 export function createTokBookViewStore(): TokBookViewStore {
   const listeners = new Set<() => void>()
   let snapshot: TokBookViewSnapshot = {

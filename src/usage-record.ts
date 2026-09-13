@@ -1,17 +1,15 @@
 /**
- * Pure record vocabulary of the token-book: the JSONL row type, its
- * projections from session events (assistant messages, compaction summaries,
- * turn-ending LLM failures, and retried failed attempts), and lenient line
- * parsing for the dedupe scan. No I/O, so every consumer shares one wire
- * format.
+ * token-book 的纯记录词汇：JSONL 行类型、从会话事件的投影（assistant 消息、
+ * compaction summary、turn 结束的 LLM 失败、重试的失败尝试），以及供去重扫描
+ * 使用的宽松行解析。无 I/O，所有消费方共享同一 wire 格式。
  *
  * @module dsh-tokbook/usage-record
  */
 
 import type { UsageFields, UsageRecord, UsageRecordKind } from './types.ts'
 
-// Minimal session-event faces (see host WIRE NOTES). Kept local so the
-// external package compiles against `@deepseek-ai/cordis` only.
+// 最小的会话事件面（见 host WIRE NOTES）。本地声明，使本外部包只针对
+// `@deepseek-ai/cordis` 编译。
 export interface TokenUsageLike {
   inputTokens?: number
   outputTokens?: number
@@ -41,9 +39,8 @@ function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
-/** Project the event's optional provider usage into the base buckets. A
- * missing record or an invalid required bucket renders the whole usage
- * absent: the row still records the request, but its numbers are not trusted. */
+/** 把事件的可选 provider usage 投影为基础桶。usage 缺失，或必需桶非法时，
+ * 整份 usage 视为缺席：行仍记下请求，但其数字不可信。 */
 export function projectUsage(usage: TokenUsageLike | undefined): UsageFields | undefined {
   if (usage === undefined) return undefined
   if (!isCount(usage.inputTokens) || !isCount(usage.outputTokens)) return undefined
@@ -55,7 +52,7 @@ export function projectUsage(usage: TokenUsageLike | undefined): UsageFields | u
   }
 }
 
-/** Build the log row for one `assistant/message` session event. */
+/** 为一条 `assistant/message` 会话事件构建日志行。 */
 export function recordFromMessage(event: SessionEventLike, sessionId: string): UsageRecord {
   const usage = projectUsage(event.data?.usage)
   return {
@@ -69,9 +66,8 @@ export function recordFromMessage(event: SessionEventLike, sessionId: string): U
   }
 }
 
-/** Build the log row for one `compaction/summary` event. The summarize
- * provider call is billed exactly like a plain request. A missing or invalid
- * usage renders the record null (unusable for pricing). */
+/** 为一条 `compaction/summary` 事件构建日志行。summarize 的 provider 调用与
+ * 普通请求同价计费。usage 缺失或非法时返回 null（不可用于计价）。 */
 export function recordFromCompaction(event: SessionEventLike, sessionId: string): UsageRecord | null {
   const usage = projectUsage(event.data?.usage)
   if (usage === undefined) return null
@@ -86,8 +82,7 @@ export function recordFromCompaction(event: SessionEventLike, sessionId: string)
   }
 }
 
-/** Build the row for one failed provider attempt (shared by a terminal
- * `turn/end` error and an `llm/retry`). */
+/** 为一次失败的 provider 尝试构建行（turn/end 的终止错误与 `llm/retry` 共用）。 */
 function failureRow(
   event: { seq: number; time: number },
   sessionId: string,
@@ -104,7 +99,7 @@ function failureRow(
   }
 }
 
-/** Build the log row for one `turn/end` event whose reason is an LLM error. */
+/** 为 reason 是 LLM 错误的 `turn/end` 事件构建日志行。 */
 export function recordFromTurnEnd(
   event: SessionEventLike,
   sessionId: string,
@@ -114,8 +109,8 @@ export function recordFromTurnEnd(
   return failureRow(event, sessionId, model, event.data.reason.error?.code)
 }
 
-/** Build the log row for one `llm/retry` event — a provider attempt that
- * failed and that the retry plugin scheduled another try for. */
+/** 为一条 `llm/retry` 事件构建日志行——一次已失败、且 retry 插件已安排重试的
+ *  provider 尝试。 */
 export function recordFromRetry(
   event: SessionEventLike,
   sessionId: string,
@@ -124,9 +119,8 @@ export function recordFromRetry(
   return failureRow(event, sessionId, model, event.data?.failure?.code)
 }
 
-/** Project one session event into a log row, or null when it is not a
- * recorded origin. `lastModel` is a session's last-known route (failure rows
- * name no model of their own). */
+/** 把一条会话事件投影成日志行；不是已记录的来源时为 null。`lastModel` 是会话
+ *  最近已知的 route（失败行不自带 model）。 */
 export function recordOfEvent(
   event: SessionEventLike,
   sessionId: string,
@@ -147,15 +141,15 @@ export function recordOfEvent(
   }
 }
 
-/** The model id an event reveals about the session's current route. */
+/** 事件揭示的会话当前 route 的 model id。 */
 export function modelOfEvent(event: SessionEventLike): string | undefined {
   if (event.type === 'request/context') return event.data?.model
   if (event.type === 'assistant/message') return event.data?.message?.source.model
   return undefined
 }
 
-/** The provider an event reveals about the session's current route. `llm/retry`
- * names its provider itself, so a failed attempt is attributed directly. */
+/** 事件揭示的会话当前 route 的 provider。`llm/retry` 自带 provider，因此失败
+ *  尝试可直接归属。 */
 export function providerOfEvent(event: SessionEventLike): string | undefined {
   if (event.type === 'request/context') return event.data?.provider
   if (event.type === 'assistant/message') return event.data?.message?.source.provider
@@ -183,8 +177,7 @@ function isRecord(value: unknown): value is UsageRecord {
     && (record.usage === undefined || record.usage === null || isUsageFields(record.usage))
 }
 
-/** Coerce an unknown value into a record, normalizing extra fields and null
- * buckets to omission. */
+/** 把未知值强制成记录，多余字段与 null 桶归一为省略。 */
 export function coerceRecord(value: unknown): UsageRecord | null {
   if (!isRecord(value)) return null
   const record = value as unknown as Record<string, unknown>
@@ -227,7 +220,7 @@ export function coerceRecord(value: unknown): UsageRecord | null {
   }
 }
 
-/** Parse one JSONL line back into a record, or null when the line is invalid. */
+/** 把一行 JSONL 解析回记录；行非法时为 null。 */
 export function parseRecord(line: string): UsageRecord | null {
   let value: unknown
   try {
@@ -238,7 +231,7 @@ export function parseRecord(line: string): UsageRecord | null {
   return coerceRecord(value)
 }
 
-/** Serialize one record to a JSONL line (no trailing newline). */
+/** 把一条记录序列化为一行 JSONL（无尾换行）。 */
 export function serializeRecord(record: UsageRecord): string {
   return JSON.stringify(record)
 }

@@ -1,6 +1,6 @@
-/** styles.ts fragment: overlay. Concatenated in order by `injectStyles`. */
-export const CSS_OVERLAY = `/* ── overlay backdrop ───────────────────────────────────────────────────── */
-/* Same recipe as the DSH native modal mask: alias mask color + mask blur. */
+/** styles.ts 片段：overlay。由 `injectStyles` 按序拼接。 */
+export const CSS_OVERLAY = `/* 遮罩背景 */
+/* 与 DSH 原生 modal 遮罩同一配方：alias mask 色 + mask blur。 */
 [data-plugin="dsh-tokbook"].dtpl-overlay{
   position:fixed;inset:0;z-index:1000;
   display:flex;align-items:center;justify-content:center;
@@ -9,16 +9,8 @@ export const CSS_OVERLAY = `/* ── overlay backdrop ────────�
   backdrop-filter:var(--dsw-mask-blur,blur(2px));
 }
 
-/* ── modal card ─────────────────────────────────────────────────────────── */
-/* Native dialog scale: 20px radius, hairline stroke + prominent elevation.
-   FIXED height, not just max-height: this is a "dashboard in a dialog" (three
-   tabs + pinned CTA footer + one internal scroll region), so the geometry must
-   not follow the data. Without a height the card is content-height up to the
-   cap and the whole centered dialog vertically re-flows between the skeleton,
-   the three panels and growing data (each panel has a very different natural
-   height). A fixed height pins the chrome (head/tabs/footer) and makes the
-   scroll always live in .dtpl-body alone; the dvh cap keeps it inside short
-   viewports. */
+/* 弹窗卡片 */
+/* 固定高度，不是 max-height：「对话框里的仪表盘」几何不能跟着数据走。固定高度把 chrome 钉住，滚动永远只在 .dtpl-body 里。 */
 [data-plugin="dsh-tokbook"] .dtpl-card{
   width:min(720px,100%);height:min(680px,88dvh);height:min(680px,88vh);
   display:flex;flex-direction:column;
@@ -30,7 +22,7 @@ export const CSS_OVERLAY = `/* ── overlay backdrop ────────�
 }
 [data-plugin="dsh-tokbook"] .dtpl-card:focus{outline:none;}
 
-/* ── head ───────────────────────────────────────────────────────────────── */
+/* 标题栏 */
 [data-plugin="dsh-tokbook"] .dtpl-head{
   display:flex;align-items:center;justify-content:space-between;gap:16px;
   padding:16px 20px 12px;
@@ -56,9 +48,8 @@ export const CSS_OVERLAY = `/* ── overlay backdrop ────────�
 [data-plugin="dsh-tokbook"] .dtpl-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-close-ico{width:16px;height:16px;}
 
-/* ── segmented tabs (用量总览 / 通道用量 / 订阅额度 / 价格表 / 统计口径) ── */
-/* Mirrors the DSH pill/segmented pattern: track fill, active segment gets a
-   layer surface + inset ghost border. */
+/* 分段 tab（用量总览 / 通道用量 / 订阅额度 / 价格表 / 统计口径） */
+/* 对齐 DSH 的 pill/segmented 模式：轨道底色，激活段得到 layer 表面 + 内嵌幽灵描边。 */
 [data-plugin="dsh-tokbook"] .dtpl-tabs{
   display:flex;gap:2px;flex:none;
   margin:0 20px 4px;padding:3px;
@@ -79,8 +70,7 @@ export const CSS_OVERLAY = `/* ── overlay backdrop ────────�
   background:var(--dtpl-surface);
   box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
 }
-/* Unsaved pricing edits: the drafts survive tab switches, so the tab carries a
-   dot until they are saved or discarded. */
+/* 未保存的价格表编辑：草稿跨 tab 存活，所以 tab 上挂一个点，直到保存或丢弃。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab-dot{
   display:inline-block;width:5px;height:5px;margin-left:5px;
   border-radius:999px;corner-shape:round;
@@ -88,7 +78,7 @@ export const CSS_OVERLAY = `/* ── overlay backdrop ────────�
   vertical-align:middle;
 }
 
-/* ── scroll body ────────────────────────────────────────────────────────── */
+/* 滚动主体 */
 [data-plugin="dsh-tokbook"] .dtpl-body{
   flex:1;min-height:0;
   padding:14px 20px 16px;overflow:auto;overscroll-behavior:contain;

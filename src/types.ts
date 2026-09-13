@@ -1,112 +1,82 @@
 /**
- * Shared domain types for dsh-tokbook (type-only; no runtime imports).
+ * dsh-tokbook 共享领域类型（纯类型；无运行时 import）。
  *
- * The token ledger records ONE row per provider-billed model call (the
- * `assistant/message` provider `usage`, plus compaction summarize calls and
- * failed attempts), then aggregates the rows into totals, per-day, per-hour,
- * per-model, per-workspace and per-(day, model, provider, rate) cells. Cost is
- * an additive
- * layer computed through a (route, model) price resolution — a hand-written
- * price table (¥ per million tokens) whose time axis has two levels: the
- * effective instant of a segment (local date, or local date + exact hour) and,
- * inside it, the daily slots (hour range × day set) that carry an exception
- * price — so a price update re-prices history without rebuilding the
- * aggregation. Amounts split into real spend (metered channels) and
- * subscription value (subscription channels).
+ * 成本是叠加层：按 (route, model) 解析人工价表（¥ / 百万 token）。金额拆成
+ * metered（真实消费）与 subscription（订阅价值）。改价只重算历史计价，不重建聚合。
  *
  * @module dsh-tokbook/types
  */
 
-/** Provider-reported token buckets of one model call. */
+/** 单次模型调用的 provider token 桶。 */
 export interface UsageFields {
-  /** Uncached input tokens (billed input = input + cacheRead + cacheWrite). */
+  /** 未命中缓存的输入 token。计费输入 = input + cacheRead + cacheWrite。 */
   inputTokens: number
-  /** Output tokens. */
   outputTokens: number
-  /** Cache-hit input tokens; omitted when the provider reported none. */
   cacheReadTokens?: number
-  /** Cache-write input tokens; omitted when the provider reported none. */
   cacheWriteTokens?: number
 }
 
-/** Where a record came from: a plain request, a compaction summarize call,
- * or a failed provider attempt. */
+/** 记录来源：普通请求、compaction summarize、失败尝试。 */
 export type UsageRecordKind = 'request' | 'compaction' | 'failure'
 
-/** One JSONL row: one provider model call (successful or failed). */
+/** 一行 JSONL：一次 provider 模型调用（成功或失败）。 */
 export interface UsageRecord {
-  /** Stable request identity (dedupe key): the assistant message id, or a
-   * synthesized `compaction:<session>:<seq>` / `failure:<session>:<seq>`. */
+  /** 稳定请求身份（去重键）：assistant message id，或合成的
+   * `compaction:<session>:<seq>` / `failure:<session>:<seq>`。 */
   requestId: string
-  /** Session-event wall time, epoch milliseconds. */
+  /** 会话事件墙钟时间，epoch 毫秒。 */
   time: number
-  /** Owning session id. */
   sessionId: string
-  /** Provider model id that produced the message; a failure row carries the
-   * session's last-known route model ('' when none was ever observed). */
+  /** 产出消息的 provider model id；失败行携带会话最近已知 route model
+   * （从未观测到时为 `''`）。 */
   model: string
-  /** Provider route key, best-effort; absent for rows that never saw a header. */
   provider?: string
-  /** Token buckets; omitted when the provider reported no usage at all. */
   usage?: UsageFields
-  /** Record origin; absent means a plain request. */
   kind?: UsageRecordKind
-  /** Failure row only: the provider-neutral `LlmFailure.code`. */
   failureCode?: string
 }
 
-/** Aggregated token counts over one group of records. */
+/** 一组记录上的聚合 token 计数。 */
 export interface UsageTotals {
-  /** Number of recorded provider-billed calls: plain requests plus compaction
-   * summarize requests. Failed requests never join this count. */
+  /** 计入次数的计费调用数：普通请求 + compaction summarize。失败不计入。 */
   requests: number
-  /** Uncached input tokens. */
   inputTokens: number
-  /** Output tokens. */
   outputTokens: number
-  /** Cache-hit input tokens. */
   cacheReadTokens: number
-  /** Cache-write input tokens. */
   cacheWriteTokens: number
-  /** Compaction summarize requests in this group; absent on legacy rollups
-   * (reads as 0). */
+  /** 组内 compaction 次数；旧 rollup 省略（读作 0）。 */
   compactions?: number
-  /** Failed model requests in this group; absent on legacy rollups (reads as 0). */
   failures?: number
-  /** Failure counts by the provider-neutral `LlmFailure.code`. */
   failuresByCode?: Record<string, number>
 }
 
-/** One per-day aggregation row, keyed by local date `YYYY-MM-DD`. */
+/** 按日聚合行，本地日期 `YYYY-MM-DD`。 */
 export interface UsageDayRow {
   day: string
   totals: UsageTotals
-  /** Real spend (¥) of this day; present only once the cost layer has run
-   * (`attachCosts`). The token-only summary and the stored rollup carry none —
-   * the cost layer re-derives it from the rate rows on every read. */
+  /** 当日真实消费（¥）；仅成本层跑过（`attachCosts`）后才有。token-only
+   * 汇总与落盘 rollup 都不含——读时再由 rateRows 重算。 */
   spend?: number
-  /** Subscription value (¥, non-cash) of this day; same presence rule as
-   * {@link spend}. */
+  /** 当日订阅价值（¥，非现金）；在场条件同 {@link spend}。 */
   subscriptionValue?: number
 }
 
-/** One per-hour × per-model row, keyed by local `YYYY-MM-DDTHH`. */
+/** 按小时 × 模型行，本地 `YYYY-MM-DDTHH`。 */
 export interface UsageHourRow {
   hour: string
   model: string
   totals: UsageTotals
 }
 
-/** One per-model aggregation row (token counts only; cost is added later). */
+/** 按模型聚合行（仅 token；成本稍后叠加）。 */
 export interface UsageModelRow {
-  /** Provider route key, best-effort; '' when unknown (unattributed rows). */
+  /** Provider route key（尽力而为）；未知为 `''`。 */
   provider: string
   model: string
   totals: UsageTotals
 }
 
-/** Per-million-token prices of one price segment, in ¥ (RMB). The cache
- *  buckets fall back to the plain input rate when omitted. */
+/** 单个价格段的每百万 token 价格（¥）。cache 桶省略时回落到 input 价。 */
 export interface ModelPricing {
   inputPerMillion: number
   outputPerMillion: number
@@ -114,77 +84,64 @@ export interface ModelPricing {
   cacheWritePerMillion?: number
 }
 
-/** How one provider channel's amount is counted: real spend vs subscription
- *  value. A route-level fact (`$billing` in the price file); absent = metered. */
+/** 通道金额如何计：真实消费 vs 订阅价值。route 级事实（价表 `$billing`）；
+ * 省略 = metered。 */
 export type BillingNature = 'metered' | 'subscription'
 
-/** Which days of the week one exception slot applies to. */
 export type DaySet = 'daily' | 'weekdays' | 'weekends'
 
-/** One exception slot of a price segment: an hour range of the local day
- *  (`[start, end)`, so `24` closes the day) that applies on its day set, with
- *  its own four ¥/M rates. While it is in force it layers over the segment's
- *  whole-day price — a rate it omits keeps the whole-day one. */
+/** 价格段的例外时段：本地日的小时区间（`[start, end)`，`24` 关日），按星期
+ * 集合生效，自带四档 ¥/M。生效时叠在段的全天价之上——省略的档沿用全天价。 */
 export interface PriceSlot {
   days: DaySet
-  /** First hour it covers, 0–23. */
+  /** 覆盖的首小时，0–23。 */
   start: number
-  /** Hour it stops covering (exclusive), 1–24. */
+  /** 停止覆盖的小时（不含），1–24。 */
   end: number
   rates: ModelPricing
 }
 
-/** One price segment of one (route, model): the price in force from `from`
- *  (epoch ms; 0 = 最早一段, i.e. since the beginning of time) until the next
- *  segment of the same (route, model) starts. The list stays ascending by
- *  `from`, so "the price at time T" is the last segment with `from ≤ T`. */
+/** 单个 (route, model) 的一段价格：从 `from`（epoch ms；0 = 最早一段）到
+ * 同 (route, model) 下一段开始。列表按 `from` 升序，因此「T 时刻的价」=
+ * 最后一个 `from ≤ T` 的段。 */
 export interface PriceSegment {
   from: number
-  /** The whole-day price of this segment: what a moment its own slots do not
-   *  cover is billed at. */
   rates: ModelPricing
-  /** Exception slots, ascending by start hour; absent/empty = one whole-day
-   *  price. Two slots never overlap (the write path refuses a pair that could
-   *  be in force at the same moment; the read path drops the later one), so at
-   *  most one slot is ever in force. */
+  /** 例外时段，按开始小时升序；空/缺 = 仅全天价。两时段永不重叠（写路径
+   * 拒绝可能同时生效的一对；读路径丢弃较晚的那个），故任一时刻至多一个
+   * 时段生效。 */
   slots?: PriceSlot[]
   note?: string
 }
 
-/** The identity of one exception slot: the hour it starts at plus its day set.
- *  Unique inside a segment — two slots sharing both would overlap for their
- *  whole common range, which the write path refuses — so a rate row can name
- *  the slot it was billed under while holding no price. Editing the slot's own
- *  rates or its end hour therefore re-prices its history, while moving its
- *  start hour or day set (or deleting it) leaves that history 价格未知. */
+/** 例外时段的身份：起始小时 + 星期集合。段内唯一——共享两者会在整个公共
+ * 区间重叠，写路径拒绝——因此 rate 行可在无价格时仍标明当时计费所依据的
+ * 时段。改时段自身费率或结束小时会重算其历史；移动起始小时 / 星期集合
+ * （或删除）则让那段历史变成「价格未知」。 */
 export interface SlotRef {
   start: number
   days: DaySet
 }
 
-/** The hand-written price table: provider route key → exact model string →
- *  that (route, model)'s price timeline. An empty/absent list = 价格未知. */
+/** 手工价表：provider route key → 精确 model 字符串 → 该 (route, model) 的
+ * 价格时间轴。空/缺列表 = 价格未知。 */
 export type PricingTable = Record<string, Record<string, PriceSegment[]>>
 
-/** route → its billing nature. The price file's reserved `$billing` section. */
+/** route → 计费性质。价表保留键 `$billing`。 */
 export type BillingMap = Record<string, BillingNature>
 
-/** The identity of the price one record was billed under: the start instant of
- *  the segment that applied, plus the exception slot that applied inside it
- *  (null/absent = that segment's whole-day price). Holds identity, never
- *  numbers, so a price edit re-prices history on the next read. */
+/** 记录计价所依据的身份：生效段的起始时刻 + 段内生效的例外时段
+ * （null/缺 = 该段全天价）。只存身份、不存数字，改价后下次读即重算历史。 */
 export interface RateKey {
   from: number
   slot?: SlotRef | null
 }
 
-/** The neutral key of an unpriced record's rows. */
 export const UNPRICED_KEY: RateKey = { from: -1 }
 
-/** One exception slot as it travels on the wire and lives in `pricing.json`. */
+/** 例外时段在 wire / `pricing.json` 里的形态。 */
 export interface PricingSlotInput {
   days: DaySet
-  /** First hour covered (0–23) / hour it stops covering, exclusive (1–24). */
   start: number
   end: number
   inputPerMillion: number
@@ -193,149 +150,114 @@ export interface PricingSlotInput {
   cacheWritePerMillion?: number
 }
 
-/** One price segment as it travels on the wire and lives in `pricing.json`:
- *  `from` is a local calendar date (`YYYY-MM-DD`) or a local date plus an exact
- *  hour (`YYYY-MM-DDTHH:00`), or null for 最早一段. Flat on purpose — the file
- *  is hand-written, so a segment is one object carrying its four whole-day
- *  rates (plus the exception slots that override them), not a nested `rates`
- *  node. */
+/** 价格段在 wire / `pricing.json` 里的形态：`from` 是本地日
+ * （`YYYY-MM-DD`）或本地日+整点（`YYYY-MM-DDTHH:00`），null = 最早一段。
+ * 刻意扁平——文件手写，段直接带四档全天价（及覆盖它们的例外时段）。 */
 export interface PricingSegmentInput {
   from: string | null
   inputPerMillion: number
   outputPerMillion: number
   cacheReadPerMillion?: number
   cacheWritePerMillion?: number
-  /** Exception slots layered over the four whole-day rates; absent/empty = this
-   *  segment has one price for the whole day. */
   slots?: PricingSlotInput[]
   note?: string
 }
 
-/** One model a route can be billed for: the exact string records carry, plus
- *  the human name a source gives it (settings `models[].name`, else the
- *  adapter catalog's `name`) — the same pair the model picker renders, where
- *  the name is the label and the exact id stays the identity. */
+/** route 上可计费的模型：账本记录的精确串 + 来源给出的展示名
+ * （settings `models[].name`，否则适配器目录的 `name`）——模型选择器同源。 */
 export interface ModelEntry {
-  /** Exact model string, as the ledger records it. */
   id: string
-  /** Display name; absent when nothing names this string. */
+  /** 展示名；无人命名该串时省略。 */
   name?: string
 }
 
-/** One route's catalog entry: the models it can currently be billed for, and
- *  the label to head its card with. Produced by `route-catalog.ts` and consumed
- *  by `pricing-view.ts`, which is why the shape is stated here instead of in
- *  either of them: a producer must not import its consumer for its own output. */
+/** 路由目录条目：可计费模型 + 卡片标题。由 `route-catalog.ts` 产出、
+ * `pricing-view.ts` 消费，故形状声明在此——产出方不得为自身输出 import
+ * 消费方。 */
 export interface RouteCatalogEntry {
   route: string
   label: string
   models: readonly ModelEntry[]
 }
 
-/** One model row of one route card: the exact model string, where the route
- *  knows it from, and its price timeline. */
+/** 价格表一张 route 卡的模型行。 */
 export interface PricingModelView {
-  /** The exact model string records are billed under. */
+  /** 账本计费所用的精确 model 串。 */
   model: string
-  /** Human-readable name, when a source names this string: the settings
-   *  profile's `models[].name`, else the adapter catalog's `name`. Absent for a
-   *  仅账本 row and for a string only the price file mentions — the tab then
-   *  shows the exact string on its own, the way the model picker falls back to
-   *  `provider/model`. */
+  /** 展示名（settings `models[].name`，否则适配器目录 `name`）。仅账本行
+   * 或仅价表提及的串省略——选择器回落到 `provider/model` 的方式。 */
   name?: string
-  /** True when settings / the adapter catalog lists this string for the route
-   *  (i.e. it is callable there); false = a 仅账本 row the configuration no
-   *  longer lists, or a string that only carries a hand-written price. */
+  /** settings / 适配器目录是否列出该串（即 route 上可调用）；false = 配置
+   * 已不再列出的仅账本行，或只手写了价格的串。 */
   configured: boolean
-  /** Ledger records naming this (route, model); 0 when never billed. */
   records: number
-  /** Timestamp of this row's first ledger record. Absent when it has none, or
-   *  when the ledger lens could not be read at all. */
   firstAt?: number
-  /** Timestamp of its last recorded request; same conditions as `firstAt`. */
   lastAt?: number
-  /** How many of its records fall outside every price segment at their own
-   *  timestamp — they bill ¥0. Absent = unknown (no ledger lens), which is NOT
-   *  the same as 0: a row that has a price can still have unpriced history. */
+  /** 落在所有价格段之外的记录数（按各自时间戳）——这些记 ¥0。省略 =
+   * 未知（无账本透镜），**不等于** 0：有价的行仍可能有未定价历史。 */
   unpriced?: number
-  /** Price segments in force order (empty = 价格未知, billed ¥0). */
+  /** 按生效序的价格段（空 = 价格未知，计 ¥0）。 */
   segments: PricingSegmentInput[]
-  /** The four ¥/M buckets of the segment in force at view time — its whole-day
-   *  price, which is exactly what the row's inline cells edit; absent = nothing
-   *  prices this row. A moment an exception slot covers is billed at the slot's
-   *  own rates instead. */
+  /** 视图时刻生效段的四档 ¥/M——全天价，即行内单元格所编辑的；省略 =
+   * 无人定价。例外时段覆盖的时刻按时段自身费率。 */
   now?: ModelPricing
-  /** Effective instant of the segment that governs `now`
-   *  (`YYYY-MM-DD` or `YYYY-MM-DDTHH:00`; null = 最早一段). */
   nowFrom?: string | null
 }
 
-/** One route card of the 价格表 tab: one provider route key, its display name,
- *  its billing nature, and every model it can be billed for. */
+/** 价格表 tab 的一张 route 卡。 */
 export interface PricingRouteView {
-  /** Provider route key (the ledger's channel identity). */
   route: string
-  /** Display name: the settings profile's `displayName`, else the adapter's
-   *  provider name, else the route key itself. */
+  /** 展示名：settings `displayName` → 适配器 provider 名 → route key 本身。 */
   label: string
-  /** Billing nature of this route (its `$billing` entry; default metered). */
+  /** 计费性质（`$billing`；默认 metered）。 */
   billing: BillingNature
-  /** Ledger records over the whole route (drives card order). */
+  /** 整条 route 的账本记录数（驱动卡片排序）。 */
   records: number
   models: PricingModelView[]
 }
 
-/** The wire payload of the pricing-table view (价格表 tab). */
+/** 价格表视图的 wire 载荷。 */
 export interface PricingView {
-  /** One card per provider route: routes with ledger usage first (most-used
-   *  first), then the rest by route key. */
+  /** 每个 provider route 一卡：有账本用量的在前（用量多的优先），其余按
+   * route key。 */
   routes: PricingRouteView[]
-  /** The data directory the price file lives in (informational). */
   dataDir: string
-  /** When the view was computed, epoch ms. */
   updatedAt: number
 }
 
 /**
- * One workspace row of the overview's 按工作区 section: every ledger record
- * whose session belongs to one workspace, folded with the same summary + cost
- * layer the rest of the overview uses. Attribution is a READ-TIME join — the
- * ledger row stores only `sessionId`, and the workspace of a session is the
- * `cwd` in its persisted header (see `src/workspaces.ts`) — so no ledger row
- * carries a workspace and history is attributed retroactively.
+ * 概览「按工作区」一行：该工作区会话下的全部账本记录，用与其余概览相同的
+ * 汇总 + 成本层折叠。归属是**读时 join**——账本行只存 `sessionId`，工作区
+ * 取自会话持久化 header 的 `cwd`（见 `src/workspaces.ts`）——历史可追溯归属。
  */
 export interface WorkspaceUsageRow {
-  /** Workspace id; '' for the catch-all 未归属 row. */
+  /** 工作区 id；兜底「未归属」行为 `''`。 */
   id: string
-  /** Display title: the workspace's own title, or 未归属. */
   title: string
-  /** Canonical directory path; '' on the 未归属 row (its records span
-   *  directories, or name none at all). */
+  /** 规范目录路径；未归属行为 `''`（其记录跨目录或未命名）。 */
   path: string
-  /** Cumulative totals over the whole ledger (failures included, as in every
-   *  other totals row). */
+  /** 全账本累计 totals（含失败，与其余 totals 行一致）。 */
   totals: UsageTotals
-  /** Sum of the four buckets. */
+  /** 四桶之和。 */
   tokens: number
-  /** Real spend (¥) over the whole ledger; unpriced records count 0. */
+  /** 全账本真实消费（¥）；未定价记录计 0。 */
   spend: number
-  /** Subscription value (¥, non-cash) over the whole ledger. */
+  /** 全账本订阅价值（¥，非现金）。 */
   subscriptionValue: number
-  /** Newest record time of this row — the sort key (最近有操作在前). */
+  /** 本行最新记录时间——排序键（最近有操作在前）。 */
   lastAt: number
 }
 
-/** One per-day × per-model × per-provider × per-rate aggregation row. */
+/** 按日 × 模型 × provider × rate 的聚合行。 */
 export interface UsageRateRow {
   day: string
   model: string
-  /** Provider route key of the row; '' (absent) for unattributed rows. */
   provider: string
   rate: RateKey
   totals: UsageTotals
 }
 
-/** The token-only aggregation shape (no currency). */
+/** 纯 token 聚合形状（无货币）。 */
 export interface TokenSummary {
   total: UsageTotals
   byDay: UsageDayRow[]
@@ -344,322 +266,236 @@ export interface TokenSummary {
   rateRows: UsageRateRow[]
 }
 
-/** A per-model row carrying its billed amounts (¥). `cost` is the sum of the
- * two buckets (spend + subscriptionValue) — kept so older clients reading only
- * `cost` still see a total; `spend` and `subscriptionValue` split it by the
- * billing nature of the (provider, model) channel. 0 when the model is
- * unpriced. */
+/** 带金额（¥）的模型行。`cost` = spend + subscriptionValue 的兼容合计；
+ * `spend` / `subscriptionValue` 按通道计费性质拆开。未定价为 0。 */
 export type CostedModelRow = UsageModelRow & {
-  /** Compatibility total (¥) = spend + subscriptionValue. */
+  /** 兼容合计（¥）= spend + subscriptionValue。 */
   cost: number
-  /** Real spend (¥): metered-channel amount. */
+  /** 真实消费（¥）：metered 通道金额。 */
   spend: number
-  /** Subscription value (¥, non-cash): subscription-channel amount. */
+  /** 订阅价值（¥，非现金）：subscription 通道金额。 */
   subscriptionValue: number
 }
 
-/** The token aggregation plus the cost layer. */
+/** Token 聚合 + 成本层。 */
 export interface CostedSummary extends TokenSummary {
-  /** Absolute data directory the summary was computed from. */
   dataDir: string
-  /** Billed cost over every recorded request (¥); unpriced models count 0.
-   * Compatibility total = spend + subscriptionValue. */
+  /** 已记录请求的计费合计（¥）；未定价模型计 0。兼容合计 =
+   * spend + subscriptionValue。 */
   totalCost: number
-  /** Real spend (¥): amount of rows whose billing is `metered`. */
+  /** 真实消费（¥）：计费为 `metered` 的行。 */
   spend: number
-  /** Subscription value (¥, non-cash): amount of rows whose billing is
-   * `subscription`. */
+  /** 订阅价值（¥，非现金）：计费为 `subscription` 的行。 */
   subscriptionValue: number
-  /** Models with usage the current price table cannot bill: nothing prices the
-   *  (route, model) at all, or some of its recorded rate rows name a price
-   *  identity the table no longer holds (a segment date or an exception slot
-   *  that was moved or deleted). Those amounts count ¥0 — 价格未知, not free. */
+  /** 当前价表无法计费的模型：(route, model) 完全无价，或部分 rate 行指向
+   * 已不存在的价格身份（段日期或例外时段被移动/删除）。这些金额计 ¥0——
+   * 是「价格未知」，不是免费。 */
   unpricedModels: string[]
-  /** The active price table (hand-written; empty when nothing is priced). */
+  /** 生效价表（手写；无定价时为空）。 */
   pricing: PricingTable
-  /** Per-model rows with their billed amounts attached. */
   byModel: CostedModelRow[]
 }
 
-/** A selectable look-back window of the Provider-usage tab, named after the
- * local calendar days it covers (same day-partition the ledger files use). */
+/** Provider 用量 tab 的回看窗口，按本地日命名（与账本分日文件一致）。 */
 export type ProviderRange = 'today' | 'yesterday' | 'last7' | 'last30'
 
-/** Every valid {@link ProviderRange} id; route validation reuses this. */
+/** 全部合法 {@link ProviderRange}；路由校验复用。 */
 export const PROVIDER_RANGES: readonly ProviderRange[] = ['today', 'yesterday', 'last7', 'last30']
 
-/** One provider-billed model row inside a provider card (tokens already
- * summed over the four buckets; amounts are the ¥ billed under the price
- * table, split into the dual buckets by the channel's billing nature). */
+/** provider 卡内的一条模型行。 */
 export interface ProviderModelUsage {
-  /** Provider model id as recorded. */
   model: string
-  /** Per-bucket counts of this model inside the window. */
   totals: UsageTotals
-  /** Sum of the four provider buckets. */
+  /** 四桶之和。 */
   tokens: number
-  /** Billed ¥ over the window; 0 when the model is unpriced.
-   * Compatibility total = spend + subscriptionValue. */
+  /** 窗口内计费 ¥；未定价为 0。兼容合计 = spend + subscriptionValue。 */
   cost: number
-  /** Real spend (¥) of this model inside the window. */
+  /** 窗口内真实消费（¥）。 */
   spend: number
-  /** Subscription value (¥, non-cash) of this model inside the window. */
+  /** 窗口内订阅价值（¥，非现金）。 */
   subscriptionValue: number
-  /** The route's billing nature (`$billing`); independent of whether this
-   *  model is priced. Unattributed routes read as metered. */
+  /** route 计费性质（`$billing`）；与该模型是否已定价无关。未归属 route
+   * 读作 metered。 */
   billing?: BillingNature
 }
 
-/** One provider card of the Provider-usage tab: every model the provider
- * billed inside the selected window, aggregated under the provider key. */
+/** Provider 用量 tab 的一张 provider 卡。 */
 export interface ProviderUsageCard {
-  /** Provider route key as recorded; rows that never saw a header group
-   * under `'(未知)'`. */
+  /** 账本记录的 route key；无 header 的行归入 `'(未知)'`。 */
   provider: string
-  /** Sum of the four buckets over the whole card. */
+  /** 整卡四桶之和。 */
   tokens: number
-  /** Billed ¥ over the whole card; unpriced models count 0.
-   * Compatibility total = spend + subscriptionValue. */
+  /** 整卡计费 ¥；未定价模型计 0。兼容合计 = spend + subscriptionValue。 */
   cost: number
-  /** Real spend (¥) over the whole card. */
+  /** 整卡真实消费（¥）。 */
   spend: number
-  /** Subscription value (¥, non-cash) over the whole card. */
+  /** 整卡订阅价值（¥，非现金）。 */
   subscriptionValue: number
-  /** Models of this provider the price table cannot bill (no price at all, or
-   *  a recorded rate row whose price identity it no longer holds); costed ¥0. */
+  /** 价表无法计费的模型（完全无价，或 rate 行身份已不存在）；计 ¥0。 */
   unpricedModels: string[]
-  /** Models of this provider, largest token total first. */
   models: ProviderModelUsage[]
-  /** Recorded requests of this card (plain requests plus compaction
-   * summarize calls; failed attempts never join this count). */
   requests: number
-  /** Compaction summarize requests inside the card. */
   compactions: number
 }
 
-/** The wire payload of the Provider-usage route. Slim and read-only: only the
- * aggregated cards for one window cross the wire. */
+/** Provider 用量路由的 wire 载荷。精简只读：只跨过聚合卡。 */
 export interface ProviderUsageView {
-  /** The window this view was computed for. */
   range: ProviderRange
-  /** Local date key of the window's first day (inclusive), e.g. `2026-09-01`. */
+  /** 窗口首日本地日期（含），如 `2026-09-01`。 */
   fromDay: string
-  /** Local date key of the window's last day (inclusive). */
+  /** 窗口末日本地日期（含）。 */
   toDay: string
-  /** When the snapshot was computed, epoch ms. */
   updatedAt: number
-  /** Human label per provider route: the route's display name (settings
-   *  `displayName`, else the adapter's provider name), so a card heads with
-   *  "DeepSeek" and shows the route key beneath it. Absent when nothing names
-   *  the route; the card then shows the key alone. */
+  /** 各 route 展示名（settings `displayName` → 适配器 provider 名），卡片可
+   * 以「DeepSeek」为题、route key 为副。无人命名时省略，只显示 key。 */
   providerLabels?: Record<string, string>
-  /** One card per provider with recorded usage inside the window, largest
-   * token total first; empty when the window holds no records. */
   providers: ProviderUsageCard[]
 }
 
 /**
- * The aggregated snapshot the browser floating window reads. Deliberately
- * slimmed from {@link CostedSummary}: the price table, the rateRows and the
- * byHour rows are dropped — the floating window renders none of them, and the
- * cost layer has already been folded into `spend` / `subscriptionValue` /
- * `totalCost` / `byModel[].*`.
+ * 浏览器浮窗读取的聚合快照。刻意从 {@link CostedSummary} 瘦身：价表、
+ * rateRows、byHour 不过 wire——浮窗不渲染它们，成本已折进 spend /
+ * subscriptionValue / totalCost / byModel。
  */
 export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour'> {
-  /** Distinct sessions that contributed records. */
   sessions: number
-  /** Sum of the four provider buckets (input + cacheRead + cacheWrite + output). */
+  /** 四桶之和（input + cacheRead + cacheWrite + output）。 */
   totalTokens: number
-  /** When the snapshot was computed, epoch ms. */
   updatedAt: number
-  /** Cumulative usage per workspace, most recently used first; the 未归属 row
-   *  (records no registered workspace claims) closes the list. Empty when the
-   *  host mounts no workspace registry. */
+  /** 按工作区累计，最近用过的在前；无人认领的「未归属」收尾。宿主无
+   * workspace registry 时为空。 */
   byWorkspace: WorkspaceUsageRow[]
-  /** Total records read from the ledger (diagnostics). */
   records: number
-  /** Number of day files the ledger holds (diagnostics). */
   files: number
-  /** Timestamp of the newest record, or null when the ledger is empty. */
   lastEventAt: number | null
-  /** When the last authoritative re-sync completed, or null if never. */
   lastSyncAt: number | null
-  /** Live re-sync state the page can show. */
   syncStatus: 'idle' | 'running' | 'done' | 'error'
-  /** Re-sync error, when the last run failed. */
   syncError: string | null
 }
 
-/** Token-meter plugin config (optional knobs; all defaults provided). */
+/** 插件配置（可选旋钮；皆有默认值）。 */
 export interface TokBookConfig {
-  /** Data directory; defaults to `$DSH_HOME/tokbook` (`~/.dsh/tokbook`). */
+  /** 数据目录；默认 `$DSH_HOME/tokbook`（`~/.dsh/tokbook`）。 */
   path?: string
-  /** Whether compaction summarize requests are recorded and billed (default true). */
+  /** 是否记录并计费 compaction summarize（默认 true）。 */
   recordCompaction?: boolean
-  /** Quota plans keyed by provider route (`opencode-go`, `commandcode`). A
-   * plan turns on automatically once a usable API key is found (config, env,
-   * or the provider's auth file) unless `enabled:false`. The official usage
-   * is fetched from each provider's own account endpoints — the tab never
-   * falls back to a local estimate. See `src/quota.ts` / `src/quota-official.ts`. */
+  /** 按 provider route 键的额度计划（`opencode-go`、`commandcode`）。找到
+   * 可用 API key（配置、env 或 provider 认证文件）后自动开启，除非
+   * `enabled:false`。用量从 provider 官方账户端点拉取——tab 不回落到本地
+   * 估算。见 `src/quota.ts` / `src/quota-official.ts`。 */
   plans?: Record<string, PlanConfig>
 }
 
-/** A user-configured quota plan override (see `src/quota.ts`). */
+/** 用户配置的额度计划覆盖（见 `src/quota.ts`）。 */
 export interface PlanConfig {
-  /** Force the plan on even before a key is found (best-effort fetch). */
   enabled?: boolean
-  /** Explicit API key literal; wins over the credentials service. Intended
-   * for tests / non-DSH hosts — a key stored in the dsh Models page lives in
-   * the credentials service and is found without this field. */
+  /** 明文 API key；优先于 credentials 服务。面向测试 / 非 DSH 宿主——
+   * DSH Models 页里的 key 在 credentials 服务里，无需此字段。 */
   apiKey?: string
-  /** Credential reference name to resolve through `ctx.credentials`; defaults
-   * to the provider's reference (`OPENCODE_GO_API_KEY`, `COMMANDCODE_API_KEY`),
-   * i.e. the name the provider adapter's own `apiKeyEnv` declares. */
+  /** 经 `ctx.credentials` 解析的凭据引用名；默认 provider 引用
+   * （`OPENCODE_GO_API_KEY`、`COMMANDCODE_API_KEY`），即适配器自身
+   * `apiKeyEnv` 声明的名字。 */
   apiKeyEnv?: string
 }
 
-/** One window of an official quota card. Amounts are optional because some
- * providers (OpenCode Go) expose only a used percent + reset, while others
- * (Command Code) expose used/cap in dollars. */
+/** 官方额度卡的一个窗口。金额可选：有的 provider 只给百分比 + 重置时间，
+ * 有的给 used/cap 美元。 */
 export interface QuotaWindowView {
-  /** Stable window id (`rolling5h`, `weekly`, `monthly`, `fiveHour`…). */
+  /** 稳定窗口 id（`rolling5h`、`weekly`、`monthly`、`fiveHour`…）。 */
   id: string
-  /** Display label (5 小时 / 本周 / 本月 …). */
+  /** 展示标签（5 小时 / 本周 / 本月 …）。 */
   label: string
-  /** 0–100 percent the server reports (or derived from used/cap). */
+  /** 服务端报的 0–100 百分比（或由 used/cap 推出）。 */
   usagePercent: number
-  /** Whether the server reports this window exceeded/rate-limited. */
   exceeded: boolean
-  /** Epoch ms when capacity returns; null when not reported. */
+  /** 额度恢复的 epoch ms；未报为 null。 */
   resetAt: number | null
-  /** Used amount in the window (Command Code). Absent → percent-only display. */
   usedUsd?: number
-  /** Window cap in USD (Command Code). Absent → percent-only display. */
   capUsd?: number
 }
 
-/** Optional subscription/account context of an official quota card. */
 export interface QuotaAccountInfo {
-  /** Account display name (userName/name) when the provider reports one. */
   name?: string
 }
 
-/** Optional plan identity of an official quota card. */
 export interface QuotaPlanInfo {
-  /** Raw plan id (`individual-goat`, …); empty when unreported. */
   planId?: string
-  /** Display plan name (GOAT / Pro …). */
   name?: string
-  /** Raw subscription status (`active`, `trialing`, `past_due`…). */
   status?: string
-  /** Billing period end, epoch ms; null when unreported. */
   periodEnd?: number | null
 }
 
-/** Optional usage summary of an official quota card (Command Code reports it;
- * OpenCode Go does not). */
+/** 官方额度卡的可选用量摘要（Command Code 报；OpenCode Go 不报）。 */
 export interface QuotaUsageSummary {
-  /** Completed (successful) request count. */
   completed?: number
-  /** Failed request count. */
   failed?: number
-  /** Success rate 0–100. */
   successRate?: number
-  /** Total cost in USD of the period, when reported. */
   costUsd?: number
-  /** Input tokens in the period. */
   tokensIn?: number
-  /** Output tokens in the period. */
   tokensOut?: number
 }
 
-/** Optional credit-pool state of an official quota card (Command Code). */
+/** 官方额度卡的可选余额池（Command Code）。 */
 export interface QuotaCreditPool {
-  /** Remaining subscription monthly credits (USD), when reported. */
   monthlyUsd?: number
-  /** Purchased (top-up, roll-over) credits (USD). */
   purchasedUsd?: number
-  /** Free/promo credits (USD). */
   freeUsd?: number
 }
 
-/** The availability of one official quota card. */
 export type QuotaCardState = 'ok' | 'unconfigured' | 'error'
 
 /**
- * What bounds one account's usage right now, as the provider itself defines it.
+ * 此刻约束账户用量的是什么——以 provider 自己的定义为准。
  *
- * `subscription` — an in-force plan: its included monthly credits plus the
- * 5-hour/weekly rolling windows that pace them.
- * `balance` — no in-force subscription, but the provider reports a credit
- * balance (`credits` is therefore always present on a `balance` card; when the
- * credits call does not answer, the card takes the `none` gate instead of
- * showing a zero nobody reported), and only that balance gates usage. This is
- * the provider's own rule ("usage with no subscription … gated only by their
- * credit balance"), and it covers two normal, non-error situations: a plan that
- * ended (including the documented `cancel at end of billing period` flow), and
- * an account that was never on a subscription at all (the pay-as-you-go plan).
- * `none` — no in-force subscription and no balance to show either, because the
- * provider's endpoint reports none (OpenCode Go exposes window percentages
- * only). Nothing bounds the account that this card can put a number on, so a
- * renderer must show the state and nothing else — never leftover windows.
+ * `subscription` — 生效中的计划：包含的月度额度 + 限制其节奏的 5 小时/周
+ * 滚动窗口。
+ * `balance` — 无生效订阅，但 provider 报了余额（故 `balance` 卡必有
+ * `credits`；余额接口无响应时走 `none` 门，而不是展示一个没人报过的 0），
+ * 且仅余额约束用量。这是 provider 自己的规则，并覆盖两种正常情形：计划已
+ * 结束（含文档化的「期末取消」流程），以及从未订过的账户（按量付费）。
+ * `none` — 无生效订阅也无余额可展示（OpenCode Go 只暴露窗口百分比）。
+ * 本卡无法给账户约束打上数字，渲染方必须只展示状态——不要残留窗口。
  *
- * Absent means `subscription` — the pre-existing reading for a card that
- * carries ordinary window data.
+ * 省略 = `subscription`：仅带普通窗口数据的卡片沿用此读法。
  */
 export type QuotaGate = 'subscription' | 'balance' | 'none'
 
-/** One official quota card: one provider's account usage fetched from the
- * provider's own endpoints. Never a local estimate. */
+/** 一张官方额度卡：从 provider 自身端点拉取的账户用量，绝非本地估算。 */
 export interface QuotaCard {
-  /** Provider route key the plan attaches to. */
   plan: string
-  /** Display title (OpenCode Go / Command Code GOAT …). */
   title: string
   state: QuotaCardState
-  /** Short hint shown when `unconfigured` (no key) or `error` (fetch failed). */
   message?: string
-  /** Account identity when reported. */
   account?: QuotaAccountInfo
-  /** Subscription plan identity when reported. */
   planInfo?: QuotaPlanInfo
-  /** Period usage summary when reported. */
   usage?: QuotaUsageSummary
-  /** Credit-pool state when reported. */
   credits?: QuotaCreditPool
-  /** What bounds usage right now (see {@link QuotaGate}); absent reads as
-   * `subscription`. A non-`subscription` card's `windows` are *not* a limit the
-   * account is under — the provider's rolling windows pace an in-force plan's
-   * included monthly credits only — so a renderer must not present them as
-   * budget. Absent (rather than `subscription`) is what an unanswered evidence
-   * source produces: the gate is never inferred from a failed call, so a
-   * renderer keeps its pre-gate reading in that case. */
+  /** 此刻约束用量的是什么（见 {@link QuotaGate}）；省略读作 `subscription`。
+   * 非 `subscription` 卡的 `windows` **不是**账户当前承受的限额——滚动
+   * 窗口只限制生效计划所含的月度额度。省略（而非写成 `subscription`）是
+   * 证据源无响应时的产物：门从不由失败调用推断，渲染方在该情形下保持
+   * 门之前读法。 */
   gate?: QuotaGate
-  /** One sentence explaining a `balance` gate (which evidence it rests on, and
-   * the date when the API reported one). Host-composed, so the client never
-   * re-derives the provider's subscription-status vocabulary. */
+  /** 解释 `balance` 门的一句话（依据哪条证据、API 报告的日期）。由 host
+   * 拼好，client 不重推 provider 订阅状态词汇。 */
   gateNote?: string
-  /** Limit windows in display order. */
   windows: QuotaWindowView[]
-  /** When the official data was fetched, epoch ms. */
   fetchedAt?: number
 }
 
-/** The wire payload of the quota route (订阅额度 tab) when no `provider` is
- * given: a fast, non-network list of the enabled provider routes, so the
- * client can then fetch each provider's card independently (`?provider=`).
- * `alert` is derived only from durable last-known 'ok' snapshots (never a
- * network hit) and drives the sidebar footer's 告急 dot. */
+/** 订阅额度路由在未带 `provider` 时的 wire 载荷：不走网络的已启用 route
+ * 列表，client 再按 `?provider=` 各自拉卡。`alert` 只由持久化的最近一次
+ * 'ok' 快照推出（绝非即时联网），驱动侧栏 footer 的告急点。 */
 export interface QuotaView {
-  /** Enabled built-in provider routes in display order (no network fetch). */
+  /** 已启用的内置 route，展示顺序（无网络拉取）。 */
   providers: string[]
-  /** True when any last-known 'ok' snapshot has a window at/over the alert
-   * threshold or already exceeded. Absent/undefined = no alert. */
+  /** 任一最近 'ok' 快照的窗口达到/超过告急阈值或已 exceeded。缺/undefined
+   * = 无告急。 */
   alert?: boolean
 }
 
 
-/** Sum the four buckets of an aggregated totals row. */
+/** 聚合 totals 行的四桶之和。 */
 export function totalsTokens(totals: UsageTotals): number {
   return totals.inputTokens
     + totals.cacheReadTokens

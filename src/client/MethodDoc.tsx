@@ -1,24 +1,5 @@
 /**
- * 统计口径 tab: how the numbers are produced and where they stop matching
- * the provider's bill.
- *
- * Reading order follows what a skeptical user actually asks, newest first:
- *   1. 一眼看懂 — a 3-fact strip (source / precision / coverage) answers
- *      "can I trust this" before any detail;
- *   2. 词元分四桶 — the four mutually-exclusive buckets as scannable tiles
- *      with the sum equation under them, then the cache-hit rate that the
- *      input-side three derive (its own denominator, never rounded up to
- *      100%);
- *   3. 记了哪些调用 — scope of the recording (what is / isn't a row);
- *   4. 差额从哪来 — the two reasons a number diverges from the bill, side by
- *      side: calls the ledger structurally cannot see vs. same facts counted
- *      under a different rule;
- *   5. 怎么核对 — 30-second field mapping against the DeepSeek console.
- * Then one cross-reference line for the 订阅额度 tab's separate (official)
- * counting rule, the live data-file diagnostics, and the source-version foot.
- *
- * Only facts worth keeping made the cut; implementation plumbing (event
- * anchor names, credential resolution) lives in the README, not this tab.
+ * 统计口径 tab。只留值得记住的事实；实现管道在 README，不在此 tab。
  *
  * @module dsh-tokbook/client/MethodDoc
  */
@@ -36,7 +17,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <p>本插件照实记录、逐条累加——不是模型厂商官网上的账户数据。</p>
       </div>
 
-      {/* ── 1 · 一眼看懂：来源 / 精度 / 完整度 ── */}
       <div className="dtpl-doc-facts" aria-label="口径速览">
         <div className="dtpl-doc-fact">
           <span className="dtpl-doc-fact-k">来源</span>
@@ -52,7 +32,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </div>
       </div>
 
-      {/* ── 2 · 词元分四桶 ── */}
       <section className="dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">1</span>词元分四桶</h2>
         <p className="dtpl-doc-sub">
@@ -101,7 +80,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </p>
       </section>
 
-      {/* ── 3 · 记了哪些调用 ── */}
       <section className="dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">2</span>记了哪些调用</h2>
         <ul className="dtpl-doc-scope">
@@ -112,7 +90,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </ul>
       </section>
 
-      {/* ── 4 · 差额从哪来 ── */}
       <section className="dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">3</span>差额从哪来</h2>
         <div className="dtpl-doc-gap">
@@ -154,7 +131,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </div>
       </section>
 
-      {/* ── 5 · 怎么核对 ── */}
       <section className="dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">4</span>怎么核对</h2>
         <p className="dtpl-doc-sub">
@@ -185,7 +161,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <p className="dtpl-doc-map-note">除「会话标题」和「中途取消的请求」两类外，应逐日吻合。</p>
       </section>
 
-      {/* ── 6 · 订阅额度页是另一套口径 ── */}
       <div className="dtpl-doc-quota">
         <p><b>小提示：</b>旁边的「订阅额度」页用的是<b>另一套数据</b>。</p>
         <p>它用你的账号凭据直接向厂商查询<b>官方用量</b>（含你在其它设备上的消费），与本页的本机账本不同。</p>
@@ -208,7 +183,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
   )
 }
 
-/** One 词元分四桶 tile: short label + a plain-language definition. */
 function Bucket({ name, desc }: { name: string; desc: string }) {
   return (
     <div className="dtpl-doc-bucket">

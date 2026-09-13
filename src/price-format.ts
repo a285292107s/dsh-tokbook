@@ -1,54 +1,43 @@
 /**
- * The pure rules of the price file's time axis, shared by the host half and the
- * browser half.
+ * 价文件时间轴的纯规则，host 半区与 browser 半区共享。
  *
- * Two independent axes decide a price:
- *   · the EFFECTIVE INSTANT — a local date, or a local date plus an exact hour —
- *     which picks the segment in force (the last `from ≤ the record's own
- *     timestamp`);
- *   · the DAILY SLOT — an hour range plus the weekdays it covers — which picks
- *     the exception price inside that segment. A moment no slot covers is billed
- *     at the segment's own whole-day price.
- *
- * Both halves validate a hand-written `pricing.json` by THE SAME rules, so a
- * table the browser draft accepts is never refused by the host writer. That is
- * why this module exists separately and stays dependency-free — no `node:fs`,
- * no React: `src/pricing.ts` and `src/client/pricing/draft.ts` both import it.
+ * 两级独立轴决定一个价格：生效时刻（本地日，或本地日 + 整点小时）选定生效段；
+ * 日内时段（小时区间 + 覆盖的星期集合）选定段内的例外价。两个半区用同一套规则
+ * 校验手写 `pricing.json`，因此 browser 草稿接受的表永远不会被 host writer
+ * 拒绝。这也是本模块独立且无依赖的原因。
  *
  * @module dsh-tokbook/price-format
  */
 
 import type { DaySet } from './types.ts'
 
-/** The `from` of a segment with no effective instant: 最早一段, i.e. it has
- *  always applied. Stored as 0 so a plain `from <= timeMs` comparison works. */
+/** 无生效时刻的段的 `from`：最早一段，即自始生效。存为 0，使朴素的
+ *  `from <= timeMs` 比较直接可用。 */
 export const EARLIEST = 0
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/u
 const HOUR_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:00$/u
 
-/** Every day set a slot may carry, in display order (also the file's order). */
+/** 时段可携带的全部 day set，展示顺序（也是文件顺序）。 */
 export const DAY_SETS: readonly DaySet[] = ['daily', 'weekdays', 'weekends']
 
-/** The label each day set goes by on every surface that prints one. */
 export const DAY_SET_LABELS: Record<DaySet, string> = {
   daily: '每天',
   weekdays: '工作日',
   weekends: '周末',
 }
 
-/** The hours one slot covers: `[start, end)`, so a whole-day slot is 0 → 24. */
+/** 一个时段覆盖的小时：`[start, end)`，故全天时段为 0 → 24。 */
 export interface HourRange {
   start: number
   end: number
 }
 
-/** A day set plus an hour range: exactly what a slot covers. */
+/** day set + 小时区间：时段覆盖的完整范围。 */
 export interface SlotScope extends HourRange {
   days: DaySet
 }
 
-/** Local `YYYY-MM-DD` of an instant. */
 export function dayKeyOf(ms: number): string {
   const at = new Date(ms)
   const month = String(at.getMonth() + 1).padStart(2, '0')
@@ -56,28 +45,26 @@ export function dayKeyOf(ms: number): string {
   return `${String(at.getFullYear())}-${month}-${day}`
 }
 
-/** Local hour of day (0–23) of an instant. */
+/** 时刻的本地小时（0–23）。 */
 export function hourOfDay(ms: number): number {
   return new Date(ms).getHours()
 }
 
-/** The local start of the hour containing `ms` — the file's own time unit, i.e.
- *  the instant a `from` of `YYYY-MM-DDTHH:00` names. The price axis is read at
- *  this precision, so a ledger instant has to be floored to it before the two
- *  can be compared (or drawn together). */
+/** 包含 `ms` 的小时的本地起点——文件自身的时间单位，即 `YYYY-MM-DDTHH:00`
+ *  的 `from` 所命名的时刻。价格轴按此精度读取，账本时刻必须先 floor 到它才能
+ *  与之比较。 */
 export function hourStartMs(ms: number): number {
   const at = new Date(ms)
   at.setMinutes(0, 0, 0)
   return at.getTime()
 }
 
-/** Local weekday (0 = Sunday … 6 = Saturday) of an instant. */
+/** 时刻的本地星期（0 = 周日 … 6 = 周六）。 */
 export function weekdayOf(ms: number): number {
   return new Date(ms).getDay()
 }
 
-/** Local-midnight epoch ms of a `YYYY-MM-DD` date; null when it is not a real
- *  calendar date (2026-02-31 is not). */
+/** `YYYY-MM-DD` 的本地零点 epoch ms；不是真实日历日（2026-02-31）时为 null。 */
 export function dayStartMs(date: string): number | null {
   if (!DATE_RE.test(date)) return null
   const year = Number(date.slice(0, 4))
@@ -89,11 +76,10 @@ export function dayStartMs(date: string): number | null {
 }
 
 /**
- * Epoch ms of a file/wire instant: `YYYY-MM-DD` (local midnight) or
- * `YYYY-MM-DDTHH:00` (that local hour). Null when it is not a real date, not an
- * exact hour, or names a local hour this timezone does not have (a DST
- * spring-forward) — a table that cannot be resolved to one instant is refused
- * rather than silently rounded.
+ * 文件 / wire 时刻的 epoch ms：`YYYY-MM-DD`（本地零点）或
+ * `YYYY-MM-DDTHH:00`（该本地整点）。不是真实日期、不是整点，或命名了本时区
+ * 不存在的本地小时（DST 春季跳变）时为 null——无法解析到唯一时刻的表会被拒绝，
+ * 而不是静默取整。
  */
 export function instantMs(text: string): number | null {
   if (DATE_RE.test(text)) return dayStartMs(text)
@@ -110,60 +96,57 @@ export function instantMs(text: string): number | null {
   return at.getTime()
 }
 
-/** The file text of an instant: the plain date at local midnight, else
- *  `YYYY-MM-DDTHH:00`. Midnight keeps the short form, so the common case reads
- *  (and diffs) exactly as it did before hourly instants existed. */
+/** 时刻的文件文本：本地零点写短日期，否则 `YYYY-MM-DDTHH:00`。午夜保留短形式，
+ *  使常见情形在小时级时刻出现前后读（及 diff）完全一致。 */
 export function instantKey(ms: number): string {
   const day = dayKeyOf(ms)
   const hour = hourOfDay(ms)
   return hour === 0 ? day : `${day}T${String(hour).padStart(2, '0')}:00`
 }
 
-/** An hour number as a clock label: 9 → `09:00`, 24 → `24:00`. */
+/** 小时数作时钟标签：9 → `09:00`，24 → `24:00`。 */
 export function clockLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`
 }
 
-/** A slot's hour range as every surface prints it: `09:00–12:00`. */
+/** 时段小时区间在各界面上的打印形式：`09:00–12:00`。 */
 export function rangeLabel(range: HourRange): string {
   return `${clockLabel(range.start)}–${clockLabel(range.end)}`
 }
 
-/** Whether an hour range is well formed: whole hours with
- *  `0 ≤ start < end ≤ 24` (end-exclusive, so 24 closes the day). */
+/** 小时区间是否合法：整点且 `0 ≤ start < end ≤ 24`（end 不含，24 收日）。 */
 export function isHourRange(range: HourRange): boolean {
   return Number.isInteger(range.start) && Number.isInteger(range.end)
     && range.start >= 0 && range.start < range.end && range.end <= 24
 }
 
-/** Whether two hour ranges share an hour. */
+/** 两个小时区间是否共享某一小时。 */
 export function hourRangesOverlap(left: HourRange, right: HourRange): boolean {
   return left.start < right.end && right.start < left.end
 }
 
-/** Whether two day sets have a weekday in common. */
+/** 两个 day set 是否有共同星期。 */
 export function daySetsIntersect(left: DaySet, right: DaySet): boolean {
   return left === 'daily' || right === 'daily' || left === right
 }
 
-/** Whether a day set covers a local weekday (0 = Sunday). */
+/** day set 是否覆盖某个本地星期（0 = 周日）。 */
 export function daySetCovers(days: DaySet, weekday: number): boolean {
   if (days === 'daily') return true
   const weekend = weekday === 0 || weekday === 6
   return days === 'weekends' ? weekend : !weekend
 }
 
-/** Whether one slot covers an instant: the instant's local weekday is in the
- *  slot's day set and its local hour falls inside `[start, end)`. */
+/** 一个时段是否覆盖某时刻：时刻的本地星期在时段的 day set 内，且本地小时
+ *  落在 `[start, end)` 内。 */
 export function slotCovers(slot: SlotScope, ms: number): boolean {
   const hour = hourOfDay(ms)
   return hour >= slot.start && hour < slot.end && daySetCovers(slot.days, weekdayOf(ms))
 }
 
-/** Whether two slots can ever be in force at the same moment. The write path
- *  refuses such a pair, so "the slot in force at an instant" is never
- *  ambiguous; a day-disjoint pair may share an hour range (工作日早高峰 next to
- *  周末早高峰). */
+/** 两个时段是否可能同时生效。写路径拒绝这样的对，因此「某时刻生效的时段」
+ *  永不歧义；星期集合不相交的一对可以共享同一小时区间（工作日早高峰挨着
+ *  周末早高峰）。 */
 export function slotsOverlap(left: SlotScope, right: SlotScope): boolean {
   return hourRangesOverlap(left, right) && daySetsIntersect(left.days, right.days)
 }

@@ -1,6 +1,6 @@
-/** styles.ts fragment: provider. Concatenated in order by `injectStyles`. */
-export const CSS_PROVIDER = `/* ── provider-usage tab ─────────────────────────────────────────────────── */
-/* Range switcher: a compact segmented control above the cards. */
+/** styles.ts 片段：provider。由 `injectStyles` 按序拼接。 */
+export const CSS_PROVIDER = `/* 通道用量 tab */
+/* 时间范围切换：卡片上方的紧凑 segmented 控件。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-sec{display:flex;flex-direction:column;gap:10px;}
 [data-plugin="dsh-tokbook"] .dtpl-range-tabs{
   display:inline-flex;gap:2px;align-self:flex-start;flex:none;
@@ -23,7 +23,7 @@ export const CSS_PROVIDER = `/* ── provider-usage tab ───────�
 }
 [data-plugin="dsh-tokbook"] .dtpl-providers{display:flex;flex-direction:column;gap:10px;}
 
-/* One provider card: a washed panel with its own head row. */
+/* 单个通道卡片：轻洗底面板，自带标题行。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-card{
   padding:12px 14px;
   border-radius:var(--dtpl-radius-sm);corner-shape:round;
@@ -44,12 +44,12 @@ export const CSS_PROVIDER = `/* ── provider-usage tab ───────�
   color:var(--dtpl-fg);font-size:14px;line-height:20px;font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-/* The route key under a label: the mirror's name leads, the ledger's key follows. */
+/* 标签下的 route key：镜像名在前，账本键在后。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-key{
   font-family:var(--dtpl-mono,ui-monospace,SFMono-Regular,Menlo,monospace);
   font-size:10px;
 }
-/* What this card's money means: 按量 (cash) / 订阅 (value) / 混合. */
+/* 这张卡上的钱是什么：按量（现金）/ 订阅（价值）/ 混合。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-bill{
   flex:none;padding:1px 5px;border-radius:999px;
   font-size:10px;line-height:14px;font-weight:600;

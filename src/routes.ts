@@ -1,18 +1,9 @@
 /**
- * Host→browser data path for dsh-tokbook: exact HTTP routes on the host
- * webserver, registered through `ctx.webServer.register({ kind:'exact', ... })`.
- * The overview (costed summary + per-day trend + per-model + per-workspace) is
- * served as a plain JSON route the browser floating window `fetch`es from; a second
- * route lets the scan button force an authoritative re-sync; a third route
- * serves the Provider-usage tab's per-provider cards for one selectable
- * look-back window (`?range=…` — exact routes match on pathname, so the query
- * is read inside the handler); a fourth serves the 订阅额度 tab's per-plan
- * official account usage (fetched host-side from each provider's own API).
+ * host→browser 数据路径：在 host webserver 上注册 exact HTTP route。
  *
- * Both handlers guard method + same-origin (the reference plugin's hardening:
- * browsers send `Sec-Fetch-Site`; non-browser clients without the header pass)
- * and wrap the snapshot read in a try/catch so an internal error answers a
- * 500 JSON body instead of an unhandled rejection.
+ * 所有 handler 守 method + same-origin（浏览器带 `Sec-Fetch-Site`；无该 header
+ * 的非浏览器客户端放行），内部错误以 500 JSON body 作答，而不是未处理 rejection。
+ * exact route 按 pathname 匹配，query 在 handler 内读。
  *
  * @module dsh-tokbook/routes
  */
@@ -21,7 +12,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { PROVIDER_RANGES, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type TokBookOverview } from './types.ts'
 import type { PriceParse } from './pricing.ts'
 
-/** The subset of the host webserver this plugin uses. */
+/** 本插件用到的 host webserver 子集。 */
 export interface WebServerLike {
   register(route: {
     kind: 'exact' | 'prefix'
@@ -35,8 +26,6 @@ export interface RescanView {
   lastSyncAt: number | null
 }
 
-/** Whether a request may read the route: same-origin browser fetches only.
- * The header is absent for non-browser clients (curl, tests), which pass. */
 export function isSameOriginFetch(req: IncomingMessage): boolean {
   const site = req.headers['sec-fetch-site']
   if (site === undefined) return true
@@ -48,8 +37,8 @@ function refuse(res: ServerResponse, status: number, message: string): void {
   res.end(message)
 }
 
-/** Bind the overview route to a fresh-snapshot provider and the rescan route
- * to a forced-sync trigger. Returns the combined disposer. */
+/** 把概览 route 绑到新鲜快照提供方、扫描 route 绑到强制同步触发器。返回
+ *  合并 disposer。 */
 export function registerTokBookRoutes(
   webServer: WebServerLike | undefined,
   overview: () => TokBookOverview | Promise<TokBookOverview>,
@@ -99,17 +88,12 @@ export function registerTokBookRoutes(
   }
 }
 
-/** Parse the `range` query of a Provider-usage request. A missing or unknown
- * value answers null; the caller refuses the request (no silent default, so a
- * stale client cannot mislabel a window). */
 export function parseProviderRange(req: IncomingMessage): ProviderRange | null {
   const raw = new URL(req.url ?? '/', 'http://tokbook.local').searchParams.get('range')
   if (raw === null) return null
   return (PROVIDER_RANGES as readonly string[]).includes(raw) ? raw as ProviderRange : null
 }
 
-/** Bind the Provider-usage route to a ranged view provider. Returns the
- * disposer. */
 export function registerTokBookUsageRoute(
   webServer: WebServerLike | undefined,
   usageView: (range: ProviderRange) => ProviderUsageView | Promise<ProviderUsageView>,
@@ -144,11 +128,8 @@ export function registerTokBookUsageRoute(
   })
 }
 
-/** Bind the quota route (订阅额度 tab) to a snapshot provider. Returns the
- * disposer. An optional `?provider=` query fetches that single provider's
- * card only, so the client can render each card as soon as it is ready
- * instead of waiting for every provider. An optional `&refresh=1` bypasses
- * the per-card TTL cache (explicit or timed refresh must re-hit the API). */
+/** 把额度 route 绑到快照提供方。返回 disposer。可选 `?provider=` 只取该
+ *  provider 的卡；可选 `&refresh=1` 绕过单卡 TTL 缓存。 */
 export function registerTokBookQuotaRoute(
   webServer: WebServerLike | undefined,
   quotaView: () => QuotaView | Promise<QuotaView>,
@@ -185,9 +166,8 @@ export function registerTokBookQuotaRoute(
   })
 }
 
-/** Read a small JSON request body (the pricing write path sends one). Bound
- *  so a malicious or broken client cannot make the host buffer unboundedly;
- *  answers a `{ ok, body }` / `{ ok: false, tooLarge }` verdict. */
+/** 读一个小 JSON 请求体（价格写路径会发一个）。有界，使恶意或破损 client
+ *  无法让 host 无界缓冲；答 `{ ok, body }` / `{ ok: false, tooLarge }` 判决。 */
 function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown } | { ok: false; tooLarge: boolean }> {
   return new Promise((resolveBody) => {
     const chunks: Buffer[] = []
@@ -198,8 +178,7 @@ function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown }
       size += chunk.length
       if (size > 256 * 1024) {
         settled = true
-        // Drain the rest so the handler can still write a 413; destroy would
-        // kill the socket before the response lands.
+        // 排空剩余，handler 仍能写 413；destroy 会在响应落地前拆掉 socket。
         req.resume()
         resolveBody({ ok: false, tooLarge: true })
         return
@@ -224,13 +203,9 @@ function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown }
   })
 }
 
-/** Bind the pricing-table route to a view provider and a save path. Returns
- *  the disposer. One exact route on `/tokbook/pricing` dispatches by method
- *  (exact routes match on pathname, so registering the same path twice would
- *  collide): GET answers the read-only route-card view; PUT accepts the
- *  COMPLETE desired price file (`$billing` + route → model → price segments),
- *  persists it, and returns the parse verdict plus the fresh view so the client
- *  can refresh its list from one response. */
+/** 把价格表 route 绑到视图提供方与保存路径。返回 disposer。`/tokbook/pricing`
+ *  上一条 exact route 按 method 分发（同一 path 注册两次会撞）：GET 答只读
+ *  route 卡视图；PUT 接受完整的期望价表，持久化，并返回解析判决加新鲜视图。 */
 export function registerTokBookPricingRoutes(
   webServer: WebServerLike | undefined,
   pricingView: () => PricingView | Promise<PricingView>,

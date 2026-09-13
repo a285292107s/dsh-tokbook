@@ -1,6 +1,6 @@
-/** styles.ts fragment: ledger. Concatenated in order by `injectStyles`. */
-export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ──────────────────────────────────── */
-/* One data-first hero: brand-washed panel, tabular figures throughout. */
+/** styles.ts 片段：ledger。由 `injectStyles` 按序拼接。 */
+export const CSS_LEDGER = `/* 总览英雄区（总词元 + 成本 + meta） */
+/* 一块 data-first 的英雄面板：品牌色轻洗底，全图等宽数字。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero{
   display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
   padding:14px 16px;margin-bottom:12px;
@@ -15,10 +15,7 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
   font-size:28px;line-height:32px;font-weight:700;color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;
 }
-/* The hero's context line: today vs the 近7天 baseline. Neutral by design —
-   "more than usual" is not inherently bad, so it never borrows the warn color
-   (that stays reserved for failures). Direction is carried by the ↑/↓ glyph
-   and by weight, not by hue. */
+/* 英雄区的语境行：今天 vs 近7天基线。刻意中性——「比平时多」本身不是坏消息，从不借用 warn 色。方向由 ↑/↓ 字形和字重表达。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-base{
   font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
@@ -31,16 +28,14 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-cost-k{font-style:normal;font-weight:500;font-size:11px;color:var(--dtpl-fg-3);}
-/* A zero spend is an answer, not a headline: it holds the row without pulling
-   the eye off the non-zero figure beside it (and never reads as cash). */
+/* 零消费是一个答案，不是标题：它占住这一行，但不抢旁边非零数字的视线，也永远不像现金。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-cost.dtpl-hero-cost-zero{color:var(--dtpl-fg-3);}
 [data-plugin="dsh-tokbook"] .dtpl-hero-value{
   display:inline-flex;align-items:baseline;gap:4px;
   font-size:12px;line-height:18px;color:var(--dtpl-fg-2);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-value b{color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;}
-/* 订阅价值 amount used inside model/provider/workspace rows: value styled
-   distinctly from spend so a subscription-channel amount never reads as cash. */
+/* 模型/通道/工作区行里的订阅价值金额：样式刻意区别于消费，订阅通道的数字永远不像现金。 */
 [data-plugin="dsh-tokbook"] .dtpl-sub-amt{color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;}
 [data-plugin="dsh-tokbook"] .dtpl-sub-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-3);margin-left:3px;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-meta{display:flex;flex-direction:column;gap:4px;align-items:flex-end;}
@@ -51,11 +46,9 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 [data-plugin="dsh-tokbook"] .dtpl-meta-n{font-variant-numeric:tabular-nums;color:var(--dtpl-fg);font-weight:600;}
 [data-plugin="dsh-tokbook"] .dtpl-meta-warn .dtpl-meta-n{color:var(--dtpl-warn);}
 
-/* ── stat tiles (4 buckets) ─────────────────────────────────────────────── */
+/* 统计磁贴 */
 [data-plugin="dsh-tokbook"] .dtpl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;}
-/* Three buckets (cache-write is not a dimension of this ledger) fill one row
-   instead of leaving a ragged half-row. Still 3 columns on narrow sheets —
-   each tile keeps ~110px, enough for its label and figure. */
+/* 三个桶刚好填满一行，不留参差的半行。窄屏仍是 3 列——每块约 110px，够放标签和数字。 */
 [data-plugin="dsh-tokbook"] .dtpl-grid-3{grid-template-columns:repeat(3,1fr);}
 [data-plugin="dsh-tokbook"] .dtpl-stat{
   display:flex;flex-direction:column-reverse;gap:2px;
@@ -66,12 +59,12 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 [data-plugin="dsh-tokbook"] .dtpl-stat .dtpl-v{font-size:15px;line-height:20px;font-weight:650;font-variant-numeric:tabular-nums;}
 [data-plugin="dsh-tokbook"] .dtpl-k{color:var(--dtpl-fg-3);font-size:12px;line-height:18px;}
 
-/* ── daily trend ────────────────────────────────────────────────────────── */
+/* 日趋势 */
 [data-plugin="dsh-tokbook"] .dtpl-sec-title{
   font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
   margin:0 0 8px;
 }
-/* Section title with a right-aligned derived metric (e.g. the cache hit rate). */
+/* 节标题右侧挂一个派生指标（如缓存命中率）。 */
 [data-plugin="dsh-tokbook"] .dtpl-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
 [data-plugin="dsh-tokbook"] .dtpl-sec-head .dtpl-sec-title{margin:0 0 8px;}
 [data-plugin="dsh-tokbook"] .dtpl-sec-aside{
@@ -94,16 +87,14 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak{background:var(--dtpl-accent);}
 [data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-fill{background:var(--dtpl-accent);}
-/* Every column carries its own value: the chart reads without hovering. The
-   vertical offset is inline — it repeats the expression that sizes the fill, so
-   the number sits directly above its own bar instead of on a shared top line. */
+/* 每根柱自带数值：不用悬停也能读图。垂直偏移写成 inline——重复填充高度的表达式，让数字贴在自己的柱顶。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-label{
   position:absolute;left:50%;transform:translateX(-50%);
   font-size:11px;line-height:14px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
   white-space:nowrap;pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:650;}
-/* A zero day has no column, so its label sits on the baseline instead. */
+/* 零消费那天没有柱，标签落在基线上。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-zero{color:var(--dtpl-fg-3);}
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-start{left:0;transform:none;}
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-end{left:auto;right:0;transform:none;}
@@ -116,12 +107,8 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
   margin:4px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
 }
 
-/* ── breakdown switch (按模型 / 按工作区) ────────────────────────────────── */
-/* Same segmented recipe as the window's own tabs, one step down in weight and
-   inline rather than full-width: a view switch INSIDE the 用量总览 tab must not
-   read as a peer of the top-level tabs. The aside names the ordering of the
-   panel on screen — the two angles do not share a sort key (models by request
-   count, workspaces most-recently-used first). */
+/* 明细切换（按模型 / 按工作区） */
+/* 与窗口自己的 tab 同一套 segmented 配方，权重降一级且改为行内。aside 说明当前面板的排序——两个视角不共用排序键。 */
 [data-plugin="dsh-tokbook"] .dtpl-bd{margin-bottom:14px;}
 [data-plugin="dsh-tokbook"] .dtpl-bd-head{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -147,7 +134,7 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
   box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border,rgba(0,0,0,.14));
 }
 
-/* ── models / workspaces (the two panels behind the switch) ─────────────── */
+/* 模型 / 工作区面板 */
 [data-plugin="dsh-tokbook"] .dtpl-models{display:flex;flex-direction:column;gap:10px;}
 [data-plugin="dsh-tokbook"] .dtpl-row{display:flex;align-items:center;justify-content:space-between;gap:16px;}
 [data-plugin="dsh-tokbook"] .dtpl-model{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;}
@@ -169,11 +156,8 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 [data-plugin="dsh-tokbook"] .dtpl-val{color:var(--dtpl-fg);font-size:13px;line-height:20px;font-variant-numeric:tabular-nums;white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-cost{color:var(--dtpl-fg-2);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;white-space:nowrap;}
 
-/* ── workspaces ─────────────────────────────────────────────────────────── */
-/* The identity line under the workspace title: the directory, then the two
-   facts that make "most recent first" legible. The directory yields (ellipsis)
-   under pressure; the facts never do — a clipped "最近 …" would read as a
-   broken number. */
+/* 工作区 */
+/* 工作区标题下的身份行：目录，然后是让「最近优先」可读的两个事实。目录在挤压时让步（ellipsis）；事实永不裁。 */
 [data-plugin="dsh-tokbook"] .dtpl-ws-meta{
   display:flex;align-items:baseline;gap:6px;min-width:0;
   font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
@@ -186,13 +170,11 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
   flex:none;font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 
-/* ── notes ──────────────────────────────────────────────────────────────── */
+/* 注释 */
 [data-plugin="dsh-tokbook"] .dtpl-note{font-size:12px;line-height:18px;color:var(--dtpl-fg-2);margin:0 0 10px;}
 
-/* ── window footer (sync state · latest + rescan) ───────────────────────── */
-/* The pinned footer holds both freshness answers — the re-sync state and the
-   newest-record time — as one always-visible group; the scroll body below is
-   pure usage content. */
+/* 窗口底部（同步状态 · 最新记录 + 重扫） */
+/* 钉住的 footer 同时回答两个新鲜度问题——重同步状态与最新记录时间——作为一组永远可见的信息。 */
 [data-plugin="dsh-tokbook"] .dtpl-foot{
   flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;
   padding:10px 20px 14px;
@@ -233,7 +215,7 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 [data-plugin="dsh-tokbook"] .dtpl-rescan-ico{width:14px;height:14px;flex:none;}
 [data-plugin="dsh-tokbook"] .dtpl-spin{animation:dtpl-rotate 1s linear infinite;}
 
-/* ── error / retry ──────────────────────────────────────────────────────── */
+/* 错误 / 重试 */
 [data-plugin="dsh-tokbook"] .dtpl-error{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
   margin-bottom:12px;padding:10px 12px;
@@ -253,7 +235,7 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 }
 [data-plugin="dsh-tokbook"] .dtpl-retry:hover{background:color-mix(in srgb,var(--dtpl-err) 12%,transparent);}
 
-/* ── skeleton (loading) ─────────────────────────────────────────────────── */
+/* 骨架屏（加载中） */
 [data-plugin="dsh-tokbook"] .dtpl-skeleton{display:flex;flex-direction:column;gap:12px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk{
   border-radius:var(--dtpl-radius-sm);corner-shape:round;
@@ -270,7 +252,7 @@ export const CSS_LEDGER = `/* ── hero (total tokens + cost + meta) ───
 [data-plugin="dsh-tokbook"] .dtpl-sk-chart{height:88px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-row{height:36px;}
 
-/* ── empty state ────────────────────────────────────────────────────────── */
+/* 空状态 */
 [data-plugin="dsh-tokbook"] .dtpl-empty{
   display:flex;flex-direction:column;align-items:center;text-align:center;
   padding:28px 20px;margin:8px 0 12px;

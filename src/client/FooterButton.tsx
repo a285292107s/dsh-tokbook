@@ -1,16 +1,7 @@
 /**
- * Sidebar footer trigger for the token book (route A: `sidebar.footer.action`).
+ * 词元账本的侧栏 footer 触发按钮（路由 A：`sidebar.footer.action`）。
  *
- * Receives the slot owner share `{ wide }` (false = 56px rail) plus the shared
- * view store through the register `inject` factory. Clicking toggles the
- * overlay via the store. A small warn-colored dot rides the icon when the
- * last-known quota snapshot says a subscription window is 告急 — the badge
- * never itself polls provider APIs; the client entry refreshes it from
- * `GET /tokbook/quota` (disk-only list + alert).
- *
- * Styled to match the DSH web sidebar foot (same geometry as the settings
- * trigger): a full-width 42px bar when wide, a 36px round icon control on the
- * 56px rail.
+ * 徽标本身从不轮询 provider API；由 client 入口经 `GET /tokbook/quota`（纯磁盘列表 + alert）刷新。
  *
  * @module dsh-tokbook/client/FooterButton
  */
@@ -20,9 +11,9 @@ import type { TokBookViewStore } from './store.ts'
 import { UsageGlyph } from './icons.tsx'
 
 export interface FooterButtonProps {
-  /** Sidebar column state: false = collapsed rail. */
+  /** 侧栏列状态：false = 收起的窄栏。 */
   wide: boolean
-  /** Shared view store (injected). */
+  /** 共享 view store（inject 注入）。 */
   view: TokBookViewStore
 }
 

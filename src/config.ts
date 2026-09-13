@@ -1,13 +1,11 @@
 /**
- * Plugin profile config: strict validation of the declared shape, and lenient
- * coercion of plan overrides (a config typo must not take the host down).
+ * profile 配置：声明形状严格校验；plan 覆盖宽松纠错（笔误不得拖垮宿主）。
  *
  * @module dsh-tokbook/config
  */
 
 import type { PlanConfig, TokBookConfig } from './types.ts'
 
-/** Reject stale or misspelled config keys before defaults can hide them. */
 export function validateConfig(config: TokBookConfig): void {
   const unknown = Object.keys(config).find(key =>
     key !== 'path' && key !== 'recordCompaction' && key !== 'plans')
@@ -25,9 +23,7 @@ export function validateConfig(config: TokBookConfig): void {
   }
 }
 
-/** Coerce a user-supplied plan override into a valid PlanConfig (drop unknown
- * keys and malformed fields instead of throwing — a config typo must not take
- * down the plugin). */
+/** 丢掉未知键与畸形字段，而不是抛错。 */
 export function coercePlanConfig(value: unknown): PlanConfig | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
@@ -38,7 +34,6 @@ export function coercePlanConfig(value: unknown): PlanConfig | undefined {
   return out
 }
 
-/** Coerce the whole `plans` config record. Malformed entries are dropped. */
 export function coercePlansConfig(value: unknown): Record<string, PlanConfig> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
   const out: Record<string, PlanConfig> = {}

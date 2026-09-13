@@ -1,16 +1,7 @@
 /**
- * Row primitives of the 价格表 tab: the four numeric cells (editable in place),
- * one price segment's editor, one model row, and one route card.
+ * 价格表 tab 的行原语：四个数字单元格、价格段编辑器、模型行、route 卡。
  *
- * The row IS the table: identity on the left, the four ¥/M buckets as aligned
- * tabular cells, and a disclosure that opens the row's 调价史. The cells always
- * edit the segment in force's WHOLE-DAY price, so the table stays a table — 峰谷
- * prices live one level down, on the 峰谷时段 rows inside the drawer. Nothing
- * here owns state: the panel does, and hands down small callbacks.
- *
- * A 峰谷时段 restates only the buckets that differ; the ones it leaves empty
- * show the whole-day rate as their placeholder, so "inherit" is visible instead
- * of being a dash that means the opposite of the dash one level up.
+ * 行**就是**表：单元格始终编辑当前生效段的**全天价**，峰谷价住在抽屉内。本文件不持有状态：面板持有，通过小回调下发。峰谷时段只重写有差异的桶，留空的桶显示段的全天价作 placeholder——使「继承」可见。
  *
  * @module dsh-tokbook/client/pricing/editors
  */
@@ -26,7 +17,7 @@ import {
 } from './draft.ts'
 import { PriceTimeline } from './Timeline.tsx'
 
-/** The four ¥/M buckets, in the order every surface writes them. */
+/** 四个 ¥/M 桶，按所有 surface 书写顺序。 */
 export const RATE_FIELDS = [
   { key: 'input', label: '输入' },
   { key: 'output', label: '输出' },
@@ -34,36 +25,30 @@ export const RATE_FIELDS = [
   { key: 'cacheWrite', label: '缓存写' },
 ] as const
 
-/** The row's four cells, in column order. */
+/** 行的四个单元格，按列顺序。 */
 const CELLS: ReadonlyArray<{ field: RateField; label: string }> = RATE_FIELDS.map(({ key, label }) => ({ field: key, label }))
 
-/** Every hour a slot may start at, and every hour it may end at (end-exclusive,
- *  so `24:00` closes the day). */
+/** 时段可选的全部开始小时与结束小时（结束不含，`24:00` 关日）。 */
 const START_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
 const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour + 1)
 
-/** One numeric cell, edited in place: it reads as text until focused, so 50
- *  rows stay calm while every value is one click (or Tab) away. */
+/** 一个数字单元格，原地编辑：聚焦前读作文本，50 行保持平静，而每个值一次点击（或 Tab）即达。 */
 function RateCell({ id, label, hint, value, state, context, placeholder, note, onEdit }: {
   id: string
   label: string
-  /** The static header this cell belongs to (for screen readers). */
+  /** 该单元格所属的静态表头（无障碍用）。 */
   hint?: string
   value: string
   state: 'ok' | 'empty' | 'bad' | 'readonly'
   context: string
-  /** Shown while the cell is empty. A 峰谷时段 passes the whole-day rate here,
-   *  so "empty = inherits" is visible rather than implied. */
+  /** 单元格为空时显示。峰谷时段把全天价传到这里，「空 = 继承」可见。 */
   placeholder?: string
-  /** Hover text explaining what an empty cell means in this context. */
+  /** 悬停时解释此上下文中空单元格的含义。 */
   note?: string
   onEdit?: (next: string) => void
 }) {
   const errorId = `${id}-err`
-  // The VISIBLE message stays short so it cannot distort a narrow rate column
-  // (a full sentence wraps into a tall thin sliver inside a 68px cell); the
-  // full sentence rides the input's title, and the row line below repeats the
-  // first problem in full width.
+  // 可见消息保持简短，不撑窄 rate 列；完整句子挂在 input 的 title 上，行下方的问题行以全宽重复第一个问题。
   const message = state === 'bad' ? '须为非负数字' : undefined
   const tip = state === 'bad' ? `${label}必须是非负数字（¥/百万词元）` : note
   return (
@@ -85,7 +70,7 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
         aria-describedby={message !== undefined ? errorId : undefined}
         onChange={(event) => onEdit?.(event.target.value)}
         onKeyDown={(event) => {
-          // Enter leaves the cell (the value is already staged).
+          // Enter 离开单元格（值已暂存）。
           if (event.key === 'Enter') event.currentTarget.blur()
         }}
       />
@@ -94,17 +79,13 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   )
 }
 
-/** One 峰谷时段: the days it applies to, the hours it covers, and the buckets it
- *  restates. Its rates are laid out exactly like the whole-day row above it, so
- *  a peak price reads as "the same four buckets, other numbers" — and a bucket
- *  left empty shows the whole-day rate it keeps. */
+/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方全天价行完全相同——留空的桶显示它沿用的全天价。 */
 function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onDuplicate }: {
   slot: SlotDraft
   index: number
-  /** Whether this one may be deleted (an unfinished draft always can; the last
-   *  priced slot may not, since that would silently drop the window). */
+  /** 是否可删除（未完成的草稿永远可以；最后一个有价时段不行，否则会悄悄丢掉那个窗口）。 */
   canRemove: boolean
-  /** The segment's whole-day rates, shown as the placeholders of empty cells. */
+  /** 段的全天价，作为空单元格的 placeholder。 */
   inherited: RateTexts
   onChange: (next: SlotDraft) => void
   onRemove: () => void
@@ -177,9 +158,7 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
   )
 }
 
-/** One price segment of the 调价史: the instant it takes effect, its whole-day
- *  price, its 峰谷时段 and its note. Actions appear on hover or keyboard focus
- *  (they stay reachable, never hover-only). */
+/** 调价史中的一个价格段：生效时刻、全天价、峰谷时段、备注。操作在 hover 或键盘聚焦时出现（始终可达，非仅 hover）。 */
 function SegmentEditor({ segment, index, count, active, onChange, onRemove, onDuplicate }: {
   segment: SegmentDraft
   index: number
@@ -283,12 +262,11 @@ function SegmentEditor({ segment, index, count, active, onChange, onRemove, onDu
   )
 }
 
-/** One model row: identity + marks | four editable cells | 调价史 disclosure. */
+/** 一个模型行：身份 + 标记 | 四个可编辑单元格 | 调价史展开。 */
 export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onToggle, onChange }: {
   route: string
   row: ModelDraft
-  /** Row signatures at the last write; the row derives its own 未保存 mark, so
-   *  an untouched row keeps its identity and never re-renders. */
+  /** 上次写入时的行签名；行自己推导未保存标记，未触碰的行保持引用、不 re-render。 */
   baseline: ReadonlyMap<string, string>
   open: boolean
   onToggle: (route: string, model: string) => void
@@ -300,28 +278,20 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
   const issue = rowIssue(row)
   const live = inForceToday(shown)
   const slots = shown === null ? 0 : effectiveSlots(shown).length
-  // The row's identity, split the way the model picker splits it — but only ONE
-  // of the two is ever printed: the human name when something names the string,
-  // the exact string itself otherwise (a 仅账本 row, or one only the price file
-  // mentions). Showing both was showing the same thing twice. The exact string is
-  // still the ledger's billing key, so it stays reachable: on hover over the
-  // label, in the drawer's own header, and in every cell's accessible name.
+  // 行的身份**只打印一个**：有人命名该串时显示展示名，否则显示精确串本身。精确串仍是账本的计费键，保持可达：hover 标签、抽屉自身头部、每个单元格的无障碍名称。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
   const meta: string[] = []
   if (shown !== null) meta.push(fmtRowFrom(shown.from))
   meta.push(row.records > 0 ? `账本 ${String(row.records)} 次` : '账本没记过')
   if (shown !== null && shown.note.trim() !== '') meta.push(shown.note.trim())
-  // The meta line has no room for a sentence, so the one term it prints without
-  // defining rides the hover: which account a 无起点 price reaches back over.
+  // meta 行放不下整句，故唯一的裸术语骑在 hover 上：无起点的价格回溯到哪段账本。
   const metaTitle = shown !== null && shown.from.trim() === ''
     ? `${meta.join(' · ')}｜「无起点」= 定价文件没写这份价的生效时间，这条模型的全部历史都按它算`
     : meta.join(' · ')
 
   const edit = (field: RateField, next: string): void => {
     if (shown === null) {
-      // The first keystroke on an unpriced row writes its 最早一段 — or fills
-      // the unfinished segment the user already added, so their choice of
-      // effective time is respected instead of being shadowed by a new one.
+      // 无定价行上的第一次按键写入最早一段——或填充用户已加的未完成段，使其选择的生效时间被尊重。
       const pending = pendingSegment(row)
       if (pending !== null) {
         onChange(route, row.model, {
@@ -343,13 +313,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
     <>
       <div className="dtpl-price-row" data-dirty={dirty} data-unpriced={unpriced} data-open={open}>
         <div className="dtpl-price-id">
-          {/* Line 1 is IDENTITY — the display name when something names this
-              string, else the exact string itself — plus the flags that change
-              how the four numbers read. Line 2 is PROVENANCE: when this price
-              took effect, how much the ledger billed, its note. One identity,
-              one line: printing the name AND the string said the same thing
-              twice, and the identity column is the one place with room to spare
-              for a long string. */}
+          {/* 第 1 行是身份（有人命名时显示展示名，否则精确串）加上标记。第 2 行是出处。一个身份一行：打印名称**和**精确串等于说两遍。 */}
           <span className="dtpl-price-name">
             <span
               className="dtpl-price-title"
@@ -359,9 +323,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
             </span>
             {!row.configured && <span className="dtpl-price-badge">仅账本</span>}
             {unpriced && <span className="dtpl-price-badge dtpl-price-badge-unknown">价格未知</span>}
-            {/* The two marks that decide whether the row's four numbers are the
-                ones actually billing: both stay outside the truncating meta
-                line, so they can never be ellipsized away. */}
+            {/* 两个决定行内四个数字是否真正在计费的标记：始终在会截断的 meta 行之外。 */}
             {slots > 0 && <span className="dtpl-price-badge dtpl-price-badge-slot">峰谷 {String(slots)} 段</span>}
             {shown !== null && !live && !unpriced && <span className="dtpl-price-badge dtpl-price-badge-idle">未生效</span>}
             {dirty && <span className="dtpl-price-badge dtpl-price-badge-dirty">未保存</span>}
@@ -403,9 +365,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
             <span className="dtpl-price-history-model">{row.model}</span>
             <span className="dtpl-price-history-colid">生效时间 → 全天价（¥/百万词元）→ 峰谷时段</span>
           </div>
-          {/* The axis heads the list it indexes: which interval is billing now,
-              where the boundaries are, what sits past 今天, and how much of the
-              ledger the price does not reach. */}
+          {/* 轴统领它索引的列表：哪个区间在计费、边界在哪、今天之后是什么、价够不到账本的哪部分。 */}
           <PriceTimeline row={row} activeId={shown === null ? null : shown.id} />
           {sortedSegments(row).map((segment, index) => (
             <SegmentEditor
@@ -461,12 +421,10 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
   )
 })
 
-/** One route card: a collapsible head (name, key, counts, 计费性质) over the
- *  model table. The head's chevron is the only way to fold it, so the switch
- *  beside it stays a switch. */
+/** 一张 route 卡：可折叠的头（名称、key、计数、计费性质）盖在模型表上。头上的 chevron 是唯一的折叠方式，旁边保持为开关。 */
 export const RouteCard = memo(function RouteCard({ card, baseline, collapsed, openKey, onToggleCard, onToggleRow, onRowChange, onBilling }: {
   card: RouteDraft
-  /** Row signatures at the last write (see {@link ModelRow}). */
+  /** 上次写入时的行签名（见 {@link ModelRow}）。 */
   baseline: ReadonlyMap<string, string>
   collapsed: boolean
   openKey: string | null

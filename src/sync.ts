@@ -1,18 +1,10 @@
 /**
- * History sync: replay persisted session logs and append the request rows
- * the ledger does not already hold, deduped by request id. Rows come from
- * `assistant/message` events (plain requests), `compaction/summary` events
- * (the summarize provider calls, unless disabled), `turn/end` events whose
- * reason is an LLM error, and `llm/retry` events. Runs automatically once on
- * the first startup after installation (gated by the initialized marker), and
- * on an overview read for the sessions the freshness probe reports stale
- * (see {@link ../stats.ts|`staleSessionIds`} — after a restart only sessions
- * whose persisted log changed since the recorded baseline). A session whose
- * stored log fails to inspect is skipped and counted, never fatal to the run.
+ * 历史同步：重放持久化的会话日志，append 账本尚未持有的请求行，按
+ * request-id 去重。安装后首次启动自动跑一次；之后在概览读时，对新鲜度探针报
+ * 为 stale 的会话跑。日志 inspect 失败的会话被跳过并计数，绝不使整轮致命。
  *
- * This walk is deliberately cancellation-free: it is a short authoritative
- * refresh and dropping `AbortSignal` plumbing keeps us from ever feeding a
- * non-signal into the persistence backend.
+ * 本 walk 刻意不取消：这是一次短的权威刷新，不接 `AbortSignal` 管道可
+ * 避免向持久化后端喂非 signal。
  *
  * @module dsh-tokbook/sync
  */
@@ -21,18 +13,16 @@ import { isInitialized, markInitialized } from './sync-state.ts'
 import { modelOfEvent, providerOfEvent, recordOfEvent, type SessionEventLike } from './usage-record.ts'
 import type { UsageLog } from './usage-log.ts'
 
-/** Outcome of one sync run. */
+/** 一轮同步的结果。 */
 export interface SyncResult {
-  /** Rows appended to the log. */
+  /** append 进日志的行数。 */
   added: number
-  /** Requests already present in the log (deduped). */
+  /** 日志里已有的请求（已去重）。 */
   skipped: number
-  /** Sessions whose stored log failed to load or validate. */
   failedSessions: number
 }
 
-/** One progress tick of a long sync, forwarded to the card so the user can
- * see how far a manual scan has gotten. */
+/** 长同步的一次进度 tick，转发给卡片，使用户能看到手动扫描走到哪。 */
 export interface SyncProgressTick {
   processed: number
   total: number
@@ -42,12 +32,10 @@ export interface SyncProgressTick {
 }
 
 /**
- * Per-session listing item as the sync reads it: the immutable header plus,
- * when the backend provides one, a cheap change token (equal revisions mean an
- * unchanged log). `revision` is optional — `listSnapshots()` provides it, a
- * plain `list()` fallback does not (every session then counts as stale). The
- * header's `cwd` rides along because the overview's 按工作区 section joins the
- * ledger against it (see `src/workspaces.ts`).
+ * 同步读到的会话列表项：不可变 header，外加（后端有则）廉价变更 token
+ * （revision 相等 = 日志未变）。`revision` 可选——`listSnapshots()` 提供，
+ * 裸 `list()` 回落没有（届时每个会话都算 stale）。header 的 `cwd` 一并
+ * 带上，概览的按工作区一节用它 join 账本。
  */
 export interface PersistenceSnapshotLike {
   header: { id: string; cwd?: string }
@@ -55,12 +43,10 @@ export interface PersistenceSnapshotLike {
 }
 
 /**
- * The persistence surface the sync needs (duck-typed for tests), matching the
- * current DSH `SessionPersistence` service: sessions are listed through
- * `listSnapshots()` (header + opaque revision per materialized session; a
- * plain-header `list()` is accepted as a fallback), and a session's validated
- * logical event log is read through `inspect(id)` (`{ meta, events }`). No
- * cancellation options are passed through.
+ * 同步所需的持久化面（为测试鸭子类型），对齐当前 DSH `SessionPersistence`
+ * 服务：会话经 `listSnapshots()` 列出（每个已物化会话一个 header + opaque
+ * revision；裸 header 的 `list()` 可作回落），经 `inspect(id)` 读该会话的
+ * 校验后逻辑事件日志（`{ meta, events }`）。不透传取消选项。
  */
 export interface SyncPersistence {
   listSnapshots?(): Promise<readonly PersistenceSnapshotLike[]>
@@ -68,17 +54,16 @@ export interface SyncPersistence {
   inspect(id: string): Promise<{ meta: { id: string }; events: readonly SessionEventLike[] }>
 }
 
-/** Coerce one raw listing item into a snapshot, or null when it names no id.
- * Accepts both a bare `SessionHeader` and a `{ header, revision }` snapshot —
- * the two shapes the real backends hand out. */
+/** 把一条原始列表项纠错成 snapshot；不带 id 则答 null。同时接受裸
+ *  `SessionHeader` 与 `{ header, revision }` snapshot——真实后端的两种形状。 */
 function normalizeSnapshot(value: unknown): PersistenceSnapshotLike | null {
   if (typeof value !== 'object' || value === null) return null
   const raw = value as Record<string, unknown>
   const header = (typeof raw.header === 'object' && raw.header !== null ? raw.header : raw) as Record<string, unknown>
   if (typeof header.id !== 'string' || header.id === '') return null
   return {
-    // Only the two fields this module declares are copied out, so a foreign
-    // backend cannot smuggle a non-string `cwd` into the workspace join.
+    // 只拷本模块声明的两个字段，外来后端无法把非 string `cwd` 走私进
+    // 工作区 join。
     header: {
       id: header.id,
       ...(typeof header.cwd === 'string' && header.cwd !== '' ? { cwd: header.cwd } : {}),
@@ -87,9 +72,9 @@ function normalizeSnapshot(value: unknown): PersistenceSnapshotLike | null {
   }
 }
 
-/** List every materialized session as normalized snapshots. Prefers
- * `listSnapshots()` (cheap change tokens); falls back to a bare-header
- * `list()`, where each session defaults to stale (no revision to compare). */
+/** 列出全部已物化会话为规范化 snapshot。优先 `listSnapshots()`
+ *  （廉价变更 token）；回落到裸 header 的 `list()`，届时每个会话默认 stale
+ *  （无 revision 可比）。 */
 export async function listPersistenceSnapshots(
   persistence: SyncPersistence,
   logger: { error(...args: unknown[]): void } = console,
@@ -111,7 +96,7 @@ export async function listPersistenceSnapshots(
     .filter((snap): snap is PersistenceSnapshotLike => snap !== null)
 }
 
-/** Dependencies of one sync run. */
+/** 一轮同步的依赖。 */
 export interface SyncDeps {
   persistence: SyncPersistence
   log: UsageLog
@@ -119,27 +104,25 @@ export interface SyncDeps {
   onSessionFailure?: (id: string, error: unknown) => void
 }
 
-/** Options of one sync run. */
+/** 一轮同步的选项。 */
 export interface SyncOptions {
   /**
-   * Per-session snapshots already fetched by the caller's freshness probe.
-   * When given, the run reuses them instead of listing a second time; when
-   * absent (the one-shot startup backfill) the run lists itself.
+   * 调用方新鲜探针已取好的会话 snapshot。给了就复用，不再列一次；缺省
+   * （启动时的一次性回填）由本轮自己列。
    */
   snapshots?: readonly PersistenceSnapshotLike[]
   /**
-   * Incremental subset: only these sessions are walked. Absent (or when the
-   * caller is doing a first full sync) walks every listed session. Each kept
-   * session's whole log is re-read and folded — request-id dedupe makes the
-   * overlap with already-recorded rows a no-op.
+   * 增量子集：只走这些会话。缺省（或调用方在做首次全量同步）走列出的
+   * 全部。每个保留的会话整份日志重读再折叠——request-id 去重使与已记行
+   * 的重叠成为空操作。
    */
   sessionIds?: readonly string[]
-  /** Progress ticks for the caller's progress bar. */
+  /** 转发给调用方进度条的进度 tick。 */
   onTick?: (tick: SyncProgressTick) => void
 }
 
-/** Append every missing request row. The log's dedupe set is rebuilt from the
- * data files first (once per process), so a second run is a no-op. */
+/** append 全部缺失的请求行。日志的去重集合先从数据文件重建（每进程一次），
+ *  因此第二轮是空操作。 */
 export async function syncHistory(
   deps: SyncDeps,
   options: SyncOptions = {},
@@ -158,14 +141,12 @@ export async function syncHistory(
   options.onTick?.({ processed, total, added, skipped, failedSessions })
   for (const session of sessions) {
     const id = session.header.id
-    // One unreadable session log (a format the current dsh build rejects, a
-    // torn file, …) must not abort the whole walk: skip the session, report
-    // it, and let the rest of the history land.
+    // 一份读不了的会话日志（当前 dsh 拒绝的格式、撕裂文件……）不得中止
+    // 整轮 walk：跳过该会话、报出，让其余历史落盘。
     let events: readonly SessionEventLike[]
     try {
-      // `inspect` returns the validated header and the session's logical
-      // event log; a live session's open turn may appear in the middle of the
-      // log, which is harmless here — only billed-call events project rows.
+      // `inspect` 返回校验过的 header 与该会话的逻辑事件日志；进行中会话
+      // 的未关 turn 可能出现在日志中部，在此无害——只有计费调用事件投影行。
       const inspection = await deps.persistence.inspect(id)
       events = inspection.events
     } catch (error) {
@@ -175,9 +156,9 @@ export async function syncHistory(
       options.onTick?.({ processed, total, added, skipped, failedSessions })
       continue
     }
-    // Last-known route model/provider of this session: failure rows need a
-    // model to attribute, and turn/end names none, so the walk follows the
-    // same request/context + assistant/message events the live recorder does.
+    // 本会话最近已知的 route model/provider：失败行需要一个 model 来归属，
+    // 而 turn/end 不带，所以 walk 跟随与实时记录器相同的 request/context +
+    // assistant/message 事件。
     let model = ''
     let provider: string | undefined
     for (const event of events) {
@@ -197,11 +178,10 @@ export async function syncHistory(
   return { added, skipped, failedSessions }
 }
 
-/** Run the one-shot automatic sync when the initialized marker is absent, then
- * persist the marker. A crash between the sync and the marker write leaves the
- * marker absent, so the next startup re-runs the sync — a no-op thanks to
- * request-id dedupe.
- * @returns the sync outcome, or null when the marker was already present. */
+/** initialized marker 缺席时跑一次性自动同步，然后持久化 marker。同步与
+ *  marker 写之间崩溃会使 marker 仍缺席，下次启动重跑同步——因 request-id
+ *  去重而是空操作。
+ * @returns 同步结果；marker 已在场时为 null。 */
 export async function autoSyncIfNeeded(deps: SyncDeps, dir: string): Promise<SyncResult | null> {
   if (await isInitialized(dir)) return null
   const result = await syncHistory(deps)

@@ -1,19 +1,5 @@
 /**
- * The two breakdown angles of the 用量总览 tab, behind one sub-tab switch:
- * 按模型 (which models the ledger billed) and 按工作区 (which project the spend
- * belongs to). Both are views of the SAME cumulative ledger — the host folds it
- * by model in the summary and joins it to workspaces at read time — so one
- * panel at a time is the honest shape: no duplicated money columns, and the
- * second angle costs the first one nothing.
- *
- * Each panel keeps the ordering its own angle actually has: models by request
- * count (`stats.modelRows`), workspaces most-recently-used first. The aside
- * names that order, because two different sort keys inside one view switch are
- * easy to misread.
- *
- * The switch only offers what exists: a breakdown with no rows — an
- * all-unattributed ledger for models, a host mounting no workspace registry for
- * workspaces — contributes no tab.
+ * 用量总览 tab 的两个拆分角度，共用一个子 tab 切换：按模型与按工作区。两者是**同一份累计账本**的不同视角。切换只展示存在的内容：无行的拆分不贡献 tab。
  *
  * @module dsh-tokbook/client/Breakdowns
  */
@@ -24,11 +10,10 @@ import type { CostedModelRow, WorkspaceUsageRow } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import { formatDateTime, formatRelative, formatTokens, share } from './format.ts'
 
-/** Which angle of the ledger is on screen. */
+/** 当前展示的账本角度。 */
 type BreakdownTab = 'model' | 'workspace'
 
-/** The right-hand note of each panel: what the panel covers, and how its rows
- *  are ordered (the two angles do not share a sort key). */
+/** 各面板的右侧旁注：覆盖面 + 行排序（两个角度不共享排序键）。 */
 const PANEL_NOTES: Record<BreakdownTab, { text: string; title: string }> = {
   model: {
     text: '全账本累计 · 请求数从多到少',
@@ -50,9 +35,7 @@ export function Breakdowns({ byModel, byWorkspace, totalTokens, money }: {
   const hasModel = byModel.length > 0
   const hasWorkspace = byWorkspace.length > 0
   if (!hasModel && !hasWorkspace) return null
-  // The active tab is RE-DERIVED, never trusted: a rescan can empty the panel
-  // that is currently selected (workspaces disappear when the registry stops
-  // answering), and an empty panel must not be what stares back.
+  // 活动 tab 始终重新推导、绝不直接信任：再同步可能清空当前选中的面板，空面板不能对着用户。
   const active: BreakdownTab = hasModel && (tab === 'model' || !hasWorkspace) ? 'model' : 'workspace'
   const note = PANEL_NOTES[active]
   const onTablistKeyDown = (e: ReactKeyboardEvent): void => {
@@ -113,9 +96,7 @@ export function Breakdowns({ byModel, byWorkspace, totalTokens, money }: {
   )
 }
 
-/** One row per (provider, model): tokens, its share of the ledger, and the
- *  billed amount — 订阅价值 when the route's billing is a subscription, never
- *  dressed up as cash. */
+/** 每 (provider, model) 一行：词元、占比、计费金额——订阅通道显示订阅价值，绝不用现金外观包装。 */
 function ModelRows({ byModel, totalTokens, money }: {
   byModel: readonly CostedModelRow[]
   totalTokens: number
@@ -147,10 +128,7 @@ function ModelRows({ byModel, totalTokens, money }: {
 }
 
 /**
- * One row per workspace, most recently used first. The 未归属 row closes the
- * list: it holds the records no registered workspace claims, which is what
- * keeps the rows adding back up to 累计词元. It is a reconciliation line, not a
- * project, so "most recent first" does not apply to it.
+ * 每个工作区一行，最近使用在前。未归属行收尾：它持有无注册工作区认领的记录，因此各行才能加回累计词元。它是对账行、不是项目。
  */
 function WorkspaceRows({ rows, totalTokens, money }: {
   rows: readonly WorkspaceUsageRow[]
@@ -167,8 +145,7 @@ function WorkspaceRows({ rows, totalTokens, money }: {
         >
           <div className="dtpl-model">
             <span className="dtpl-model-name">{row.title}</span>
-            {/* The directory yields (ellipsis) under pressure; the two facts
-                never do — a clipped "最近 …" would read as a broken number. */}
+            {/* 目录在压力下截断（省略号）；两个事实不截——被截断的「最近 …」会被读成坏掉的数字。 */}
             <span className="dtpl-ws-meta">
               {row.path !== '' && (
                 <>
@@ -186,11 +163,7 @@ function WorkspaceRows({ rows, totalTokens, money }: {
           </div>
           <div className="dtpl-model-nums">
             <span className="dtpl-val">{formatTokens(row.tokens)}</span>
-            {/* A workspace spans channels, so BOTH money buckets can be
-                non-zero at once — unlike a model row, which one route scopes
-                to a single bucket. Each non-zero bucket is therefore named,
-                and a fully unpriced workspace still shows ¥0.00 (价格未知 is
-                a 口径, never a free ride). */}
+            {/* 工作区跨通道，两个金额桶可同时非零——因此每个非零桶各自标明，全未定价的工作区仍显示 ¥0.00（价格未知是口径，不是免费）。 */}
             <span className="dtpl-cost">
               {row.spend > 0 && <span>{money(row.spend)}</span>}
               {row.spend > 0 && row.subscriptionValue > 0 && <span aria-hidden="true"> · </span>}
@@ -206,8 +179,7 @@ function WorkspaceRows({ rows, totalTokens, money }: {
   )
 }
 
-/** The hover audit trail of one workspace row: identity, cumulative token
- * split, requests/failures, both money buckets and when it was last used. */
+/** 工作区行的 hover 审计信息：身份、累计词元四桶、请求/失败、两个金额桶、最近使用时间。 */
 function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => string): string {
   const totals = row.totals
   const failed = totals.failures ?? 0

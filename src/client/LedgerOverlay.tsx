@@ -1,19 +1,7 @@
 /**
- * Token-book overlay window (route A: `shell.overlay`) — shell only.
+ * 词元账本浮窗（路由 A：`shell.overlay`）——纯壳层。
  *
- * Owns open/close, overview fetch + rescan poll, the five-tab chrome and the
- * pinned ledger footer. Tab bodies live next to this file:
- *   · 用量总览 — `LedgerView.tsx`
- *   · 通道用量 — `ProviderPanel.tsx`
- *   · 订阅额度 — `QuotaPanel.tsx`
- *   · 价格表   — `pricing/PricingPanel.tsx`
- *   · 统计口径 — `MethodDoc.tsx`
- *
- * Dialog semantics: Escape and a backdrop click both close, focus moves into
- * the card on open, Tab is trapped inside while open, and focus returns to the
- * trigger on close.
- *
- * Uses DSH design tokens and owns its CSS scope (`styles.ts`).
+ * 对话语义：Escape 和点背景都关闭；打开时焦点移入卡片，Tab 被困在内部，关闭后焦点回到触发按钮。
  *
  * @module dsh-tokbook/client/LedgerOverlay
  */
@@ -33,7 +21,7 @@ import { CloseGlyph, RefreshGlyph, UsageGlyph } from './icons.tsx'
 import { formatDateTime } from './format.ts'
 
 export interface LedgerOverlayProps {
-  /** Shared view store (injected). */
+  /** 共享 view store（inject 注入）。 */
   view: TokBookViewStore
 }
 
@@ -49,7 +37,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       .catch((err: unknown) => { if (!signal?.aborted) view.setError(err instanceof Error ? err.message : String(err)) })
   }, [view])
 
-  // Fetch once per open; ignore stale responses after close/reopen.
+  // 每次打开拉取一次；关闭/重开后忽略过期响应。
   useEffect(() => {
     if (!open) return
     const controller = new AbortController()
@@ -57,9 +45,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     return () => { controller.abort() }
   }, [open, fetchOverview])
 
-  // Force an authoritative re-sync, then poll the overview until the sync
-  // settles (the rescan route returns before the walk finishes, so a fixed
-  // delay could read a mid-run snapshot).
+  // 触发一次权威再同步，然后轮询总览直到同步结束（再同步路由在扫描完成前就返回，固定延迟会读到中途快照）。
   const onRescan = useCallback(async () => {
     setScanning(true)
     try {
@@ -92,7 +78,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
   )
 }
 
-/** Which surface of the overlay is visible. */
+/** 浮窗当前显示的 surface。 */
 type OverlayTab = 'ledger' | 'provider' | 'quota' | 'pricing' | 'method'
 
 const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'provider', 'quota', 'pricing', 'method']
@@ -118,28 +104,25 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
   onClose: () => void
 }) {
   const [tab, setTab] = useState<OverlayTab>('ledger')
-  // A cross-tab jump (the overview's 价格未知 note) asks the pricing tab to open
-  // on a specific scope; the request is cleared once the panel applied it.
+  // 跨 tab 跳转（概览的价格未知备注）要求价格表 tab 以特定筛选打开；面板应用后清掉请求。
   const [pricingScope, setPricingScope] = useState<PricingFocus>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const openPricing = (scope: PricingFocus): void => { setPricingScope(scope); setTab('pricing') }
 
-  // Focus the card on open, restore focus to the trigger on close.
+  // 打开时聚焦卡片，关闭时焦点回到触发按钮。
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
     cardRef.current?.focus()
     return () => previous?.focus()
   }, [])
 
-  // The body is one persistent scroll container shared by every tab, so a
-  // scroll offset left by one panel carries over into the next. Reset to top
-  // on every tab switch (including when re-selecting the current tab).
+  // body 是所有 tab 共享的持久滚动容器；每次切换 tab 重置到顶部。
   useEffect(() => {
     bodyRef.current?.scrollTo(0, 0)
   }, [tab])
 
-  // Escape closes; Tab is trapped inside the dialog while it is open.
+  // Escape 关闭；打开时 Tab 被困在对话框内。
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') { onClose(); return }
@@ -164,7 +147,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Roving-tabindex arrow-key navigation for the tablist (automatic activation).
+  // tablist 的 roving-tabindex 方向键导航（自动激活）。
   const onTablistKeyDown = useCallback((e: ReactKeyboardEvent) => {
     const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
     if (delta === 0) return
@@ -176,7 +159,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
     })
   }, [])
 
-  // A click that lands on the backdrop itself (not the card) dismisses.
+  // 点中背景本身（非卡片）时关闭。
   const onBackdropMouseDown = useCallback((e: ReactMouseEvent) => {
     if (e.target === e.currentTarget) onClose()
   }, [onClose])

@@ -1,49 +1,38 @@
 /**
- * Minimal client-side contract types for dsh-tokbook: the host seams the
- * plugin is granted, plus the view contracts shared between surfaces.
+ * dsh-tokbook 的最小客户端契约类型：插件被授予的宿主接缝，以及跨 surface 共享的视图契约。
  *
- * The browser bundle reuses the DSH baseline module table (react, cordis,
- * store, ui-slots, ui-primitives) and must NOT runtime-import a
- * `@deepseek-ai/*` client package (bundle-purity gate). So `ctx.slots` is typed
- * locally here with only the members the plugin uses; tighten against the real
- * `@deepseek-ai/dsh-client-ui-slots` types (via `import type`) when wiring the
- * type graph as devDependencies.
- *
- * A type that one surface *produces* for another to *consume* belongs here
- * rather than next to the consumer: the producer would otherwise import the
- * consumer, which is the dependency direction reversed.
+ * browser bundle 复用 DSH 基线模块表，不得运行时 import 任何 `@deepseek-ai/*` client 包（bundle 纯净性门禁）。因此 `ctx.slots` 在此本地声明。一个 surface *产出*、另一个 surface *消费* 的类型声明在此而非消费方旁——否则产出方会 import 消费方，依赖方向就反了。
  *
  * @module dsh-tokbook/client
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 
-/** The subset of `slots.register` options the plugin uses. */
+/** 插件用到的 `slots.register` 选项子集。 */
 export interface SlotRegisterOptions {
-  /** The target SlotMap key. */
+  /** 目标 SlotMap 键。 */
   name: string
-  /** Unique id for list-valued slots (additive). */
+  /** 列表型 slot 的唯一 id（叠加注册）。 */
   id?: string
-  /** Sort order within a list slot. */
+  /** 列表 slot 内的排序权重。 */
   order?: number
-  /** Locale namespace seat for the `t` prop (not wired yet in this scaffold). */
+  /** `t` prop 的 locale 命名空间占位（scaffold 尚未接线）。 */
   locale?: string
-  /** Registrant-private injected share consumed by the component. */
+  /** 注册方私有、由组件消费的注入份额。 */
   inject?: (...args: never[]) => Record<string, unknown>
-  /** Declared child slots (this plugin declares none). */
+  /** 声明的子 slot（本插件不声明）。 */
   children?: Record<string, unknown>
 }
 
-/** The subset of the slots service the plugin uses. */
+/** 插件用到的 slots 服务子集。 */
 export interface SlotsService {
   inject(name: string, callback: () => (() => void) | Iterable<() => void>): () => void
   register(options: SlotRegisterOptions, component: unknown): () => void
 }
 
-/** The client Context the plugin is granted; keep it to `slots` only. */
+/** 插件被授予的 client Context；仅含 `slots`。 */
 export type TokBookContext = Context & { slots: SlotsService }
 
-/** A cross-tab request to open the 价格表 tab on one filter. Produced by the
- *  overview (its 价格未知 note) and consumed by the pricing panel, so it is
- *  stated here — where both surfaces can reach it — instead of on either one. */
+/** 跨 tab 请求：在价格表 tab 上打开某个筛选。由概览（价格未知备注）产出、
+ * 价格表面板消费，故声明在此——双方都能 reach——而非任一消费方旁。 */
 export type PricingFocus = 'unpriced' | null

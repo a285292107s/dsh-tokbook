@@ -1,23 +1,9 @@
 /**
- * Per-workspace aggregation of the token-book: the pure math behind the
- * overview's 按工作区 section.
+ * token-book 的按工作区聚合——概览「按工作区」节背后的纯数学。
  *
- * A ledger row names only its session, so "which project did this cost belong
- * to" is a READ-TIME join against two live host sources — the workspace
- * registry (id / title / canonical path) and each stored session's header
- * `cwd`. A record joins the workspace whose path equals its session's `cwd`:
- * that is exactly the membership rule the registry itself applies, and it is
- * deliberately wider than the registry's manually owned session account — a
- * session that was never attached (a subagent child, a session resumed from
- * elsewhere) still carries the directory it was created in, and its usage
- * belongs to that project.
- *
- * Records no workspace claims — a session with no `cwd`, or a directory that
- * is not a registered workspace — fold into one 未归属 row, so the section
- * always adds back up to the ledger's own totals. Each partition then runs the
- * regular summary + cost layer (the overview's exact math, so both the token
- * counts and the ¥ figures agree with every other surface); this module owns
- * no arithmetic of its own.
+ * 账本行只命名其会话，因此归属是对 workspace registry 与会话 header `cwd`
+ * 的**读时 join**。没有 workspace 认领的记录折进「未归属」行，使本节始终
+ * 加总回账本自身的 totals。
  *
  * @module dsh-tokbook/workspaces
  */
@@ -30,31 +16,27 @@ import { totalsTokens } from './types.ts'
 import type { RateResolver } from './stats.ts'
 import { attachCosts, summarizeRecords } from './stats.ts'
 
-/** Row id of the catch-all row no workspace claims. */
+/** 无人认领的兜底行的行 id。 */
 export const UNATTRIBUTED_ID = ''
 
-/** Display title of the catch-all row. */
+/** 兜底行的展示标题。 */
 export const UNATTRIBUTED_TITLE = '未归属'
 
-/** The workspace facts this aggregation needs, as the host reads them off the
- *  workspace registry. Kept structural rather than importing DSH's `Workspace`
- *  (the host package compiles against `@deepseek-ai/cordis` only). */
+/** 本聚合所需的 workspace 事实，由宿主从 workspace registry 读出。保持
+ *  结构性而不是 import DSH 的 `Workspace`（宿主包只针对
+ *  `@deepseek-ai/cordis` 编译）。 */
 export interface WorkspaceRef {
   id: string
   title: string
-  /** Canonical directory path (`fs.realpath` of the registered directory). */
+  /** 规范目录路径（注册目录的 `fs.realpath`）。 */
   path: string
 }
 
 /**
- * Comparison key of a directory path. Session headers carry the cwd they were
- * created with, the registry carries a resolved path: the two agree on the
- * same directory but not necessarily byte-for-byte (separator spelling,
- * trailing slash, `..`, and on Windows the drive/folder case). `resolve`
- * normalizes the spelling; the case fold applies only where the filesystem is
- * case-insensitive, because folding on POSIX would merge two genuinely
- * different projects. Anything the keys still fail to match stays 未归属 —
- * never silently billed to a neighbouring project.
+ * 目录路径的比较键。会话 header 带着创建时的 cwd，registry 带着解析后的
+ * 路径：两者指同一目录但不必字节相同（分隔符写法、尾斜杠、`..`，以及
+ * Windows 上盘符/文件夹大小写）。`resolve` 归一写法；大小写折叠只在文件系统
+ * 大小写不敏感时应用——在 POSIX 上折叠会把两个真正不同的项目合并。
  */
 export function pathKey(path: string): string {
   const normalized = resolvePath(path)
@@ -62,15 +44,11 @@ export function pathKey(path: string): string {
 }
 
 /**
- * Fold every record into its workspace row, most recently used first.
+ * 把每条记录折入其工作区行，最近用过的在前。
  *
- * `cwdOf` is the host's session-header lookup (live or persisted). A record
- * without provider usage still counts a request; a failure row counts only the
- * `failures` dimension, exactly as the overview's own totals do. A workspace
- * that never billed a request (failure rows only) is skipped rather than shown
- * as a zero row — the rule the provider cards already apply. The single
- * 未归属 row closes the list: it is a reconciliation line, not a project, so
- * "most recent first" does not apply to it.
+ * `cwdOf` 是宿主的会话 header 查找（实时或已持久化）。没有 provider usage 的
+ * 记录仍计入请求；失败行只计入 `failures` 维度，与概览自身的 totals 一致。
+ * 从未计费过请求的工作区（只有失败行）跳过，而不是显示为零行。
  */
 export function workspaceRows(
   records: readonly UsageRecord[],
@@ -86,8 +64,8 @@ export function workspaceRows(
     byId.set(workspace.id, workspace)
     if (workspace.path !== '') byPath.set(pathKey(workspace.path), workspace)
   }
-  // sessionId → its workspace (or null for 未归属): a session contributes many
-  // records but has one header.
+  // sessionId → 其 workspace（未归属为 null）：一个会话贡献多条记录，但只有
+  // 一个 header。
   const owner = new Map<string, WorkspaceRef | null>()
   const groups = new Map<string, UsageRecord[]>()
   const lastAt = new Map<string, number>()
@@ -111,7 +89,7 @@ export function workspaceRows(
     const summary = summarizeRecords(group, resolveRate)
     if (summary.total.requests === 0) continue
     const workspace = byId.get(key)
-    // `dataDir` is only echoed through CostedSummary; no row renders it.
+    // `dataDir` 只是经 CostedSummary 回传；没有行渲染它。
     const costed = attachCosts({ dataDir: '', ...summary }, pricing, billing)
     const row: WorkspaceUsageRow = {
       id: key,

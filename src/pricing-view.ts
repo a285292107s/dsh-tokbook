@@ -1,18 +1,10 @@
 /**
- * The 价格表 tab's data assembly: the cards the pricing view renders, built as
- * the union of three sources that each know part of the truth —
+ * 价格表 tab 的数据装配：视图渲染的卡片，由三个各知部分真相的源的并集构成——
+ * route catalog（settings profiles ∪ 活的适配器 registry）、账本计过费的每个
+ * route 与 model、价文件命名的一切。因此从配置中消失的 route——或只带手写
+ * 价格的 route——仍可见、可编辑，其金额不会变成孤儿。
  *
- *   · the route catalog (settings profiles ∪ the live adapter registry),
- *   · every route and model the ledger billed, and
- *   · everything the price file names,
- *
- * so a route that disappeared from configuration — or that only carries a
- * hand-written price — stays visible and editable instead of orphaning its
- * money.
- *
- * Separate from `./pricing.ts`, which owns the price FILE itself (read, write,
- * resolve): this module only decides what the tab shows, and owns no rule about
- * what a price means.
+ * 与拥有价**文件**本身（读、写、解析）的 `./pricing.ts` 分开。
  *
  * @module dsh-tokbook/pricing-view
  */
@@ -27,41 +19,27 @@ interface Logger {
   error(...args: unknown[]): void
 }
 
-/** What the ledger billed one (route, model): the count the row shows, when it
- *  was first and last billed, and how much of it the price table does not
- *  cover. */
+/** 账本对一个 (route, model) 计过什么。`unpriced` 按当前表判定，与成本层
+ *  定价规则（`rateKeyAt`）一致，故计数与金额一致。 */
 export interface LedgerModelUsage {
-  /** Recorded requests naming this exact string. */
   records: number
-  /** Timestamp of its first recorded request. */
   firstAt: number
-  /** Timestamp of its last one. */
   lastAt: number
-  /** Requests no price segment covers at their own timestamp. They bill ¥0, and
-   *  a row that HAS a price can still hold them: a written 生效时间 cuts off
-   *  everything before it, silently. The 价格表 has to be able to say so, which
-   *  is why the count travels with the row. */
+  /** 按各自时间戳不被任何价格段覆盖的请求。它们计 ¥0，而**有**价的行仍可能
+   *  持有它们：写下的生效时间会静默截断其之前的一切。 */
   unpriced: number
 }
 
-/** What the ledger billed, per route and per (route, model). */
+/** 账本计过什么，按 route 与 (route, model)。 */
 export interface LedgerUsage {
-  /** route → exact model string → what that row was billed. */
+  /** route → 精确 model 串 → 该行计过什么。 */
   byRouteModel: ReadonlyMap<string, ReadonlyMap<string, LedgerModelUsage>>
-  /** route → recorded requests over the whole route. */
   byRoute: ReadonlyMap<string, number>
 }
 
-/** Fold the ledger's rows into the pricing view's usage lens. Failed attempts
- *  name a route but no billed call, so they stay out — the card's
- *  「账本 N 次」 means the same thing the 通道用量 tab's request count does.
- *  Unattributed rows (no route header was ever seen) cannot be priced and stay
- *  out of the 价格表 cards.
- *
- *  `unpriced` is judged per record against the CURRENT table — the same rule the
- *  cost layer prices with (`rateKeyAt`), so the count and the money agree: it
- *  rises exactly when a row's history stops being covered (a 生效时间 added to
- *  the segment that used to be 无起点). */
+/** 把账本行折成价格视图的用量透镜。失败尝试命名 route 但没有计费调用，故
+ *  不进——卡片的「账本 N 次」与通道用量 tab 的请求计数同义。未归属行无法定价，
+ *  不进价格表卡片。 */
 export function ledgerUsageOf(records: readonly UsageRecord[], table: PricingTable): LedgerUsage {
   const byRouteModel = new Map<string, Map<string, LedgerModelUsage>>()
   const byRoute = new Map<string, number>()
@@ -116,10 +94,9 @@ function segmentInput(segment: PriceSegment): PricingSegmentInput {
 }
 
 /**
- * Assemble the 价格表 cards: one card per provider route, one row per model the
- * route can be billed for. A row's `now` is the WHOLE-DAY price of the segment
- * in force at read time — exactly what the row's inline cells edit; the peak and
- * off-peak exception slots live one level down in its `segments`.
+ * 装配价格表卡片：每个 provider route 一张卡，route 可计费的每个 model 一行。
+ * 一行的 `now` 是读取时生效段的**全天价**——正是行内单元格所编辑的；峰谷
+ * 例外时段在其 `segments` 的下一级。
  */
 export async function readPricingView(
   dir: string,
@@ -132,7 +109,7 @@ export async function readPricingView(
     configured: boolean
     records: number
     name?: string
-    /** The ledger's own facts, present once the row has one record. */
+    /** 账本自身的事实，行有一条记录后在场。 */
     firstAt?: number
     lastAt?: number
     unpriced?: number
@@ -158,8 +135,8 @@ export async function readPricingView(
         continue
       }
       row.configured = true
-      // The configured name wins over a later adapter-only one; the ledger and
-      // the price file never name a string, so a 仅账本 row keeps no name.
+      // 配置里的名字优先于稍后适配器目录的名字；账本与价文件从不给串命名，
+      // 故「仅账本」行不带 name。
       if (row.name === undefined && name !== undefined) row.name = name
     }
   }

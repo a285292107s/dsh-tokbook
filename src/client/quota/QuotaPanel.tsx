@@ -1,32 +1,7 @@
 /**
- * 订阅额度 tab of the token-book floating window: the enabled-provider list,
- * one card per provider, and the refresh policy that keeps them current.
+ * 订阅额度 tab：官方账户用量（宿主侧从 provider 拉取；浏览器不持有 API key）。
  *
- * Renders each configured subscription's *official* account usage (fetched
- * Host-side from the provider's own endpoints; the browser never holds the
- * API key and the tab never estimates from the local ledger). Data comes from
- * its own exact route `/tokbook/quota`, independent of the overview store and
- * of the Provider-usage range selector: quota windows are budget windows with
- * reset instants, not look-back windows, and they describe the *account* (all
- * tools/devices on the same key).
- *
- * Open latency is a first-class concern: an official fetch takes a network
- * round trip but the numbers change on a minutes scale, so the tab renders
- * the *last known* card immediately (host TTL, else the host's durable
- * per-provider snapshot — no provider round trip on first paint) and only
- * refreshes when the served data is older than the freshness budget. A
- * refresh never blanks the card: old numbers stay visible until fresh ones
- * replace them in place. The only skeleton ever shown is the very first open
- * of a fresh install, when nothing is known yet.
- *
- * Card order: the host's list is the base order, and cards that turn out to
- * have no in-force subscription are demoted below the rest as they resolve
- * (`orderQuotaProviders`) — the tab should open on the plans that can actually
- * be spent, not on a retired one. Each card owns its own fetch, so the order is
- * learned one card at a time and a card moves at most once, when its first
- * response lands.
- *
- * The markup is in `QuotaCard.tsx` and the card arithmetic in `metrics.ts`.
+ * 打开延迟是一等关切：tab 立即渲染最近已知的卡（宿主 TTL 或持久化快照——首帧不触达 provider），仅当已服务数据老于新鲜度预算时就地刷新。刷新绝不清空卡。无生效订阅的卡被下沉。
  *
  * @module dsh-tokbook/client/quota/QuotaPanel
  */
@@ -37,7 +12,7 @@ import { orderQuotaProviders } from '../../quota.ts'
 import { UsageGlyph } from '../icons.tsx'
 import { QuotaCardView } from './QuotaCard.tsx'
 
-/** Auto-refresh presets offered by the segmented control (0 = off). */
+/** 分段控件提供的自动刷新预设（0 = 关闭）。 */
 const AUTO_PRESETS: ReadonlyArray<{ min: number; label: string }> = [
   { min: 0, label: '关闭' },
   { min: 1, label: '1 分' },
@@ -46,13 +21,10 @@ const AUTO_PRESETS: ReadonlyArray<{ min: number; label: string }> = [
   { min: 30, label: '30 分' },
 ]
 
-/** How old served 'ok' data may be before the controller refreshes it in
- * place on tab entry. Quota windows move on a minutes scale, so anything
- * within this budget is shown as-is. */
+/** 已服务的 'ok' 数据在进入 tab 触发就地刷新前允许多旧。额度窗口按分钟尺度变化，预算内的数据原样展示。 */
 const QUOTA_FRESH_MS = 60_000
 
-/** Minimum gap between automatic follow-up refreshes, so rapid tab toggling
- * does not hammer the provider API. */
+/** 自动跟进刷新之间的最小间隔，防止快速切 tab 打爆 provider API。 */
 const QUOTA_REFRESH_COOLDOWN_MS = 30_000
 
 export function QuotaPanel() {
@@ -60,16 +32,10 @@ export function QuotaPanel() {
   const [listError, setListError] = useState<string | null>(null)
   const [autoMinutes, setAutoMinutes] = useState(5)
   const [autoTicker, setAutoTicker] = useState(0)
-  /** Last gate each card reported, keyed by provider. Cards fetch and load
-   *  independently (that is the point of the per-provider route), so the panel
-   *  cannot know the order up front — it learns each card's gate as that card
-   *  resolves. Only known gates are stored: an absent entry means "not known
-   *  yet", which orders as active, the same way an absent gate renders. */
+  /** 每张卡最近一次报告的 gate，按 provider 键控。缺席意味着「尚不知道」，排序时按生效处理。 */
   const [gates, setGates] = useState<Readonly<Record<string, QuotaGate>>>({})
 
-  // Stable identity on purpose: the cards take this as a prop and hold it in
-  // their fetch callback's deps, so a new function on every render would
-  // rebuild that callback and re-run their mount effect (a refetch loop).
+  // 刻意保持引用稳定：卡把它作为 prop 放进 fetch 回调的 deps，每次渲染换新函数会重建该回调并重跑挂载 effect（refetch 循环）。
   const reportGate = useCallback((provider: string, gate: QuotaGate | undefined) => {
     setGates((prev) => {
       if (prev[provider] === gate) return prev
@@ -80,7 +46,7 @@ export function QuotaPanel() {
     })
   }, [])
 
-  // Fetch the enabled-provider list once per mount. Fast and non-network.
+  // 每次挂载拉取一次已启用 route 列表。快速、不走网络。
   useEffect(() => {
     let cancelled = false
     setListError(null)
@@ -101,7 +67,7 @@ export function QuotaPanel() {
     return () => { cancelled = true }
   }, [])
 
-  // Auto-refresh: bump a ticker on the chosen interval (0 = off).
+  // 自动刷新：按选定间隔推进 ticker（0 = 关闭）。
   useEffect(() => {
     if (autoMinutes <= 0) return
     const timer = setInterval(() => {
@@ -111,10 +77,7 @@ export function QuotaPanel() {
   }, [autoMinutes])
 
   const hasProviders = providers !== null && providers.length > 0
-  // Display order: retired plans last (see `orderQuotaProviders`). Recomputed
-  // as cards report their gate, which is why it lives here and not in the host's
-  // list payload — the host's list is static and un-fetched, while the truth
-  // arrives one card at a time.
+  // 展示顺序：退役计划在后（见 `orderQuotaProviders`）。卡报告 gate 时重新计算——宿主列表是静态的，真相一张一张到来。
   const ordered = useMemo(
     () => (providers === null ? [] : orderQuotaProviders(providers, (provider) => gates[provider])),
     [providers, gates],
@@ -167,7 +130,7 @@ export function QuotaPanel() {
   )
 }
 
-/** Segmented auto-refresh picker: 关闭 / 1 / 5 / 15 / 30 分钟. */
+/** 分段自动刷新选择器：关闭 / 1 / 5 / 15 / 30 分钟。 */
 function AutoRefreshControl({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <div className="dtpl-quota-autorefresh">
@@ -192,20 +155,11 @@ function AutoRefreshControl({ value, onChange }: { value: number; onChange: (v: 
   )
 }
 
-/** One card owning its own data fetch + refresh, so cards load/refresh
- * independently. `autoTicker` bumps trigger a forced refetch.
- *
- * Render model is stale-while-revalidate: the first fetch returns instantly
- * (fresh host TTL, else the host's durable last-known card — never a provider
- * round trip), and only when that served data is already old does the card
- * refresh itself in place. A refresh never blanks a rendered card: old
- * numbers stay visible and are swapped when fresh ones arrive. */
+/** 一张拥有自己数据拉取 + 刷新的卡。stale-while-revalidate：首帧返回最近已知数据，过时才就地刷新；刷新绝不清空已渲染的卡。 */
 function QuotaCardController({ provider, autoTicker, onGate }: {
   provider: string
   autoTicker: number
-  /** Reports this card's gate to the panel, which orders the cards with it.
-   *  Must have a stable identity (the panel memoizes it) — it sits in
-   *  `fetchCard`'s deps, which the mount effect keys off. */
+  /** 把本卡的 gate 报告给面板，面板据此排序。必须保持引用稳定。 */
   onGate: (provider: string, gate: QuotaGate | undefined) => void
 }) {
   const [card, setCard] = useState<QuotaCard | null>(null)
@@ -213,8 +167,7 @@ function QuotaCardController({ provider, autoTicker, onGate }: {
   const [loading, setLoading] = useState(true)
   const inFlight = useRef(0)
   const lastRefreshAt = useRef(0)
-  /** The rendered card, readable from the timer effect without making the
-   *  effect depend on it (which would restart the interval on every fetch). */
+  /** 已渲染的卡，供 timer effect 读取而不必依赖它（否则每次拉取都会重启 interval）。 */
   const cardRef = useRef<QuotaCard | null>(null)
 
   const fetchCard = useCallback((force: boolean): Promise<QuotaCard | null> => {
@@ -231,20 +184,13 @@ function QuotaCardController({ provider, autoTicker, onGate }: {
         cardRef.current = data
         setCard(data)
         setError(null)
-        // Report after the supersede check, so only the response that actually
-        // became this card's state can move it in the order. A successful
-        // response carrying no gate (a fetch failed server-side, or the key is
-        // gone) reports `undefined` and drops the entry: we no longer know the
-        // gate, and that card renders as a state panel — not as a retired plan.
-        // A *failed* refresh never reaches here, because it deliberately keeps
-        // the rendered card, so that card's gate still stands.
+        // 在取代检查之后报告：成功但无 gate 的响应（服务端拉取失败或 key 已消失）报告 `undefined` 并删掉条目。失败的刷新永远到不了这里。
         onGate(provider, data.gate)
         return data
       })
       .catch((err: unknown) => {
         if (token !== inFlight.current) return null
-        // Keep whatever card is rendered — a failed refresh must not blank
-        // the last-known numbers (the error surfaces as an in-card note).
+        // 保留已渲染的卡——失败的刷新绝不抹掉最近已知数字（错误以卡内提示形式浮出）。
         setError(err instanceof Error ? err.message : String(err))
         return null
       })
@@ -253,9 +199,8 @@ function QuotaCardController({ provider, autoTicker, onGate }: {
       })
   }, [provider, onGate])
 
-  // Initial load (host serves fresh TTL or the durable last-known card, so
-  // this resolves without waiting on the provider). If the served data is
-  // already older than the freshness budget, refresh it once in place.
+  // 首次加载（宿主提供新鲜 TTL 或持久化最近已知卡，故不等 provider）。
+  // 已服务数据老于新鲜度预算时就地刷新一次。
   useEffect(() => {
     let cancelled = false
     void fetchCard(false).then((first) => {
@@ -269,13 +214,7 @@ function QuotaCardController({ provider, autoTicker, onGate }: {
     return () => { cancelled = true; inFlight.current += 1 }
   }, [fetchCard])
 
-  // Auto-refresh tick → force this card's data. A non-subscription card is
-  // skipped: nothing it reports moves on a minutes scale, because the rolling
-  // windows that would move are not a bound the account is under. Its balance
-  // changes only when the user spends or tops up, and both the manual refresh
-  // button and the on-open freshness refresh above still re-hit the provider —
-  // so a renewal or a top-up is picked up on the next click or open, without
-  // polling an API that has nothing new to say.
+  // 自动刷新 tick → 强制重拉本卡。非订阅卡跳过：余额只在用户消费或充值时变化，手动刷新和打开时的新鲜度刷新仍然会重 hit provider。
   const firstTick = useRef(true)
   useEffect(() => {
     if (firstTick.current) { firstTick.current = false; return }

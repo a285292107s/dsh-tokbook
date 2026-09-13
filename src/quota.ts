@@ -1,23 +1,9 @@
 /**
- * Quota-plan domain of the token-book: the *official* account usage shown in
- * the 订阅额度 tab.
+ * token-book 的额度计划域：订阅额度 tab 展示的**官方**账户用量。
  *
- * The tab never estimates from the local ledger — a subscription key is shared
- * across every tool/device, so a machine-local ledger cannot know the true
- * account spend. Instead each built-in provider's card is fetched from that
- * provider's own account endpoints (see `src/quota-official.ts` for the
- * fetchers), and this module normalizes the raw provider payloads into the
- * wire shapes the client renders.
- *
- * The two built-in providers differ in what their official endpoints expose:
- *  - Command Code (`/alpha/billing/credits` + friends) reports real dollar
- *    amounts: window used/cap/exceeded/resetAt, monthly credit pool, plan,
- *    and a usage summary.
- *  - OpenCode Go (`/zen/go/v1/usage`) reports only usage-percent + reset for
- *    the three windows (no amounts).
- * The wire types keep amounts optional so a card can be percent-only.
- *
- * Pure functions (no I/O) so normalization is unit-tested directly.
+ * tab 从不从本地账本估算——订阅 key 在所有工具/设备间共享，本机账本无法知道
+ * 真实账户花费。两个内置 provider 的官方端点暴露的内容不同：Command Code 报告
+ * 真实美元金额；OpenCode Go 只报告百分比 + 重置。wire 类型让金额可选。
  *
  * @module dsh-tokbook/quota
  */
@@ -27,23 +13,21 @@ import type { QuotaCard, QuotaGate, QuotaPlanInfo, QuotaWindowView } from './typ
 export type { QuotaCard, QuotaView, QuotaWindowView } from './types.ts'
 
 // ---------------------------------------------------------------------------
-// Built-in plans (display identity only — no budgets, no prices)
+// 内置计划（仅展示身份——无预算、无价格）
 // ---------------------------------------------------------------------------
 
-/** The provider route key of the built-in OpenCode Go plan. */
+/** 内置 OpenCode Go 计划的 provider route key。 */
 export const OPENCODE_GO_PROVIDER = 'opencode-go'
 
-/** The provider route key of the built-in Command Code plan. */
+/** 内置 Command Code 计划的 provider route key。 */
 export const COMMAND_CODE_PROVIDER = 'commandcode'
 
-/** Built-in plan display titles keyed by provider route. */
 export const BUILTIN_PLAN_TITLES: Readonly<Record<string, string>> = {
   [OPENCODE_GO_PROVIDER]: 'OpenCode Go',
   [COMMAND_CODE_PROVIDER]: 'Command Code',
 }
 
-/** Known Command Code subscription plan ids → display name (subset of the
- * reference provider's map). Used to render a friendly plan title. */
+/** 已知的 Command Code 订阅计划 id → 展示名（参考 provider 映射的子集）。 */
 export const COMMAND_CODE_PLAN_NAMES: Readonly<Record<string, string>> = {
   'individual-go': 'Go',
   'individual-goat': 'GOAT',
@@ -55,25 +39,21 @@ export const COMMAND_CODE_PLAN_NAMES: Readonly<Record<string, string>> = {
   'teams-pro': 'Teams Pro',
 }
 
-/** Default env var each provider reads its API key from. */
+/** 各 provider 读取 API key 的默认环境变量。 */
 export const BUILTIN_KEY_ENV: Readonly<Record<string, string>> = {
   [OPENCODE_GO_PROVIDER]: 'OPENCODE_GO_API_KEY',
   [COMMAND_CODE_PROVIDER]: 'COMMANDCODE_API_KEY',
 }
 
-/** Usage percent at which a last-known window lights the sidebar 告急 dot.
- *  90 is "you will notice soon", not "already dead" — exceeded is separate. */
+/** 最近一次已知窗口点亮侧栏告急点的用量百分比。90 是「你很快会注意到」，
+ *  不是「已经死透」——exceeded 是另一回事。 */
 export const QUOTA_ALERT_PERCENT = 90
 
 /**
- * Whether one official quota card is worth a persistent 告急 indicator on the
- * footer trigger. Only 'ok' cards count: an unconfigured/error card has no
- * window facts, and inventing an alert from a fetch failure would cry wolf.
+ * 一张官方额度卡是否值得 footer 触发器上持久的告急指示。只计 'ok' 卡：
+ * unconfigured/error 卡没有窗口事实，从拉取失败里编出告急会狼来了。
  *
- * A non-`subscription` card is never an alert either: its windows do not pace
- * anything the account is under, so a number left over from when the plan was
- * live must not raise a 告急 dot the user cannot act on. (A low *balance* is a
- * real signal, but a different one — it needs a threshold nobody asked for.)
+ * 非 `subscription` 卡也永不告急：其窗口不限制账户当前承受的任何限额。
  */
 export function isQuotaAlert(card: QuotaCard | null | undefined): boolean {
   if (card === null || card === undefined || card.state !== 'ok') return false
@@ -82,26 +62,23 @@ export function isQuotaAlert(card: QuotaCard | null | undefined): boolean {
 }
 
 /**
- * Which provider routes carry an official quota fetch. A plan is "on" when
- * the route is known and not disabled (`enabled:false` in the config). A key
- * presence check happens at fetch time; an enabled plan without a key yields
- * an `unconfigured` card.
+ * 哪些 provider route 携带官方额度拉取。计划「开启」当 route 已知且未禁用
+ * （配置中 `enabled:false`）。key 是否存在在拉取时检查；已启用但无 key 的
+ * 计划产出 `unconfigured` 卡。
  */
 export function isBuiltinQuotaPlan(provider: string): boolean {
   return provider === OPENCODE_GO_PROVIDER || provider === COMMAND_CODE_PROVIDER
 }
 
 /**
- * Card order for the 订阅额度 tab: cards whose account has no in-force
- * subscription sink below the ones that do, so the tab opens on the plans that
- * can actually be spent rather than on a retired one.
+ * 订阅额度 tab 的卡片顺序：账户无生效订阅的卡沉到有生效订阅的之下，使 tab
+ * 打开在真正还能花的计划上，而不是已退役的那个。
  *
- * A stable partition, not a sort: `providers` is the host's display order (see
- * `QuotaView.providers`) and stays the order *within* each group, so nothing
- * reshuffles except the demotion itself. A provider with no known gate yet — it
- * is still loading, or its last fetch failed — counts as active, which is the
- * same reading the card renders (an absent gate means `subscription`); guessing
- * "retired" from missing data is the mistake the gate exists to prevent.
+ * 稳定切分，不是排序：`providers` 是宿主的展示顺序（见
+ * `QuotaView.providers`），并保持**组内**顺序，因此除降级本身外无任何重排。
+ * 还没有已知 gate 的 provider——仍在加载，或最近一次拉取失败——算作 active，
+ * 与卡渲染的读法一致（缺席的 gate 意味着 `subscription`）；从缺失数据里猜
+ * 「已退役」正是 gate 要防止的错误。
  */
 export function orderQuotaProviders(
   providers: readonly string[],
@@ -118,26 +95,23 @@ export function orderQuotaProviders(
 }
 
 // ---------------------------------------------------------------------------
-// Usage gate: what bounds the account right now
+// 用量 gate：此刻约束账户的是什么
 // ---------------------------------------------------------------------------
 
 /**
- * Subscription statuses that are unambiguously an in-force plan. Anything else
- * is judged by the billing period instead of by name: the provider's own
- * documented cancel flow keeps access until the period ends ("it stays active
- * until the end of the current billing period"), so a status word like
- * `canceled` can still mean "in force until `periodEnd`". Judging unknown
- * status words by date rather than by a hard-coded vocabulary also means a new
- * word from the provider degrades to the date rule instead of to a wrong card.
+ * 无歧义地表示生效中计划的订阅状态。其他一切按计费周期而非按名字判定：provider
+ * 自己文档化的取消流程在周期结束前保留访问权（「保持 active 直到当前计费周期
+ * 结束」），因此像 `canceled` 这样的状态词仍可能意味着「生效至 `periodEnd`」。
+ * 未知状态词按日期而非硬编码词表判定，也意味着 provider 的新词会降级到日期
+ * 规则，而不是错误的卡。
  */
 export const QUOTA_IN_FORCE_STATUSES: readonly string[] = ['active', 'trialing']
 
 /**
- * What bounds one account's usage, derived from the plan identity the provider
- * reports (`billing/subscriptions`). No plan identity at all means no evidence
- * of an in-force subscription — the balance gate, which is also the honest
- * reading for a pay-as-you-go account (a normal, non-error state: the provider
- * sells one).
+ * 一个账户的用量被什么约束，由 provider 报告的计划身份
+ * （`billing/subscriptions`）推出。完全没有计划身份 = 没有生效订阅的证据——
+ * balance 门，这也是按量付费账户的诚实读法（正常、非错误状态：provider 卖
+ * 这种）。
  */
 export function quotaGate(planInfo: QuotaPlanInfo | undefined, now: number = Date.now()): QuotaGate {
   if (planInfo === undefined) return 'balance'
@@ -148,9 +122,8 @@ export function quotaGate(planInfo: QuotaPlanInfo | undefined, now: number = Dat
   return 'balance'
 }
 
-/** Local `YYYY-MM-DD` of an epoch-ms instant. Formatted by hand (not
- * `toLocaleDateString`) so the host-composed sentence is stable regardless of
- * the host process's locale. */
+/** epoch-ms 时刻的本地 `YYYY-MM-DD`。手写格式（不用 `toLocaleDateString`），
+ *  使宿主拼好的句子不受宿主进程 locale 影响。 */
 export function dayText(epochMs: number): string {
   const date = new Date(epochMs)
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -159,11 +132,9 @@ export function dayText(epochMs: number): string {
 }
 
 /**
- * The one sentence shown on a `balance`-gated card: why the rolling windows no
- * longer describe anything, and what does. Names the evidence it rests on — a
- * period end, or the raw status word when the provider sent one — so a card
- * never asserts "expired" on thin air (a pay-as-you-go account reports neither,
- * and is not expired).
+ * `balance` 门卡上展示的一句话：滚动窗口为何不再描述任何东西，以及现在由什么
+ * 约束。说出它所依据的证据——周期结束，或 provider 发来的原始状态词——使卡
+ * 从不在空口上断言「已过期」（按量付费账户两者都不报，也不是过期）。
  */
 export function balanceGateNote(planInfo: QuotaPlanInfo | undefined, now: number = Date.now()): string {
   const periodEnd = planInfo?.periodEnd
@@ -178,33 +149,33 @@ export function balanceGateNote(planInfo: QuotaPlanInfo | undefined, now: number
 }
 
 // ---------------------------------------------------------------------------
-// Normalization helpers (raw official payload → wire shape)
+// 归一化助手（原始官方载荷 → wire 形状）
 // ---------------------------------------------------------------------------
 
-/** Clamp a server percent into 0–100; missing/invalid → 0. */
+/** 把服务端百分比夹到 0–100；缺失/非法 → 0。 */
 export function clampPercent(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0
   return Math.max(0, Math.min(100, value))
 }
 
-/** Epoch ms from a raw reset value: a number of *seconds until reset*, a
- * number of ms, or an ISO date. null when absent/invalid. */
+/** 从原始 reset 值得到 epoch ms：*距重置的秒数*、毫秒数，或 ISO 日期。
+ *  缺席/非法时为 null。 */
 export function resetEpoch(value: unknown, now: number = Date.now()): number | null {
   if (typeof value === 'string') {
     const parsed = Date.parse(value)
     return Number.isNaN(parsed) ? null : parsed
   }
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  // Heuristic: values in a plausible *seconds-until-reset* range (< 2^32 and
-  // far from "now as ms") are treated as a countdown.
+  // 启发式：落在合理*秒级倒计时*范围内的值（< 2^32 且远「于以 ms 表示的 now」）
+  // 视为倒计时。
   if (value > 0 && value < 4_294_967_296 && Math.abs(value - now) > 4_294_967_296) {
     return now + value * 1000
   }
   return value
 }
 
-/** Build one window row from a raw `{used, cap, exceeded, resetAt}` block
- * (Command Code shape). Amounts are real dollars. */
+/** 从原始 `{used, cap, exceeded, resetAt}` 块（Command Code 形状）构建一行窗口。
+ *  金额是真实美元。 */
 export function windowFromCreditsBlock(
   id: string,
   label: string,
@@ -228,11 +199,10 @@ export function windowFromCreditsBlock(
   }
 }
 
-/** Build one window row from the OpenCode Go shape — real endpoint
- * `{status, percent, resetsAt}` (percent + ISO reset string; no amounts).
- * Tolerates the older internal spelling `{status, usagePercent, resetInSec}`
- * so a shape change never blanks the card. A status other than `ok` means the
- * window is throttled/exhausted. */
+/** 从 OpenCode Go 形状构建一行窗口——真实端点
+ *  `{status, percent, resetsAt}`（百分比 + ISO 重置串；无金额）。兼容旧的内部
+ *  写法 `{status, usagePercent, resetInSec}`，形状变更不会清空卡片。`ok` 以外
+ *  的 status 意味着窗口已限流/耗尽。 */
 export function windowFromUsagePercent(
   id: string,
   label: string,
@@ -251,7 +221,7 @@ export function windowFromUsagePercent(
   }
 }
 
-/** Normalize a Command Code `billing/subscriptions` plan node. */
+/** 归一 Command Code `billing/subscriptions` 计划节点。 */
 export function planInfoFromSubscriptions(raw: { planId?: unknown; status?: unknown; currentPeriodEnd?: unknown } | undefined): QuotaPlanInfo | undefined {
   if (raw === undefined) return undefined
   const planId = typeof raw.planId === 'string' && raw.planId !== '' ? raw.planId : undefined
@@ -265,8 +235,7 @@ export function planInfoFromSubscriptions(raw: { planId?: unknown; status?: unkn
   return info
 }
 
-/** A raw quota card is usable (has windows/data) only when the official fetch
- * returned something worth showing. */
+/** 原始额度卡可用（有窗口/数据）当且仅当官方拉取返回了值得展示的东西。 */
 export function hasQuotaContent(card: QuotaCard): boolean {
   return card.windows.length > 0
     || card.planInfo !== undefined
@@ -275,7 +244,7 @@ export function hasQuotaContent(card: QuotaCard): boolean {
     || card.account !== undefined
 }
 
-/** Build an `unconfigured` card (no API key found) for a built-in plan. */
+/** 为内置计划构建 `unconfigured` 卡（未找到 API key）。 */
 export function unconfiguredCard(provider: string, hint?: string): QuotaCard {
   return {
     plan: provider,
@@ -286,7 +255,7 @@ export function unconfiguredCard(provider: string, hint?: string): QuotaCard {
   }
 }
 
-/** Build an `error` card (official fetch failed) for a built-in plan. */
+/** 为内置计划构建 `error` 卡（官方拉取失败）。 */
 export function errorCard(provider: string, reason: string): QuotaCard {
   return {
     plan: provider,
@@ -298,17 +267,14 @@ export function errorCard(provider: string, reason: string): QuotaCard {
 }
 
 /**
- * Build an `ok` card for an account the provider has *answered* about, but
- * whose answer is "no in-force subscription, and no balance for this endpoint
- * to report either" — OpenCode Go's 403, which the endpoint's own reference
- * reads as "valid key, no Go subscription" (distinct from a 401 auth failure).
+ * 为 provider **已回答**、但答案是「没有生效订阅，且此端点也无可报告余额」的
+ * 账户构建 `ok` 卡——OpenCode Go 的 403，端点自身参考将其读作「有效 key、无
+ * Go 订阅」（区别于 401 认证失败）。
  *
- * `state: 'ok'` on purpose: nothing failed, so calling it 「查询失败」 tells the
- * user to debug the wrong thing. The deficiency moves to `gate: 'none'`, which
- * is what stops a renderer from showing meters and what keeps the card out of
- * the auto-refresh loop and off the 告急 dot. The card carries no windows at
- * all — there is no bound here to draw, and inventing a 0% would read as
- * "plenty left".
+ * 刻意 `state: 'ok'`：什么都没失败，标成「查询失败」会教用户调试错方向。缺陷
+ * 移到 `gate: 'none'`——正是它阻止渲染方展示仪表，并把卡挡在自动刷新循环与
+ * 告急点之外。卡完全不带窗口——这里没有可画的约束，编一个 0% 会读作「还剩
+ * 很多」。
  */
 export function noSubscriptionCard(provider: string, note: string, now: number = Date.now()): QuotaCard {
   return {

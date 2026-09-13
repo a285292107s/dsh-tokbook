@@ -1,31 +1,9 @@
 /**
- * dsh-tokbook host half: a per-request token-usage ledger service.
+ * host 半区：durable 事件流实时记账 + 权威再同步（`sessionPersistence` 日志，
+ * request-id 去重）。概览读前先同步，实时 hook 只是两次打开间的快路径。
  *
- * The host listens to the durable `session/event` stream and folds each
- * provider-billed model call (`assistant/message` usage, plus compaction
- * summarize calls and failed attempts) into one JSONL row persisted per local
- * day. To stay correct even when the live hook misses events, every overview
- * read first re-syncs from the authoritative `sessionPersistence` log
- * (idempotent via request-id dedupe), then aggregates the ledger; the live
- * hook is the fast path that keeps the ledger current between opens.
- *
- * The authoritative refresh is incremental across restarts: after each
- * successful sync the per-session change tokens (`revision`) are persisted
- * (`sync-progress.json` in the data directory). A restarted process loads
- * that baseline and only re-walks sessions whose persisted log changed since
- * — so the first overview after a restart does not decode every session log,
- * only the ones that actually gained events while the process was down.
- *
- * WIRE NOTES (tighten against real DSH types when the type packages are wired
- * as devDependencies): `session/event`, `sessionPersistence`, `webServer` and
- * the event payloads are typed loosely here so the external package compiles
- * with only `@deepseek-ai/cordis` on the type graph. The event shapes
- * (`assistant/message`·usage, `turn/end`·reason, `request/context`,
- * `llm/retry`, `compaction/summary`) and the persistence surface
- * (`listSnapshots()` with a plain `list()` fallback, plus `inspect(id)` →
- * `{ meta, events }`) have been verified against the real DSH source:
- * `list()` alone returns bare headers, so the freshness probe needs the
- * snapshot listing to cheaply detect changed logs.
+ * WIRE NOTES：事件与持久化面为宽松类型（待类型包接入可收紧）。单独 `list()`
+ * 只返回裸 header，因此新鲜度探针必须用 `listSnapshots()` 才能廉价检出变更。
  *
  * @module dsh-tokbook
  */
@@ -61,19 +39,13 @@ import { isBuiltinQuotaPlan, isQuotaAlert, COMMAND_CODE_PROVIDER, OPENCODE_GO_PR
 import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
 import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
 
-/** Built-in providers with an official quota fetch, in display order. */
 const BUILTIN_PLAN_KEYS: readonly string[] = [OPENCODE_GO_PROVIDER, COMMAND_CODE_PROVIDER]
-
-/** How long a quota snapshot is reused before the providers are re-polled. */
 const QUOTA_TTL_MS = 30_000
 
-/** Minimal face of the durable session-event stream. */
 interface SessionLike { readonly id: string }
 interface EventStream {
   on(event: 'session/event', listener: (session: SessionLike, event: SessionEventLike) => void): void
 }
-/** Minimal face of the workspace registry service (`ctx.workspaceRegistry`):
- *  the durable workspace records the 按工作区 section joins against. */
 interface WorkspaceLike {
   readonly id: string
   readonly title: string
@@ -82,7 +54,6 @@ interface WorkspaceLike {
 interface WorkspaceRegistryLike {
   list(): readonly WorkspaceLike[]
 }
-/** Minimal face of the host logger service (absent on some hosts → console). */
 interface LoggerLike {
   error(...args: unknown[]): void
   info?(...args: unknown[]): void
@@ -96,10 +67,6 @@ function resolveLogger(ctx: Context): LoggerLike {
   return typeof maybe.logger === 'function' ? maybe.logger('tokbook') : console
 }
 
-/**
- * The token-book service. Owns the durable per-day JSONL ledger and the
- * costed overview, registered under `ctx.tokbook`.
- */
 export class TokenUsageBook extends Service {
   static inject = []
 
@@ -107,20 +74,13 @@ export class TokenUsageBook extends Service {
   private readonly dir: string
   private readonly log: UsageLog
   private readonly recordCompaction: boolean
-  /** The host context, kept for the two optional seams the 价格表 tab reads:
-   *  the settings document (which routes/profiles exist) and the live LLM
-   *  registry (which routes are actually serving). */
+  /** host context：价格表 tab 经它读 settings/llm 缝。 */
   private readonly hostCtx: Context
-  /** User-configured quota-plan overrides keyed by provider route (coerced). */
+  /** 用户配置的额度计划覆盖，按 provider route 键（已纠错）。 */
   private readonly planConfig: Record<string, PlanConfig>
-  /** In-process official quota card cache (see {@link QUOTA_TTL_MS}), so a
-   * `?provider=` request does not re-hit the provider API on every open. This
-   * is a thin freshness layer only: 'ok' cards are also mirrored to a durable
-   * snapshot (see {@link readQuotaSnapshot}) that survives restarts, which is
-   * what lets the tab render last-known data with zero latency. */
+  /** 进程内官方额度卡缓存（TTL {@link QUOTA_TTL_MS}）。'ok' 卡还会镜像到 durable
+   *  快照，重启后 tab 靠它零延迟渲染。 */
   private quotaCardCache = new Map<string, { at: number; card: QuotaCard }>()
-  /** The DSH credentials seam (`ctx.credentials`), wired when present. The
-   * quota fetchers resolve provider keys through it. */
   private credentials: CredentialResolver | undefined
   private lastModel = new Map<string, string>()
   private persistence: SyncPersistence | undefined
@@ -128,45 +88,23 @@ export class TokenUsageBook extends Service {
   private lastSyncAt = 0
   private syncStatus: 'idle' | 'running' | 'done' | 'error' = 'idle'
   private syncError: string | null = null
-  /** Per-session opaque revision recorded at the last sync; the cheap probe
-   * compares `list()` snapshot revisions to this to detect un-synced work.
-   * Seeded from the persisted baseline (`sync-progress.json`) so a restart
-   * does not re-walk every session; rewritten after every successful sync. */
+  /** 上次同步时各会话的 opaque revision；探针以此对比检出未同步工作。从持久化
+   *  基线（`sync-progress.json`）播种，重启后不必重走全部会话。 */
   private syncedBySession = new Map<string, string>()
-  /** Whether an authoritative sync has settled for the current signature set.
-   * True once a persisted baseline loaded, or once a sync settles in this
-   * process. Guards the probe: with a trustworthy signature the probe only
-   * re-walks drifted sessions. */
+  /** 当前签名集上是否已有一次权威同步落定。守卫探针：有了可信签名才只走漂移会话。 */
   private syncedOnce = false
-  /** Loads the persisted baseline exactly once; callers await it before the
-   * first probe so a restart inherits the previous process's signature. */
+  /** 恰好载入一次持久化基线；调用方在首次探针前 await 它，使重启继承上一进程的签名。 */
   private readonly baselineReady: Promise<void>
-  /** True once this fiber has been unloaded (HMR reload, or a dependency's
-   * dispose → auto-reload). Fire-and-forget continuations that outlive the
-   * fiber check it before their final side effect, so a disposed instance
-   * never schedules derived-state writes (rollup invalidation, baseline
-   * persistence) on behalf of a world that already moved on. */
+  /** 本 fiber 已卸载（HMR reload 或依赖 dispose → auto-reload）。fire-and-forget
+   *  续体在最终副作用前检查它，已 dispose 的实例不会再调度派生态写。 */
   private disposed = false
 
   constructor(ctx: Context, config: TokBookConfig = {}) {
     super(ctx, 'tokbook')
     validateConfig(config)
-    // Fiber-unload cleanup: mark this instance disposed and settle whatever
-    // append work it already queued. Cordis runs disposers in reverse order
-    // when the owning fiber unloads — service-isolation teardown or a
-    // dependency's dispose → auto-reload — and awaits each fiber's disposers
-    // before the fiber is gone.
-    //
-    // IMPORTANT scope note for a module-level HMR reload (cordis-plugin-hmr):
-    // that path calls `registry.delete(plugin)` WITHOUT awaiting fiber
-    // disposal, then immediately re-imports the plugin entry. The successor
-    // module gets a FRESH module-level state map (see UsageLog), so it neither
-    // "inherits" this instance's queue nor waits for this flush — dedupe safety
-    // across that boundary is re-derived from the on-disk rows before the
-    // successor's first write. Marking `disposed` here only stops THIS
-    // instance's own fire-and-forget continuations; it does not gate the
-    // successor. The flush is best-effort under module HMR, awaited under the
-    // in-process teardown paths.
+    // fiber 卸载清理：标记 disposed 并 settle 已入队的 append。模块级 HMR reload
+    // （cordis-plugin-hmr）的 `registry.delete(plugin)` 不 await fiber disposal，
+    // 继任者拿到全新的模块级 map——跨该边界的去重由继任者首次写前从磁盘重建。
     ctx.effect(() => {
       return () => {
         this.disposed = true
@@ -180,16 +118,12 @@ export class TokenUsageBook extends Service {
     this.hostCtx = ctx
     this.planConfig = coercePlansConfig(config.plans)
 
-    // "One data directory, one writing process" guard: warn when a live
-    // foreign host owns this directory (two writers race the rollup/cache),
-    // then record this process as the current owner. Advisory, never fatal.
+    // 「一个数据目录、一个写进程」守卫：发现别的存活 host 拥有本目录时告警（双写者
+    // 会竞争 rollup/cache），然后把本进程记为当前 owner。只建议，绝不致命。
     void warnIfForeignOwner(this.dir, this.logger).then(() => writeOwnerMarker(this.dir))
     void warmRecordCache(this.dir, undefined, this.logger)
 
-    // Inherit the previous process's sync baseline (which session logs were
-    // folded through which revision), so a restart does not re-walk every
-    // session on the first overview. A missing/torn baseline reads as null:
-    // the probe then walks everything once (idempotent) and rewrites one.
+    // 继承上一进程的同步基线。缺失/撕裂读作 null：探针随后走一遍全量（幂等）并重写。
     this.baselineReady = readSyncProgress(this.dir)
       .then((progress) => {
         if (progress === null) return
@@ -198,16 +132,12 @@ export class TokenUsageBook extends Service {
         this.logger.info?.(`[tokbook] loaded sync baseline: ${String(this.syncedBySession.size)} sessions (synced ${new Date(progress.syncedAt).toISOString()})`)
       })
       .catch((error: unknown) => {
-        // A baseline read failure must not block recording: fall back to the
-        // conservative full walk (the probe treats it as no baseline).
+        // 基线读失败不得阻塞记账：回落到保守全量走（探针视作无基线）。
         this.logger.warn?.('[tokbook] cannot read sync baseline; will re-sync from scratch:', error)
       })
 
-    // Live recording from the durable session-event stream (fast path). Each
-    // recorded event is projected into a row and appended; dedupe by request
-    // id keeps the authoritative re-sync from double-counting. Per-session
-    // last-known model/provider mirror the sync walk, so a failure row (which
-    // names neither) is attributed the same way on both paths.
+    // 从 durable 会话事件流实时记账（快路径）。按 request-id 去重，使权威再同步
+    // 不会重复计数。失败行归属与同步 walk 同源。
     const lastProvider = new Map<string, string>()
     const eventStream = ctx as unknown as EventStream
     eventStream.on('session/event', (session, event) => {
@@ -228,14 +158,12 @@ export class TokenUsageBook extends Service {
       }
     })
 
-    // The authoritative re-sync needs the session persistence service; wire
-    // it lazily so a host that mounts no persistence still records live
-    // requests (it just cannot backfill history).
+    // 权威再同步需要 session persistence 服务；懒接线，使不挂 persistence 的
+    // host 仍能实时记账。
     ctx.inject(['sessionPersistence'], (persistenceCtx: Context) => {
       const persistence = persistenceCtx.get('sessionPersistence') as SyncPersistence
       this.persistence = persistence
-      // Sessions whose log failed to fold are excluded from the baseline
-      // written after this first-run sync, so the next process re-tries them.
+      // 折叠失败的会话被排除在本轮基线之外，下一进程会重试它们。
       const failed = new Set<string>()
       void autoSyncIfNeeded(
         {
@@ -251,9 +179,8 @@ export class TokenUsageBook extends Service {
           if (result !== null) {
             this.logger.info?.(`[tokbook] first-run sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions`)
             if (result.added > 0) invalidateDerivedState(this.dir)
-            // The one-shot backfill just folded every session; record its
-            // signature so a restart between now and the first overview does
-            // not re-walk everything (no baseline exists until here).
+            // 这次一次性回填刚折叠了全部会话；记下它的签名，使现在与首次概览之间的
+            // 重启不重走一切。
             try {
               const snapshots = await listPersistenceSnapshots(persistence, this.logger)
               this.setBaseline(snapshots, failed)
@@ -268,10 +195,8 @@ export class TokenUsageBook extends Service {
         })
     })
 
-    // The quota tab resolves provider keys through the DSH credentials seam
-    // (`ctx.credentials`), the same place the Models/settings page stores a
-    // provider's API key. Wire it when the host mounts the service; without
-    // it the quota fetch finds no key and shows an `unconfigured` card.
+    // 额度 tab 经 DSH credentials 缝（`ctx.credentials`）解析 provider key。没有
+    // 它，额度拉取找不到 key，显示 `unconfigured` 卡。
     ctx.inject(['credentials'], (credentialsCtx: Context) => {
       const service = credentialsCtx.get('credentials') as { resolve(ref: string): Promise<{ value: string } | undefined> } | undefined
       if (service === undefined) return
@@ -307,19 +232,10 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * Ensure the ledger is current before an overview read, and hand back the
-   * session-header listing that read needs (every session's `cwd`, which the
-   * 按工作区 section joins against the workspace registry). A cheap metadata
-   * probe decides what needs syncing. The signature set is seeded from the
-   * persisted baseline (this process's own previous syncs, or an earlier
-   * process's), so after a restart only sessions whose persisted log changed
-   * since the recorded signature are walked — the common "nothing changed
-   * while the web server was down" case walks nothing. Without a usable
-   * baseline (first install, torn file) every session is walked once
-   * (history backfill + post-restart catch-up), then a fresh baseline is
-   * written. Idempotent (request-id dedupe); a run already in flight is not
-   * started again — the listing is still returned, so the caller's join sees
-   * the same headers the run is folding.
+   * 概览读之前保证账本新鲜，并把该读所需的会话 header 列表交回去（各会话的
+   * `cwd`，按工作区一节用它 join）。签名集从持久化基线播种，重启后只走变更的会话。
+   * 没有可用基线时每个会话走一次，再写一份新基线。幂等（request-id 去重）；已在
+   * 飞的 run 不会再启动。
    */
   async ensureFresh(): Promise<readonly PersistenceSnapshotLike[]> {
     const persistence = this.persistence
@@ -327,11 +243,10 @@ export class TokenUsageBook extends Service {
     await this.baselineReady
     let snapshots: readonly PersistenceSnapshotLike[]
     try {
-      // Snapshot listing (header + change token per session) with a plain
-      // header-list fallback; `normalizeSnapshot` accepts either shape.
+      // snapshot 列表（每会话 header + 变更 token），裸 header 列表可回落。
       snapshots = await listPersistenceSnapshots(persistence, this.logger)
     } catch (error) {
-      // A failing probe means we cannot tell; try the walk rather than serve stale.
+      // 探针失败意味着无法判断；宁可走一遍，也不端出过期数据。
       this.logger.error('[tokbook] persistence list probe failed:', error)
       snapshots = []
     }
@@ -345,17 +260,14 @@ export class TokenUsageBook extends Service {
     return snapshots
   }
 
-  /** The authoritative walk: fold the (changed) persisted logs into the
-   * ledger, then record the post-sync revision signature so the next read
-   * only walks what has changed by then. */
+  /** 权威 walk：把（有变化的）持久化日志折叠进账本，再记下同步后的 revision 签名。 */
   private async doSync(snapshots: readonly PersistenceSnapshotLike[], sessionIds: readonly string[]): Promise<void> {
     const persistence = this.persistence
     if (persistence === undefined || this.syncing) return
     this.syncing = true
     this.syncStatus = 'running'
     this.syncError = null
-    // Sessions whose log failed to fold are excluded from the baseline
-    // written after this run, so the next process re-tries them.
+    // 折叠失败的会话被排除在本轮之后写下的基线之外，下一进程会重试它们。
     const failed = new Set<string>()
     try {
       const result = await syncHistory(
@@ -382,20 +294,14 @@ export class TokenUsageBook extends Service {
     }
   }
 
-  /** Adopt the signature of a completed sync as the current in-memory
-   * baseline and persist it as the cross-process baseline. `failed` holds the
-   * sessions this run could not fold (unreadable logs): their signatures are
-   * excluded, so the next process re-walks them. A persist failure only costs
-   * one future full walk — the in-memory signature already keeps this process
-   * incremental. */
+  /** 把一次已完成同步的签名收为当前内存基线，并持久化为跨进程基线。`failed` 是
+   *  本轮读不了日志的会话：其签名被排除，下一进程会重走它们。持久化失败只让未来
+   *  多一次全量走——内存签名已保证本进程内的增量。 */
   private setBaseline(snapshots: readonly PersistenceSnapshotLike[], failed: ReadonlySet<string>): void {
     const baseline = snapshotBaseline(snapshots)
     for (const id of failed) baseline.delete(id)
     this.syncedBySession = baseline
-    // Fire-and-forget: never block the read path on a metadata write. A
-    // disposed instance stops persisting (its successor will write its own
-    // baseline after the next sync; an in-memory signature already covers this
-    // process's remaining reads).
+    // fire-and-forget：绝不为元数据写阻塞读路径。
     if (this.disposed) return
     writeSyncProgress(this.dir, {
       syncedAt: Date.now(),
@@ -405,10 +311,8 @@ export class TokenUsageBook extends Service {
     })
   }
 
-  /** Current aggregated overview snapshot (costed, with per-day trend and the
-   *  per-workspace cumulative section). */
+  /** 当前聚合概览快照（带成本，含按日趋势与按工作区累计）。 */
   async overview(): Promise<TokBookOverview> {
-    // Authoritative refresh first, so the ledger reflects persisted sessions.
     const snapshots = await this.ensureFresh()
     const { table, billing, revision } = await readPriceFile(this.dir, this.logger)
     const resolve: RateResolver = (record) => rateKeyAt(table, record.provider, record.model, record.time)
@@ -426,13 +330,9 @@ export class TokenUsageBook extends Service {
       }
       if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
     }
-    // Cumulated per workspace, joined on the session header's cwd at read time
-    // (no ledger row carries a workspace, so history is attributed
-    // retroactively). Empty when the host mounts no workspace registry.
+    // 按工作区累计，读时 join 会话 header 的 cwd。宿主未挂工作区注册表时为空。
     const byWorkspace = this.workspaceUsage(records, snapshots, table, billing, resolve)
-    // Slim wire payload: the price table and the rateRows are host-side
-    // concerns the floating window never renders; the cost layer has already
-    // been folded into the cost fields.
+    // 精简 wire 载荷：价表与 rateRows 不过 wire，成本已折进 cost 字段。
     const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, ...slim } = costed
     void _pricing; void _rateRows; void _byHour
     return {
@@ -451,12 +351,9 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * The 按工作区 rows of one overview read: the ledger's records folded by the
-   * workspace each record's session belongs to. The join needs both live host
-   * seams — the workspace registry (title + canonical path) and the session
-   * headers (`cwd`) — so a host that mounts no registry gets no section rather
-   * than a page of 未归属. A session absent from the listing (its log is gone)
-   * contributes no `cwd` and its records land in 未归属.
+   * 一次概览读的按工作区行：账本记录按其会话所属工作区折叠。该 join 需要两条
+   * live host 缝——工作区注册表（title + 规范 path）与会话 header（`cwd`）。
+   * 列表中缺席的会话（其日志已消失）贡献不了 `cwd`，其记录落入未归属。
    */
   private workspaceUsage(
     records: readonly UsageRecord[],
@@ -480,9 +377,8 @@ export class TokenUsageBook extends Service {
     return workspaceRows(records, workspaces, id => cwdBySession.get(id), pricing, resolve, billing)
   }
 
-  /** Per-provider view of one look-back window, the payload of the
-   * Provider-usage tab. Reuses the overview's authoritative freshness gate
-   * and pricing; only the window's day files are read. */
+  /** 一个回看窗口的按 provider 视图，Provider 用量 tab 的载荷。复用概览的
+   *  权威新鲜门与价表；只读窗口内的日文件。 */
   async usageByRange(range: ProviderRange): Promise<ProviderUsageView> {
     await this.ensureFresh()
     const { table, billing } = await readPriceFile(this.dir, this.logger)
@@ -490,8 +386,8 @@ export class TokenUsageBook extends Service {
     const { fromDay, toDay } = rangeDayWindow(range)
     const records = await readRecordsByDayRange(this.dir, fromDay, toDay, () => new Date(), this.logger)
     const cards = providerCards(records, table, resolve, billing)
-    // Channel names for the cards: the settings profile's displayName, else the
-    // adapter's provider name, so a route reads the way the 价格表 tab names it.
+    // 卡片的通道名：settings profile 的 displayName，否则适配器 provider 名，
+    // 使 route 与价格表 tab 同名。
     const providerLabels = routeLabels(this.settings(), this.llm(), this.logger)
     return {
       range,
@@ -503,41 +399,34 @@ export class TokenUsageBook extends Service {
     }
   }
 
-  /** The host settings seam (`ctx.settings`), or undefined when unmounted.
-   *  `ctx.get` is the reflective accessor: reading an unmounted service as a
-   *  property throws ("without inject"), which a read-only view must not do. */
+  /** host settings 缝（`ctx.settings`），未挂载时 undefined。`ctx.get` 是反射式
+   *  访问器：以属性方式读未挂载服务会抛错（without inject），只读视图不得这样做。 */
   private settings(): SettingsLike | undefined {
     return this.hostCtx.get('settings') as SettingsLike | undefined
   }
 
-  /** The host LLM seam (`ctx.llm`), or undefined when unmounted. */
+  /** host LLM 缝（`ctx.llm`），未挂载时 undefined。 */
   private llm(): LlmLike | undefined {
     return this.hostCtx.get('llm') as LlmLike | undefined
   }
 
-  /** The host workspace registry (`ctx.workspaceRegistry`), or undefined when
-   *  unmounted. Read reflectively for the same reason as `settings`/`llm`:
-   *  this read-only view must not throw when a service is absent. */
+  /** host 工作区注册表（`ctx.workspaceRegistry`），未挂载时 undefined。与
+   *  `settings`/`llm` 同因，反射读取：服务缺席时本只读视图不得抛。 */
   private workspaceRegistry(): WorkspaceRegistryLike | undefined {
     return this.hostCtx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
   }
 
   /**
-   * Quota snapshot for the 订阅额度 tab: fetch each built-in provider's
-   * *official* account usage (never a local estimate — a subscription key is
-   * shared across tools/devices, so the local ledger cannot know the true
-   * account spend). Providers without a usable key yield an `unconfigured`
-   * card; a failed fetch yields an `error` card. Results are cached for a
-   * short TTL so repeated opens do not hammer the provider APIs.
+   * 订阅额度 tab 的快照：拉取每个内置 provider 的*官方*账户用量（绝不本地估算
+   * ——订阅 key 跨工具/设备共享，本地账本不可能知道真实账户花费）。结果按短 TTL
+   * 缓存，重复打开不 hammer provider API。
    */
   async quota(): Promise<QuotaView> {
-    // Fast, non-network: the list of enabled built-in providers in display
-    // order. The client fetches each provider's card via `?provider=` so a
-    // slow/failing provider never blocks the others from rendering.
+    // 快、无网络：按展示顺序列出已启用的内置 provider。client 再经 `?provider=`
+    // 逐个拉卡，使某个慢/失败的 provider 不阻塞其余卡渲染。
     const providers = BUILTIN_PLAN_KEYS.filter((key) => this.planConfig[key]?.enabled !== false)
-    // Footer 告急 dot: derived only from durable last-known 'ok' snapshots.
-    // Opening this route must never hit a provider API — the badge is a
-    // cheap signal for "the last time we looked, a window was nearly full".
+    // footer 告急点：只从 durable 的最近 'ok' 快照推出。打开本路由绝不能打
+    // provider API——该徽章是「上次看时某个窗口快满了」的廉价信号。
     let alert = false
     for (const key of providers) {
       const cached = this.quotaCardCache.get(key)
@@ -552,28 +441,16 @@ export class TokenUsageBook extends Service {
     return { providers, alert }
   }
 
-  /** Official quota card for one built-in provider, stale-while-revalidate:
-   *
-   *  - `force` (client refresh button / auto-refresh timer) always polls the
-   *    provider and re-persists the result.
-   *  - A non-forced read first reuses the fresh in-memory card (TTL), then
-   *    falls back to the provider's *durable last-known 'ok' card* (disk
-   *    snapshot, instant — no provider round trip), and only hits the
-   *    provider API when nothing is known yet (first-ever open of the tab).
-   *
-   * The tab therefore renders content immediately on open (the last known
-   * numbers) and the client follows up with a forced refresh when those
-   * numbers are old, updating the card in place — the provider latency is
-   * never in the way of first paint.
-   *
-   * A provider disabled in config yields an error card; an enabled provider
-   * without a usable key yields an `unconfigured` card. Never throws. */
+  /** 单个内置 provider 的官方额度卡，stale-while-revalidate：
+   *  - `force` 总是轮询 provider 并重新持久化。
+   *  - 非 force 读先复用新鲜内存卡（TTL），再回落到 durable 最近 'ok' 卡，
+   *    只在一无所知时才打 provider API。
+   *  因此 tab 打开即渲染上次已知数字，client 在数字过旧时跟进 force 刷新。 */
   async quotaCardOf(provider: string, force = false): Promise<QuotaCard> {
     const now = Date.now()
     const config = this.planConfig[provider]
     const enabled = config === undefined || config.enabled !== false
-    // A disabled/unknown provider is terminal: never serve a stale snapshot
-    // or refresh it. (Cached like any card so repeated opens are consistent.)
+    // 禁用/未知的 provider 是终态：绝不端出过期快照，也不去刷新它。
     if (!enabled || !isBuiltinQuotaPlan(provider)) {
       const card: QuotaCard = {
         plan: provider,
@@ -589,11 +466,8 @@ export class TokenUsageBook extends Service {
     if (!force) {
       const cached = this.quotaCardCache.get(provider)
       if (cached !== undefined && now - cached.at < QUOTA_TTL_MS) return cached.card
-      // No fresh in-memory card: serve the durable last-known 'ok' card
-      // instantly (never block an open on the provider round trip). It is
-      // mirrored into the TTL cache so repeated opens within the TTL do not
-      // even re-read disk; its own fetchedAt still tells the client it is
-      // stale and a refresh is due.
+      // 没有新鲜内存卡：瞬时端出 durable 的最近 'ok' 卡。它会镜像进 TTL 缓存，
+      // 其 fetchedAt 告诉 client 它已过期、该刷新了。
       const snapshot = await readQuotaSnapshot(this.dir, provider)
       if (snapshot !== null) {
         this.quotaCardCache.set(provider, { at: now, card: snapshot })
@@ -619,8 +493,8 @@ export class TokenUsageBook extends Service {
       }
     }
     this.quotaCardCache.set(provider, { at: now, card })
-    // Only 'ok' cards become durable last-known snapshots; a fetch failure or
-    // missing key is cheap to re-derive and must not mask a later recovery.
+    // 只有 'ok' 卡成为 durable 的最近快照；拉取失败或缺 key 便宜可重推，不得掩盖
+    // 后续恢复。
     if (card.state === 'ok') {
       void writeQuotaSnapshot(this.dir, provider, card)
         .catch((error: unknown) => {
@@ -630,8 +504,7 @@ export class TokenUsageBook extends Service {
     return card
   }
 
-  /** Force an authoritative re-sync of every session (bypassing the freshness
-   * probe) and report its start, for the scan button. */
+  /** 强制对全部会话做一次权威再同步（绕过新鲜探针）并报告其启动，供扫描按钮用。 */
   async rescan(): Promise<{ status: 'running' | 'skipped'; lastSyncAt: number | null }> {
     const persistence = this.persistence
     if (persistence === undefined) return { status: 'skipped', lastSyncAt: this.lastSyncAt > 0 ? this.lastSyncAt : null }
@@ -643,36 +516,25 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * The 价格表 view: one card per provider route, one row per model the route
-   * can be billed for.
+   * 价格表视图：每个 provider route 一张卡，每行是该 route 上可计费的模型。
    *
-   * The route set is the route catalog (the settings document's profiles ∪ the
-   * live adapter registry) merged by `readPricingView` with every route the
-   * ledger billed and every route the price file names — so a route that left
-   * the configuration, or that only carries a hand-written price, stays visible
-   * and editable. Model rows come from the same catalog plus each route's own
-   * ledger strings, so a 仅账本 string keeps an editable price.
+   * route 集合是路由目录（settings 文档的 profiles ∪ live 适配器注册表）经
+   * `readPricingView` 与账本计费过的、以及价表写过的每个 route 合并——因此
+   * 已离开配置、或只手写了价格的 route 仍可见、可编辑。
    *
-   * The ledger lens reads the record cache (counts only), so this tab never
-   * stages rate rows of its own for the costed paths to trust. `ensureFresh`
-   * still runs first — the same freshness the overview / usage tabs pay — so
-   * 「账本 N 次」 is not stuck on a stale cache when the overlay opens here first.
+   * 账本透镜读的是记录缓存（只计数），因此本 tab 不会为自己铺设让带成本路径
+   * 信任的 rate 行。`ensureFresh` 仍先跑——与概览 / 用量 tab 同价的新鲜门。
    */
   async pricingView(): Promise<PricingView> {
     await this.ensureFresh()
     let ledger: LedgerUsage = { byRouteModel: new Map(), byRoute: new Map() }
     try {
-      // The ledger lens needs record counts, not prices: read the warmed record
-      // cache rather than folding a rollup, so this tab never stages rate rows
-      // of its own for the costed paths to trust. The table rides along because
-      // the lens also reports how much of each row the price does NOT cover —
-      // records a written 生效时间 cut off, which bill ¥0.
+      // 账本透镜要的是记录数不是价格：读已预热的记录缓存，而不是折叠 rollup。
       const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
       const { table } = await readPriceFile(this.dir, this.logger)
       ledger = ledgerUsageOf(records, table)
     } catch (error) {
-      // A failing read must not block the tab: the price file is still editable
-      // without the ledger's usage lens.
+      // 读失败不得阻塞 tab：没有账本用量透镜，价表仍可编辑。
       this.logger.warn?.('[tokbook] cannot read ledger usage for pricing view:', error)
     }
     const catalog = await collectRoutes(this.settings(), this.llm(), this.logger)
@@ -680,11 +542,10 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * Validate + persist a complete price table from the 价格表 tab. The body is
-   * the COMPLETE desired file (`$billing` + route → model → price segments), so
-   * the write replaces `pricing.json` wholesale and an omitted (route, model)
-   * stops being priced (its records fall to 价格未知). The read-time cost layer
-   * re-prices history on the next read — no ledger or rollup rewrite.
+   * 从价格表 tab 校验并持久化一份完整价表。body 是完整的期望文件（`$billing` +
+   * route → model → 价格段），因此写路径整体替换 `pricing.json`，被省略的
+   * (route, model) 停止定价（其记录落到价格未知）。读时成本层在下次读时重算历史
+   * ——不重写账本或 rollup。
    */
   async savePricing(body: unknown): Promise<PriceParse & { view: PricingView }> {
     const parsed = parsePriceInput(body)
@@ -695,9 +556,8 @@ export class TokenUsageBook extends Service {
 
 }
 
-/** Drop the derived stats state after a sync appended rows (a rollup whose
- * `upto` already covers that day would skip the new contents; the cache may
- * hold a stale parse). Both rebuild losslessly on the next read. */
+/** 同步 append 了新行之后丢掉派生态（`upto` 已覆盖该日的 rollup 会跳过新内容；
+ *  缓存可能持有过期 parse）。下次读时两者都无损重建。 */
 function invalidateDerivedState(dir: string): void {
   clearRecordCache(dir)
   void unlink(join(dir, 'rollup.json')).catch(() => undefined)

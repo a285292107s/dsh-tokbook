@@ -1,15 +1,7 @@
 /**
- * dsh-tokbook client entry.
+ * dsh-tokbook client 入口。
  *
- * Route A: fills two declared root-scoped slots, no in-repo DSH change needed.
- *   - `sidebar.footer.action` — the trigger button beside the settings button.
- *   - `shell.overlay` — the floating token-book window (list, additive; the
- *     entry opts into pointer events by rendering an interactive card).
- *
- * Also owns the 告急 badge refresh: a cheap `GET /tokbook/quota` (enabled
- * providers + alert from durable last-known snapshots; never a provider API
- * hit) on apply, every {@link QUOTA_ALERT_POLL_MS}, and after the overlay
- * closes (so a forced refresh on the 订阅额度 tab shows up on the button).
+ * 路由 A：填入两个已声明的 root-scoped slot（`sidebar.footer.action` + `shell.overlay`），无需改 DSH 本体。
  *
  * @module dsh-tokbook/client
  */
@@ -22,11 +14,10 @@ import { LedgerOverlay } from './LedgerOverlay.tsx'
 
 export const inject = ['slots']
 
-/** How often the closed-window badge re-reads the host list (disk-only). */
+/** 浮窗关闭时徽标重读宿主列表的间隔（纯磁盘，不走网络）。 */
 const QUOTA_ALERT_POLL_MS = 5 * 60_000
 
-/** Pull the non-network quota list and store its alert bit. Failures leave the
- *  previous badge alone — a flaky host must not clear a real warning. */
+/** 拉取非网络的额度列表并写入 alert 位。失败时保留上一次徽标——宿主抖动不得清除真实的告警。 */
 function refreshQuotaAlert(view: TokBookViewStore): Promise<void> {
   return fetch('/tokbook/quota')
     .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<QuotaView> })
@@ -35,7 +26,7 @@ function refreshQuotaAlert(view: TokBookViewStore): Promise<void> {
 }
 
 export function apply(ctx: TokBookContext): void {
-  // One root-scoped store shared by both entries (button ↔ overlay state).
+  // 两个入口共享的 root 级 store（按钮 ↔ 浮窗状态）。
   const view = createTokBookViewStore()
 
   ctx.slots.inject('sidebar.footer.action', () =>
@@ -43,7 +34,7 @@ export function apply(ctx: TokBookContext): void {
       name: 'sidebar.footer.action',
       id: 'dsh-tokbook',
       order: 100,
-      // The owner passes only the column state; our data comes from `inject`.
+      // 宿主只传列状态；数据来自 `inject`。
       inject: () => ({ view }),
     }, FooterButton))
 
@@ -55,8 +46,7 @@ export function apply(ctx: TokBookContext): void {
       inject: () => ({ view }),
     }, LedgerOverlay))
 
-  // Badge: one shot on load, then a gentle disk-only poll, and again whenever
-  // the overlay closes (the quota tab may have force-refreshed snapshots).
+  // 徽标：加载时刷一次，然后每间隔轮询一次，浮窗关闭后再刷一次（额度 tab 可能强制刷新了快照）。
   void refreshQuotaAlert(view)
   const poll = setInterval(() => { void refreshQuotaAlert(view) }, QUOTA_ALERT_POLL_MS)
   ctx.effect(() => () => { clearInterval(poll) })
@@ -69,6 +59,6 @@ export function apply(ctx: TokBookContext): void {
   ctx.effect(() => unsubscribe)
 }
 
-// NOTE: no `export default` here. The cordis loader does `exports.default ?? exports`,
-// so a client plugin MUST expose `inject`/`apply` as NAMED exports and not smuggle a
-// default — the default would mask `.inject`, and cordis would read an empty inject.
+// 注意：此处**没有** `export default`。cordis loader 做 `exports.default ?? exports`，
+// 因此 client plugin 必须以**命名导出**暴露 `inject`/`apply`——default 会遮蔽
+// `.inject`，cordis 会读到空的 inject。
