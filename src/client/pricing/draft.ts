@@ -551,12 +551,6 @@ export function fmtFrom(from: string): string {
   return at === null ? '无起点' : `${at} 起`
 }
 
-/** 行 meta 线如何陈述四个单元格所编辑价格的生效时间。短语自带主语：裸的「无起点」在该位置会被读成账本时间。 */
-export function fmtRowFrom(from: string): string {
-  const at = instantLabel(from)
-  return at === null ? '价段无起点（自始生效）' : `价段自 ${at} 起`
-}
-
 /** 段的 `from` 作为 `datetime-local` 输入值：零点打印为 `00:00`，因为纯日期就是这个意思。 */
 export function fromFieldValue(from: string): string {
   const text = from.trim()

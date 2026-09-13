@@ -10,7 +10,7 @@ import { memo } from 'react'
 import { DAY_SET_LABELS, DAY_SETS, clockLabel } from '../../price-format.ts'
 import type { BillingNature, DaySet } from '../../types.ts'
 import {
-  blankSegment, duplicateSlot, editableSegment, effectiveSlots, fieldState, fmtFrom, fmtRowFrom, fromFieldInput,
+  blankSegment, duplicateSlot, editableSegment, effectiveSlots, fieldState, fmtFrom, fromFieldInput,
   fromFieldValue, inForceToday, inheritedRates, isBlankSlot, isUnpriced, modelDirty, newSegment, newSlot,
   pendingSegment, rowIssue, sortedSegments, withSlotEnd, withSlotStart,
   type ModelDraft, type RateField, type RateTexts, type RouteDraft, type SegmentDraft, type SlotDraft,
@@ -280,14 +280,12 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
   const slots = shown === null ? 0 : effectiveSlots(shown).length
   // 行的身份**只打印一个**：有人命名该串时显示展示名，否则显示精确串本身。精确串仍是账本的计费键，保持可达：hover 标签与每个单元格的无障碍名称。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
+  // 第二行只放这段价的来龙去脉：账本次数与备注。生效时间**不在行上**——四格编辑的是当前生效那一段
+  // （工具栏图例说过一次），而它的起点在抽屉的段编辑器与时间轴上比半行字说得更完整。
   const meta: string[] = []
-  if (shown !== null) meta.push(fmtRowFrom(shown.from))
   meta.push(row.records > 0 ? `账本 ${String(row.records)} 次` : '账本没记过')
   if (shown !== null && shown.note.trim() !== '') meta.push(shown.note.trim())
-  // meta 行放不下整句，故唯一的裸术语骑在 hover 上：无起点的价格回溯到哪段账本。
-  const metaTitle = shown !== null && shown.from.trim() === ''
-    ? `${meta.join(' · ')}｜「无起点」= 定价文件没写这份价的生效时间，这条模型的全部历史都按它算`
-    : meta.join(' · ')
+  const metaText = meta.join(' · ')
 
   const edit = (field: RateField, next: string): void => {
     if (shown === null) {
@@ -329,9 +327,8 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
             {dirty && <span className="dtpl-price-badge dtpl-price-badge-dirty">未保存</span>}
           </span>
           <span className="dtpl-price-meta">
-            {meta.length > 0 && (
-              <span className="dtpl-price-meta-text" title={metaTitle}>{meta.join(' · ')}</span>
-            )}
+            {/* 这一行会被压缩截断尾部，title 兜住全文。 */}
+            <span className="dtpl-price-meta-text" title={metaText}>{metaText}</span>
           </span>
         </div>
         <div className="dtpl-price-rates">
