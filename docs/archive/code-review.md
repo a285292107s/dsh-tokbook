@@ -8,7 +8,7 @@ commits: # uncommitted working tree on main; range not applicable
 
 # 全面代码审查（D-011 + 全仓库）
 
-> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: process · language: zh-CN · status: superseded · last-reviewed: 2026-09-11 · supersedes: —
 
 ## Report
 

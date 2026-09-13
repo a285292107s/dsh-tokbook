@@ -1,6 +1,6 @@
 # 文档索引 — dsh-tokbook
 
-> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-13 · supersedes: —
+> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-14 · supersedes: —
 
 本仓库所有文档文件的地图。动手前先读你要触及领域的条目,然后**只读那一份**。本文件
 的存在是为了让 [`AGENTS.md`](../AGENTS.md) 与你的第一跳保持精简:根文件只放面包屑,
@@ -18,9 +18,8 @@
 | [`docs/DESIGN.md`](DESIGN.md) | reason / background | current | "为什么":DSH 机制背景、一期框架、二期重构说明、硬约束。顶部「阅读指南」区分历史与现状 |
 | [`docs/HMR.md`](HMR.md) | lessons / reference | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
 | [`docs/LESSONS.md`](LESSONS.md) | lessons | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
-| [`docs/skills.md`](skills.md) | reference | current | 改动涉及 DSH 技能系统或 `.dsh/skills` 时 |
-| [`docs/WORKFLOW.md`](WORKFLOW.md) | process | current | 接到功能迭代 / 修复任务时对照的「代码 + 文档同 commit」循环;新建文档前先看判据 |
-| [`docs/compose/spec/code-review.md`](compose/spec/code-review.md) | process(归档快照) | current | 追溯 D-011 落地前那轮全面审查的结论与修复时;**不描述此后重构后的文件布局** |
+| [`docs/WORKFLOW.md`](WORKFLOW.md) | process | current | L2/L3(契约面 / 跨 commit / 维护者要求 worktree)对照的「代码 + 文档同 commit」循环;新建文档前先看判据 |
+| [`docs/archive/code-review.md`](archive/code-review.md) | process(归档) | superseded | 追溯 D-011 落地前那轮全面审查的结论与修复时;**不描述此后重构后的文件布局** |
 | [`docs/archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md) | process(归档) | superseded | 只想追溯当期实施计划与推理时读;**不描述现状**——现状看 README / CONTRACTS / DECISIONS |
 
 ## Doc meta 约定
@@ -34,8 +33,8 @@
 - `role` = 该文件属于文档体系的哪一层(见上表)。
 - `status` = 描述的是现状(`current`)、已被替换的事物(`superseded`)、还是未完成
   (`draft`)。已落地的计划/过程文档应标 `superseded` 并移入 `docs/archive/`。
-- `last-reviewed` = 上次把该文件与当前代码树核对一致的日期。编辑该文件时刷新它——
-  通常与它记录的代码改动在同一个 commit。
+- `last-reviewed` = 上次把该文件与当前代码树核对一致的日期。**改了它的正文就顺手刷新**;
+  没有文档面要动的小改动不要为一个日期去碰它。
 
 `scripts/selfcheck-docs.ts`(属于 `pnpm selfcheck`)会在文档缺 meta 行、CONTRACTS
 路由表与 `src/routes.ts` 漂移、或本文件里的链接指向不存在的文件时失败。

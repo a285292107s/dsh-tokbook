@@ -1,82 +1,80 @@
 # AGENTS.md
 
-dsh-tokbook 是一个面向 DeepSeek Harness(DSH)的**跨会话 Token 用量账本**插件:
-host 半区把每次通道计费模型调用记成一行、写入按日 JSONL 账本并提供带成本的聚合;
-browser 半区用侧边栏 footer 按钮 + shell.overlay 浮窗展示它们(汇总、按通道、
-价格表、订阅额度等 tab)。
-
-本文件让 agent 的行为与本仓库的实际运作方式对齐。更具体的指示优先;当任务进入下面
-某一领域时,先读链接的文件再改代码。
+dsh-tokbook 是一个面向 DeepSeek Harness(DSH)的**跨会话 Token 用量账本**插件:host 半区把
+每次通道计费模型调用记成一行、写入按日 JSONL 账本并提供带成本的聚合;browser 半区用侧边栏
+footer 按钮 + shell.overlay 浮窗展示它们(汇总、按通道、价格表、订阅额度等 tab)。
 
 ## 与维护者的协作方式(常设偏好)
 
-本仓库只有一位维护者——我,以 AI 辅助开发。除非我在具体任务里另行说明,以下三条是
-每个任务的默认:
+本仓库只有一位维护者——我,以 AI 辅助开发。除非我在具体任务里另行说明,以下三条是默认:
 
-1. **动手前先澄清意图——不要猜测。** 我提出任务时,先分析我的意图:我想要的结果、
-   适用的约束。如果有影响实质的不清晰点——范围、目标、取舍、"完成"的样子——直接
-   向我提问,确保我们认知同步后再改动任何东西。只有机械、无歧义的工作可以不问直接做。
+1. **先对齐意图,但只在真正值得问的时候问。** **影响实质、且反向成本高**的不清晰点(范围、
+   取舍、"完成"的样子)直接问我;只是细节未明 → 说明假设后直接做——一次往返比一次可回退的
+   改动贵。**只读 / 分析类任务不需要"动手前澄清"这一步。**
+2. **从第一性原理出发思考。** 从底层目标与本仓库真实的事实(代码、数据、约束)出发,不套用
+   熟悉的套路。它体现在**取舍的理由**上,不是长篇论证;对继承来的选择——包括此前 AI 的决定
+   与文档——不值得保留就质疑并明说。
+3. **单人维护 + AI 辅助——不做过度防御性设计。** 选满足需求的最简设计;不加投机结构(为未必
+   到来的未来做的抽象、没发生过的场景的防御代码、没人要的开关、超出的测试)。真因存在的不变量
+   (账本单写者与去重)保留。**这条尺子同样适用于流程与文档本身。**
 
-2. **从第一性原理出发思考。** 从底层目标与本仓库内真实的事实(代码、数据、约束)出发,
-   而不是套用熟悉的套路或习惯。说明你的假设;对继承来的选择——包括此前 AI 的决定与
-   文档——如果它已不值得保留,敢于质疑并明说,而不是默默照做。
+## 任务分层:默认走最轻的一档
 
-3. **单人维护 + AI 辅助——不做过度防御性设计。** 优先选择满足需求的最简设计。不添加
-   投机性结构:为未必到来的未来做的抽象、为没发生过的场景写的防御代码、没人要的配置
-   开关、超出需要的测试/检查。因真实原因存在的不变量(账本的单写者与去重)保留;不为
-   没人要求的新场景新增。当更简方案只是牺牲投机性防护时,选更简方案。
+按改动**触到什么**判档,默认 L0/L1;**只有确实触到 L2/L3 的判据才升级——禁止预防性升级**
+(不"以防万一"多读文档、多开 worktree、多补文档)。**优先级:任务级说明 > 本节分层 >
+`docs/WORKFLOW.md` 的流程**——我说「就改这一行、别动文档」时,即使 §3 的表认为该更新契约
+文档,也照我说的做。
 
-> 维护者原话:① 先分析意图;不清晰时**不要猜测,向我提问**,确保认知同步;
-> ② **从第一性原理出发**思考;③ 单人维护 + AI 辅助开发,**不做过度防御性设计**。
+| 档 | 判据 | 做 | 不做 |
+| --- | --- | --- | --- |
+| **L0** 只读 / 问答 | 不写文件 | 直接答 | 不读 `WORKFLOW.md`、不跑门禁、不改文档、不建 PLAN/goal/todo |
+| **L1** 单点改动 | 只改 `src/`,不碰 L2 的任一面 | 改 + 最小那道门(见下) | 不读 CONTRACTS / DECISIONS、不建 PLAN、不拆文件;文档只在文件名真变了时动 |
+| **L2** 契约面 | 路由 / wire JSON / 配置键 / 会话事件 / 数据目录文件 / 价格表与计价规则 / 持久架构决策 | 看 `docs/INDEX.md` 对应行 → **只读那一份叶子**,按 `docs/WORKFLOW.md` §1–§4 同 commit 改文档 | 不顺手扩大范围 |
+| **L3** 跨 commit / 真并行 | 需要分阶段审,或维护者明确要求 worktree | 先落 PLAN;worktree 见 §8 | — |
 
 ## 包管理器与命令
 
-这是单个 pnpm 包(`pnpm-workspace.yaml` 只固定 esbuild 构建)。用 `pnpm install` 安装。
+单个 pnpm 包(`pnpm-workspace.yaml` 只固定 esbuild 构建),用 `pnpm install` 安装。
+**门禁与改动成正比**——按这张表选最小的那道,别对一行样式跑全套:
 
-| 命令            | 执行内容 |
-| --------------- | ------------ |
-| `pnpm build`    | `tsc -b`(生成 `lib/types/*.d.ts`),再用 esbuild 打包 `lib/index.js`(host)与 `lib/client.js`(browser) |
-| `pnpm typecheck`| `tsc --noEmit` — 只查 `src/`;`scripts/` 不参与编译 |
-| `pnpm watch`    | `tsc -b --watch` — 只出类型;要刷新产物请跑 `pnpm build` |
-| `pnpm smoke` / `pnpm selfcheck` / `pnpm test` | 纯逻辑 + 不变量自检,用 `node --experimental-strip-types` 执行 |
+| 改动 | 门 |
+| --- | --- |
+| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm build` + 刷新页面 |
+| 别的 `src/**` | `pnpm typecheck`(只查 `src/`);碰了 host 逻辑或 `src/client/pricing/axis.ts` 再加 `pnpm test` |
+| README / `docs/**` | `pnpm docs:check`(selfcheck 的文档段) |
+| 提交、或合并回主检出之前 | `pnpm test`,需要线上产物时再 `pnpm build` |
 
-`scripts/*.ts` 直接用 Node 的类型剥离执行、从不由 tsc 编译,所以它们只在真正运行时才被
-类型检查。
+`pnpm test` = `pnpm smoke` + `pnpm selfcheck`(聚合 / 计价 / 额度纯逻辑 + 不变量自检)。
+`scripts/*.ts` 由 Node 类型剥离运行、**从不由 tsc 编译**,所以只在真正跑起来时才被类型检查;
+`pnpm build` 的产物与 `pnpm watch`(只出类型)见 README · 构建 / 对着源码检出开发。
 
 ## 修改源码
 
-- 源码唯一真源在 `src/`:host 半区在 `src/*.ts`,browser 半区在 `src/client/*.tsx`。
-  整体文件布局见 README。
-- **别养出巨型单文件。** 功能落在已有大文件上时,优先按**职责/surface**顺手拆开
-  (一个 tab 一个文件、一类 CSS 一个 `styles/*.ts` 分片、config 校验独立),而不是继续
-  往里堆。经验阈值:单一职责源文件到 **~400 行**就该审视是否该拆;~600+ 且混了多类
-  关注点必须拆。**不为拆而拆**——`types.ts` / `pricing.ts` 这类内聚领域模块保持整文件。
-  拆分不改行为、不引入投机抽象;样式分片的拼接顺序是级联契约。判据与示例见
-  `docs/WORKFLOW.md` §7。
-- `lib/` 是构建产物且被 gitignore——改 `src/`,然后跑 `pnpm build`。不要手改或提交 `lib/`。
-- 构建后,host 改动经 profile 的 `cordis-plugin-hmr` 行热替换;browser 改动在刷新页面后
-  生效。确切保证见 README(Dev / HMR)与 `docs/HMR.md`。
-- browser bundle 把 DSH 基线模块(react、cordis、`dsh-client-*`)保持 external。若新增
-  client 依赖,保持 `scripts/build-client.mjs` 的 `BASELINE_EXTERNALS` 与 DSH 的 client
-  platform 模块清单同步(README · Build 一节)。
-- client 入口**不能加 `default` 导出**——cordis loader 会因此坏掉(`docs/DESIGN.md` §7.4)。
+- 源码唯一真源在 `src/`(host `src/*.ts`,browser `src/client/*.tsx`);`lib/` 是 gitignore 的
+  构建产物——改 `src/` 再 `pnpm build`,不要手改或提交 `lib/`。布局见 README。
+- host 改动经 profile 的 `cordis-plugin-hmr` 行热替换,browser 改动刷新页面生效;确切保证见
+  README(Dev / HMR)与 `docs/HMR.md`。
+- **小改动只做最小修复,不顺手重构。** 「别养巨型单文件」仍然成立,但**拆分是独立一轮**:
+  判据见 `docs/WORKFLOW.md` §7,碰到大文件先修眼前的问题。
+- browser bundle 的 external 清单、client 入口**不能加 `default` 导出**(`docs/DESIGN.md`
+  §7.4)——改到那里再读。
+
+## 不要做(反仪式)
+
+- 不为小改动建 PLAN / goal / todo 清单;不在回复里复述流程与门禁。
+- 不顺手重构、不顺手拆文件、不更新与本次改动无关的文档。
+- 不加没人要求的面:配置开关、抽象层、「以后可能要」的测试。
+- 不为想象中的并行开 worktree;没被要求就不新建受管文档。
 
 ## 更深上下文(动手前先读对应领域)
 
-- `README.md` — 端到端项目范围、布局、构建/安装/配置、状态。最先读它。
-- `docs/INDEX.md` — 本仓库文档树的地图(role · status · 何时读)。在改动有文档契约的
-  代码(路由、配置、事件、数据文件)前,先看该领域的条目。
-- `docs/WORKFLOW.md` — 每次改代码要走的循环:同 commit 改文档、门禁、文件体量判据(§7),
-  以及**两个及以上功能并行时的 worktree 车道与合并协议**(§8)。
-
-必须与代码一致的契约在 `docs/CONTRACTS.md`,持久架构决策在 `docs/DECISIONS.md`——在
-**同一个 commit** 里随代码改动更新它们;`scripts/selfcheck-docs.ts`(属于 `pnpm
-selfcheck`)会在它们漂移时失败。
-
-本仓库文档统一为中文;代码、README 中的命令与标识符保留英文原样。文档会过时——当文档
-与代码冲突时,以代码为准并修文档。
+**L0 / L1 不需要读本节。** 按 `docs/INDEX.md` 的「何时读」列跳到**那一份**叶子,不整树通读:
+`README.md` 需要全貌时;`docs/WORKFLOW.md` 只在 L2/L3(§8 的 worktree 流程**只在维护者明确
+要求时才走**,不要自行判断主检出忙不忙)。契约与决策在 **L2** 时随代码同 commit 更新
+(`docs/CONTRACTS.md` / `docs/DECISIONS.md`,`selfcheck-docs` 会在漂移时失败);文档与代码冲突
+时以代码为准并修文档。文档统一中文,代码、命令与标识符保留英文原样。
 
 ## 保持本文件精简
 
-本文件每次请求都会载入上下文,所以刻意保持最小。只适用于单一领域的指引应放进上面链接
-的文档(或嵌套的 AGENTS.md),而不是这里——加面包屑,不要加规则。
+本文件每次请求都会载入上下文,刻意保持最小(**含空行 ≤ 80 行——加一条规则就先删一条**):只放
+**常设偏好 + 分层判据 + 面包屑**。单一领域的规则进它该在的叶子,而不是这里。
