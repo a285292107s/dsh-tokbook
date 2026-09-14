@@ -1,25 +1,63 @@
 /**
- * Standalone visual preview harness for the dsh-tokbook overlay.
+ * dsh-tokbook 浮窗的两种开发载体（dev-only，never shipped）。
  *
- * Dev-only (never shipped): stubs `window.__ModuleLoader__`, provides the
+ * **预览模式（默认）**—— fixture 台：stubs `window.__ModuleLoader__`, provides the
  * baseline modules (react, jsx-runtime, react-dom/client) the real DSH module
  * table would inject, defines the DSH `--dsw-alias-*` tokens (light + dark),
- * stubs `/tokbook/overview` + `/tokbook/rescan`, then mounts the REAL built
- * bundle (`lib/client.js`) through its real `apply()` path and opens the
+ * stubs every route the client fetches — `/tokbook/overview`、`/tokbook/rescan`、
+ * `/tokbook/usage`、`/tokbook/quota`、`/tokbook/pricing` — then mounts the REAL
+ * built bundle (`lib/client.js`) through its real `apply()` path and opens the
  * overlay.
  *
- * Query flags: ?dark=1 dark skin, ?empty=1 empty ledger, ?err=1 fetch error,
- * ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none quota-tab fixture +
- * auto-switch to the quota tab.
+ * **独立查看器模式（`--ledger [dir]`）**—— 同一个页面壳、同一份 client bundle，但
+ * `/tokbook/*` 由**真的 host 插件**作答：`lib/index.js` 的 `TokenUsageBook` 挂在本
+ * 进程的 cordis 根 context 上（DSH 自己的测试也这么起根 ctx），经一个 5 行的
+ * `webServer` shim 注册路由，直接读本机账本目录（省略 `dir` 用插件自己的默认值：
+ * `$DSH_HOME/tokbook`，否则 `~/.dsh/tokbook`）。不提供 `sessionPersistence`，所以它
+ * **只看已入账的历史**——「重新扫描」回报 skipped，不摄取新会话。
+ *
+ * **fixture 清单要跟着 client 一起改。** client 换数据源时（例如通道用量 tab 从总览
+ * payload 改成自己的 `/tokbook/usage`），漏掉一路 fixture 不会报错——那一 tab 会
+ * 落到 HTML 兜底、以「加载失败：Unexpected token '<'」的形式出现在界面上。这条只在
+ * 预览模式成立：独立查看器不看 fixture。
+ *
+ * Query flags: ?dark=1 dark skin, ?tab=ledger|provider|quota|method,
+ * ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none quota-tab
+ * fixture + auto-switch to the quota tab.
+ *
+ * The overview fixture shape is picked by the **TOKBOOK_MODE env var** (`empty` / `err`), not
+ * by a query flag: the payload is served by the same process that renders the page, so one
+ * server = one mode. Restart with the env set to look at those two states.
  */
 import { build } from 'esbuild'
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
-const clientJs = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
+
+/** `--ledger [dir]` 切到独立查看器模式（见文件头）；省略 dir 用插件自己的默认数据目录。 */
+const argv = process.argv.slice(2)
+const ledgerIndex = argv.findIndex((arg) => arg === '--ledger' || arg.startsWith('--ledger='))
+const LEDGER = ledgerIndex !== -1
+const ledgerValue = !LEDGER
+  ? undefined
+  : argv[ledgerIndex].startsWith('--ledger=')
+    ? argv[ledgerIndex].slice('--ledger='.length)
+    : argv[ledgerIndex + 1]
+const ledgerDir = ledgerValue === undefined || ledgerValue === '' || ledgerValue.startsWith('--')
+  ? undefined
+  : ledgerValue
+
+/** lib/ 是构建产物：两个半区都在启动时读一次（`pnpm build` 之后要重启本进程）。 */
+let clientJs
+try {
+  clientJs = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
+} catch {
+  console.error('缺少 lib/client.js —— 先跑 pnpm build')
+  process.exit(1)
+}
 
 /** Bundle react + react-dom as the "baseline module table" for the loader. */
 const baseline = await build({
@@ -46,6 +84,35 @@ const baseline = await build({
 })
 const baselineJs = baseline.outputFiles[0].text
 
+/* ── 独立查看器：真 host 插件挂在真 cordis 根 context 上 ───────────────────── */
+
+/**
+ * 独立查看器不用 fixture：把 `lib/index.js` 的 `TokenUsageBook` 挂在根 context 上，
+ * 只补它要的 `webServer` 服务。本插件把那个缝缩成了 `register({kind,path,handler})`
+ * （`src/routes.ts` 的 `WebServerLike`），所以 shim 就是一张 path → handler 的表，
+ * node:http 按 pathname 派发。缺席的 `sessionPersistence` 让 `ensureFresh()` 立即
+ * 返回、`rescan()` 回报 skipped——只看已入账的历史，不摄取新会话。
+ */
+const ledgerRoutes = new Map()
+if (LEDGER) {
+  let host
+  try {
+    host = await import(pathToFileURL(join(root, 'lib', 'index.js')).href)
+  } catch (error) {
+    console.error(`无法载入 lib/index.js（${String(error)}）—— 先跑 pnpm build`)
+    process.exit(1)
+  }
+  const { Context } = await import('@deepseek-ai/cordis')
+  const ctx = new Context()
+  ctx.provide('webServer', {
+    register(route) {
+      ledgerRoutes.set(route.path, route.handler)
+      return () => { ledgerRoutes.delete(route.path) }
+    },
+  })
+  ctx.plugin(host.default, ledgerDir === undefined ? {} : { path: ledgerDir })
+}
+
 /** Deterministic-ish daily rows for the last 14 days. */
 function days(n) {
   const rows = []
@@ -54,18 +121,26 @@ function days(n) {
     const d = new Date(base.getTime() - i * 86_400_000)
     const day = d.toISOString().slice(0, 10)
     const seed = (i * 73) % 100
+    const inputTokens = 40_000 + seed * 3_100
+    const outputTokens = 9_000 + seed * 820
+    const cacheReadTokens = 120_000 + seed * 21_000
+    const tokens = inputTokens + cacheReadTokens + outputTokens
     rows.push({
       day,
       totals: {
         requests: 8 + (seed % 17),
-        inputTokens: 40_000 + seed * 3_100,
-        outputTokens: 9_000 + seed * 820,
-        cacheReadTokens: 120_000 + seed * 21_000,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
         cacheWriteTokens: 0,
         compactions: seed % 5 === 0 ? 1 : 0,
         failures: seed % 7 === 0 ? 1 : 0,
         usageUnknown: seed % 3 === 0 ? 1 : 0,
       },
+      // 今日（最后一行）两个桶都非零，所以 hero 的两条金额行都能看到；其余日子
+      // 有一部分是纯按量日（订阅桶为 0），用来看「只列非零桶」那条规则。
+      spend: Math.round((tokens / 2_400_000) * 100) / 100,
+      subscriptionValue: seed % 3 === 0 ? Math.round((tokens / 6_000_000) * 100) / 100 : 0,
     })
   }
   return rows
@@ -79,6 +154,8 @@ const overview = {
   total: { requests: 214, ...mk(1_920_000, 6_310_000, 486_000, 214), compactions: 6, failures: 3, usageUnknown: 5 },
   byDay: days(14),
   byHour: [],
+  // 故意**不**按任何键排：概览的模型清单自己按词元降序排（占比条编码的就是词元），
+  // 所以这份乱序 fixture 正好证明排序发生在展示层。
   byModel: [
     { provider: 'deepseek', model: 'deepseek-chat', totals: mk(1_510_000, 6_100_000, 402_000, 198), cost: 3.87, spend: 3.87, subscriptionValue: 0 },
     { provider: 'deepseek', model: 'deepseek-reasoner', totals: mk(410_000, 210_000, 84_000, 16), cost: 1.12, spend: 1.12, subscriptionValue: 0 },
@@ -89,7 +166,7 @@ const overview = {
   // 第一行故意跨两条计费性质的路由（实际支出 + 订阅价值同时非零），因为工作区
   // 不像模型行那样被限定在单个金额桶里。
   byWorkspace: [
-    { id: 'w-harness', title: 'deepseek-harness', path: 'C:\\Users\\28529\\Desktop\\deepseek-harness', totals: mk(1_510_000, 6_100_000, 402_000, 198), tokens: 8_012_000, spend: 3.87, subscriptionValue: 1.2, lastAt: Date.now() - 3 * 60_000 },
+    { id: 'w-harness', title: 'deepseek-harness', path: 'C:\\Users\\28529\\Desktop\\deepseek-harness', totals: { ...mk(1_510_000, 6_100_000, 402_000, 198), failures: 2 }, tokens: 8_012_000, spend: 3.87, subscriptionValue: 1.2, lastAt: Date.now() - 3 * 60_000 },
     { id: 'w-wiki', title: 'zzz wiki', path: 'C:\\Users\\28529\\Desktop\\zzz wiki', totals: mk(800_000, 900_000, 120_000, 34), tokens: 1_820_000, spend: 0, subscriptionValue: 2.4, lastAt: Date.now() - 5 * 3_600_000 },
     { id: 'w-plugins', title: 'dsh-plugins', path: 'C:\\Users\\28529\\Desktop\\dsh-plugins', totals: mk(410_000, 210_000, 84_000, 16), tokens: 704_000, spend: 1.12, subscriptionValue: 0, lastAt: Date.now() - 26 * 3_600_000 },
     { id: '', title: '未归属', path: '', totals: mk(50_000, 120_000, 8_000, 7), tokens: 178_000, spend: 0, subscriptionValue: 0, lastAt: Date.now() - 40 * 60_000 },
@@ -98,7 +175,8 @@ const overview = {
   totalCost: 8.59,
   spend: 4.99,
   subscriptionValue: 3.6,
-  unpricedModels: [],
+  // 非空：这条注记（含「去定价」入口）是概览的口径声明之一，预览要能看到它。
+  unpricedModels: ['mimo-v2.5', 'retired-model'],
   pricing: {},
   totalTokens: 10_714_000,
   currency: 'CNY',
@@ -107,10 +185,8 @@ const overview = {
   records: 214,
   files: 9,
   lastEventAt: Date.now() - 3 * 60_000,
-  lastSyncAt: Date.now() - 3_600_000,
   syncStatus: 'done',
   syncError: null,
-  sessions: 4,
 }
 
 const emptyOverview = {
@@ -118,7 +194,7 @@ const emptyOverview = {
   total: { ...overview.total, ...mk(0, 0, 0, 0), compactions: 0, failures: 0, usageUnknown: 0 },
   byDay: [], byModel: [], byWorkspace: [],
   totalTokens: 0, totalCost: 0, spend: 0, subscriptionValue: 0, records: 0, files: 0,
-  lastEventAt: null, lastSyncAt: null, syncStatus: 'idle', sessions: 0,
+  lastEventAt: null, syncStatus: 'idle', syncError: null,
 }
 
 /* ── pricing-tab fixtures ── */
@@ -462,6 +538,91 @@ function quotaCards(mode) {
   }
 }
 
+/* ── 通道用量 tab fixtures ─────────────────────────────────────────────── */
+/**
+ * `GET /tokbook/usage?range=…` —— 每个 provider route 一张卡。窗口边界是 host
+ * 侧的事实，预览不复刻，只让四个 range 落在**看得见差别**的状态上：今日是一张
+ * 小按量卡，昨天多一张订阅卡，两个长窗口才是全集——外加卡片能报的两种降级事实
+ * （价格未知模型、没上报用量的调用）。
+ */
+const usageModel = (model, tokens, { spend = 0, value = 0, requests = 1, billing } = {}) => ({
+  model,
+  totals: {
+    requests, compactions: 0, failures: 0, usageUnknown: 0,
+    inputTokens: Math.round(tokens * 0.18), outputTokens: Math.round(tokens * 0.07),
+    cacheReadTokens: Math.round(tokens * 0.75), cacheWriteTokens: 0,
+  },
+  tokens,
+  cost: spend + value,
+  spend,
+  subscriptionValue: value,
+  ...(billing === undefined ? {} : { billing }),
+})
+
+const usageCard = (provider, models, extra = {}) => ({
+  provider,
+  tokens: models.reduce((sum, m) => sum + m.tokens, 0),
+  cost: models.reduce((sum, m) => sum + m.cost, 0),
+  spend: models.reduce((sum, m) => sum + m.spend, 0),
+  subscriptionValue: models.reduce((sum, m) => sum + m.subscriptionValue, 0),
+  unpricedModels: [],
+  models,
+  requests: models.reduce((sum, m) => sum + m.totals.requests, 0),
+  compactions: 0,
+  usageUnknown: 0,
+  ...extra,
+})
+
+/** 合法的 `range` 值，与 host 的 `PROVIDER_RANGES` 一致（预览是独立 .mjs，不能 import src 的 .ts）。 */
+const RANGE_IDS = ['today', 'yesterday', 'last7', 'last30']
+
+const USAGE_CARDS = {
+  today: [
+    usageCard('deepseek', [
+      usageModel('deepseek-v4-flash', 1_420_000, { spend: 0.68, requests: 34 }),
+      usageModel('deepseek-reasoner', 96_000, { spend: 0.15, requests: 4 }),
+    ]),
+  ],
+  yesterday: [
+    usageCard('deepseek', [
+      usageModel('deepseek-v4-flash', 2_180_000, { spend: 1.04, requests: 51 }),
+    ]),
+    usageCard('commandcode', [
+      usageModel('deepseek/deepseek-v4-flash', 1_640_000, { value: 1.22, requests: 62, billing: 'subscription' }),
+    ]),
+  ],
+  last7: [
+    usageCard('deepseek', [
+      usageModel('deepseek-v4-flash', 8_012_000, { spend: 3.87, requests: 198 }),
+      usageModel('deepseek-reasoner', 704_000, { spend: 1.12, requests: 16 }),
+    ]),
+    usageCard('commandcode', [
+      usageModel('deepseek/deepseek-v4-flash', 6_840_000, { value: 5.1, requests: 240, billing: 'subscription' }),
+      usageModel('z-ai/glm-5.3-flash', 412_000, { value: 0.31, requests: 22, billing: 'subscription' }),
+    ], { usageUnknown: 2 }),
+    // 这张卡同时带「价格未知」与「没上报用量」两种降级事实，因为一条 route 上
+    // 两者可以并存（未定价的新模型 + 中途取消的请求）。
+    usageCard('opencode-go', [
+      usageModel('glm-5.3-flash', 1_820_000, { value: 2.4, requests: 34, billing: 'subscription' }),
+      usageModel('mimo-v2.5', 178_000, { requests: 7, billing: 'subscription' }),
+    ], { unpricedModels: ['mimo-v2.5'], usageUnknown: 1 }),
+  ],
+}
+USAGE_CARDS.last30 = USAGE_CARDS.last7
+
+const USAGE_LABELS = { deepseek: 'DeepSeek', commandcode: 'Command Code', 'opencode-go': 'OpenCode Go' }
+
+function usageView(range) {
+  return {
+    range,
+    fromDay: '2026-08-16',
+    toDay: '2026-09-14',
+    updatedAt: Date.now(),
+    providerLabels: USAGE_LABELS,
+    providers: USAGE_CARDS[range] ?? [],
+  }
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x')
   if (url.pathname === '/client.js') {
@@ -474,6 +635,26 @@ const server = createServer((req, res) => {
     res.end(baselineJs)
     return
   }
+  // 独立查看器：`/tokbook/*` 一律由真插件注册的 handler 作答；真插件没注册的
+  // `/tokbook/*` 显式 404，免得 client 拿到 HTML 兜底、把「Unexpected token '<'」
+  // 报成加载失败。
+  if (LEDGER) {
+    const handler = ledgerRoutes.get(url.pathname)
+    if (handler !== undefined) {
+      Promise.resolve(handler(req, res)).catch((error) => {
+        if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end(String(error))
+      })
+      return
+    }
+    if (url.pathname.startsWith('/tokbook/')) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: `no host route for ${url.pathname}` }))
+      return
+    }
+  }
+
+  /* ── fixture 路由：只服务预览模式（独立查看器在上面就返回了，走不到这里） ── */
   if (url.pathname === '/tokbook/overview') {
     res.writeHead(200, { 'content-type': 'application/json' })
     const mode = process.env.TOKBOOK_MODE ?? ''
@@ -487,6 +668,14 @@ const server = createServer((req, res) => {
   if (url.pathname === '/tokbook/rescan') {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end('{}')
+    return
+  }
+  // 通道用量 tab：`?range=` 是唯一入参，非法/缺失就照 host 的 400 回。
+  if (url.pathname === '/tokbook/usage') {
+    const range = url.searchParams.get('range')
+    const ok = RANGE_IDS.includes(range)
+    res.writeHead(ok ? 200 : 400, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(ok ? usageView(range) : { error: 'unknown or missing "range"' }))
     return
   }
   // Pricing tab: the route-card view (GET) + the whole-file write (PUT).
@@ -532,12 +721,20 @@ const server = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html' })
   const quotaMode = url.searchParams.get('quota')
   if (quotaMode !== null) serverState.quota = quotaMode
+  // 独立查看器的背景文字直说这个进程在读什么——免得把真账本当预览 fixture 看。
+  const backdrop = LEDGER
+    ? `<h1>dsh-tokbook — 独立查看器</h1>
+    <p>直接读本机账本目录（不摄取会话日志）。数据目录见浮窗的「统计口径」tab。</p>
+    <p>ESC 或点击遮罩关闭浮窗；关闭后点左下角的按钮可重新打开。</p>`
+    : `<h1>DSH 宿主应用（预览背景）</h1>
+    <p>这是模拟的宿主界面，用于预览 dsh-tokbook 悬浮窗口。弹窗打开时这些内容应被遮罩压暗。</p>
+    <p>TAB 键在弹窗打开时不应离开弹窗；ESC 或点击遮罩可关闭。</p>`
   res.end(`<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tokbook overlay preview</title>
+<title>${LEDGER ? 'tokbook 账本查看器' : 'tokbook overlay preview'}</title>
 <style>
   html,body{margin:0;height:100%;}
   body{
@@ -634,9 +831,7 @@ const server = createServer((req, res) => {
 </head>
 <body class="${url.searchParams.has('dark') ? 'dark' : ''}">
   <div class="fake-app">
-    <h1>DSH 宿主应用（预览背景）</h1>
-    <p>这是模拟的宿主界面，用于预览 dsh-tokbook 悬浮窗口。弹窗打开时这些内容应被遮罩压暗。</p>
-    <p>TAB 键在弹窗打开时不应离开弹窗；ESC 或点击遮罩可关闭。</p>
+    ${backdrop}
   </div>
   <div id="root"></div>
   <script type="module">
@@ -686,6 +881,10 @@ const server = createServer((req, res) => {
 
 const port = Number(process.env.PORT ?? 8931)
 server.listen(port, '127.0.0.1', () => {
+  if (LEDGER) {
+    console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}`)
+    return
+  }
   console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?empty=1, ?err=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
 })
 

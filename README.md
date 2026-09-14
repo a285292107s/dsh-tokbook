@@ -86,6 +86,7 @@ src/
       QuotaPanel.tsx  订阅额度 tab 外壳:取数 + 刷新策略 + 卡片排序
 scripts/
   build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS)
+  preview-overlay.mjs      浮窗预览台(fixture 数据)与独立查看器(--ledger,读真账本)
   smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试
   selfcheck-baseline.ts    重启/同步进度语义自检
   selfcheck-rebuild.ts     折叠重建 / refile / 跨实例去重自检
@@ -146,6 +147,22 @@ dsh web --patch /abs/path/to/tokbook/dev/cordis.yml   # 仅 host 半区
 
 > `--patch` overlay 只加载 host 半区(模块解析够不到包级 client 声明);要跑 browser
 > 半区,请按上文装进 profile。
+
+不启 DSH 也能看这份账本——**独立查看器**:同一个页面壳与同一份 client bundle,但
+`/tokbook/*` 由**真的 host 插件**作答(`lib/index.js` 挂在本进程的 cordis 根 context 上,
+配一个 `webServer` shim),直接读本机账本目录:
+
+```sh
+pnpm ledger                                                # 默认账本目录($DSH_HOME/tokbook)
+node scripts/preview-overlay.mjs --ledger D:/data/tokbook    # 或指定别的目录
+```
+
+脚本叫 `ledger` 而不是 `view`:`pnpm view` 是 pnpm 自己的内建命令(=`info`),会被它截走。
+
+它**只读**:不接 `sessionPersistence`,所以只看已入账的历史——「重新扫描」回报 skipped,
+不摄取新会话。DSH 的 settings / llm / credentials 缝缺席时按缺省降级(通道路由显示路由键、
+订阅额度显示「未配置 API key」)。不带 `--ledger` 时,同一个脚本仍是 fixture 预览台,
+用来看 UI 的各个状态与空态。
 
 ## 它怎么记 token
 
