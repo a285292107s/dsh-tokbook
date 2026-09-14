@@ -83,7 +83,8 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
   const [query, setQuery] = useState('')
   const [unknownOnly, setUnknownOnly] = useState(false)
   const [openKey, setOpenKey] = useState<string | null>(null)
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  // 通道卡默认收纳：这里记的是**被点开过**的路由，空集 = 全部收起。
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
 
   const changes = useMemo(() => stagedChanges(draft, baseline), [draft, baseline])
 
@@ -248,7 +249,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
   }, [])
 
   const toggleCard = useCallback((route: string) => {
-    setCollapsed((current) => {
+    setExpanded((current) => {
       const next = new Set(current)
       if (next.has(route)) next.delete(route)
       else next.add(route)
@@ -290,12 +291,12 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     return count
   }, [draft])
 
-  /** 卡折叠时关闭其抽屉，避免内容藏在折叠后面。 */
+  /** 卡收起时关闭其抽屉，避免内容藏在收纳后面。 */
   useEffect(() => {
     if (openKey === null) return
     const route = openKey.split('\u0000')[0] ?? ''
-    if (collapsed.has(route)) setOpenKey(null)
-  }, [collapsed, openKey])
+    if (!expanded.has(route)) setOpenKey(null)
+  }, [expanded, openKey])
 
   const cards = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -381,7 +382,7 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
                   key={card.route}
                   card={card}
                   baseline={baseline.models}
-                  collapsed={!filtering && collapsed.has(card.route)}
+                  collapsed={!filtering && !expanded.has(card.route)}
                   openKey={openKey}
                   onToggleCard={toggleCard}
                   onToggleRow={toggleRow}
