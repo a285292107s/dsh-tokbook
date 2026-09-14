@@ -213,34 +213,55 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   position:relative;width:100%;overflow:hidden;
   background-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
 }
-/* 柱顶 1px 受光边 + 峰值柱内侧墨色的**顶部盖片**：面板有 --dtpl-metal 那道机加工受光边，
+/* 柱顶 1px 受光边 + 峰值柱内侧的**顶部盖片**：面板有 --dtpl-metal 那道机加工受光边，
    柱子此前是纯色块。盖片高度与底面都写 3%，所以它在 68px、2px 柱上都按比例成立（2px 柱上
-   盖片被 overflow 裁掉，只剩受光边——不会缩成一团）。墨边仍是全周，形与色各分一层照旧。 */
+   盖片被 overflow 裁掉，只剩受光边——不会缩成一团）。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill::before{
   content:"";position:absolute;left:0;right:0;top:0;height:1px;
   background:color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
 }
-/* 峰值：黄牌 + 墨边。**墨边同时解决两件事**——恒定黄对白底只有 1.57:1，边界由墨边给到
-   18:1；而且峰值因此是「形」上的不同（带框的块 vs 无框的块），不再是只靠颜色区分。 */
+/* 峰值：**更亮的中性块 + 柱值标签前一枚黄牌**，柱身上不带任何黄。
+   缘由是黄的面积预算——黄只出现在当前页 / 峰值 / 徽记三处，这条规则管的是「几处」而没管
+   「多大」。徽记 7×13px、当前页标记 5px 宽，而峰值柱恒为满高（峰值就是量程 max，柱高永远
+   92px），一根约 43×92px 的实心黄把全 UI 的黄面积吃掉了约 97%。于是「黄 = 小件」的稀缺性
+   失效：满屏唯一的饱和色落在最大的那块面上，视线被钉在这里，而这张图要读的是分布的形状。
+   且它是冗余编码——「哪天最多」柱高已经说明，标签又已经加粗提亮（见下 .is-peak 标签），
+   黄只贡献了「报警」的语气。恒定的黄还有个主题不对称：#FFCD00 对深底 9.28:1 是全屏最响的
+   东西，对白卡只有 1.57:1 只是块淡黄——同一套 CSS 在深色主题下重得多。这也是 D-028 撤掉
+   峰值参考线用过的同一把尺子（收益抵不过打扰）。
+   **黄在柱身上试过三版，全被否掉，最后一版还错在原则上。** ① 6×3px 贴左下角：一枚不知从哪
+   来的黄块（「只有立柱的左下角有,看起来很奇怪」）。② 改成贯通柱宽的柱脚黄条：又成了「上下
+   各有一条黄线」。③ 病根在于**柱顶 3% 的压边与柱脚 3px 的黄条都是"线"**——tokens 那条
+   「它是"料"，不是"线"」本来就禁止黄以线条出现（恒定的黄做细线在浅底上是 1.57:1 的糊线），
+   而我把它画成了两根细线；两条平行线贴着同一个矩形的上下边，读起来是一圈「取景框」，不是
+   一枚件。所以黄从柱身**整个撤掉**，回到它唯一站得住的形态：**一枚实心小黄牌（4×8px，节徽记
+   的 0.6 倍）+ 墨边**，挂在峰值那个数值前面（.dtpl-bar-label.is-peak::before）——「黄牌 + 黑
+   边」正是工业标识的写法，也是本窗口「当前页标记 = 黄块 + 墨边」「口径词前一枚徽记」同一套
+   记号；挂在数字上，标记与它标注的值就不会走散（这也是数据图形该有的做法：用形状 + 文字标注
+   峰值，而不是只靠颜色）。柱身因此只剩形与明度：墨边（形）+ 70% vs 45%（明度）。
+   **70% 是量出来的，不是拍的**：82% 时峰值柱体是 #D4D5D6，与黄 #FFCD00 的明度几乎相同（9.4:1
+   vs 9.0:1 对深底），黄牌挨着浅块也读不出来——留着黄却看不见它，等于白留。70% 时柱体约
+   #B7B8B9（对深底 ≈6.9:1），仍是全图最亮的一根（其余柱 3.9:1）。再往下压就会和邻柱糊在一起，
+   峰值也认不出。
+   墨边仍照旧：恒定黄对白底只有 1.57:1 的老问题不再存在，但它让峰值的边界在浅色主题下由
+   「深块 + 更深的描边」给出，深色主题下则是一道清晰的墨框。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak{
-  background-color:var(--dtpl-brand);
+  background-color:color-mix(in srgb,var(--dtpl-fg) 70%,transparent);
   box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
+/* 峰值柱顶那 3% 回到墨色：柱身不承担黄，这枚盖片只做「机加工件的顶边」。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak::before{
   top:1px;height:3%;background:var(--dtpl-on-brand);
 }
-/* 底座与零刻度：柱脚一枚 3px 高的样板，峰值更宽——它是「装上去的件」，不只是涂了色的块。
+/* 零刻度：挂在 .dtpl-bar 上、贴 bottom:0——柱子的零高度不参与定位。
    零日**不写「0」**（等宽 0 只有 5.5px 宽，读起来是标签而不是测量结果）：基线上一道 2×3px 的
    硬刻度，取 --dtpl-fg-3（在深底上是那枚全图最亮的中性灰）：2px 的块比 1px 线的观感弱，
-   再压透明度就会在深色主题里消失。两块都挂在 .dtpl-bar 上、都贴 bottom:0——柱子的零高度
-   不参与定位。 */
-[data-plugin="dsh-tokbook"] .dtpl-bar.is-zero::after,
-[data-plugin="dsh-tokbook"] .dtpl-bar.is-peak::after{
-  content:"";position:absolute;left:0;bottom:0;height:3px;pointer-events:none;
-  background:var(--dtpl-on-brand);
+   再压透明度就会在深色主题里消失。这枚刻度**居中于自己那一列**——它量的是这一列，左右两角
+   没有含义，贴左角同样是一枚「不知从哪来的块」（它由此也和柱值标签同轴）。 */
+[data-plugin="dsh-tokbook"] .dtpl-bar.is-zero::after{
+  content:"";position:absolute;left:calc(50% - 1px);bottom:0;width:2px;height:3px;
+  pointer-events:none;background:var(--dtpl-fg-3);
 }
-[data-plugin="dsh-tokbook"] .dtpl-bar.is-zero::after{width:2px;background:var(--dtpl-fg-3);}
-[data-plugin="dsh-tokbook"] .dtpl-bar.is-peak::after{width:6px;}
 /* 每根柱自带数值：不用悬停也能读图。偏移量写成 inline——重复填充高度的表达式，让数字贴在自己的柱顶。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-label{
   position:absolute;left:50%;transform:translateX(-50%);
@@ -249,6 +270,17 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   white-space:nowrap;pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:600;}
+/* 峰值的黄牌：4×8px（节徽记的 0.6 倍）+ 墨边，挂在**数值前面**——黄在这一屏的唯一形态是
+   「实心块 + 墨边」，而它挂在数字上，标记与它标注的值就不会走散。柱身那三版失败的黄
+   （角块 / 通宽柱脚 / 上下两条线）都长在几何上，说的却不是数据；这枚说的是「这一根是峰值」，
+   而且它同时是形状：数据图形的峰值不该只靠颜色说出来（形状 + 文字 + 明度，三层各自成立）。
+   内联块 + vertical-align:-1px，与 10px 等宽数字的基线对齐；标签整体仍由 left:50% +
+   translateX(-50%) 居中，于是「黄牌 + 数字」作为一组居中在柱顶，而不是把数字单独推偏。 */
+[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak::before{
+  content:"";display:inline-block;width:4px;height:8px;vertical-align:-1px;
+  margin-right:5px;background:var(--dtpl-brand);
+  box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
+}
 /* 零日的数不由标签承担：柱高为 0 时「0」只是一个字符的噪声（等宽 0 只有 5.5px 宽），
    它说的是基线自己就能说的事。量出来的零改由基线上那道 2×3px 刻度画（见上 .is-zero::after），
    所以标签在零日整枚撤掉，而不是挪个位置接着写。 */

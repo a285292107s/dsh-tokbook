@@ -150,9 +150,16 @@ function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
         // 标签骑在柱上而非图区上：偏移量与填充高度同表达式，数字永远停在自己的柱上方 2px。
         // 首尾列和其它列一样居中——图区左右各留了半个标签宽的边距（见 styles/ledger.ts）。
         // 零日不写数：`.is-zero` 那枚标签在样式表里被撤掉，由基线上的刻度画「量出来的零」。
+        // 这一类必须挂在**柱**上：柱脚那枚零刻度（`::after`）与「零日撤标签」都由
+        // `.dtpl-bar.is-zero` 选中——此前只挂在标签上，两条规则都是死的（零日照旧印出「0」，
+        // 零刻度从不出现）。峰值不需要挂在柱上：它的黄牌挂在标签上、明度与墨边挂在填充上。
         const columnH = columnHeight(tokens, max)
         return (
-          <div className="dtpl-bar" key={slots[index]!} title={`${slots[index]!}\n${formatTokens(tokens)}`}>
+          <div
+            className={`dtpl-bar${tokens === 0 ? ' is-zero' : ''}`}
+            key={slots[index]!}
+            title={`${slots[index]!}\n${formatTokens(tokens)}`}
+          >
             <span
               className={`dtpl-bar-label${isPeak ? ' is-peak' : ''}${tokens === 0 ? ' is-zero' : ''}`}
               style={{ bottom: `calc(${columnH} + 2px)` }}
