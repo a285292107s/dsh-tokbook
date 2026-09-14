@@ -112,6 +112,7 @@ D-011 之后实测的痛点:`LedgerOverlay.tsx` 曾到 ~1300 行(壳 + 五 tab +
 |---|---|
 | 决策本身、迫使它成立的背景、它取代了什么、代价与取舍 | `DECISIONS.md` 条目(**≤ 40 行**) |
 | 契约(wire 形状 / 配置键 / 路由 / 数据文件 / 界面词表) | [`CONTRACTS.md`](CONTRACTS.md) |
+| 入口与功能面(它是什么 / 怎么装 / 怎么配 / 怎么跑 / 当前缺口) | [`README.md`](../README.md)——**只到这里**:界面规格、实测数字与机制推理不进 README |
 | 机制推理、当前界面规格、实测出来的尺寸与对比度 | [`DESIGN.md`](DESIGN.md) |
 | 踩坑与取舍对照(某个 CSS 写法、某个 loader 行为) | [`LESSONS.md`](LESSONS.md) |
 

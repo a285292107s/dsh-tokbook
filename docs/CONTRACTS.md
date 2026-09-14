@@ -1,6 +1,6 @@
 # Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-13 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-14 · supersedes: —
 
 其他代码与 browser 半区必须**分毫不差**依赖的事实的唯一家园:host 路由与 wire JSON、
 插件配置、消费的 `session/event` 类型、数据目录文件布局。
@@ -90,6 +90,15 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   `gate` 是**读时派生**、不进快照版本:每次拉取按当次响应重算,所以续费后不会被旧值掩盖。
 - `unconfigured` / `error` 卡没有 `gate`(它们没有可用数据);`balance` 与 `none` 门**不改变**
   `state`——它们仍是 `ok`,照常持久化为最近已知快照。
+- 官方额度只来自各通道自己的账户端点,由 host 用你的 key 拉取:
+  `GET /alpha/whoami`、`GET /alpha/usage/summary?since=<当期开始>`、`GET /alpha/billing/credits`、
+  `GET /alpha/billing/subscriptions`(Command Code;`since` 让花费与它对照的额度池同属一个计费
+  周期);`GET https://opencode.ai/zen/go/v1/usage`(OpenCode Go)。key 只在 host 侧解析,
+  **从不过 wire**。
+- 取数走 **stale-while-revalidate**:host 先给数据目录里该通道的最近已知快照
+  (`quota-<provider>.json`),只有它超过新鲜度预算才真的打通道 API;内存卡另缓存 30s。browser
+  逐通道独立请求(`/tokbook/quota?provider=<路由键>`),**某张卡的数据一到就渲染**,慢/失败的
+  通道不阻塞其余卡。
 - `range` id 是以本地日历天命名的窗口,与它们读取的日文件对应。
 - 从未见过通道头的行归入 `'(未知)'` 组。
 - 价格未知模型计 ¥0,并在 `unpricedModels` 中列出——口径是**价格未知**,不是免费(费率为 0

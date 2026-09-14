@@ -566,9 +566,11 @@ dsh-tokbook/
 对比度问题——是「看不出它可以点」。
 `ui-ux-pro-max` 数据集里命中的是通用条目(`compact-label-overflow` 只约束长度不可预测的值、
 并给键盘与指针用户完整文本;`font-size-scale`、`table-handling`、`truncation-strategy`、
-`number-tabular`、`elevation-consistent`)。本仓库是桌面 Web 的 DSH 插件,**移动端 App 专章
-不适用**(安全区、haptics、Dynamic Type、底部导航一律不引用);无障碍仍按 WCAG 口径查:触摸
-目标 ≥44、焦点指示不遮挡控件、颜色不单独承载语义(状态同时有文字徽章)。
+`number-tabular`、`elevation-consistent`)。四档价单元格是四个**真正的输入框**(Tab 依次走过),
+折叠与「按量 / 订阅」开关是带 `aria-expanded` / `aria-pressed` 的真按钮;状态文本只留在顶部
+工具栏里报,不遮挡任何控件。本仓库是桌面 Web 的 DSH 插件,**移动端 App 专章不适用**(安全区、
+haptics、Dynamic Type、底部导航一律不引用);无障碍仍按 WCAG 口径查:触摸目标 ≥44、
+焦点指示不遮挡控件、颜色不单独承载语义(状态同时有文字徽章)。
 
 ### 4. 前端（保留浮窗形态，内容升级，覆盖 §6.1/§6.2）
 
