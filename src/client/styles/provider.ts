@@ -12,7 +12,7 @@ export const CSS_PROVIDER = `/* 通道用量 tab */
   position:relative;appearance:none;border:0;background:transparent;
   height:28px;padding:0 14px;
   font:inherit;font-size:12px;line-height:18px;font-weight:500;
-  color:var(--dtpl-fg-3);white-space:nowrap;cursor:pointer;
+  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:background .15s ease,color .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-range-tab + .dtpl-range-tab{border-left:.5px solid var(--dtpl-hairline);}

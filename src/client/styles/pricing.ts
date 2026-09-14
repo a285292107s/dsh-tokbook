@@ -9,7 +9,9 @@ export const CSS_PRICING = `/* 价格表 tab */
   border:1px solid var(--dtpl-border);background:transparent;color:var(--dtpl-fg);
   font:inherit;font-size:12px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-search::placeholder{color:var(--dtpl-fg-3);}
+/* 工具栏搜索框是**唯一一处 placeholder-only** 的字段（空间预算，见 UI-SPEC §6.8）：
+   正因为它没有持久可见的标签，placeholder 就是它唯一可见的名字，所以墨色走 fg-2 而不是三级色。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-search::placeholder{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-price-chip{
   appearance:none;flex:none;height:28px;padding:0 10px;
   display:inline-flex;align-items:center;gap:6px;
@@ -73,7 +75,7 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-switch button{
   position:relative;appearance:none;border:0;background:transparent;
   height:24px;padding:0 11px;
-  color:var(--dtpl-fg-3);font:inherit;font-size:11px;line-height:16px;font-weight:500;
+  color:var(--dtpl-fg-2);font:inherit;font-size:11px;line-height:16px;font-weight:500;
   white-space:nowrap;cursor:pointer;
   transition:background .15s ease,color .15s ease;
 }
@@ -276,7 +278,7 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost{
   appearance:none;border:0;background:transparent;
   height:24px;padding:0 8px;
-  color:var(--dtpl-fg-3);font:inherit;font-size:11px;cursor:pointer;
+  color:var(--dtpl-fg-2);font:inherit;font-size:11px;cursor:pointer;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);}
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost-danger:hover{color:var(--dtpl-err);background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);}

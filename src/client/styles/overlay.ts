@@ -73,11 +73,14 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
   margin:0;padding:0 20px;
   border-bottom:1px solid var(--dtpl-border);
 }
+/* 未选中项的墨色是 fg-2，不是 fg-3：它是**控件的文字**，不是装饰，浅色皮肤下三级色只有 3.47:1。
+   「当前页」的区别改由字重 600 + 6% 洗色 + 底部那条 5px 黄块三样一起给——状态照样一眼看出，
+   而不用把没选中的字洗淡到读不清（DESIGN §4 那条「安静由字号、字距与留白做」）。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab{
   position:relative;appearance:none;flex:1;border:0;background:transparent;
   height:30px;padding:0 12px;
   font:inherit;font-size:12px;line-height:18px;font-weight:500;
-  color:var(--dtpl-fg-3);white-space:nowrap;cursor:pointer;
+  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:background .15s ease,color .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tab + .dtpl-tab{border-left:.5px solid var(--dtpl-hairline);}

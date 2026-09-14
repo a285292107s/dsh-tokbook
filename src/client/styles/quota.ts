@@ -20,7 +20,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   position:relative;appearance:none;border:0;background:transparent;
   height:24px;padding:0 11px;
   font:inherit;font-size:11px;line-height:16px;font-weight:500;
-  color:var(--dtpl-fg-3);white-space:nowrap;cursor:pointer;
+  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:background .15s ease,color .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt + .dtpl-quota-autorefresh-opt{border-left:.5px solid var(--dtpl-hairline);}
@@ -32,12 +32,11 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt.dtpl-quota-autorefresh-on::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
 }
+/* 「每 N 分钟自动刷新」是**正在生效的机制**，不是健康状态：绿只留给真正的 ok，所以它走中性色。
+   墨色取 fg-2（11px 正文）；「哪一档被选中」由上面那颗实条说明，不需要这一行再换一档颜色。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-state{
-  margin-left:auto;color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
+  margin-left:auto;color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
 }
-/* 「每 N 分钟自动刷新」是**正在生效的机制**，不是健康状态：绿只留给真正的 ok，
-   所以这条留在中性色——它旁边那颗实条已经说明选中的是哪一档。 */
-[data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-state.dtpl-quota-autorefresh-live{color:var(--dtpl-fg-2);}
 
 [data-plugin="dsh-tokbook"] .dtpl-quota-cards{display:flex;flex-direction:column;gap:12px;}
 /* 一张订阅卡 = 同一块读数面板（1px 硬边框 + 3% 洗色 + 金属反光）。 */
@@ -104,8 +103,10 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   content:"";width:6px;height:6px;border-radius:50%;corner-shape:round;
   background:currentColor;
 }
+/* 「未配置」是**状态文字**（11px），所以走 fg-2：quiet 由前置状态点与描边表达，
+   不靠把字洗淡——三级色在浅色皮肤上只有 3.47:1。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-chip-muted{
-  color:var(--dtpl-fg-3);
+  color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-chip-err{
   color:var(--dtpl-err);

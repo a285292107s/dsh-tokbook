@@ -102,7 +102,9 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
    而这里唯一有色相的 token 是品牌黄，它是身份色、不外借给数据分类。区分由字重 +
    始终在场的「订阅价值」标签承担，换任何皮肤都成立。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-v.is-cash{color:var(--dtpl-fg);font-weight:600;}
-[data-plugin="dsh-tokbook"] .dtpl-hero-money-v.is-zero{color:var(--dtpl-fg-3);font-weight:400;}
+/* 零支出仍占住该行，但走 fg-2（不是三级色）：它是一枚**读数**，12px 正文不能只有 3.47:1；
+   「金额为 0」这件事由墨色与字重降一档表达，不靠洗淡。 */
+[data-plugin="dsh-tokbook"] .dtpl-hero-money-v.is-zero{color:var(--dtpl-fg-2);font-weight:400;}
 /* 累计事实带：累计单调递增、永不触发决策，所以它只证明「账本在记账」——一条次要行读完。
    层级靠**字号 + 只在数字上加字重**：文字部分留在 fg-2（11px 正文要 4.5:1，三级色不够），
    数字升到主墨色。安静由字号、字距与留白做，不靠把字洗淡到读不清。 */
@@ -325,7 +327,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   position:relative;appearance:none;border:0;background:transparent;
   padding:3px 14px 8px;
   font:inherit;font-size:12px;line-height:18px;font-weight:500;
-  color:var(--dtpl-fg-3);white-space:nowrap;cursor:pointer;
+  color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:color .15s ease,background .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-bd-tab + .dtpl-bd-tab{border-left:.5px solid var(--dtpl-hairline);}

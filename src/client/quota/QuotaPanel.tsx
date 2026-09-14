@@ -148,7 +148,7 @@ function AutoRefreshControl({ value, onChange }: { value: number; onChange: (v: 
           </button>
         ))}
       </div>
-      <span className={`dtpl-quota-autorefresh-state${value > 0 ? ' dtpl-quota-autorefresh-live' : ''}`}>
+      <span className="dtpl-quota-autorefresh-state">
         {value > 0 ? `每 ${value} 分钟自动刷新` : '不自动刷新'}
       </span>
     </div>
