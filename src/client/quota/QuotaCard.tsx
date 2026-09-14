@@ -193,8 +193,8 @@ function QuotaWindowRow({ window }: { window: QuotaWindowView }) {
     ? `已用 ${money(window.usedUsd!)} / ${money(window.capUsd!)}`
     : `已用 ${pct}%`
   const remaining = hasAmounts
-    ? `剩 ${money(Math.max(0, (window.capUsd ?? 0) - (window.usedUsd ?? 0)))}`
-    : `剩 ${Math.max(0, Math.round(100 - pct))}%`
+    ? `剩余 ${money(Math.max(0, (window.capUsd ?? 0) - (window.usedUsd ?? 0)))}`
+    : `剩余 ${Math.max(0, Math.round(100 - pct))}%`
   return (
     <div className="dtpl-quota-window" data-window={window.id} data-tone={tone}>
       <div className="dtpl-quota-window-line1">

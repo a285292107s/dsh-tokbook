@@ -10,7 +10,7 @@ export const CSS_PRICING_TIMELINE = `
 /* 轨用皮肤的三级文字色，而不是前景色的稀释洗色：它必须读成日期挂靠的那条线。3px，不是 hairline：1px 读起来像一条游离分隔线。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-rail{
   position:absolute;left:0;right:0;top:17px;height:3px;
-  border-radius:1.5px;background:var(--dtpl-fg-3);
+  border-radius:0;background:var(--dtpl-fg-3);
 }
 /* 一个节点：点在轨上，日期挂在点下方。背后有分段的节点是 button（轴是导航，不是装饰）。盒子占满整个轨道高度——这才让 5px 的点拥有 36px 热区。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-node{
@@ -31,10 +31,12 @@ export const CSS_PRICING_TIMELINE = `
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap] .dtpl-tl-node-k{margin-top:0;}
-/* 点落在轨上：5px 在 16px 处、3px 的线在 17px 处，两者中心都在 18.5。fg-2，不是 fg-3：点是非文字物体，需要与所处表面 3:1。 */
+/* 点落在轨上：5px 在 16px 处、3px 的线在 17px 处，两者中心都在 18.5。fg-2，不是 fg-3：点是非文字物体，需要与所处表面 3:1。
+   直角：轴上的点是**工程刻度**，与趋势图的柱同属数据图形，所以和柱一样是方的。
+   （真正保留的圆只有三处：侧栏按钮、状态灯、额度表盘——灯是灯，刻度是刻度。） */
 [data-plugin="dsh-tokbook"] .dtpl-tl-dot{
   position:absolute;top:16px;left:50%;
-  width:5px;height:5px;border-radius:50%;box-sizing:border-box;
+  width:5px;height:5px;box-sizing:border-box;
   background:var(--dtpl-fg-2);transform:translateX(-50%);
 }
 /* 两端把标签收在轨道内——第一个从左缘起，最后一个到右缘止。它们本身就是括号，所以没有任何东西往里推。 */

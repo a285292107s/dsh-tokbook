@@ -1,5 +1,5 @@
 /**
- * 用量总览 tab 内容：今日 hero、四桶构成、每日趋势，以及按模型 / 按工作区的拆分切换（拆分体在 `Breakdowns.tsx`）。
+ * 用量总览 tab 内容：今日 hero、四桶构成、近 14 天趋势，以及按模型 / 按工作区的拆分切换（拆分体在 `Breakdowns.tsx`）。
  *
  * @module dsh-tokbook/client/LedgerView
  */
@@ -32,8 +32,8 @@ const ZERO_TOTALS: UsageTotals = {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="dtpl-stat">
-      <div className="dtpl-v">{value}</div>
       <div className="dtpl-k">{label}</div>
+      <div className="dtpl-v">{value}</div>
     </div>
   )
 }
@@ -78,18 +78,22 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
   if (average <= 0) return todayTokens === 0 ? noRecord : null
 
   // 零天需要基线做上下文；从零算出的百分比只是噪音披上了信号的外衣。
+  // 「今天还没记录」写进标签而不是只写进 title：这一行的三个状态都要在原地读得懂，
+  // 否则读者要么悬停，要么把基线数字当成今天的数字。
   if (todayTokens === 0) {
     return {
-      label: `近${BASELINE_DAYS}天日均`,
+      label: `近${BASELINE_DAYS}天日均（今天还没有记录）`,
       value: formatTokens(average),
       title: `今天还没有记录；近 ${BASELINE_DAYS} 天日均 ${formatTokens(average)} 词元。`,
     }
   }
 
   const percent = Math.round(Math.abs(todayTokens / average - 1) * 100)
+  // 持平这一档也要给出数字：它正是读者此刻最想知道的「平均水平是多少」。
   if (percent === 0) {
     return {
-      label: `≈ 近${BASELINE_DAYS}天日均`,
+      label: `持平于近${BASELINE_DAYS}天日均`,
+      value: formatTokens(average),
       title: `今日与近 ${BASELINE_DAYS} 天日均持平（${formatTokens(average)} 词元）。`,
     }
   }
@@ -102,7 +106,7 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
 }
 
 /**
- * 连续日历窗口内的每日词元柱状图。宿主的 `byDay` 只带有点记录的天，故窗口在此重建：无记录的天变成零柱而不是消失——否则时间轴会被悄悄压缩。每根柱自带数值标签，读图不依赖 hover。
+ * 连续日历窗口内按日的词元柱状图。宿主的 `byDay` 只带有点记录的天，故窗口在此重建：无记录的天变成零柱而不是消失——否则时间轴会被悄悄压缩。每根柱自带数值标签，读图不依赖 hover。
  */
 function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   if (days.length === 0) return null
@@ -121,11 +125,19 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   const peakIndex = peak > 0 ? values.indexOf(peak) : -1
   return (
     <section className="dtpl-trend">
-      <h2 className="dtpl-sec-title">每日词元</h2>
+      {/* 节标题把**窗口词**放在最前面，而不是「每日词元」这种按日说法。
+          缘由是一次真实的撞车：「今日词元」（hero 的口径词）与「每日词元」只差一个字、
+          又共用「词元」这个头，两个小标题读起来像一对兄弟——维护者原话「太过相近」。
+          两者其实是两种不同的陈述：hero 是**一个窗口里的一个总量**，这张图是
+          **一个窗口里逐日的分布**。所以图这一节改用一个完全不同结构的名字：
+          窗口（近 N 天）领起 + 陈述类型（趋势），与「今日词元」不共享任何字串。
+          这同时把窗口词从下面的合计行提到了标题里——每个窗口自己报名，本来就是这一屏的规矩。
+          N 直接取 TREND_DAYS，标题与柱子数因此不可能对不上。 */}
+      <h2 className="dtpl-sec-title">近 {TREND_DAYS} 天趋势</h2>
       <div
         className="dtpl-bars"
         role="img"
-        aria-label={`每日词元柱状图：${shortDay(slots[0]!)} 至 ${shortDay(slots[slots.length - 1]!)} 共 ${slots.length} 天，合计 ${formatTokens(sum)} 词元${peak > 0 ? `，峰值 ${shortDay(slots[peakIndex]!)} 的 ${formatTokens(peak)}` : ''}。`}
+        aria-label={`近 ${String(TREND_DAYS)} 天词元柱状图：${shortDay(slots[0]!)} 至 ${shortDay(slots[slots.length - 1]!)} 共 ${slots.length} 天，合计 ${formatTokens(sum)} 词元${peak > 0 ? `，峰值 ${shortDay(slots[peakIndex]!)} 的 ${formatTokens(peak)}` : ''}。`}
       >
         {slots.map((day, index) => {
           const tokens = values[index]!
@@ -155,8 +167,8 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
         {slots.map(day => <span key={day}>{shortDay(day)}</span>)}
       </div>
       <p className="dtpl-trend-sum">
-        最近 {slots.length} 天（{active} 天有记录）合计 {formatTokens(sum)} 词元
-        {peak > 0 && <>，峰值 {slots[peakIndex]}（{formatTokens(peak)}）</>}。
+        最近 {slots.length} 天合计 {formatTokens(sum)} 词元
+        {active < slots.length ? `（其中 ${active} 天有记录）` : ''}。
       </p>
     </section>
   )
@@ -176,77 +188,116 @@ export function LedgerView({ overview, onOpenPricing }: {
   )
   // 缓存写入是否是本账本的维度。按安装决定而非按天：聚合无法区分「上报了 0」与「未上报」，按天决定会让通道组合变化时网格 reflow。零桶因此表示「本安装不关心这一维」。
   const showCacheWrite = overview.byDay.some(row => row.totals.cacheWriteTokens > 0)
+  // 「出过事」按**今天**报：失败与未上报用量只在发生的时候可行动，累计值既不及时也没有
+  // 分母（「累计 7 失败」说明不了现在有没有问题）。累计那一侧只留能加总的量。
+  const todayFailures = today.failures ?? 0
+  const todayUnknown = today.usageUnknown ?? 0
+  const totalUnknown = overview.total.usageUnknown ?? 0
 
   return (
     <>
       {empty ? (
         <div className="dtpl-empty">
           <UsageGlyph className="dtpl-empty-ico" />
-          <p className="dtpl-empty-title">尚未记录到 token 用量</p>
-          <p className="dtpl-empty-sub">本插件监听各通道回报的用量并逐条记录。产生对话后点击右下角“重新扫描”即可回填，或用过一段时间后这里会累计出数据。</p>
+          <p className="dtpl-empty-title">还没有记录到词元用量</p>
+          <p className="dtpl-empty-sub">本插件记录本机每次模型调用的用量。先聊几句就会有数据；安装前的历史记录，点右下角「重新扫描」可以补上。</p>
         </div>
       ) : (
         <>
+          {/* 首屏只有一个窗口（今日）。累计事实不另占卡，但也不再与今日数字平起平坐：
+              它落在发丝线下一条次要行里，靠「累计」这一个分区词表明口径，而不是每个标签都自带前缀。
+              这样今日金额与累计金额不再同基线并排——此前两行看起来是同一组数字。 */}
           <div className="dtpl-hero">
-            <div className="dtpl-hero-main">
-              <span className="dtpl-total-k">今日词元</span>
-              <span className="dtpl-total-num">{formatTokens(hero.tokens)}</span>
-              {hero.reference !== null && (
-                <span className="dtpl-hero-base" title={hero.reference.title}>
-                  {hero.reference.label}
-                  {hero.reference.value !== undefined && <> <b>{hero.reference.value}</b></>}
+            <div className="dtpl-hero-top">
+              <div className="dtpl-hero-lead">
+                <span className="dtpl-total-k">今日词元</span>
+                <span className="dtpl-hero-figure">
+                  <span className="dtpl-total-num">{formatTokens(hero.tokens)}</span>
+                  {/* 参照行与主角数字同行：它是这张卡存在的理由（今天算不算多），不再做脚注。 */}
+                  {hero.reference !== null && (
+                    <span className="dtpl-hero-delta" title={hero.reference.title}>
+                      {hero.reference.value !== undefined && <><b>{hero.reference.value}</b>{' '}</>}
+                      {hero.reference.label}
+                    </span>
+                  )}
                 </span>
-              )}
-              {/* 有话可说的桶各占一行；两者都无话时用一个灰色零撑住行。零从不借强调色：纯订阅日没有现金支出。 */}
-              <span className="dtpl-hero-money">
+              </div>
+              {/* 金额恒为今日，与下方累计事实带分属两个口径，所以各走各的排版。
+                  有话可说的桶各占一行；两者都无话时用一个灰色零撑住行。零从不借强调色：纯订阅日没有现金支出。 */}
+              <div className="dtpl-hero-money">
                 {(hero.spend > 0 || hero.subscriptionValue === 0) && (
-                  <span className={`dtpl-hero-cost${hero.spend > 0 ? '' : ' dtpl-hero-cost-zero'}`}>
-                    {money(hero.spend)}<em className="dtpl-hero-cost-k">今日实际支出</em>
+                  <span className="dtpl-hero-money-row">
+                    <span className="dtpl-hero-money-k">今日实际支出</span>
+                    <b className={`dtpl-hero-money-v${hero.spend > 0 ? ' is-cash' : ' is-zero'}`}>{money(hero.spend)}</b>
                   </span>
                 )}
                 {hero.subscriptionValue > 0 && (
-                  <span className="dtpl-hero-value" title="订阅通道按官方价折算的价值——非实际扣款，不加入上方支出">
-                    <b>{money(hero.subscriptionValue)}</b> 今日订阅价值
+                  <span className="dtpl-hero-money-row" title="订阅通道的这些用量若按量付费本来要花的钱——你没有真的付它，所以它不加入今日实际支出">
+                    <span className="dtpl-hero-money-k">今日订阅价值</span>
+                    <b className="dtpl-hero-money-v">{money(hero.subscriptionValue)}</b>
                   </span>
+                )}
+              </div>
+            </div>
+            {/* 今日出过的事：只在有事时占行，且明确写「今日」——它与下面那条累计事实分属
+                两个口径，不该混在同一串里。 */}
+            {(todayFailures > 0 || todayUnknown > 0) && (
+              <p className="dtpl-hero-alert">
+                <span className="dtpl-hero-alert-k">今日</span>
+                {todayFailures > 0 && <span><b>{todayFailures}</b> 次失败</span>}
+                {todayFailures > 0 && todayUnknown > 0 && <i aria-hidden="true">·</i>}
+                {todayUnknown > 0 && (
+                  <span title={`${String(todayUnknown)} 次计费调用没有拿到通道上报的用量（多为中途取消的请求）：计入请求次数，但没有词元可加——是「未知」，不是 0。所以今天的词元数比实际略少。`}>
+                    <b>{todayUnknown}</b> 次调用没上报用量
+                  </span>
+                )}
+              </p>
+            )}
+            <div className="dtpl-hero-foot">
+              <span className="dtpl-hero-foot-k">累计</span>
+              <span className="dtpl-hero-facts">
+                <span className="dtpl-hero-fact"><b>{overview.total.requests}</b> 请求</span>
+                <i aria-hidden="true">·</i>
+                <span className="dtpl-hero-fact"><b>{formatTokens(overview.totalTokens)}</b> 词元</span>
+                <i aria-hidden="true">·</i>
+                <span className="dtpl-hero-fact"><b>{money(overview.spend)}</b> 实际支出</span>
+                {overview.subscriptionValue > 0 && (
+                  <>
+                    <i aria-hidden="true">·</i>
+                    <span className="dtpl-hero-fact"><b>{money(overview.subscriptionValue)}</b> 订阅价值</span>
+                  </>
                 )}
               </span>
             </div>
-            <div className="dtpl-hero-meta">
-              <span className="dtpl-meta"><b className="dtpl-meta-n">{overview.sessions}</b> 会话</span>
-              <span className="dtpl-meta"><b className="dtpl-meta-n">{overview.total.requests}</b> 请求</span>
-              <span className={`dtpl-meta${(overview.total.failures ?? 0) > 0 ? ' dtpl-meta-warn' : ''}`}><b className="dtpl-meta-n">{(overview.total.failures ?? 0)}</b> 失败</span>
-              {/* 只在有这类调用时占行：它限定的是下面那个「累计词元」数字——那几次调用的用量未知，所以累计值比实际略少。 */}
-              {(overview.total.usageUnknown ?? 0) > 0 && (
-                <span
-                  className="dtpl-meta dtpl-meta-warn"
-                  title={`${String(overview.total.usageUnknown)} 次计费调用没有拿到通道上报的用量（多为中途取消的请求）：计入请求次数，但没有词元可加——是「未知」，不是 0。所以「累计词元」比实际略少。原因见「统计口径」。`}
-                >
-                  <b className="dtpl-meta-n">{overview.total.usageUnknown}</b> 用量未知
-                </span>
-              )}
-              <span className="dtpl-meta"><b className="dtpl-meta-n">{formatTokens(overview.totalTokens)}</b> 累计词元</span>
-              <span className="dtpl-meta">
-                <b className="dtpl-meta-n">{money(overview.spend)}</b> 累计实际支出
-                {overview.subscriptionValue > 0 && <> · <b className="dtpl-meta-n">{money(overview.subscriptionValue)}</b> 累计订阅价值</>}
-              </span>
-            </div>
+            {/* 底边刻度轨：hero 是一块**仪表**，这条轨就是它的量尺。line 由 ledger 片段画
+                （三层 repeating-linear-gradient + 一条基线），这里只出位置与顺序。
+                纯装饰：aria-hidden，且不吃指针。 */}
+            <i className="dtpl-hero-rail" aria-hidden="true" />
           </div>
 
           {/* 首屏只有一个窗口：这些瓦片拆解的是 hero 数字，所以是今天的——不是累计的。 */}
           <div className="dtpl-sec-head">
             <h2 className="dtpl-sec-title">今日词元构成</h2>
             {hitRate !== null && (
-              <span className="dtpl-sec-aside" title="缓存读取 ÷（输入 + 缓存读取 + 缓存写入）——越高，同样的词元越便宜；部分命中不会凑整成 100%。">
+              <span className="dtpl-sec-aside" title="越高，同样的词元越便宜；部分命中不会凑整成 100%。">
                 缓存命中率 {hitRate}%
               </span>
             )}
           </div>
           <div className={`dtpl-grid${showCacheWrite ? '' : ' dtpl-grid-3'}`}>
-            <Stat label="输入" value={formatTokens(today.inputTokens)} />
+            {/* 「输入」不是「我发过去的全部文字」，而是其中**没命中缓存**的那部分；
+                标签必须自己说清这一点，否则这一格会把一次很长的对话读成很短。 */}
+            <Stat label="未命中输入" value={formatTokens(today.inputTokens)} />
             <Stat label="缓存读取" value={formatTokens(today.cacheReadTokens)} />
             {showCacheWrite && <Stat label="缓存写入" value={formatTokens(today.cacheWriteTokens)} />}
             <Stat label="输出" value={formatTokens(today.outputTokens)} />
           </div>
+          {/* 这一屏的加法律与词表，就地写一次：四桶与 hero 是同一个窗口，读者不该为了
+              把两处对上而切到「统计口径」页。 */}
+          <p className="dtpl-note dtpl-buckets-note">
+            词元（token）分四类、互不重复，相加即上方的「今日词元」；输出含模型的思考过程。
+            缓存命中率＝缓存读取 ÷ 输入侧三类之和。
+          </p>
 
           <DailyTrend days={overview.byDay} />
 
@@ -257,21 +308,23 @@ export function LedgerView({ overview, onOpenPricing }: {
             money={money}
           />
 
+          {/* 三条注记都是**全账本累计**口径，而它们上面是今日口径的内容——所以口径词
+                必须写在句子里，不能靠读者的位置感。 */}
           {(overview.total.compactions ?? 0) > 0 && (
-            <p className="dtpl-note">其中包含 {overview.total.compactions} 次上下文压缩 summarize 调用。</p>
+            <p className="dtpl-note">累计包含 {overview.total.compactions} 次自动压缩上下文的调用。</p>
           )}
           {overview.unpricedModels.length > 0 && (
             <p className="dtpl-note">
-              价格未知的模型（暂按 ¥0 计，不是免费）：{overview.unpricedModels.join('、')}
+              累计 {overview.unpricedModels.length} 个模型价格未知（暂按 ¥0 计，不是免费）：{overview.unpricedModels.join('、')}
               <button type="button" className="dtpl-pricing-empty-link" onClick={() => onOpenPricing('unpriced')}>去定价</button>
             </p>
           )}
-          {/* 金额侧的同一个口径问题：用量未知的调用无从计价，所以它们按 ¥0 进入支出——
-              与「价格未知」同形地说明，而不是让那个 0 冒充真实花费。 */}
-          {(overview.total.usageUnknown ?? 0) > 0 && (
+          {/* 金额侧的同一个口径问题：没上报用量的调用无从计价，所以它们按 ¥0 进入支出——
+              与「价格未知」同形地说明，而不是让那个 0 冒充真实花费。今天那几次在上面
+              的今日行里已单独报过，这里说的是**整本账**的规模。 */}
+          {totalUnknown > 0 && (
             <p className="dtpl-note">
-              其中 {overview.total.usageUnknown} 次调用用量未知（通道没上报）：只计次数、不计词元，
-              金额也按 ¥0 计——是「不知道」，不是免费。
+              累计 {totalUnknown} 次调用通道没上报用量：只计次数、不计词元，金额也按 ¥0 计——是「不知道」，不是免费。
             </p>
           )}
         </>

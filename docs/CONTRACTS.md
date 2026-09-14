@@ -30,8 +30,9 @@
 | 仅账本 | 卡内模型不在 settings / 适配器目录里,只有账本记过(`configured: false`) |
 | 模型名称 | `PricingModelView.name`:settings `models[].name` → 适配器目录的 `name`;行上**只显示其一**——有名字显示名字,没有才显示精确模型串(与模型选择器一致);精确串仍可从悬停与单元格读屏名读到 |
 | 价格未知 | 该 (路由, 模型) 没有价段(暂按 ¥0,**不是免费**) |
-| 用量未知 | 计费调用没有通道上报的 `usage`(`assistant/message` 多为中途取消的请求,`compaction/summary` 是没回报用量的 summarize):仍写行、仍计入请求次数(summarize 另计一次压缩),四桶一个都不加——计 0 是**未知**而非零消耗(`UsageTotals.usageUnknown`,概览与通道卡显示「用量未知 N」) |
-| 实际支出 / 订阅价值 | `billing: metered` / `subscription` 两个桶(`spend` / `subscriptionValue`) |
+| 未上报用量 | 计费调用没有通道上报的 `usage`(`assistant/message` 多为中途取消的请求,`compaction/summary` 是没回报用量的 summarize):仍写行、仍计入请求次数(summarize 另计一次压缩),四桶一个都不加——计 0 是**未知**而非零消耗(`UsageTotals.usageUnknown`,概览与通道卡报出「N 次调用没上报用量」) |
+| 实际支出 / 订阅价值 | `billing: metered` / `subscription` 两个桶(`spend` / `subscriptionValue`);订阅价值是**这些用量按量付费本来要花的钱**,不是现金,也不加入支出 |
+| 用量明细 | 概览里「按模型 / 按工作区」那一节的分区词——**同一份累计账本**的两种切法,列头与两列网格由这一节共用 |
 | 按工作区 | overview 的 `byWorkspace`(`WorkspaceUsageRow[]`)——每个工作区一行累计 |
 | 未归属 | `byWorkspace` 里 `id: ''` 的那一行:会话没有工作区目录、或目录未注册为工作区的记录 |
 | 通道路由键 | provider route key(账本里的通道标识) |
@@ -61,6 +62,10 @@
 
 Wire 形状要点(权威字段清单见 `src/types.ts`):
 
+- 概览载荷(`TokBookOverview`)**只带客户端真正渲染的字段**:价表、`rateRows`、`byHour` 不过 wire,
+  会话计数与「上次同步时刻」也不再过 wire(无人渲染的字段不留,`sessions` / `lastSyncAt` 已删)。
+  新鲜度由 `lastEventAt` + `syncStatus` / `syncError` 表达。概览的 `byModel` 顺序不是契约——
+  模型清单在**展示层**按词元降序排(占比条编码的就是词元,见 D-026)。
 - wire 上的金额是人民币(¥);**除非**某通道官方 API 以美元上报
   (`QuotaCard.usage / credits / windows.usedUsd / capUsd`,额度 tab 自己按美元展示)。
 - 额度卡的 `ok` 态还带**门**(`QuotaCard.gate: 'subscription' | 'balance' | 'none'`,缺省 =
@@ -212,11 +217,11 @@ profile patch 中的 `plugins.tokbook`,类型为 `TokBookConfig` + `PlanConfig`
 | `request/context`(+ `assistant/message`) | 不写行 | 维护会话最后已知的 `model`/`provider`,用于给失败行归属 |
 
 - **用量未知 ≠ 0**:计费调用没有 `usage` 时仍写行、仍计入 `requests`(summarize 还计一次
-  `compactions`),但四桶一个都不加——`UsageTotals.usageUnknown` 单独计数,概览以「用量未知 N」
-  标出(只在 >0 时占行),通道卡的请求行同样带一句。与「价格未知 ≠ 免费」同一条原则,只是对象
-  从价格换成用量。**不估算、不猜测**:这类调用的 token 数在日志里根本不存在(客户端在 usage
-  分片到达前就断了),所以没有可恢复的数字。**两条都要写行**:丢行等于让一次计费调用连同它的
-  用量一起消失,那比「用量未知」更不可查。
+  `compactions`),但四桶一个都不加——`UsageTotals.usageUnknown` 单独计数,概览的今日异常行报出
+  今天的次数、注记报出累计次数(只在 >0 时占行),通道卡的请求行同样带一句。与「价格未知 ≠ 免费」
+  同一条原则,只是对象从价格换成用量。**不估算、不猜测**:这类调用的 token 数在日志里根本不存在
+  (客户端在 usage 分片到达前就断了),所以没有可恢复的数字。**两条都要写行**:丢行等于让一次计费
+  调用连同它的用量一起消失,那比「未上报用量」更不可查。
 
 ## 数据目录
 
@@ -251,8 +256,8 @@ unlink 目标)。**例外**:`pricing.json` 先把上一版 rename 成 `.bak` 再
   totals 字段同一条重建路径。
 - **金额层不区分「用量未知」,但把它说出来**:这些行按 0 词元计成 ¥0,所以 `spend` /
   `subscriptionValue` 对它们偏低。这不是靠拆桶解决的——金额没有「未知」这个值——而是靠
-  **可见**:概览以「用量未知 N」标出这些调用,并在注记里说明金额按 ¥0 计、不是免费;通道卡的
-  请求行同样带「用量未知 N」。静默的 ¥0 才算违反「未知 ≠ 0」,标注过的 ¥0 不违反。
+  **可见**:概览的今日异常行报出今天的次数、注记报出累计次数并说明金额按 ¥0 计、不是免费;通道卡
+  的请求行同样带「N 次没上报用量」。静默的 ¥0 才算违反「未知 ≠ 0」,标注过的 ¥0 不违反。
 - 价格改动在**读取时**重新计价历史——不重写账本;计价入口是 (路由, 模型, 记录时间戳)
   两级解析(`priceAt` 取该时刻生效的价段,`slotAt` 再取该段内该时刻生效的峰谷时段;都没有就是
   价格未知)。费率行的身份是**当时生效的价段的生效时刻 + 那一刻生效的峰谷时段**(时段身份 =

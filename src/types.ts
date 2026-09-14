@@ -367,7 +367,6 @@ export interface ProviderUsageView {
  * subscriptionValue / totalCost / byModel。
  */
 export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour'> {
-  sessions: number
   /** 四桶之和（input + cacheRead + cacheWrite + output）。 */
   totalTokens: number
   updatedAt: number
@@ -377,7 +376,6 @@ export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRo
   records: number
   files: number
   lastEventAt: number | null
-  lastSyncAt: number | null
   syncStatus: 'idle' | 'running' | 'done' | 'error'
   syncError: string | null
 }

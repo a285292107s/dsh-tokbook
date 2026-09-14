@@ -41,7 +41,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           一次请求的用量被拆成四类、互不重复，加起来就是「词元合计」：
         </p>
         <div className="dtpl-doc-buckets">
-          <Bucket name="输入" desc="你发过去、但没命中缓存的文字量。" />
+          <Bucket name="未命中输入" desc="你发过去、但没命中缓存的文字量。" />
           <Bucket name="缓存读取" desc="命中了缓存、不必重新计算的文字量，费率更低。" />
           <Bucket name="缓存写入" desc="写入缓存的文字量；多数厂商不上报，多为 0。" />
           <Bucket name="输出" desc="模型回复的全部文字（含思考过程）。" />
@@ -49,7 +49,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <div className="dtpl-doc-eq" role="note">
           <span className="dtpl-doc-eq-lead">词元合计</span>
           <span className="dtpl-doc-eq-op">=</span>
-          <span className="dtpl-doc-eq-term">输入</span>
+          <span className="dtpl-doc-eq-term">未命中输入</span>
           <span className="dtpl-doc-eq-op">+</span>
           <span className="dtpl-doc-eq-term">缓存读取</span>
           <span className="dtpl-doc-eq-op">+</span>
@@ -58,7 +58,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           <span className="dtpl-doc-eq-term">输出</span>
         </div>
         <p className="dtpl-doc-sub">
-          输入侧三桶还派生出一个数字：<b>缓存命中率</b> = 缓存读取 ÷（输入 + 缓存读取 + 缓存写入）。越高，同样的词元越便宜——命中的那部分按低得多的费率计费。分母取<b>全部输入侧词元</b>（与 DSH 会话统计同口径）；只有真正零遗漏才显示 100%，部分命中会退到一位小数显示，不会被四舍五入凑成满命中。
+          输入侧三桶还派生出一个数字：<b>缓存命中率</b> = 缓存读取 ÷（未命中输入 + 缓存读取 + 缓存写入）。越高，同样的词元越便宜——命中的那部分按低得多的费率计费。分母取<b>全部输入侧词元</b>（与 DSH 会话统计同口径）；只有真正零遗漏才显示 100%，部分命中会退到一位小数显示，不会被四舍五入凑成满命中。
         </p>
         <p className="dtpl-doc-sub">
           金额 = 按每模型价格表（每百万词元多少元）逐条计价后累加。价格表存在本机、
@@ -69,8 +69,8 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           计费性质不同。时刻上分两级——先取该记录时间戳落在哪一段<b>调价段</b>（生效时间精确到整点），
           再取该段内该时刻落在哪个<b>峰谷时段</b>（星期几 + 几点到几点）；没被任何时段覆盖的
           时间按该段的<b>全天价</b>算。金额分成两个桶——
-          <b>实际支出</b>（按量通道真金白银的花费）与 <b>订阅价值</b>（订阅通道按官方价折算
-          的“省了多少”，<b>不是现金</b>，也不会混入上方支出数字）。
+          <b>实际支出</b>（按量通道真金白银的花费）与 <b>订阅价值</b>（订阅通道的这些用量若按量付费
+          本来要花的钱，<b>不是现金</b>，也不会混入上方支出数字）。
         </p>
         <p className="dtpl-doc-sub">
           价格表页<b>行内那四个数字改的是「当前生效那一段的全天价」</b>——改它等于重算用这段价
@@ -102,7 +102,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">中途取消 / 出错的请求</span>
-                <span className="dtpl-doc-gap-item-desc">已经发出去、但没等到厂商回复的那部分文字，厂商可能照常计费，本账本却拿不到用量。这类调用仍计入请求次数，并在概览里以「<b>用量未知 N</b>」单独标出——计入次数、不冒充 0 词元，金额也因此按 ¥0 计（<b>不是免费</b>）。</span>
+                <span className="dtpl-doc-gap-item-desc">已经发出去、但没等到厂商回复的那部分文字，厂商可能照常计费，本账本却拿不到用量。这类调用仍计入请求次数，并在概览里单独报出「<b>N 次调用没上报用量</b>」——计入次数、不冒充 0 词元，金额也因此按 ¥0 计（<b>不是免费</b>）。</span>
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">不走会话记录的调用</span>
@@ -135,14 +135,14 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">4</span>怎么核对</h2>
         <p className="dtpl-doc-sub">
           登录模型厂商的官网（如 DeepSeek 开放平台），<b>按天导出用量</b>，
-          与本页「每日词元」对比。
+          与本页「近 14 天趋势」对比。
         </p>
         <p className="dtpl-doc-sub">
           左侧是本账本，右侧是平台导出的字段：
         </p>
         <div className="dtpl-doc-map">
           <div className="dtpl-doc-map-row">
-            <span className="dtpl-doc-map-side"><b>输入</b></span>
+            <span className="dtpl-doc-map-side"><b>未命中输入</b></span>
             <span className="dtpl-doc-map-arrow">↔</span>
             <span className="dtpl-doc-map-side"><code>prompt_cache_miss_tokens</code></span>
           </div>
@@ -157,7 +157,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
             <span className="dtpl-doc-map-side"><code>completion_tokens</code></span>
           </div>
         </div>
-        <p className="dtpl-doc-map-note">输入、缓存读取、输出正好对应平台导出的三个字段。</p>
+        <p className="dtpl-doc-map-note">未命中输入、缓存读取、输出正好对应平台导出的三个字段。</p>
         <p className="dtpl-doc-map-note">除「会话标题」和「中途取消的请求」两类外，应逐日吻合。</p>
       </section>
 

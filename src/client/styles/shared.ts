@@ -1,48 +1,96 @@
 /** styles.ts 片段：shared。由 `injectStyles` 按序拼接。 */
-export const CSS_SHARED = `/* 深色皮肤兜底微调 */
-/* Token 已承担大部分配色；这里只抬高深色表面上需要多一点提亮的邻近洗色。 */
-body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-hero{
-  background:linear-gradient(135deg,
-    color-mix(in srgb,var(--dtpl-accent) 16%,transparent),
-    color-mix(in srgb,var(--dtpl-accent) 6%,transparent));
-}
-body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-stat,
-body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-bars,
-body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-provider-card,
-body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
-  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
+export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg + --dtpl-metal），不再为深色皮肤单独补一层
+   提亮：那样做会让「通道卡 / 订阅卡」比同一屏的 hero 更亮，同一块面板在两个 tab 里
+   深浅不同。3% 的洗色在深浅两个主题上都够——总览的 hero 一直是这么用的。 */
+
+/* 只给读屏的文本：视觉上不占位，但留在无障碍树里。
+   用途是**列的意义**——表头在视觉上命名了每一列，读屏读不到表头与单元格的对应关系，
+   所以每个格子自己把列名带上（「通道 commandcode」「词元 830.3M」），
+   读出来才是一句说得通的话，而不是一串没有主语的数字。 */
+[data-plugin="dsh-tokbook"] .dtpl-sr{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0;
 }
 
-/* 选中态 */
+/* 选中态：品牌黄。它是"料"——选中本身就带墨色文字压在上面，所以恒定黄在这里成立。 */
 [data-plugin="dsh-tokbook"] .dtpl-body ::selection{
-  background:color-mix(in srgb,var(--dtpl-accent) 25%,transparent);
+  background:color-mix(in srgb,var(--dtpl-brand) 55%,transparent);
 }
 
 /* 窄屏 */
 @media (max-width:640px){
-  /* 底部抽屉：主动选择，而不是半吊子的居中 94dvh 对话框。全宽、贴底，只圆上角（原生移动端 sheet 习惯）。 */
+  /* 底部抽屉：主动选择，而不是半吊子的居中 94dvh 对话框。全宽、贴底——方舟语言里没有
+     圆角，所以这里也不再有「只圆上角」这条移动端习语。 */
   [data-plugin="dsh-tokbook"].dtpl-overlay{padding:0;align-items:flex-end;}
   [data-plugin="dsh-tokbook"] .dtpl-card{
     width:100%;height:min(94dvh,94vh);
-    border-radius:var(--dtpl-radius) var(--dtpl-radius) 0 0;corner-shape:round;
     box-shadow:var(--dsw-elevation-prominent,0 24px 60px rgba(0,0,0,.28)),
-      inset 0 0 0 .5px var(--dsw-elevation-stroke-color,var(--dtpl-hairline));
+      inset 0 0 0 1px var(--dtpl-border);
   }
   [data-plugin="dsh-tokbook"] .dtpl-head{padding:14px 16px 10px;}
-  [data-plugin="dsh-tokbook"] .dtpl-tabs{margin:0 16px 4px;}
+  [data-plugin="dsh-tokbook"] .dtpl-tabs{padding:0 16px;}
   /* 五个 tab 塞不进手机宽度：让行横向滚动，而不是把最后一个裁出卡片。 */
   [data-plugin="dsh-tokbook"] .dtpl-tabs{overflow-x:auto;scrollbar-width:none;}
   [data-plugin="dsh-tokbook"] .dtpl-tabs::-webkit-scrollbar{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-tab{flex:0 0 auto;}
   [data-plugin="dsh-tokbook"] .dtpl-body{padding:12px 16px 14px;}
   [data-plugin="dsh-tokbook"] .dtpl-foot{padding:10px 16px 12px;}
-  [data-plugin="dsh-tokbook"] .dtpl-hero{flex-direction:column;align-items:flex-start;gap:8px;}
-  /* meta 行在窄 sheet 上改横排；按单元换行，而不是溢出卡片边缘。 */
-  [data-plugin="dsh-tokbook"] .dtpl-hero-meta{flex-direction:row;flex-wrap:wrap;gap:8px 12px;align-items:baseline;}
+  /* hero 上下两块在窄 sheet 上改为堆叠。金额块整块靠左，但块内不被拉伸：两行仍按最宽那行的宽度
+     对齐，所以金额右端依然成列。 */
+  [data-plugin="dsh-tokbook"] .dtpl-hero-top{flex-direction:column;align-items:flex-start;gap:8px;}
+  /* 累计事实带在窄处换行：「累计」永远领着自己那串事实，分隔点让位给间距——行首不会孤零零出现一个「·」。 */
+  [data-plugin="dsh-tokbook"] .dtpl-hero-foot{gap:9px;}
+  [data-plugin="dsh-tokbook"] .dtpl-hero-facts{flex:1 1 auto;gap:4px 10px;}
+  [data-plugin="dsh-tokbook"] .dtpl-hero-facts i{display:none;}
+  /* 词元构成：四个桶在手机宽度上排不下，折成 2×2。框与分隔线跟着折：第二行补一条横向分隔，
+     行首那一格去掉竖分隔——否则分隔线会漂在格子外面。 */
+  [data-plugin="dsh-tokbook"] .dtpl-grid,
+  [data-plugin="dsh-tokbook"] .dtpl-grid-3{grid-template-columns:repeat(2,minmax(0,1fr));}
+  [data-plugin="dsh-tokbook"] .dtpl-stat:nth-child(odd){border-left:0;}
+  [data-plugin="dsh-tokbook"] .dtpl-stat:nth-child(n+3){border-top:1px solid var(--dtpl-border);}
+  /* 趋势图的每柱数值标签在手机宽度上必然互相压字：14 根柱每根只剩约 22px，而「298.5M」要 34px。
+     窄处只留峰值那一个标签（它是这张图的信息点），其余柱值仍在自己的 title 里，节末那行合计
+     照旧说明总量与峰值——不是把数值藏起来，是不让它叠成一团。 */
+  [data-plugin="dsh-tokbook"] .dtpl-bar-label:not(.is-peak){display:none;}
+  /* 明细表：窄处一张两列的表塞不下——数字列会把身份列压到 ~130px，模型名与工作区目录
+     都没地方站。所以按价格表的先例：**列头收掉**（它在窄处不再指向任何一列），
+     行改成单列堆叠，数字从「右上竖排」改为「身份下面横排一行」。 */
+  [data-plugin="dsh-tokbook"] .dtpl-bd-cols{display:none;}
+  [data-plugin="dsh-tokbook"] .dtpl-bd-cols,
+  [data-plugin="dsh-tokbook"] .dtpl-row{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-model-nums{
+    flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:12px;
+    margin-top:5px;
+  }
+  [data-plugin="dsh-tokbook"] .dtpl-val{margin-right:auto;}
+  /* 明细的两个子 tab：窄 sheet 是触控形态，而这一行是切换这一节视图的**唯一**入口。
+     29px 过得了 WCAG 2.2 的 24px 底线，却离触控的 44px 差得远。
+     这里给足 44px（13+18+13），与下面价格表展开钮同一条规矩——它早就在窄屏拿 44px，
+     同一张面板里两种标准是漏了，不是取舍。 */
+  [data-plugin="dsh-tokbook"] .dtpl-bd-tab{
+    min-height:44px;padding:13px 16px;
+  }
+
   /* 统计口径文档：窄 sheet 上多列组改单列。 */
   [data-plugin="dsh-tokbook"] .dtpl-doc-facts{grid-template-columns:1fr;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-buckets{grid-template-columns:1fr;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-gap{grid-template-columns:1fr;}
+
+  /* 订阅额度的用量摘要格：窄处改单列并让分隔线跟着折（竖线换横线），
+     否则行首那格的左边框会贴在框的左边线上，看起来像 2px。 */
+  [data-plugin="dsh-tokbook"] .dtpl-quota-stats{grid-template-columns:1fr;}
+  [data-plugin="dsh-tokbook"] .dtpl-quota-stat + .dtpl-quota-stat{
+    border-left:0;border-top:1px solid var(--dtpl-border);
+  }
+
+  /* 通道卡头在窄处改堆叠：合计数字不再和通道名抢同一行。金额两行也跟着改左对齐——
+     堆叠之后它们不再与右侧的模型数字成列，右对齐只剩「¥0.00 缩在 ¥68.81 订阅价值 后面」
+     这一种效果，读起来像缩进错了。 */
+  [data-plugin="dsh-tokbook"] .dtpl-provider-head{
+    flex-direction:column;align-items:stretch;gap:8px;
+  }
+  [data-plugin="dsh-tokbook"] .dtpl-provider-nums{align-items:flex-start;}
+  [data-plugin="dsh-tokbook"] .dtpl-provider-cost{align-items:flex-start;}
 
   /* 价格表：四列费率加模型身份塞不进手机。整行改为堆叠——身份、再 2×2 带标签的格子、再展开钮——并去掉已对不齐的列头。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-cols{display:none;}
@@ -50,9 +98,11 @@ body[data-ds-dark-theme] [data-plugin="dsh-tokbook"] .dtpl-quota-card{
     grid-template-columns:minmax(0,1fr) auto;row-gap:6px;
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-id{grid-column:1;}
-  /* 展开钮是进入一行调价史的唯一入口，触控 sheet 上给完整 44px 热区。 */
+  /* 展开钮是进入一行调价史的唯一入口，触控 sheet 上给完整 44px 热区。
+     这里只覆盖**几何**、不覆盖字形：字形全窗口一个值（14px，见 pricing 片段）——
+     触控与鼠标的差别是热区大小，不是这个符号该画多大。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-more{
-    grid-column:2;grid-row:1;width:44px;height:44px;font-size:12px;
+    grid-column:2;grid-row:1;width:44px;height:44px;
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-rates{
     grid-column:1 / -1;

@@ -320,14 +320,8 @@ export class TokenUsageBook extends Service {
     const costed = attachCosts(summary, table, billing)
     const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
     const files = (await listDayFiles(this.dir)).length
-    let sessions = 0
     let lastEventAt: number | null = null
-    const seen = new Set<string>()
     for (const record of records) {
-      if (!seen.has(record.sessionId)) {
-        seen.add(record.sessionId)
-        sessions += 1
-      }
       if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
     }
     // 按工作区累计，读时 join 会话 header 的 cwd。宿主未挂工作区注册表时为空。
@@ -337,14 +331,12 @@ export class TokenUsageBook extends Service {
     void _pricing; void _rateRows; void _byHour
     return {
       ...slim,
-      sessions,
       byWorkspace,
       totalTokens: totalsTokens(costed.total),
       updatedAt: Date.now(),
       records: records.length,
       files,
       lastEventAt,
-      lastSyncAt: this.lastSyncAt > 0 ? this.lastSyncAt : null,
       syncStatus: this.syncStatus,
       syncError: this.syncError,
     }

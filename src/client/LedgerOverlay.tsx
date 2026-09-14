@@ -83,15 +83,6 @@ type OverlayTab = 'ledger' | 'provider' | 'quota' | 'pricing' | 'method'
 
 const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'provider', 'quota', 'pricing', 'method']
 
-function syncLabel(status: 'idle' | 'running' | 'done' | 'error'): string {
-  switch (status) {
-    case 'running': return '进行中'
-    case 'done': return '已同步'
-    case 'error': return '失败'
-    default: return '待同步'
-  }
-}
-
 function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onClose }: {
   overview: TokBookOverview | null
   error: string | null
@@ -287,17 +278,24 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
 
         {overview !== null && tab === 'ledger' && (
           <footer className="dtpl-foot">
+            {/* 正常态（待同步 / 已同步）不占字。读者要的答案是「屏上这份数据有多新」，
+                而那个时刻就是答案；插件内部状态机的名字只在该他采取行动时出现
+                （正在扫 / 上次失败）。 */}
             <span className="dtpl-foot-state">
-              <span className={`dtpl-sync dtpl-sync-${overview.syncStatus}`}>
-                <i className="dtpl-sync-dot" aria-hidden="true" />
-                {syncLabel(overview.syncStatus)}
-                {overview.syncStatus === 'error' && overview.syncError !== null ? `：${overview.syncError}` : ''}
-              </span>
+              {overview.syncStatus === 'running' && (
+                <span className="dtpl-sync dtpl-sync-running">
+                  <i className="dtpl-sync-dot" aria-hidden="true" />
+                  正在重新扫描…
+                </span>
+              )}
+              {overview.syncStatus === 'error' && (
+                <span className="dtpl-sync dtpl-sync-error">
+                  <i className="dtpl-sync-dot" aria-hidden="true" />
+                  上次重新扫描失败{overview.syncError !== null ? `：${overview.syncError}` : ''}
+                </span>
+              )}
               {overview.lastEventAt !== null && (
-                <>
-                  <span className="dtpl-foot-sep" aria-hidden="true">·</span>
-                  <span className="dtpl-foot-latest">最新 {formatDateTime(overview.lastEventAt)}</span>
-                </>
+                <span className="dtpl-foot-latest">最新记录 {formatDateTime(overview.lastEventAt)}</span>
               )}
             </span>
             <button type="button" className="dtpl-rescan" onClick={onRescan} disabled={scanning}>

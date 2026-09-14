@@ -6,7 +6,7 @@ export const CSS_FOOTER = `/* 侧边栏入口按钮 */
   flex:1;min-width:0;
   display:flex;align-items:center;gap:8px;
   width:auto;height:42px;padding:0 10px 0 8px;box-sizing:border-box;
-  border:none;border-radius:12px;background:transparent;
+  border:none;border-radius:var(--dtpl-radius-sm);background:transparent;
   cursor:pointer;overflow:hidden;
   color:var(--dsw-alias-label-primary,#1f2328);
   font-family:inherit;font-size:14px;line-height:22px;white-space:nowrap;

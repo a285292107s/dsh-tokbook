@@ -143,7 +143,7 @@ function ProviderCard({ card, money, labels }: {
   const subscription = card.models.some(model => model.billing === 'subscription')
   const billingTag = subscription ? '订阅' : '按量'
   const billingTitle = subscription
-    ? '订阅通道：金额是按官方价折算的订阅价值，不是实际支出'
+    ? '订阅通道：金额是这些用量按官方价折算的订阅价值，不是实际支出'
     : '按量通道：金额是实际支出口径'
   return (
     <article className="dtpl-provider-card" data-provider={card.provider}>
@@ -162,7 +162,7 @@ function ProviderCard({ card, money, labels }: {
           <span className="dtpl-provider-meta">
             {label !== undefined && <><span className="dtpl-provider-key">{card.provider}</span> · </>}
             {card.requests} 请求{card.compactions > 0 ? ` · ${card.compactions} 压缩` : ''}
-            {card.usageUnknown > 0 ? ` · 用量未知 ${card.usageUnknown}` : ''}
+            {card.usageUnknown > 0 ? ` · ${card.usageUnknown} 次没上报用量` : ''}
             {card.unpricedModels.length > 0 ? ` · 价格未知 ${card.unpricedModels.join('、')}` : ''}
           </span>
         </div>
@@ -171,7 +171,7 @@ function ProviderCard({ card, money, labels }: {
           <span className="dtpl-provider-cost">
             <span className="dtpl-provider-spend">{money(card.spend)}</span>
             {card.subscriptionValue > 0 && (
-              <span className="dtpl-provider-value" title="订阅通道价值（非实际扣款）">{money(card.subscriptionValue)} 订阅价值</span>
+              <span className="dtpl-provider-value" title="订阅通道：这些用量按量付费本来要花的钱（非实际扣款）">{money(card.subscriptionValue)} 订阅价值</span>
             )}
           </span>
         </div>
