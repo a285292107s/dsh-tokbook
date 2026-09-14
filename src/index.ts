@@ -1,6 +1,9 @@
 /**
  * host 半区：durable 事件流实时记账 + 权威再同步（`sessionPersistence` 日志，
- * request-id 去重）。概览读前先同步，实时 hook 只是两次打开间的快路径。
+ * request-id 去重）。实时 hook 是新鲜度的**主路径**；权威 walk 是自愈路径
+ * （折叠失败、插件缺席期间写下的行），**排在后台，读路径绝不 await 它**——
+ * 当前会话每来一条消息就变一次 revision，await 它等于每次打开都重读那份
+ * 完整会话日志（实测单份可达 8.6 MB 压缩，秒级）。
  *
  * WIRE NOTES：事件与持久化面是鸭子类型（待 DSH 类型包接入可收紧）。单个
  * `list()` 只有裸 header，故新鲜度探针走 `listSnapshots()`（带变更令牌）。
@@ -41,6 +44,13 @@ import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
 
 const BUILTIN_PLAN_KEYS: readonly string[] = [OPENCODE_GO_PROVIDER, COMMAND_CODE_PROVIDER]
 const QUOTA_TTL_MS = 30_000
+/**
+ * 两轮后台权威 walk 之间的最小间隔。walk 对漂移会话**整份日志重读重折叠**，
+ * 而当前会话每条消息都会漂移——不节流就是每次打开（概览 / 通道用量 / 价格表）
+ * 都重读那份日志。它只承担自愈（折叠失败、别的进程写下的行），新鲜度由
+ * `session/event` 实时 hook 保证，所以间隔按「秒」而不按「次」。
+ */
+const SYNC_MIN_INTERVAL_MS = 15_000
 
 interface SessionLike { readonly id: string }
 interface EventStream {
@@ -85,6 +95,10 @@ export class TokenUsageBook extends Service {
   private persistence: SyncPersistence | undefined
   private syncing = false
   private lastSyncAt = 0
+  /** 上一轮 walk **开始**的时刻，用于 {@link SYNC_MIN_INTERVAL_MS} 节流。 */
+  private lastWalkAt = 0
+  /** 在飞的那轮 walk（含启动时的一次性回填）。只在冷账本时被读路径 await。 */
+  private walkInFlight: Promise<void> | null = null
   private syncStatus: 'idle' | 'running' | 'done' | 'error' = 'idle'
   private syncError: string | null = null
   /** 上次同步时各会话的 opaque revision；探针以此对比检出未同步工作。从持久化
@@ -165,7 +179,9 @@ export class TokenUsageBook extends Service {
       const persistence = persistenceCtx.get('sessionPersistence') as SyncPersistence
       this.persistence = persistence
       const failed = new Set<string>()
-      void autoSyncIfNeeded(this.syncDeps(persistence, failed), this.dir)
+      // 一次性历史回填也在后台跑；它被记进 `walkInFlight`，使冷账本上的第一次读
+      // 能等它（只有那时等待才有意义：账本一条记录都没有，没什么可显示的）。
+      this.walkInFlight = autoSyncIfNeeded(this.syncDeps(persistence, failed), this.dir)
         .then(async (result) => {
           if (this.disposed || result === null) return
           this.logger.info?.(`[tokbook] first-run sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions`)
@@ -222,10 +238,15 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * 概览读之前保证账本新鲜，并把该读所需的会话 header 列表交回去（各会话的
-   * `cwd`，按工作区一节用它 join）。签名集从持久化基线播种，重启后只走变更的会话。
-   * 没有可用基线时每个会话走一次，再写一份新基线。幂等（request-id 去重）；已在
-   * 飞的 run 不会再启动。
+   * 读之前的**廉价**新鲜度探针：列出持久化会话、（用 revision）挑出漂移的，把
+   * 需要折的行交给后台的权威 walk，然后立刻把会话清单交回调用方（各会话的 `cwd`，
+   * 按工作区一节用它 join）。签名集从持久化基线播种，重启后只走变更的会话。
+   *
+   * **读路径不 await walk。** 理由是实测出来的：当前会话的消息一落日志 revision
+   * 就变，探针因此永远报它 stale，而 walk 会把它整份日志重读重折叠（单份日志
+   * 可达 8.6 MB 压缩 / 数万事件），于是「打开概览 / 通道用量 / 价格表」= 秒级等待。
+   * 那些行其实早已由 `session/event` 实时 hook 记进账本，读路径要的是「账本当前
+   * 内容」，不是「此刻再走一遍历史」。
    */
   async ensureFresh(): Promise<readonly PersistenceSnapshotLike[]> {
     const persistence = this.persistence
@@ -241,13 +262,34 @@ export class TokenUsageBook extends Service {
       this.logger.error('[tokbook] persistence list probe failed:', error)
       snapshots = []
     }
-    const stale = staleSessionIds(this.syncedOnce, this.syncedBySession, snapshots)
-    if (stale.length === 0) {
-      this.syncStatus = 'done'
-      return snapshots
+    this.scheduleSync(snapshots, staleSessionIds(this.syncedOnce, this.syncedBySession, snapshots))
+    // 冷账本（本目录还没有任何日文件）时等一轮：否则首次安装 / 换数据目录后
+    // 打开，会把「还没回填完」显示成「没有记录」。账本一旦有行就不再等。
+    if (this.walkInFlight !== null && (await listDayFiles(this.dir)).length === 0) {
+      await this.walkInFlight
     }
-    await this.doSync(snapshots, stale)
     return snapshots
+  }
+
+  /**
+   * 把一轮权威 walk 排到后台（或判定这一轮不必走）。
+   *
+   * - 没有漂移会话 → 什么都不做，状态归位 `done`。
+   * - 已有一轮在飞 → 跳过：它结束时写下的基线覆盖同一批快照，重复启动没有收益。
+   * - **没有任何基线签名的会话不受节流**：首次安装的回填、以及刚开的新会话都属于
+   *   这一类——它们便宜（新会话的日志很短）而且该立刻同步。
+   * - 其余（已有基线但 revision 漂移，典型就是当前会话）按 {@link SYNC_MIN_INTERVAL_MS}
+   *   节流，避免持续重读那份大日志。
+   */
+  private scheduleSync(snapshots: readonly PersistenceSnapshotLike[], stale: readonly string[]): void {
+    if (stale.length === 0) {
+      if (!this.syncing) this.syncStatus = 'done'
+      return
+    }
+    if (this.syncing) return
+    const neverSynced = stale.some((id) => !this.syncedBySession.has(id))
+    if (!neverSynced && Date.now() - this.lastWalkAt < SYNC_MIN_INTERVAL_MS) return
+    void this.doSync(snapshots, stale)
   }
 
   /** 一轮同步的依赖：一次性回填与权威 walk 共用；`failed` 收集读不了日志的会话。 */
@@ -267,24 +309,32 @@ export class TokenUsageBook extends Service {
     this.syncing = true
     this.syncStatus = 'running'
     this.syncError = null
+    const startedAt = Date.now()
+    this.lastWalkAt = startedAt
     const failed = new Set<string>()
-    try {
-      const result = await syncHistory(
-        this.syncDeps(persistence, failed),
-        { snapshots, sessionIds },
-      )
-      this.lastSyncAt = Date.now()
-      this.syncStatus = 'done'
-      this.setBaseline(snapshots, failed)
-      if (result.added > 0) invalidateDerivedState(this.dir)
-      this.logger.info?.(`[tokbook] sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions (${String(sessionIds.length)} of ${String(snapshots.length)} sessions)`)
-    } catch (error) {
-      this.syncStatus = 'error'
-      this.syncError = error instanceof Error ? error.message : String(error)
-      this.logger.error('[tokbook] sync failed:', error)
-    } finally {
-      this.syncing = false
-    }
+    const run = (async (): Promise<void> => {
+      try {
+        const result = await syncHistory(
+          this.syncDeps(persistence, failed),
+          { snapshots, sessionIds },
+        )
+        this.lastSyncAt = Date.now()
+        this.syncStatus = 'done'
+        this.setBaseline(snapshots, failed)
+        if (result.added > 0) invalidateDerivedState(this.dir)
+        // 时长写进日志：这条路径的成本全在「整份日志重读重折叠」上，而它是否
+        // 拖慢了读路径，只能从这行看出来（2026-09-15 那次卡顿排查就是靠它）。
+        this.logger.info?.(`[tokbook] sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions (${String(sessionIds.length)} of ${String(snapshots.length)} sessions) in ${String(Date.now() - startedAt)} ms`)
+      } catch (error) {
+        this.syncStatus = 'error'
+        this.syncError = error instanceof Error ? error.message : String(error)
+        this.logger.error('[tokbook] sync failed:', error)
+      } finally {
+        this.syncing = false
+      }
+    })()
+    this.walkInFlight = run
+    await run
   }
 
   /** 把一次已完成同步的签名收为当前内存基线并置 `syncedOnce`，再持久化为跨进程

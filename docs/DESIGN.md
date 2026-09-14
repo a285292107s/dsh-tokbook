@@ -478,6 +478,13 @@ dsh-tokbook/
   的 `SessionPersistence` 抽象类 + `dsh-session-persistence-jsonl` 后端实现）。
   `assistant/message`、`turn/end`、`llm/retry`、`compaction/summary`、
   `request/context` 均为当前已知 `session/event` 类型（`core/session/src/known-event-types.ts`）。
+- **读路径不 await 这次回放**（D-030，2026-09-15 实测后改）。探针只做廉价部分（列会话 +
+  比对 revision），需要折叠时把 walk 排到后台并按 15 s 节流；`inspect(id)` 会把该会话的
+  **整份日志**读回并解码（本机 `~/.dsh/sessions` 251 份 / 208 MB，最大单份 8.6 MB 压缩），
+  而当前会话每条消息都会漂移——把它挂在读路径上就是「打开通道用量 / 价格表要加载半天」。
+  账本本身的读只要 11–77 ms（真实账本 5.6 MB / 20.6k 行实测），那些行早已由实时 hook 记下。
+  唯一例外是**冷账本**（一个日文件都没有）：那时读等一轮，否则「还没回填完」会被显示成
+  「没有记录」。回归测试见 `scripts/selfcheck-readpath.ts`。
 
 ### 2. 统计聚合（新增）
 

@@ -227,6 +227,11 @@
   `getComputedStyle` 都是 `rgb(38,39,43)`)。判断颜色一律以 computed style 或**元素截图**
   (`screenshot '.dtpl-card'`)为准,或临时 `overlay.style.backdropFilter='none'` 再整页拍——
   别据此判定"深色模式坏了"。
+- **独立查看器模式**看不见同步路径**的成本**:`--ledger` 模式刻意不挂 `sessionPersistence`
+  (它只读已入账的历史),所以 `ensureFresh()` 的探针与权威 walk **一次都不跑**。2026-09-15
+  那次「打开通道用量 / 价格表要加载半天」正是因此长期没被发现:harness 里一切都在几十毫秒内。
+  要复现这类问题,要么挂一个真/桩 persistence(见 `scripts/selfcheck-readpath.ts` 的桩),
+  要么读 host 日志里的 `[tokbook] sync: … in <ms> ms` 那一行(该行现在带耗时与会话数)。
 
 ---
 
