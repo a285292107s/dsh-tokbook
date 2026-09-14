@@ -16,8 +16,9 @@ footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含
   时间戳**取价,金额分「**实际支出**」与「**订阅价值**」两桶。没定价的是**价格未知**(按 ¥0 计,
   但会在界面上列出来);费率为 0 才是免费。
 
-界面词与代码/契约的逐条对应见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 的「术语」段;每个 tab
-的界面规格与量出来的依据见 [`docs/DESIGN.md`](docs/DESIGN.md)。文档树的地图(每份文件的
+界面词与代码/契约的逐条对应见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 的「术语」段;改界面长相/
+交互前对照的取值与禁令见 [`docs/UI-SPEC.md`](docs/UI-SPEC.md),每个 tab 的界面规格与量出来的
+依据见 [`docs/DESIGN.md`](docs/DESIGN.md)。文档树的地图(每份文件的
 role / status / 何时读)见 [`docs/INDEX.md`](docs/INDEX.md);必须与代码一致的 host 契约由
 `pnpm selfcheck` 强制同步。
 
