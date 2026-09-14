@@ -10,17 +10,17 @@
 
 | 文件 | 角色 | 状态 | 何时读 |
 |---|---|---|---|
-| [`AGENTS.md`](../AGENTS.md) | identity | current | 每个任务——自动载入上下文 |
-| [`README.md`](../README.md) | entry + operations | current | 第一站:范围、布局、构建、安装、配置 |
-| `docs/INDEX.md` | map(本文件) | current | 在文档间导航 |
-| [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts | current | 改动 host 路由、wire JSON 形状、配置键、会话事件或数据目录文件时——在同一 commit 更新它;`scripts/selfcheck-docs.ts` 会强制路由表同步 |
-| [`docs/DECISIONS.md`](DECISIONS.md) | decisions(ADR 日志) | current | 改架构、价格/计价、额度或界面结构,或落下任何持久决策时——**先读顶部索引表**,再定点读 1–3 条,不要整份通读;在同一 commit 追加条目 |
-| [`docs/DESIGN.md`](DESIGN.md) | reason / background | current | "为什么":DSH 机制背景、一期框架、二期重构说明、硬约束。顶部「阅读指南」区分历史与现状 |
-| [`docs/HMR.md`](HMR.md) | lessons / reference | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
-| [`docs/LESSONS.md`](LESSONS.md) | lessons | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
-| [`docs/WORKFLOW.md`](WORKFLOW.md) | process | current | L2/L3(契约面 / 跨 commit / 维护者要求 worktree)对照的「代码 + 文档同 commit」循环;新建文档前先看判据 |
-| [`docs/archive/code-review.md`](archive/code-review.md) | process(归档) | superseded | 追溯 D-011 落地前那轮全面审查的结论与修复时;**不描述此后重构后的文件布局** |
-| [`docs/archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md) | process(归档) | superseded | 只想追溯当期实施计划与推理时读;**不描述现状**——现状看 README / CONTRACTS / DECISIONS |
+| [`AGENTS.md`](../AGENTS.md) | identity(身份) | current | 每个任务——自动载入上下文 |
+| [`README.md`](../README.md) | entry(入口)+ operations(操作) | current | 第一站:范围、布局、构建、安装、配置 |
+| `docs/INDEX.md` | index(地图,本文件) | current | 在文档间导航 |
+| [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts(契约) | current | 改动 host 路由、wire JSON 形状、配置键、会话事件或数据目录文件时——在同一 commit 更新它;`scripts/selfcheck-docs.ts` 会强制路由表同步 |
+| [`docs/DECISIONS.md`](DECISIONS.md) | decisions(决策,ADR 日志) | current | 改架构、价格/计价、额度或界面结构,或落下任何持久决策时——**先读顶部索引表**,再定点读 1–3 条,不要整份通读;在同一 commit 追加条目 |
+| [`docs/DESIGN.md`](DESIGN.md) | reason(推理 / 背景) | current | "为什么":DSH 机制背景、一期框架、二期重构说明、硬约束。顶部「阅读指南」区分历史与现状 |
+| [`docs/HMR.md`](HMR.md) | lessons(教训)/ reference(参考) | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
+| [`docs/LESSONS.md`](LESSONS.md) | lessons(教训) | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
+| [`docs/WORKFLOW.md`](WORKFLOW.md) | process(流程) | current | L2/L3(契约面 / 跨 commit / 维护者要求 worktree)对照的「代码 + 文档同 commit」循环;新建文档前先看判据 |
+| [`docs/archive/code-review.md`](archive/code-review.md) | process(流程,归档) | superseded | 追溯 D-011 落地前那轮全面审查的结论与修复时;**不描述此后重构后的文件布局** |
+| [`docs/archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md) | process(流程,归档) | superseded | 只想追溯当期实施计划与推理时读;**不描述现状**——现状看 README / CONTRACTS / DECISIONS |
 
 ## Doc meta 约定
 
@@ -30,7 +30,8 @@
 > **Doc meta** · role: <identity|entry|index|contracts|decisions|reason|lessons|reference|process> · language: zh-CN · status: <current|superseded|draft> · last-reviewed: <YYYY-MM-DD> · supersedes: <文件 | —>
 ```
 
-- `role` = 该文件属于文档体系的哪一层(见上表)。
+- `role` = 该文件属于文档体系的哪一层(见上表)。这一行**只写英文 token**(上表「角色」列
+  括号里的中文只是给中文读者的注解,别写进 meta 行)。
 - `status` = 描述的是现状(`current`)、已被替换的事物(`superseded`)、还是未完成
   (`draft`)。已落地的计划/过程文档应标 `superseded` 并移入 `docs/archive/`。
 - `last-reviewed` = 上次把该文件与当前代码树核对一致的日期。**改了它的正文就顺手刷新**;
