@@ -104,7 +104,6 @@ export function Breakdowns({ byModel, byWorkspace, totalTokens, money }: {
         <span className="dtpl-bd-col-nums">{cols.nums}</span>
       </div>
       <div
-        className="dtpl-bd-panel"
         role="tabpanel"
         id="dtpl-bd-panel"
         aria-labelledby={`dtpl-bd-tab-${active}`}
@@ -158,7 +157,7 @@ function ModelRows({ byModel, totalTokens, money }: {
                     <span className="dtpl-sr">金额 </span>
                     {showsSub
                       ? <b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b>
-                      : money(m.spend)}
+                      : <b className="dtpl-cash-amt">{money(m.spend)}</b>}
                   </span>
                   <em className="dtpl-cost-k">{bucket}</em>
                 </span>
@@ -233,7 +232,7 @@ function WorkspaceRows({ rows, totalTokens, money }: {
                   <span className="dtpl-cost-seg">
                     <span className="dtpl-cost-main">
                       <span className="dtpl-sr">金额 </span>
-                      {money(row.spend)}
+                      <b className="dtpl-cash-amt">{money(row.spend)}</b>
                     </span>
                     <em className="dtpl-cost-k">实际支出</em>
                   </span>

@@ -52,6 +52,10 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
      窄处只留峰值那一个标签（它是这张图的信息点），其余柱值仍在自己的 title 里，节末那行合计
      照旧说明总量与峰值——不是把数值藏起来，是不让它叠成一团。 */
   [data-plugin="dsh-tokbook"] .dtpl-bar-label:not(.is-peak){display:none;}
+  /* 轴上的日期同样挤：14 格每格约 21px，而「9/10」要 24px——后半段会连成一片。
+     窄处隔一格留一个（偶数格收掉），**峰值那一天永远留下**（它是这张图的信息点，
+     位置本身说不清是哪一天）。收掉的是重复的位置信息，不是日期。 */
+  [data-plugin="dsh-tokbook"] .dtpl-trend-axis span:nth-child(even):not(.is-peak){visibility:hidden;}
   /* 明细表：窄处一张两列的表塞不下——数字列会把身份列压到 ~130px，模型名与工作区目录
      都没地方站。所以按价格表的先例：**列头收掉**（它在窄处不再指向任何一列），
      行改成单列堆叠，数字从「右上竖排」改为「身份下面横排一行」。 */
@@ -69,6 +73,12 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
      同一张面板里两种标准是漏了，不是取舍。 */
   [data-plugin="dsh-tokbook"] .dtpl-bd-tab{
     min-height:44px;padding:13px 16px;
+  }
+  /* 关闭钮是浮窗**唯一**的显式退出（Escape 不算指针手段），所以窄 sheet 上按「唯一入口/退出」
+     那条判据给足 44px。字形不动（仍是 16px 的 ✕），只放大命中区——触控与鼠标的差别是热区，
+     不是这个符号该画多大。 */
+  [data-plugin="dsh-tokbook"] .dtpl-close{
+    width:44px;height:44px;
   }
 
   /* 统计口径文档：窄 sheet 上多列组改单列。 */
@@ -153,6 +163,7 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
+  [data-plugin="dsh-tokbook"] .dtpl-spin,
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions,
   [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim.dtpl-quota-refresh-pop{animation:none;transition:none;}
 }

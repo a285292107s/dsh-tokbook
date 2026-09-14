@@ -656,13 +656,17 @@ const server = createServer((req, res) => {
 
   /* ── fixture 路由：只服务预览模式（独立查看器在上面就返回了，走不到这里） ── */
   if (url.pathname === '/tokbook/overview') {
-    res.writeHead(200, { 'content-type': 'application/json' })
     const mode = process.env.TOKBOOK_MODE ?? ''
     if (mode === 'err') {
+      /* 真 host 的失败是 **500 + 错误体**（`src/routes.ts` 的 catch）。这里必须跟着回 500：
+         回 200 + `{error}` 会让客户端把它当成一份合法总览去渲染（`byDay.find` 抛错、整个浮窗
+         消失），而那个形状真 host 从不发送——预览台的 err 模式反而看不见真正的错误界面。 */
+      res.writeHead(500, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ error: 'HTTP 500' }))
-    } else {
-      res.end(JSON.stringify(mode === 'empty' ? emptyOverview : overview))
+      return
     }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(mode === 'empty' ? emptyOverview : overview))
     return
   }
   if (url.pathname === '/tokbook/rescan') {
@@ -885,6 +889,7 @@ server.listen(port, '127.0.0.1', () => {
     console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}`)
     return
   }
-  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?empty=1, ?err=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
+  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
+  console.log(`  总览的空 / 错两种形状由 **环境变量** 选（一个服务 = 一种形状）：TOKBOOK_MODE=empty|err；账本目录同样由 PORT / TOKBOOK_MODE 所在的进程定。`)
 })
 

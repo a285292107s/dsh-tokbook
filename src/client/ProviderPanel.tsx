@@ -186,12 +186,14 @@ function ProviderCard({ card, money, labels }: {
               </span>
             </div>
             <div className="dtpl-model-nums">
-              <span className="dtpl-val">{formatTokens(m.tokens)}</span>
+              {/* 每一格自带列名（`.dtpl-sr`）：这一节没有列头（通道卡的模型行是「身份 + 数字」
+                  两列形态），读屏听到「830.3M」时得知道那是词元还是金额——与用量明细同一套补偿。 */}
+              <span className="dtpl-val"><span className="dtpl-sr">词元 </span>{formatTokens(m.tokens)}</span>
               <span className="dtpl-provider-model-sub">
                 {m.totals.requests} 请求 ·{' '}
                 {m.spend > 0
-                  ? money(m.spend)
-                  : <><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-cost-k">订阅价值</em></>}
+                  ? <><span className="dtpl-sr">金额 </span><b className="dtpl-cash-amt">{money(m.spend)}</b></>
+                  : <><span className="dtpl-sr">金额 </span><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-cost-k">订阅价值</em></>}
               </span>
             </div>
           </div>

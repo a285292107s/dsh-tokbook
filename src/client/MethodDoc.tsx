@@ -9,7 +9,7 @@ import { formatDateTime } from './format.ts'
 
 export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
   return (
-    <div className="dtpl-doc">
+    <section className="dtpl-doc" aria-label="统计口径">
       <div className="dtpl-doc-lede">
         <p>本插件<b>不估算</b>：每个数字都来自<b>本机保存的对话记录</b>。</p>
         <p>向模型提问时，提供这条接入通道的一方（本页叫<b>通道</b>，代码与文档里写作 provider，如 <code>deepseek-official</code>、<code>commandcode</code>）会回报这次消耗了多少词元。</p>
@@ -17,7 +17,9 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <p>本插件照实记录、逐条累加——不是模型厂商官网上的账户数据。</p>
       </div>
 
-      <div className="dtpl-doc-facts" aria-label="口径速览">
+      {/* `role="group"` 不是装饰：`aria-label` 落在**没有角色**的 div 上，浏览器不会把它
+          暴露给读屏（generic 角色不支持命名），这一组事实就等于没有名字。 */}
+      <div className="dtpl-doc-facts" role="group" aria-label="口径速览">
         <div className="dtpl-doc-fact">
           <span className="dtpl-doc-fact-k">来源</span>
           <span className="dtpl-doc-fact-v">本机对话记录，逐条统计</span>
@@ -142,19 +144,19 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </p>
         <div className="dtpl-doc-map">
           <div className="dtpl-doc-map-row">
-            <span className="dtpl-doc-map-side"><b>未命中输入</b></span>
+            <span><b>未命中输入</b></span>
             <span className="dtpl-doc-map-arrow">↔</span>
-            <span className="dtpl-doc-map-side"><code>prompt_cache_miss_tokens</code></span>
+            <span><code>prompt_cache_miss_tokens</code></span>
           </div>
           <div className="dtpl-doc-map-row">
-            <span className="dtpl-doc-map-side"><b>缓存读取</b></span>
+            <span><b>缓存读取</b></span>
             <span className="dtpl-doc-map-arrow">↔</span>
-            <span className="dtpl-doc-map-side"><code>prompt_cache_hit_tokens</code></span>
+            <span><code>prompt_cache_hit_tokens</code></span>
           </div>
           <div className="dtpl-doc-map-row">
-            <span className="dtpl-doc-map-side"><b>输出</b></span>
+            <span><b>输出</b></span>
             <span className="dtpl-doc-map-arrow">↔</span>
-            <span className="dtpl-doc-map-side"><code>completion_tokens</code></span>
+            <span><code>completion_tokens</code></span>
           </div>
         </div>
         <p className="dtpl-doc-map-note">未命中输入、缓存读取、输出正好对应平台导出的三个字段。</p>
@@ -179,7 +181,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
       )}
 
       <p className="dtpl-doc-foot">以上口径基于当前 DSH 版本源码核对。</p>
-    </div>
+    </section>
   )
 }
 

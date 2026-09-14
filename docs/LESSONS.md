@@ -1,6 +1,6 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-12 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-15 · supersedes: —
 
 > 本文件整理本次「UI 优化 + 全中文 + 对齐 DSH 官方设置按钮样式」迭代中踩过的坑与结论，
 > 供后续维护 / 继续开发时对照。结构统一按 **现象 → 根因 → 修复 / 正确做法** 组织。
@@ -216,6 +216,17 @@
   "改动没生效"。重启时还要确认端口真的空了:`job_kill` 杀掉的是外层 shell,`node` 子进程可能还占着
   8931,新进程直接 `EADDRINUSE` 退出;用 `Get-NetTCPConnection -LocalPort 8931 -State Listen`
   看 `OwningProcess`,必要时 `Stop-Process`。
+- **端口被占时先换端口、别急着杀**:同一台机器上可能留着上次会话的预览台(2026-09-15 实测
+  8931/8932/8941 三个都活着),它们服务的是**旧 bundle**。用 `PORT=8955 node scripts/preview-overlay.mjs`
+  换一个空端口最省事;真要复用原端口,先按上面的 pid 确认那是 `node` 再停。
+- **`TOKBOOK_MODE` 决定总览的空 / 错形状,不是 query flag**:`?empty=1` / `?err=1` 是**旧提示**,
+  实际读的是环境变量(`TOKBOOK_MODE=empty|err`,一个进程一种形状);`?dark=1` / `?tab=` / `?quota=`
+  才是 query flag。要同时看两种形状就起两个进程、两个端口。
+- **整页截图在 `backdrop-filter` 下会说谎**:遮罩(`.dtpl-overlay`)带 `backdrop-filter` 时,
+  Chromium 的**整页**截图会把深色卡片拍成浅色(实测同一页面:整页截图浅、元素截图与
+  `getComputedStyle` 都是 `rgb(38,39,43)`)。判断颜色一律以 computed style 或**元素截图**
+  (`screenshot '.dtpl-card'`)为准,或临时 `overlay.style.backdropFilter='none'` 再整页拍——
+  别据此判定"深色模式坏了"。
 
 ---
 
@@ -263,4 +274,6 @@ padding-top:24px` ❌（居中照旧）。**判据**：固定高度 + 绝对定�
 - [ ] client 入口无 `export default`；esbuild 加 `charset:'utf8'`。
 - [ ] 用 kimi-webbridge 时：先 `snapshot`，再 `evaluate` 读 computed style；**每次调用前先 `find_tab`**（当前标签页会漂）。
 - [ ] 用 `scripts/preview-overlay.mjs` 看效果：**每次 `pnpm build` 后重启预览台**（它在启动时读一次 bundle），并确认 8931 端口已释放。
+- [ ] 预览台端口被占：换 `PORT=8955`（旧进程还活着、服务的是旧 bundle），别急着杀；空/错态用 `TOKBOOK_MODE=empty|err` 环境变量。
+- [ ] 判断颜色别用整页截图：`backdrop-filter` 会让深色卡拍成浅色；用元素截图或 `getComputedStyle`。
 - [ ] 绝对定位 + 固定高度的 `<button>`：内容会被 UA 布局**垂直居中**；要贴顶就 `display:flex;flex-direction:column;justify-content:flex-start`（见 §7）。

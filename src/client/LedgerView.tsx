@@ -217,7 +217,13 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
         sum={sum}
       />
       <div className="dtpl-trend-axis">
-        {slots.map(day => <span key={day}>{shortDay(day)}</span>)}
+        {slots.map((day, index) => (
+          // 峰值那一天带一个类：窄屏会把偶数格收掉（`shared` 的 ≤640 段），
+          // 而峰值的位置本身就是这张图的信息点，它的日期永远留下。
+          <span key={day} className={index === peakIndex ? 'is-peak' : undefined}>
+            {shortDay(day)}
+          </span>
+        ))}
       </div>
       <p className="dtpl-trend-sum">
         最近 {slots.length} 天合计 {formatTokens(sum)} 词元

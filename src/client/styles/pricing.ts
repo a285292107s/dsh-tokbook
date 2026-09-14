@@ -56,7 +56,7 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-label{flex:none;font-size:13px;line-height:20px;font-weight:600;color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-price-key{
   flex:0 1 auto;min-width:0;
-  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
+  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-count{
@@ -87,7 +87,7 @@ export const CSS_PRICING = `/* 价格表 tab */
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-empty{
-  margin:0;padding:10px 11px;font-size:12px;line-height:18px;color:var(--dtpl-fg-3);
+  margin:0;padding:10px 11px;font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-rows{display:flex;flex-direction:column;}
 

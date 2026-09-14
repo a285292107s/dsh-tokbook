@@ -66,7 +66,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-sub{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-head-side{
@@ -163,6 +163,9 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-title{margin:0;font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-err .dtpl-quota-msg-title{color:var(--dtpl-err);}
+/* 「未配置」不是错误：同一块说明面，只是标题降一档到次要色——与 dtpl-quota-chip-muted
+   同一档。此前这个类只写在 TSX 里、样式表里没有规则，于是它和普通说明面长得一模一样。 */
+[data-plugin="dsh-tokbook"] .dtpl-quota-msg-muted .dtpl-quota-msg-title{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-body{
   margin:0;font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
   overflow-wrap:anywhere;
@@ -222,7 +225,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-window[data-tone="danger"] .dtpl-quota-remaining{color:var(--dtpl-err);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-reset{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-reset-limited{color:var(--dtpl-err);font-weight:600;}
@@ -234,14 +237,14 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   font-variant-numeric:tabular-nums;letter-spacing:-.01em;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-k{
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;font-weight:500;
+  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;font-weight:500;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-note{
   margin:6px 0 0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
 }
 /* 额度来源（月额度 / 已购 / 赠送）：余额下的一行紧凑说明——带加购额度的生效卡则在用量条下方。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sources{
-  margin:8px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
+  margin:8px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
 }
 /* 用量摘要活动条：**与总览的「今日词元构成」同一只框**——1px 硬边框 + 竖发丝分隔的读数格。
@@ -283,7 +286,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-line-short{width:35%;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-bar{height:7px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-note{
-  margin:10px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
+  margin:10px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
 
 /* 「价格未知」提示的跨 tab 链接（总览 → 价格表，带着该筛选）。左边距自带：它紧跟在

@@ -75,14 +75,16 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;
 }
 /* 参照行与主角数字同行、紧贴其后——它是这张面板存在的理由（今天算不算多）。
-   涨跌仍刻意中性：方向只由 ↑/↓ 字形与字重表达，品牌黄留给身份，语义色留给告警。 */
+   涨跌仍刻意中性：方向只由 ↑/↓ 字形与字重表达，品牌黄留给身份，语义色留给告警。
+   墨色取 fg-2 而不是三级色：这一行是**读数**（口径词 + 数字），而浅色皮肤的三级色对卡面只有
+   3.47:1，11px 正文过不了 4.5:1。数字因此升到主墨色——参照的层级靠字号与字重，不靠洗淡。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-figure{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-delta{
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-3);white-space:nowrap;
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-delta b{
   font-family:var(--dtpl-mono);
-  font-size:13px;line-height:18px;font-weight:600;color:var(--dtpl-fg-2);
+  font-size:13px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;
 }
 /* 今日金额：标签左、金额右的双行块，两行共用 max-content 宽度，所以两端各自成列。 */
@@ -90,7 +92,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-row{
   display:flex;align-items:baseline;gap:16px;justify-content:space-between;
 }
-[data-plugin="dsh-tokbook"] .dtpl-hero-money-k{font-size:11px;line-height:17px;color:var(--dtpl-fg-3);white-space:nowrap;}
+[data-plugin="dsh-tokbook"] .dtpl-hero-money-k{font-size:11px;line-height:17px;color:var(--dtpl-fg-2);white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-v{
   font-family:var(--dtpl-mono);
   font-size:12px;line-height:17px;font-weight:500;color:var(--dtpl-fg-2);
@@ -101,7 +103,9 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
    始终在场的「订阅价值」标签承担，换任何皮肤都成立。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-v.is-cash{color:var(--dtpl-fg);font-weight:600;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-v.is-zero{color:var(--dtpl-fg-3);font-weight:400;}
-/* 累计事实带：累计单调递增、永不触发决策，所以它只证明「账本在记账」——一条次要行读完。 */
+/* 累计事实带：累计单调递增、永不触发决策，所以它只证明「账本在记账」——一条次要行读完。
+   层级靠**字号 + 只在数字上加字重**：文字部分留在 fg-2（11px 正文要 4.5:1，三级色不够），
+   数字升到主墨色。安静由字号、字距与留白做，不靠把字洗淡到读不清。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-foot{
   position:relative;z-index:1;
   display:flex;align-items:baseline;gap:10px;
@@ -112,13 +116,13 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-facts{
   display:flex;flex-wrap:wrap;align-items:baseline;min-width:0;
-  font-size:11px;line-height:18px;color:var(--dtpl-fg-3);
+  font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
 }
 /* 每项整体换行（数字不与自己的标签拆开），分隔点因此永不出现在行首。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-fact{white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-facts b{
-  font-family:var(--dtpl-mono);font-weight:600;color:var(--dtpl-fg-2);
+  font-family:var(--dtpl-mono);font-weight:600;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-facts i{font-style:normal;color:var(--dtpl-fg-dim);padding:0 5px;}
 /* 今日出过的事：与下面的累计事实带同处 hero，但口径是「今天」，所以自带分区词，
@@ -139,9 +143,18 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-alert i{font-style:normal;color:var(--dtpl-fg-dim);}
-/* 模型/通道/工作区行里的订阅金额：刻意区别于消费，订阅通道的数字永远不像现金。 */
-[data-plugin="dsh-tokbook"] .dtpl-sub-amt{
+/* 行里的两个金额桶按**同一套口径**分主次：现金升到主墨色 + 600，订阅价值留在次要色 + 400
+   （并永远带着「订阅价值」这个名字）。此前这里反了——订阅金额拿的是主墨色 600，而现金金额
+   是 dtpl-cost 的次要色裸字，于是同一扇窗里 hero 说「现金最重要」、行里却把没花的钱写成
+   最响的那个数（DESIGN §4：现金升一档、订阅留在次要色）。桶名与数字的区分由字重 + 名字承担，
+   色相不外借（这里唯一有色相的 token 是品牌黄）。 */
+[data-plugin="dsh-tokbook"] .dtpl-cash-amt{
+  font-style:normal;
   font-family:var(--dtpl-mono);color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-sub-amt{
+  font-style:normal;
+  font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-weight:400;font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-cost-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-2);margin-left:3px;}
 
@@ -187,7 +200,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-sec-head .dtpl-sec-title{margin:0 0 11px;}
 [data-plugin="dsh-tokbook"] .dtpl-sec-aside{
   flex:none;margin-bottom:11px;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 
@@ -262,11 +275,13 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   content:"";position:absolute;left:calc(50% - 1px);bottom:0;width:2px;height:3px;
   pointer-events:none;background:var(--dtpl-fg-3);
 }
-/* 每根柱自带数值：不用悬停也能读图。偏移量写成 inline——重复填充高度的表达式，让数字贴在自己的柱顶。 */
+/* 每根柱自带数值：不用悬停也能读图。偏移量写成 inline——重复填充高度的表达式，让数字贴在自己的柱顶。
+   墨色取 fg-2：这是图的正文（读数），三级色对卡面只有 3.47:1，10px 也不该这么淡；
+   峰值仍靠主墨色 + 600 + 黄牌 + 更亮的柱体区分。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-label{
   position:absolute;left:50%;transform:translateX(-50%);
   font-family:var(--dtpl-mono);
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-3);font-variant-numeric:tabular-nums;
+  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
   white-space:nowrap;pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:600;}
@@ -288,11 +303,11 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis{
   display:flex;gap:3px;margin-top:6px;padding:0 14px;
   font-family:var(--dtpl-mono);
-  font-size:10px;line-height:16px;color:var(--dtpl-fg-3);font-variant-numeric:tabular-nums;
+  font-size:10px;line-height:16px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis span{flex:1 1 0;min-width:0;text-align:center;white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-trend-sum{
-  margin:6px 0 0;font-size:11px;line-height:17px;color:var(--dtpl-fg-3);
+  margin:6px 0 0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
 }
 
 /* 明细（按模型 / 按工作区）：这一节此前只有两个 tab 标签，而它们说的是**切法**、不是这一节
@@ -346,7 +361,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
    一行牺牲精确对位，换回它像一行表头。 */
 [data-plugin="dsh-tokbook"] .dtpl-bd-cols{
   padding:8px 0 6px;
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-3);
+  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bd-col-id,
 [data-plugin="dsh-tokbook"] .dtpl-bd-col-nums{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -476,7 +491,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot{animation:dtpl-pulse 1.2s ease-in-out infinite;}
 [data-plugin="dsh-tokbook"] .dtpl-foot-latest{
   font-family:var(--dtpl-mono);
-  font-size:11px;line-height:18px;letter-spacing:.04em;color:var(--dtpl-fg-3);
+  font-size:11px;line-height:18px;letter-spacing:.04em;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 重扫是偶尔用的维护动作，不是这一屏的主行动：描边式方按钮，不是实心 CTA。 */

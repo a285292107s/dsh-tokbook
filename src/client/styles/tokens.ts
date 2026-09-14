@@ -6,7 +6,6 @@ export const CSS_TOKENS = `
   --dtpl-fg-3:var(--dsw-alias-label-tertiary,#81858c);
   --dtpl-fg-dim:var(--dsw-alias-label-dimmed,#a0a4a8);
   --dtpl-accent:var(--dsw-alias-brand-primary,#4d6bfe);
-  --dtpl-accent-hover:var(--dsw-alias-button-primary-hover,#3f5ce0);
   --dtpl-card:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1,#ffffff));
   --dtpl-surface:var(--dsw-alias-bg-layer-1,#ffffff);
   --dtpl-border:var(--dsw-alias-border-l2,rgba(0,0,0,.12));

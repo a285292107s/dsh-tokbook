@@ -73,8 +73,11 @@ export const CSS_PROVIDER = `/* 通道用量 tab */
   border-color:var(--dtpl-fg);
   background:var(--dtpl-fg);color:var(--dtpl-card);
 }
+/* 卡头这一段是**信息**（请求 / 压缩 / 没上报用量 / 价格未知的模型），不是装饰：
+   墨色取 fg-2。浅色皮肤的三级色对卡面只有 3.47:1，11px 正文不够 4.5:1
+   （与总览「按工作区」那一行的身份行同一条判据）。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-meta{
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-nums{
@@ -96,10 +99,11 @@ export const CSS_PROVIDER = `/* 通道用量 tab */
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-spend{font-weight:600;color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-provider-value{color:var(--dtpl-fg-3);font-weight:400;font-size:10px;line-height:15px;}
+[data-plugin="dsh-tokbook"] .dtpl-provider-value{color:var(--dtpl-fg-2);font-weight:400;font-size:10px;line-height:15px;}
+/* 模型行副行（请求数 · 金额）是读数：fg-2，现金金额另走主墨色 600（见 ledger 的 dtpl-cash-amt）。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-model-sub{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-3);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 模型行自带「发丝线 + 上下间距」（.dtpl-row + .dtpl-row，见 ledger 片段），

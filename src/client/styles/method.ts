@@ -38,7 +38,7 @@ export const CSS_METHOD = `/* 统计口径文档 */
   box-shadow:var(--dtpl-metal);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-fact-k{
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-3);font-weight:500;
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);font-weight:500;
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-fact-v{
   font-size:12px;line-height:18px;color:var(--dtpl-fg);
@@ -195,7 +195,7 @@ export const CSS_METHOD = `/* 统计口径文档 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-map-row b{color:var(--dtpl-fg);font-weight:600;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-map-arrow{color:var(--dtpl-fg-3);flex:none;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-map-note{
-  margin:2px 0 0;font-size:11.5px;line-height:17px;color:var(--dtpl-fg-3);
+  margin:2px 0 0;font-size:11.5px;line-height:17px;color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-map-note:first-of-type{margin-top:2px;}
 
@@ -224,7 +224,7 @@ export const CSS_METHOD = `/* 统计口径文档 */
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-data-line b{color:var(--dtpl-fg);font-weight:600;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-data-dir{
-  margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
+  margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-data-dir code{
@@ -234,6 +234,6 @@ export const CSS_METHOD = `/* 统计口径文档 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-foot{
   margin-top:12px;padding-top:10px;
   border-top:1px solid var(--dtpl-border);
-  font-size:11px!important;line-height:16px!important;color:var(--dtpl-fg-3)!important;
+  font-size:11px!important;line-height:16px!important;color:var(--dtpl-fg-2)!important;
 }
 `
