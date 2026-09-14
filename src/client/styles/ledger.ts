@@ -143,7 +143,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-sub-amt{
   font-family:var(--dtpl-mono);color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;
 }
-[data-plugin="dsh-tokbook"] .dtpl-sub-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-3);margin-left:3px;}
+[data-plugin="dsh-tokbook"] .dtpl-cost-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-2);margin-left:3px;}
 
 /* 词元构成：一只带分隔的方框——工程读数正是「框 + 竖分隔」。与 hero 同一块面板配方。 */
 [data-plugin="dsh-tokbook"] .dtpl-grid{
@@ -197,16 +197,28 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-bars{
   position:relative;
   display:flex;align-items:flex-end;gap:3px;height:92px;
-  padding:24px 4px 0;
+  /* 图上方那 24px 留白给最高那根柱的数值标签。 */
+  margin-top:24px;
+  /* 左右内边距必须 ≥ 半个标签宽。列宽约 40px，而最宽的标签是等宽 10px 的六字（517.3M）实测 33px，
+     居中后每侧探出约 4px；此前留的 4px 不够，所以首尾两列曾被单独钉在列边缘（is-start / is-end）
+     来防溢出——代价是那两根柱和数字对不上。这里留 14px（与本卡正文的 14px 内缩一致），
+     14 列统一居中，字体度量最宽的浏览器也还剩 ~10px 余量。轴行同步，否则柱子与日期会错开。 */
+  padding:0 14px;
   border-bottom:1px solid var(--dtpl-border);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar{position:relative;flex:1 1 0;min-width:0;height:100%;display:flex;align-items:flex-end;}
 /* 非峰值柱：中性灰。灰取墨色 45%——柱高是这张图的正文，30% 在白底上只有 1.99:1，
    过不了 3:1 非文本对比度。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill{
-  width:100%;
+  position:relative;width:100%;overflow:hidden;
   background-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
-  transition:background-color .15s ease;
+}
+/* 柱顶 1px 受光边 + 峰值柱内侧墨色的**顶部盖片**：面板有 --dtpl-metal 那道机加工受光边，
+   柱子此前是纯色块。盖片高度与底面都写 3%，所以它在 68px、2px 柱上都按比例成立（2px 柱上
+   盖片被 overflow 裁掉，只剩受光边——不会缩成一团）。墨边仍是全周，形与色各分一层照旧。 */
+[data-plugin="dsh-tokbook"] .dtpl-bar-fill::before{
+  content:"";position:absolute;left:0;right:0;top:0;height:1px;
+  background:color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
 }
 /* 峰值：黄牌 + 墨边。**墨边同时解决两件事**——恒定黄对白底只有 1.57:1，边界由墨边给到
    18:1；而且峰值因此是「形」上的不同（带框的块 vs 无框的块），不再是只靠颜色区分。 */
@@ -214,8 +226,21 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   background-color:var(--dtpl-brand);
   box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
-[data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-fill{background-color:color-mix(in srgb,var(--dtpl-fg) 62%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-fill.is-peak{background-color:var(--dtpl-brand);}
+[data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak::before{
+  top:1px;height:3%;background:var(--dtpl-on-brand);
+}
+/* 底座与零刻度：柱脚一枚 3px 高的样板，峰值更宽——它是「装上去的件」，不只是涂了色的块。
+   零日**不写「0」**（等宽 0 只有 5.5px 宽，读起来是标签而不是测量结果）：基线上一道 2×3px 的
+   硬刻度，取 --dtpl-fg-3（在深底上是那枚全图最亮的中性灰）：2px 的块比 1px 线的观感弱，
+   再压透明度就会在深色主题里消失。两块都挂在 .dtpl-bar 上、都贴 bottom:0——柱子的零高度
+   不参与定位。 */
+[data-plugin="dsh-tokbook"] .dtpl-bar.is-zero::after,
+[data-plugin="dsh-tokbook"] .dtpl-bar.is-peak::after{
+  content:"";position:absolute;left:0;bottom:0;height:3px;pointer-events:none;
+  background:var(--dtpl-on-brand);
+}
+[data-plugin="dsh-tokbook"] .dtpl-bar.is-zero::after{width:2px;background:var(--dtpl-fg-3);}
+[data-plugin="dsh-tokbook"] .dtpl-bar.is-peak::after{width:6px;}
 /* 每根柱自带数值：不用悬停也能读图。偏移量写成 inline——重复填充高度的表达式，让数字贴在自己的柱顶。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-label{
   position:absolute;left:50%;transform:translateX(-50%);
@@ -224,11 +249,12 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   white-space:nowrap;pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:600;}
-[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-zero{color:var(--dtpl-fg-3);}
-[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-start{left:0;transform:none;}
-[data-plugin="dsh-tokbook"] .dtpl-bar-label.is-end{left:auto;right:0;transform:none;}
+/* 零日的数不由标签承担：柱高为 0 时「0」只是一个字符的噪声（等宽 0 只有 5.5px 宽），
+   它说的是基线自己就能说的事。量出来的零改由基线上那道 2×3px 刻度画（见上 .is-zero::after），
+   所以标签在零日整枚撤掉，而不是挪个位置接着写。 */
+[data-plugin="dsh-tokbook"] .dtpl-bar.is-zero .dtpl-bar-label{display:none;}
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis{
-  display:flex;gap:3px;margin-top:6px;padding:0 4px;
+  display:flex;gap:3px;margin-top:6px;padding:0 14px;
   font-family:var(--dtpl-mono);
   font-size:10px;line-height:16px;color:var(--dtpl-fg-3);font-variant-numeric:tabular-nums;
 }
@@ -327,32 +353,39 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   font-family:var(--dtpl-mono);color:var(--dtpl-fg);font-size:13px;line-height:20px;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
-/* 金额格 = 「数值」+ 一枚「订阅价值」槽位。**只限不可预测的那一半**：
+/* 金额格 = 一段或两段「数额 + 桶名」。**只限不可预测的那一半**：
    值（数额）是会被裁的那一个，所以它限宽 + 省略号 + title 兜底；
-   标签是**固定的一小段字**（永远是「订阅价值」），所以给它 nowrap 与一个 min-width，
-   宽度在每一行里因此都是同一个 max-content —— 数字右边缘照样对齐，而标签既不会换行、
-   也不会被裁。上一版给标签硬写 width:44px（等于「限一个可预测的值」），换个字体宽一点
-   就会被裁或折行。现金行不写死空元素，而是照常渲染同一段字、用 .is-blank 藏起来：
-   这样它的占位与订阅行**一模一样**。 */
+   桶名是**固定的一小段字**（「实际支出」/「订阅价值」，都是四个汉字），所以给它 nowrap 与一个
+   min-width，宽度在每一段里因此都是同一个 max-content —— 各段数额的右边缘照样对齐，而标签
+   既不会换行、也不会被裁。上一版给标签硬写 width:44px（等于「限一个可预测的值」），换个字体
+   宽一点就会被裁或折行。
+   一个工作区跨通道，两个桶可同时非零 —— 那是**两段**并排（各带自己的桶名），不是一段里塞两个
+   没名字的数；两者都无话时仍用一枚零撑住格子。 */
 [data-plugin="dsh-tokbook"] .dtpl-cost{
-  display:flex;align-items:baseline;justify-content:flex-end;gap:5px;
+  display:flex;align-items:baseline;justify-content:flex-end;gap:0;
   max-width:100%;
   font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-size:12px;line-height:16px;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
+[data-plugin="dsh-tokbook"] .dtpl-cost-seg{
+  display:flex;align-items:baseline;gap:5px;min-width:0;
+}
+/* 段之间用这个窗口表示「一串事实」的那个『·』（与 hero 累计带、工作区元信息行同一个符号），
+   间距走它自己的 padding 而不是容器的 gap——两段之间因此只留 6+6.6+6，好把宽度让给数额。 */
+[data-plugin="dsh-tokbook"] .dtpl-cost-sep{flex:none;padding:0 6px;color:var(--dtpl-fg-dim);}
 [data-plugin="dsh-tokbook"] .dtpl-cost-main{min-width:0;overflow:hidden;text-overflow:ellipsis;}
-[data-plugin="dsh-tokbook"] .dtpl-sub-k{
+[data-plugin="dsh-tokbook"] .dtpl-cost-k{
   flex:none;min-width:44px;margin-left:0;text-align:left;line-height:16px;white-space:nowrap;
 }
-/* 藏在视觉里、留在无障碍树外（visibility 会一并移出 AT）：换行与裁切都不可能发生。 */
-[data-plugin="dsh-tokbook"] .dtpl-sub-k.is-blank{visibility:hidden;}
 
 
 /* 工作区 */
-/* 身份行：目录，然后是让「最近优先」可读的两个事实。目录在挤压时让步；事实永不裁。 */
+/* 身份行：目录，然后是让「最近优先」可读的两个事实。目录在挤压时让步；事实永不裁。
+   这一行走『--dtpl-fg-2』而不是三级色：它与「按模型」行的通道行是同一档信息（行的次要身份），
+   而三级色在浅色皮肤上是 #81858c —— 压在白卡上实测 3.45:1，11px 正文不够 4.5:1。 */
 [data-plugin="dsh-tokbook"] .dtpl-ws-meta{
   display:flex;align-items:baseline;gap:6px;min-width:0;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-3);
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-ws-path{
   font-family:var(--dtpl-mono);font-size:10px;
@@ -361,6 +394,21 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-ws-sep{flex:none;color:var(--dtpl-fg-dim);}
 [data-plugin="dsh-tokbook"] .dtpl-ws-facts{
   flex:none;font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+/* 失败数染色，因为它与旁边的请求数不是一类事实：请求数是读数，失败是**要看一眼**的状态。
+   色相与 hero 的今日异常行同一个 token（裸 warn 在 11px 正文上只有 2.15:1，warn-ink 才够）。 */
+[data-plugin="dsh-tokbook"] .dtpl-ws-fail{
+  font-weight:600;color:var(--dtpl-warn-ink);font-variant-numeric:tabular-nums;
+}
+/* 「未归属」是对账行、不是项目（D-018）：它不参与「最近有操作在前」，所以用一条发丝线把它从
+   上面的工作区清单里分出来，标题降一档到次要色——行内其余排版不动，它照样有词元、金额与占比条，
+   因为它的量本来就要能加回累计。 */
+[data-plugin="dsh-tokbook"] .dtpl-row.is-unattributed{
+  margin-top:22px;padding-top:14px;
+  border-top:1px solid var(--dtpl-border);
+}
+[data-plugin="dsh-tokbook"] .dtpl-row.is-unattributed .dtpl-model-name{
+  color:var(--dtpl-fg-2);font-weight:400;
 }
 
 /* 注释：装着口径的去处（价格未知 = 不是免费、没上报用量 = 不是 0），是要读的正文。 */

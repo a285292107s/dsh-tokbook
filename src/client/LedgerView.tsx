@@ -4,6 +4,7 @@
  * @module dsh-tokbook/client/LedgerView
  */
 
+import { useEffect, useRef } from 'react'
 import type { TokBookOverview, UsageDayRow, UsageTotals } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import type { PricingFocus } from './contract.ts'
@@ -106,7 +107,73 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
 }
 
 /**
- * 连续日历窗口内按日的词元柱状图。宿主的 `byDay` 只带有点记录的天，故窗口在此重建：无记录的天变成零柱而不是消失——否则时间轴会被悄悄压缩。每根柱自带数值标签，读图不依赖 hover。
+ * 一根柱的填充高度表达式。柱高与标签锚点**共用这一个函数**：两处若各写一份，标签就会和柱顶
+ * 悄悄错开。
+ */
+function columnHeight(tokens: number, max: number): string {
+  return tokens > 0 ? `max(2px, ${String(Math.round((tokens / max) * 100))}%)` : '0px'
+}
+
+/**
+ * 图区本体。单独成一个组件是为了那支**入场动效**：它要挂一次性的 DOM 监听来撤掉动画类，
+ * 而 `DailyTrend` 有三条 early return——在那里挂 hook 会踩条件调用。隔离在这一层之后，
+ * 这一层只在真有柱可画时才挂载，规则天然成立。
+ * 动效只播一次：挂载即入场，`animationend` 一到就把类摘掉；此后轮询只更新数值，
+ * 动画不会重播，切 tab 回来（组件重新挂载）才会再播。
+ */
+function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
+  slots: readonly string[]
+  values: readonly number[]
+  peak: number
+  peakIndex: number
+  max: number
+  sum: number
+}) {
+  const barsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const bars = barsRef.current
+    if (bars === null) return
+    bars.classList.add('is-anim')
+    const stop = (): void => { bars.classList.remove('is-anim') }
+    bars.addEventListener('animationend', stop)
+    return () => { bars.removeEventListener('animationend', stop) }
+  }, [])
+  return (
+    <div
+      className="dtpl-bars"
+      ref={barsRef}
+      role="img"
+      aria-label={`近 ${String(TREND_DAYS)} 天词元柱状图：${shortDay(slots[0]!)} 至 ${shortDay(slots[slots.length - 1]!)} 共 ${String(slots.length)} 天，合计 ${formatTokens(sum)} 词元${peak > 0 ? `，峰值 ${shortDay(slots[peakIndex]!)} 的 ${formatTokens(peak)}` : ''}。`}
+    >
+      {values.map((tokens, index) => {
+        const isPeak = index === peakIndex
+        // 标签骑在柱上而非图区上：偏移量与填充高度同表达式，数字永远停在自己的柱上方 2px。
+        // 首尾列和其它列一样居中——图区左右各留了半个标签宽的边距（见 styles/ledger.ts）。
+        // 零日不写数：`.is-zero` 那枚标签在样式表里被撤掉，由基线上的刻度画「量出来的零」。
+        const columnH = columnHeight(tokens, max)
+        return (
+          <div className="dtpl-bar" key={slots[index]!} title={`${slots[index]!}\n${formatTokens(tokens)}`}>
+            <span
+              className={`dtpl-bar-label${isPeak ? ' is-peak' : ''}${tokens === 0 ? ' is-zero' : ''}`}
+              style={{ bottom: `calc(${columnH} + 2px)` }}
+            >
+              {formatTokens(tokens)}
+            </span>
+            {tokens > 0 && (
+              <div
+                className={`dtpl-bar-fill${isPeak ? ' is-peak' : ''}`}
+                style={{ height: columnH }}
+              />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * 连续日历窗口内按日的词元柱状图（图区本体在 `TrendPlot`）。宿主的 `byDay` 只带有点记录的天，故窗口在此重建：无记录的天变成零柱而不是消失——否则时间轴会被悄悄压缩。
  */
 function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   if (days.length === 0) return null
@@ -134,35 +201,14 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
           这同时把窗口词从下面的合计行提到了标题里——每个窗口自己报名，本来就是这一屏的规矩。
           N 直接取 TREND_DAYS，标题与柱子数因此不可能对不上。 */}
       <h2 className="dtpl-sec-title">近 {TREND_DAYS} 天趋势</h2>
-      <div
-        className="dtpl-bars"
-        role="img"
-        aria-label={`近 ${String(TREND_DAYS)} 天词元柱状图：${shortDay(slots[0]!)} 至 ${shortDay(slots[slots.length - 1]!)} 共 ${slots.length} 天，合计 ${formatTokens(sum)} 词元${peak > 0 ? `，峰值 ${shortDay(slots[peakIndex]!)} 的 ${formatTokens(peak)}` : ''}。`}
-      >
-        {slots.map((day, index) => {
-          const tokens = values[index]!
-          const isPeak = index === peakIndex
-          const edge = index === 0 ? ' is-start' : index === slots.length - 1 ? ' is-end' : ''
-          // 标签骑在柱上而非图区上：偏移量与填充高度同表达式，数字永远停在自己的柱上方 2px。
-          const columnH = tokens > 0 ? `max(2px, ${String(Math.round((tokens / max) * 100))}%)` : '0px'
-          return (
-            <div className="dtpl-bar" key={day} title={`${day}\n${formatTokens(tokens)}`}>
-              <span
-                className={`dtpl-bar-label${isPeak ? ' is-peak' : ''}${tokens === 0 ? ' is-zero' : ''}${edge}`}
-                style={{ bottom: `calc(${columnH} + 2px)` }}
-              >
-                {formatTokens(tokens)}
-              </span>
-              {tokens > 0 && (
-                <div
-                  className={`dtpl-bar-fill${isPeak ? ' is-peak' : ''}`}
-                  style={{ height: columnH }}
-                />
-              )}
-            </div>
-          )
-        })}
-      </div>
+      <TrendPlot
+        slots={slots}
+        values={values}
+        peak={peak}
+        peakIndex={peakIndex}
+        max={max}
+        sum={sum}
+      />
       <div className="dtpl-trend-axis">
         {slots.map(day => <span key={day}>{shortDay(day)}</span>)}
       </div>

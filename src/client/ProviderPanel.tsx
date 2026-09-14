@@ -191,7 +191,7 @@ function ProviderCard({ card, money, labels }: {
                 {m.totals.requests} 请求 ·{' '}
                 {m.spend > 0
                   ? money(m.spend)
-                  : <><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-sub-k">订阅价值</em></>}
+                  : <><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-cost-k">订阅价值</em></>}
               </span>
             </div>
           </div>

@@ -126,12 +126,18 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"].dtpl-overlay{animation:dtpl-fade .16s ease-out;}
   [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop .16s ease-out;}
   [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transform-origin:bottom;}
+  /* 柱子入场：柱高本身就是这张图的读数，所以只让**读数长出来**，数值标签一律不动——
+     数字在动画期间就已经停在它最终的高度上，柱子是长到数字那里去。真实数据切换时再播一次
+     是错的（那会让「数据变了」和「这一屏刚打开」混成同一件事），所以 .is-anim 由 TrendPlot
+     挂载时加上、animationend 一到就摘掉，此后重渲染不再有动画。 */
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill{animation:dtpl-bar-grow .18s cubic-bezier(.22,.68,.24,1) both;}
 }
 @media (prefers-reduced-motion:no-preference) and (max-width:640px){
   /* sheet 习语：居中弹窗的 pop 动画是向上平移 8px，对贴底全宽 sheet 无意义——改为从视口下方滑入。 */
   [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-sheet .22s cubic-bezier(.32,.72,0,1);}
 }
 @keyframes dtpl-fade{from{opacity:0}}
+@keyframes dtpl-bar-grow{from{transform:scaleY(0)}}
 @keyframes dtpl-pop{from{opacity:0;transform:translateY(8px) scale(.98)}}
 @keyframes dtpl-sheet{from{transform:translateY(100%)}}
 @keyframes dtpl-rotate{to{transform:rotate(360deg)}}
@@ -144,6 +150,7 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   100%{transform:scale(1)}
 }
 @media (prefers-reduced-motion:reduce){
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions,

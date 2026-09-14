@@ -133,12 +133,12 @@ function ModelRows({ byModel, totalTokens, money }: {
   return (
     <div className="dtpl-models">
       {rows.map((m) => {
-        // 金额这一格永远渲染「订阅价值」这枚标签（现金行只是**看不见**，见 .is-blank），
-        // 所以槽位宽度在每一行里都是同一个 max-content——数字的右边缘因此落在同一条竖线上，
-        // 而标签永远不会换行或被裁掉。
-        // 这一行没有实际支出（spend 为 0）时，格子里放的是订阅价值。
+        // 一行只有一个金额桶（计费是 route 事实），但**标明是哪一桶**不是可省的：现金行写
+        // 「实际支出」、订阅行写「订阅价值」。两枚标签都是四个汉字、在等宽栈里同宽，
+        // 所以数字的右边缘仍然落在同一条竖线上，而标签永远不会换行或被裁掉。
         const showsSub = m.spend === 0
-        const costText = showsSub ? `${money(m.subscriptionValue)} 订阅价值` : money(m.spend)
+        const bucket = showsSub ? '订阅价值' : '实际支出'
+        const costText = `${showsSub ? money(m.subscriptionValue) : money(m.spend)} ${bucket}`
         return (
           <div className="dtpl-row" key={`${m.provider}/${m.model}`}>
             <div className="dtpl-model">
@@ -153,13 +153,15 @@ function ModelRows({ byModel, totalTokens, money }: {
             <div className="dtpl-model-nums">
               <span className="dtpl-val"><span className="dtpl-sr">词元 </span>{formatTokens(totalsTokens(m.totals))}</span>
               <span className="dtpl-cost" title={costText}>
-                <span className="dtpl-cost-main">
-                  <span className="dtpl-sr">金额 </span>
-                  {showsSub
-                    ? <b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b>
-                    : money(m.spend)}
+                <span className="dtpl-cost-seg">
+                  <span className="dtpl-cost-main">
+                    <span className="dtpl-sr">金额 </span>
+                    {showsSub
+                      ? <b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b>
+                      : money(m.spend)}
+                  </span>
+                  <em className="dtpl-cost-k">{bucket}</em>
                 </span>
-                <em className={`dtpl-sub-k${showsSub ? '' : ' is-blank'}`}>订阅价值</em>
               </span>
             </div>
             <span className="dtpl-model-bar" role="presentation">
@@ -192,19 +194,20 @@ function WorkspaceRows({ rows, totalTokens, money }: {
         // 金额这一格的完整文本：格子可能被裁（界面上它是被**限宽**的那一个），
         // 所以同一条串也交给 title——值是不可预测的那部分，只限它、不限标签。
         const costText = [
-          cash ? money(row.spend) : '',
+          cash || !sub ? `${money(row.spend)} 实际支出` : '',
           sub ? `${money(row.subscriptionValue)} 订阅价值` : '',
-          !cash && !sub ? money(0) : '',
         ].filter(part => part !== '').join(' · ')
         return (
           <div
-            className="dtpl-row"
+            className={`dtpl-row${row.id === '' ? ' is-unattributed' : ''}`}
             key={row.id === '' ? 'unattributed' : row.id}
             title={workspaceDetail(row, money)}
           >
             <div className="dtpl-model">
               <span className="dtpl-model-name">{row.title}</span>
-              {/* 目录在压力下截断（省略号）；两个事实不截——被截断的「最近 …」会被读成坏掉的数字。 */}
+              {/* 目录在压力下截断（省略号）；两个事实不截——被截断的「最近 …」会被读成坏掉的数字。
+                  「N 失败」是这一行唯一会改变动作的事实，所以它带色相（与 hero 的今日异常行同一条
+                  规矩：色相只给要看一眼的状态），而请求数、最近时刻是读数，不染色。 */}
               <span className="dtpl-ws-meta">
                 {row.path !== '' && (
                   <>
@@ -213,23 +216,35 @@ function WorkspaceRows({ rows, totalTokens, money }: {
                   </>
                 )}
                 <span className="dtpl-ws-facts">
-                  {row.totals.requests} 请求{failed > 0 ? ` · ${String(failed)} 失败` : ''} · 最近 {formatRelative(row.lastAt)}
+                  {row.totals.requests} 请求
+                  {failed > 0 && <> · <b className="dtpl-ws-fail">{failed} 失败</b></>}
+                  {' '}· 最近 {formatRelative(row.lastAt)}
                 </span>
               </span>
             </div>
             <div className="dtpl-model-nums">
               <span className="dtpl-val"><span className="dtpl-sr">词元 </span>{formatTokens(row.tokens)}</span>
+              {/* 工作区跨通道，两个金额桶可同时非零——所以一格里有**两段**「数额 + 桶名」，段之间用
+                  这个窗口表示「一串事实」的 `·` 分隔（与 hero 的累计事实带同一条写法）。桶名与模型行
+                  共用同一条槽位，所以各段数额的右边缘仍然落在同一条竖线上；两者都无话时用一枚零
+                  撑住格子：「价格未知」是口径，不是免费。 */}
               <span className="dtpl-cost" title={costText}>
-                {/* 工作区跨通道，两个金额桶可同时非零——因此每个非零桶各自标明，全未定价的工作区仍
-                    显示 ¥0.00（价格未知是口径，不是免费）。「订阅价值」槽位与模型行共用同一条右边缘。 */}
-                <span className="dtpl-cost-main">
-                  <span className="dtpl-sr">金额 </span>
-                  {cash && money(row.spend)}
-                  {cash && sub && <span aria-hidden="true"> · </span>}
-                  {sub && <b className="dtpl-sub-amt">{money(row.subscriptionValue)}</b>}
-                  {!cash && !sub && money(0)}
-                </span>
-                <em className={`dtpl-sub-k${sub ? '' : ' is-blank'}`}>订阅价值</em>
+                {(cash || !sub) && (
+                  <span className="dtpl-cost-seg">
+                    <span className="dtpl-cost-main">
+                      <span className="dtpl-sr">金额 </span>
+                      {money(row.spend)}
+                    </span>
+                    <em className="dtpl-cost-k">实际支出</em>
+                  </span>
+                )}
+                {cash && sub && <span className="dtpl-cost-sep" aria-hidden="true">·</span>}
+                {sub && (
+                  <span className="dtpl-cost-seg">
+                    <span className="dtpl-cost-main"><b className="dtpl-sub-amt">{money(row.subscriptionValue)}</b></span>
+                    <em className="dtpl-cost-k">订阅价值</em>
+                  </span>
+                )}
               </span>
             </div>
             <span className="dtpl-model-bar" role="presentation">
