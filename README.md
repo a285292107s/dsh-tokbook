@@ -53,7 +53,7 @@ src/
   routes.ts           host 精确 Fetch 路由(见 CONTRACTS · Host 路由)
   client/
     index.ts          client: apply(ctx),注册两个 slot
-    contract.ts       最小 client 契约:ctx/slots 面 + 跨 surface 视图契约(PricingFocus)
+    contract.ts       最小 client 契约:插件被授予的 ctx/slots 面
     store.ts          按钮 ↔ 浮窗共享视图 store
     format.ts         纯展示 helper(日键、token/金额/时间格式化)
     styles.ts         注入样式表入口(按 surface 拼接 styles/*.ts)

@@ -309,9 +309,6 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   font-size:10px;line-height:16px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis span{flex:1 1 0;min-width:0;text-align:center;white-space:nowrap;}
-[data-plugin="dsh-tokbook"] .dtpl-trend-sum{
-  margin:6px 0 0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
-}
 
 /* 明细头部（用量明细 tab 的分区词 + 切法子 tab + 右端旁注）。这一节此前只有两个 tab 标签，
    而它们说的是**切法**、不是这一节是什么——所以它成了全窗口唯一没有分区词与工业徽记的一节。

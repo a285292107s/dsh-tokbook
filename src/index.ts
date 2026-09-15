@@ -368,8 +368,9 @@ export class TokenUsageBook extends Service {
       if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
     }
     // 精简 wire 载荷：价表、rateRows、byModel 不过 wire（成本已折进 cost 字段）；
-    // byModel / byWorkspace 随用量明细 tab 走窗口载荷，不在这里。
-    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, byModel: _byModel, ...slim } = costed
+    // byModel / byWorkspace 随用量明细 tab 走窗口载荷，不在这里；unpricedModels 自
+    // D-032 起概览不再渲染（价格未知在用量明细 / 价格表里），也不占 wire。
+    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, byModel: _byModel, unpricedModels: _unpricedModels, ...slim } = costed
     return {
       ...slim,
       totalTokens: totalsTokens(costed.total),

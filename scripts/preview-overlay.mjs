@@ -161,8 +161,7 @@ const overview = {
   totalCost: 8.59,
   spend: 4.99,
   subscriptionValue: 3.6,
-  // 非空：这条注记（含「去定价」入口）是概览的口径声明之一，预览要能看到它。
-  unpricedModels: ['mimo-v2.5', 'retired-model'],
+  // 概览载荷自 D-032 起不带 unpricedModels：价格未知只在用量明细的通道卡里可见。
   pricing: {},
   totalTokens: 10_714_000,
   currency: 'CNY',

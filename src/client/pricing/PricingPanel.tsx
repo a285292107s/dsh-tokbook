@@ -8,7 +8,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PricingView } from '../../types.ts'
-import type { PricingFocus } from '../contract.ts'
 import {
   anchoredRow, baselineOfDraft, baselinesOf, composePriceBody, draftFromView, isUnpriced, stagedChanges, rowKey,
   type ModelDraft, type PriceDraft, type RouteDraft,
@@ -21,10 +20,6 @@ export interface PricingPanelProps {
   /** 报告 tab 当前是否有未保存的暂存改动（驱动 tab 圆点）。不在 unmount
    *  时清除：草稿跨面板存活。 */
   onDirtyChange?: (dirty: boolean) => void
-  /** 跨 tab 请求（概览的价格未知备注）以某个筛选打开。 */
-  focus?: PricingFocus | null
-  /** `focus` 被应用后调用一次。 */
-  onFocusHandled?: () => void
 }
 
 /** 最后一次按键后 tab 等待多久才写入。足够长以合并一行的四个数字，足够短以感觉即时。 */
@@ -74,7 +69,7 @@ function clockOf(epochMs: number): string {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}:${String(at.getSeconds()).padStart(2, '0')}`
 }
 
-export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }: PricingPanelProps) {
+export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [view, setView] = useState<PricingView | null>(() => staged?.view ?? null)
   const [draft, setDraft] = useState<PriceDraft>(() => staged?.draft ?? new Map())
   const [baseline, setBaseline] = useState<Staged['baseline']>(() => staged?.baseline ?? { models: new Map(), billing: new Map() })
@@ -121,13 +116,6 @@ export function PricingPanel({ onChanged, onDirtyChange, focus, onFocusHandled }
     })()
     return () => { alive = false }
   }, [seed])
-
-  // 概览的价格未知备注直接跳到筛选。
-  useEffect(() => {
-    if (focus !== 'unpriced') return
-    setUnknownOnly(true)
-    onFocusHandled?.()
-  }, [focus, onFocusHandled])
 
   /**
    * 写入整个文件。草稿尚无效时拒绝（不写入），使半输入的数字不能阻塞或破坏其余内容；防抖 effect 在草稿再次变化时重试。保存串行化：在飞的写入期间发生的变更排队一次。

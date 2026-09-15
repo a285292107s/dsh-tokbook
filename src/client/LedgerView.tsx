@@ -8,7 +8,6 @@
 import { useEffect, useRef } from 'react'
 import type { TokBookOverview, UsageDayRow, UsageTotals } from '../types.ts'
 import { totalsTokens } from '../types.ts'
-import type { PricingFocus } from './contract.ts'
 import { UsageGlyph } from './icons.tsx'
 import {
   formatHitRate, formatMoney, formatTokens,
@@ -194,7 +193,6 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   const values = slots.map(day => byDay.get(day) ?? 0)
   const max = Math.max(...values, 1)
   const sum = values.reduce((acc, value) => acc + value, 0)
-  const active = values.filter(value => value > 0).length
   const peak = Math.max(...values)
   const peakIndex = peak > 0 ? values.indexOf(peak) : -1
   return (
@@ -204,8 +202,8 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
           又共用「词元」这个头，两个小标题读起来像一对兄弟——维护者原话「太过相近」。
           两者其实是两种不同的陈述：hero 是**一个窗口里的一个总量**，这张图是
           **一个窗口里逐日的分布**。所以图这一节改用一个完全不同结构的名字：
-          窗口（近 N 天）领起 + 陈述类型（趋势），与「今日词元」不共享任何字串。
-          这同时把窗口词从下面的合计行提到了标题里——每个窗口自己报名，本来就是这一屏的规矩。
+          窗口（近 N 天）领起 + 陈述类型（趋势），与「今日词元」不共享任何字串——
+          每个窗口自己报名，本来就是这一屏的规矩。
           N 直接取 TREND_DAYS，标题与柱子数因此不可能对不上。 */}
       <h2 className="dtpl-sec-title">近 {TREND_DAYS} 天趋势</h2>
       <TrendPlot
@@ -225,18 +223,11 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
           </span>
         ))}
       </div>
-      <p className="dtpl-trend-sum">
-        最近 {slots.length} 天合计 {formatTokens(sum)} 词元
-        {active < slots.length ? `（其中 ${active} 天有记录）` : ''}。
-      </p>
     </section>
   )
 }
 
-export function LedgerView({ overview, onOpenPricing }: {
-  overview: TokBookOverview
-  onOpenPricing: (scope: PricingFocus) => void
-}) {
+export function LedgerView({ overview }: { overview: TokBookOverview }) {
   const money = (value: number): string => formatMoney(value)
   const empty = overview.records === 0
   const hero = todayHero(overview)
@@ -251,7 +242,6 @@ export function LedgerView({ overview, onOpenPricing }: {
   // 分母（「累计 7 失败」说明不了现在有没有问题）。累计那一侧只留能加总的量。
   const todayFailures = today.failures ?? 0
   const todayUnknown = today.usageUnknown ?? 0
-  const totalUnknown = overview.total.usageUnknown ?? 0
 
   return (
     <>
@@ -359,26 +349,6 @@ export function LedgerView({ overview, onOpenPricing }: {
           </p>
 
           <DailyTrend days={overview.byDay} />
-
-          {/* 三条注记都是**全账本累计**口径，而它们上面是今日口径的内容——所以口径词
-                必须写在句子里，不能靠读者的位置感。 */}
-          {(overview.total.compactions ?? 0) > 0 && (
-            <p className="dtpl-note">累计包含 {overview.total.compactions} 次自动压缩上下文的调用。</p>
-          )}
-          {overview.unpricedModels.length > 0 && (
-            <p className="dtpl-note">
-              累计 {overview.unpricedModels.length} 个模型价格未知（暂按 ¥0 计，不是免费）：{overview.unpricedModels.join('、')}
-              <button type="button" className="dtpl-pricing-empty-link" onClick={() => onOpenPricing('unpriced')}>去定价</button>
-            </p>
-          )}
-          {/* 金额侧的同一个口径问题：没上报用量的调用无从计价，所以它们按 ¥0 进入支出——
-              与「价格未知」同形地说明，而不是让那个 0 冒充真实花费。今天那几次在上面
-              的今日行里已单独报过，这里说的是**整本账**的规模。 */}
-          {totalUnknown > 0 && (
-            <p className="dtpl-note">
-              累计 {totalUnknown} 次调用通道没上报用量：只计次数、不计词元，金额也按 ¥0 计——是「不知道」，不是免费。
-            </p>
-          )}
         </>
       )}
     </>

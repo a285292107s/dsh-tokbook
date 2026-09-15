@@ -289,15 +289,4 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-note{
   margin:10px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
-
-/* 「价格未知」提示的跨 tab 链接（总览 → 价格表，带着该筛选）。左边距自带：它紧跟在
-   一串模型名之后，而 JSX 在标签边界上不会留下空格，靠源码里的空白对齐是脆的。
-   链接不借强调色：这套语言里唯一有色相的 token 是品牌黄，它是身份色、不外借给「可点」
-   ——可点由下划线 + 悬停底洗色说明，换任何皮肤都成立。 */
-[data-plugin="dsh-tokbook"] .dtpl-pricing-empty-link{
-  appearance:none;border:0;background:transparent;padding:0 1px;margin-left:6px;
-  font:inherit;font-size:inherit;color:var(--dtpl-fg);
-  cursor:pointer;text-decoration:underline;text-underline-offset:2px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-pricing-empty-link:hover{background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);}
 `

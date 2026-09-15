@@ -13,7 +13,6 @@ import type { TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
 import { PricingPanel } from './pricing/PricingPanel.tsx'
 import { QuotaPanel } from './quota/QuotaPanel.tsx'
-import type { PricingFocus } from './contract.ts'
 import { LedgerSkeleton, LedgerView } from './LedgerView.tsx'
 import { ProviderPanel } from './ProviderPanel.tsx'
 import { MethodDoc } from './MethodDoc.tsx'
@@ -95,11 +94,8 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
   onClose: () => void
 }) {
   const [tab, setTab] = useState<OverlayTab>('ledger')
-  // 跨 tab 跳转（概览的价格未知备注）要求价格表 tab 以特定筛选打开；面板应用后清掉请求。
-  const [pricingScope, setPricingScope] = useState<PricingFocus>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
-  const openPricing = (scope: PricingFocus): void => { setPricingScope(scope); setTab('pricing') }
 
   // 打开时聚焦卡片，关闭时焦点回到触发按钮。
   useEffect(() => {
@@ -257,8 +253,6 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
                     <PricingPanel
                       onChanged={onRefresh}
                       onDirtyChange={onDirtyChange}
-                      focus={pricingScope}
-                      onFocusHandled={() => setPricingScope(null)}
                     />
                   )
                   : (
@@ -271,7 +265,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
                     )}
                     {overview === null
                       ? <LedgerSkeleton />
-                      : <LedgerView overview={overview} onOpenPricing={openPricing} />}
+                      : <LedgerView overview={overview} />}
                   </>
                   )}
         </div>
