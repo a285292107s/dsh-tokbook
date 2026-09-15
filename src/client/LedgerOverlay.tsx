@@ -81,7 +81,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
 /** 浮窗当前显示的 surface。 */
 type OverlayTab = 'ledger' | 'provider' | 'quota' | 'pricing' | 'method'
 
-const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'provider', 'quota', 'pricing', 'method']
+const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'quota', 'provider', 'pricing', 'method']
 
 function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onClose }: {
   overview: TokBookOverview | null
@@ -191,18 +191,6 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
           <button
             type="button"
             role="tab"
-            id="dtpl-tab-provider"
-            aria-selected={tab === 'provider'}
-            aria-controls="dtpl-panel-provider"
-            tabIndex={tab === 'provider' ? 0 : -1}
-            className="dtpl-tab"
-            onClick={() => setTab('provider')}
-          >
-            通道用量
-          </button>
-          <button
-            type="button"
-            role="tab"
             id="dtpl-tab-quota"
             aria-selected={tab === 'quota'}
             aria-controls="dtpl-panel-quota"
@@ -211,6 +199,18 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             onClick={() => setTab('quota')}
           >
             订阅额度
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="dtpl-tab-provider"
+            aria-selected={tab === 'provider'}
+            aria-controls="dtpl-panel-provider"
+            tabIndex={tab === 'provider' ? 0 : -1}
+            className="dtpl-tab"
+            onClick={() => setTab('provider')}
+          >
+            通道用量
           </button>
           <button
             type="button"

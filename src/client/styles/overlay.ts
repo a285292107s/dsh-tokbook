@@ -65,7 +65,7 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
 [data-plugin="dsh-tokbook"] .dtpl-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-close-ico{width:16px;height:16px;}
 
-/* 分段 tab（用量总览 / 通道用量 / 订阅额度 / 价格表 / 统计口径） */
+/* 分段 tab（用量总览 / 订阅额度 / 通道用量 / 价格表 / 统计口径） */
 /* 不做药丸轨道：方舟的选择器是一条横排、项与项之间用竖发丝线分隔，当前项由**底部一条
    警戒色实条**标出。轨道底色会把它读成「一组按钮」，而这里表达的是「这台设备当前的页」。 */
 [data-plugin="dsh-tokbook"] .dtpl-tabs{
