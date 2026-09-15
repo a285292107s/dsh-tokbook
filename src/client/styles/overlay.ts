@@ -106,10 +106,14 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
 }
 
 /* 滚动主体 */
-/* 上下留白比横向大一档：首屏第一个元素（hero）因此不贴着 tab 条。 */
+/* 上下留白比横向大一档：首屏第一个元素（hero）因此不贴着 tab 条。
+   scrollbar-gutter:stable 常驻那条滚动条槽：用量明细的窗口一换，行数就从个位数跳到上千（滚
+   动条随之出现或消失），不留槽的话整块正文会横向挪 8px——比滚动条本身显眼得多。不支持这条属性
+   的浏览器只是回到旧行为，不会变差。 */
 [data-plugin="dsh-tokbook"] .dtpl-body{
   flex:1;min-height:0;
   padding:18px 20px 20px;overflow:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable;
   scrollbar-width:thin;
   scrollbar-color:var(--dsw-alias-scrollbar-bg-l2,rgba(0,0,0,.2)) transparent;
   scroll-padding:8px;

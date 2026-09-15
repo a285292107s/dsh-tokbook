@@ -36,6 +36,19 @@ export function share(value: number, total: number): number {
 }
 
 /**
+ * 占比的读法（百分比字符串）。两条与 `formatHitRate` 同源的诚实规则：**不足 1% 写「<1%」**
+ * 而不是取整成 0（那会把「有一点」说成「没有」），**99.x% 不凑整成 100%**（部分占满不是占满）。
+ */
+export function formatShare(value: number, total: number): string {
+  const percent = share(value, total)
+  if (percent <= 0) return '0%'
+  if (percent < 1) return '<1%'
+  const rounded = Math.round(percent)
+  if (rounded >= 100 && percent < 100) return '>99%'
+  return `${rounded}%`
+}
+
+/**
  * 缓存命中率（缓存读取 ÷ 输入侧计费词元），分母 = 未命中输入 + 缓存读 + 缓存写——与 harness 自身会话统计同口径。部分命中绝不会显示为 100%：展示只会低估命中、绝不虚报满命中。
  */
 export function formatHitRate(cacheReadTokens: number, billedInputTokens: number): string | null {

@@ -210,7 +210,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             className="dtpl-tab"
             onClick={() => setTab('provider')}
           >
-            通道用量
+            用量明细
           </button>
           <button
             type="button"

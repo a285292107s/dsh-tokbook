@@ -1,6 +1,6 @@
 # Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-14 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-15 · supersedes: —
 
 其他代码与 browser 半区必须**分毫不差**依赖的事实的唯一家园:host 路由与 wire JSON、
 插件配置、消费的 `session/event` 类型、数据目录文件布局。
@@ -20,7 +20,7 @@
 
 | 界面 | 代码 / 契约 |
 |---|---|
-| 通道用量 | Provider-usage tab,`GET /tokbook/usage` |
+| 用量明细 | breakdown tab(原「通道用量」),`GET /tokbook/usage` |
 | 价格表 | pricing tab,`pricing.json`,`GET`/`PUT /tokbook/pricing` |
 | 路由卡片 | `PricingRouteView`(`routes[]`)——一条通道路由一张卡 |
 | 价段(生效时间) | `PriceSegment`:`from`(`YYYY-MM-DD` 或整点 `YYYY-MM-DDTHH:00`,省略 = 最早一段)+ 四档全天价 + 可选的峰谷时段 |
@@ -32,8 +32,12 @@
 | 价格未知 | 该 (路由, 模型) 没有价段(暂按 ¥0,**不是免费**) |
 | 未上报用量 | 计费调用没有通道上报的 `usage`(`assistant/message` 多为中途取消的请求,`compaction/summary` 是没回报用量的 summarize):仍写行、仍计入请求次数(summarize 另计一次压缩),四桶一个都不加——计 0 是**未知**而非零消耗(`UsageTotals.usageUnknown`,概览与通道卡报出「N 次调用没上报用量」) |
 | 实际支出 / 订阅价值 | `billing: metered` / `subscription` 两个桶(`spend` / `subscriptionValue`);订阅价值是**这些用量按量付费本来要花的钱**,不是现金,也不加入支出 |
-| 用量明细 | 概览里「按模型 / 按工作区」那一节的分区词——**同一份累计账本**的两种切法,列头与两列网格由这一节共用 |
-| 按工作区 | overview 的 `byWorkspace`(`WorkspaceUsageRow[]`)——每个工作区一行累计 |
+| 用量明细 | 同一个**窗口**的用量按三种切法看:按模型 / 按工作区 / 按通道——三面读同一批窗口记录,所以合计逐分对得上 |
+| 按模型 | `/tokbook/usage` 的 `byModel`(`CostedModelRow[]`)——每个 (通道, 模型) 在窗口内的词元与费用 |
+| 按工作区 | `/tokbook/usage` 的 `byWorkspace`(`WorkspaceUsageRow[]`)——每个工作区在窗口内一行 |
+| 按通道 | `/tokbook/usage` 的 `providers`(`ProviderUsageCard[]`)——一条通道路由一张卡 |
+| 窗口 | `/tokbook/usage?range=`:`today` / `yesterday` / `last7` / `last30` / `all`(全账本,不设下界);它作用于三种切法 |
+| 窗口合计 | 页头那句「N 请求 · X 词元 · ¥Y 实际支出 · ¥Z 订阅价值」= 载荷的 `totalRequests` / `totalTokens` / `totalSpend` / `totalSubscriptionValue`,与三种切法逐分对得上 |
 | 未归属 | `byWorkspace` 里 `id: ''` 的那一行:会话没有工作区目录、或目录未注册为工作区的记录 |
 | 通道路由键 | provider route key(账本里的通道标识) |
 | 通道名称 | 卡头显示名:settings profile 的 `displayName` → 适配器给的名字 → 路由键 |
@@ -52,9 +56,9 @@
 
 | 方法 | 路径 | Query / body | 成功载荷(类型见 `src/types.ts`) |
 |---|---|---|---|
-| `GET` | `/tokbook/overview` | — | `TokBookOverview`(带成本的汇总 + 趋势 + 按模型 + 按工作区 + 新鲜度) |
+| `GET` | `/tokbook/overview` | — | `TokBookOverview`(带成本的汇总 + 趋势 + 新鲜度) |
 | `POST` | `/tokbook/rescan` | — | `RescanView` = `{ status: 'running'\|'skipped', lastSyncAt: number\|null }` |
-| `GET` | `/tokbook/usage` | `range` ∈ `today` \| `yesterday` \| `last7` \| `last30`(缺失/未知 → `400 {error}`) | `ProviderUsageView` |
+| `GET` | `/tokbook/usage` | `range` ∈ `today` \| `yesterday` \| `last7` \| `last30` \| `all`(缺失/未知 → `400 {error}`) | `ProviderUsageView`(窗口的三种切法 + 通道名) |
 | `GET` | `/tokbook/quota` | — | `QuotaView` = `{ providers: string[], alert?: boolean }` — 仅已启用计划;`alert` 只读持久化快照,无网络 |
 | `GET` | `/tokbook/quota` | `provider=<路由键>`;可选 `refresh=1` 跳过 TTL 缓存 | 该通道的 `QuotaCard` |
 | `GET` | `/tokbook/pricing` | — | `PricingView` = `{ routes: PricingRouteView[], dataDir, updatedAt }` |
@@ -64,8 +68,9 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
 
 - 概览载荷(`TokBookOverview`)**只带客户端真正渲染的字段**:价表、`rateRows`、`byHour` 不过 wire,
   会话计数与「上次同步时刻」也不再过 wire(无人渲染的字段不留,`sessions` / `lastSyncAt` 已删)。
-  新鲜度由 `lastEventAt` + `syncStatus` / `syncError` 表达。概览的 `byModel` 顺序不是契约——
-  模型清单在**展示层**按词元降序排(占比条编码的就是词元,见 D-026)。
+  新鲜度由 `lastEventAt` + `syncStatus` / `syncError` 表达。**`byModel` / `byWorkspace` 也不在概览里**:
+  两者是**窗口**的切法,随 `/tokbook/usage` 走(用量明细 tab 自己选窗口)。某个切法的行顺序**不是契约**
+  ——模型清单在**展示层**按词元降序排(占比条编码的就是词元,见 D-026)。
 - wire 上的金额是人民币(¥);**除非**某通道官方 API 以美元上报
   (`QuotaCard.usage / credits / windows.usedUsd / capUsd`,额度 tab 自己按美元展示)。
 - 额度卡的 `ok` 态还带**门**(`QuotaCard.gate: 'subscription' | 'balance' | 'none'`,缺省 =
@@ -99,7 +104,8 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   (`quota-<provider>.json`),只有它超过新鲜度预算才真的打通道 API;内存卡另缓存 30s。browser
   逐通道独立请求(`/tokbook/quota?provider=<路由键>`),**某张卡的数据一到就渲染**,慢/失败的
   通道不阻塞其余卡。
-- `range` id 是以本地日历天命名的窗口,与它们读取的日文件对应。
+- `range` id 是以本地日历天命名的窗口,与它们读取的日文件对应;**`all` 例外**:它不设下界
+  (`fromDay` 是**空串**,`readRecordsByDayRange` 据此读全部日文件),`toDay` 仍是今天。
 - 从未见过通道头的行归入 `'(未知)'` 组。
 - 价格未知模型计 ¥0,并在 `unpricedModels` 中列出——口径是**价格未知**,不是免费(费率为 0
   属于已知价,正常计价并显示为 ¥0)。这里同时收两类:当前价格表根本没有该 (路由, 模型) 的价,
@@ -109,6 +115,23 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
   次要小字,与价格表 tab 命名一致;卡片的计费芯片(按量 / 订阅)由该路由的 `$billing` 推出
   (计费性质是**通道路由**属性,所以一张卡内不会出现两种),说明该卡的金额是实际支出（现金）
   还是订阅价值（折算）。
+- 同一个载荷还带窗口的另外两种切法:**`byModel`**(按模型 = 各通道卡的模型行摊平,
+  `modelRowsOf`)与 **`byWorkspace`**(按工作区,归属规则见下一条,只是限定在窗口内),
+  外加**窗口合计**四个数:`totalTokens`(四桶之和,也是按模型 / 按工作区两种切法里占比条的
+  分母)、`totalRequests`、`totalSpend`、`totalSubscriptionValue`——四个都由 host 从各通道卡
+  求和得出,所以页头那句合计与三种切法逐分对得上,界面不做金额聚合。按模型
+  与按通道**同源**,所以两者的合计恒等;只有失败尝试的 (通道, 模型) 与工作区都不出行
+  (没有任何消耗,与卡片同一条规则)。宿主没挂载工作区注册表时 `byWorkspace` 为空,
+  界面不显示「按工作区」这一面——绝不把「无从归属」渲染成一屏「未归属」。
+- **按工作区的归属规则**(`byWorkspace`,窗口内):每个工作区一行(词元 / 请求数 / 双桶金额 /
+  最近一次记录时刻),最近有操作的在前,`id: ''` 的「未归属」行收尾。归属是**读时连接**:
+  账本行只有 `sessionId`,host 拿会话列表里该会话 header 的 `cwd` 去比工作区注册表
+  (`ctx.workspaceRegistry`)的规范路径——正是注册表自己的成员判据,所以**从未被 attach**
+  的会话(子代理、别处 resume 来的)也按它创建时的目录归属,归档(archive)不影响归属、
+  窗口内的量照算。没有 `cwd`、或目录不是已注册工作区的记录落进那一行「未归属」,因此**各工作区
+  之和恒等于窗口合计**(词元与两个金额桶都对得上)。只记过失败尝试的工作区不出行(与通道卡片
+  同一条规则)。金额与词元走与其他面相同的汇总 + 成本层(`summarizeRecords` + `attachCosts`),
+  所以三处口径一致。
 - `GET /tokbook/pricing` 的路由卡片由**三个来源求并**:
   1. **路由目录**——本机设置文档(`llm-pi-ai.providers` 的键,以及 `llm-deepseek` 所拥有的
      唯一路由 `deepseek-official`)∪ **正在运行的适配器注册表**(`ctx.llm.listProviders()`,
@@ -184,16 +207,6 @@ Wire 形状要点(权威字段清单见 `src/types.ts`):
 - `byDay` 每行除 token 汇总外还带该日 `spend` / `subscriptionValue`(`attachCosts` 从
   rate rows 按天折叠得出)。token-only 汇总与磁盘 rollup 里没有这两个字段——成本层每次
   读取都从 rate rows 重新推导,所以价格表改动后逐日金额自动跟着变。
-- overview 还带 **`byWorkspace`**:每个工作区一行**累计**(词元 / 请求数 / 双桶金额 /
-  最近一次记录时刻),最近有操作的在前,`id: ''` 的「未归属」行收尾。归属是**读时连接**:
-  账本行只有 `sessionId`,host 拿会话列表里该会话 header 的 `cwd` 去比工作区注册表
-  (`ctx.workspaceRegistry`)的规范路径——正是注册表自己的成员判据,所以**从未被 attach**
-  的会话(子代理、别处 resume 来的)也按它创建时的目录归属,归档(archive)不影响归属、
-  累计照算。没有 `cwd`、或目录不是已注册工作区的记录落进那一行「未归属」,因此**各工作区
-  之和恒等于账本累计**(词元与两个金额桶都对得上)。只记过失败尝试的工作区不出行(没有
-  任何消耗,与通道卡片同一条规则)。**宿主没挂载工作区注册表时该数组为空**,界面不显示
-  这一节——绝不把「无从归属」渲染成一屏「未归属」。金额与词元走与其他面相同的汇总 + 成本
-  层(`summarizeRecords` + `attachCosts`),所以三处口径一致。
 
 ## 配置
 

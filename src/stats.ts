@@ -112,11 +112,13 @@ function dayKeyOffset(day: string, back: number): string {
   return dayKey(new Date(year!, month! - 1, date! - back).getTime())
 }
 
-/** Provider 用量窗口的本地日闭区间：给定「现在」的本地日期，返回覆盖的首日与
- * 末日键。`today` 只盖当日；`yesterday` 盖前一天；`last7`/`last30` 向前数整个
- * 日历日（含今日）。 */
+/** 用量窗口的本地日闭区间：给定「现在」的本地日期，返回覆盖的首日与末日键。
+ *  `today` 只盖当日；`yesterday` 盖前一天；`last7`/`last30` 向前数整个日历日
+ *  （含今日）；`all` = 全账本，`fromDay` 为**空串**（不设下界，`readRecordsByDayRange`
+ *  据此读全部日文件）。 */
 export function rangeDayWindow(range: ProviderRange, now: () => Date = () => new Date()): { fromDay: string; toDay: string } {
   const to = dayKey(now().getTime())
+  if (range === 'all') return { fromDay: '', toDay: to }
   const back = range === 'yesterday' ? 2 : range === 'last7' ? 7 : range === 'last30' ? 30 : 1
   return { fromDay: dayKeyOffset(to, back - 1), toDay: range === 'yesterday' ? dayKeyOffset(to, 1) : to }
 }

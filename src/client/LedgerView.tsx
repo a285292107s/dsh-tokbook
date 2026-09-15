@@ -1,5 +1,6 @@
 /**
- * 用量总览 tab 内容：今日 hero、四桶构成、近 14 天趋势，以及按模型 / 按工作区的拆分切换（拆分体在 `Breakdowns.tsx`）。
+ * 用量总览 tab 内容：今日 hero、四桶构成、近 14 天趋势。按模型 / 按工作区 / 按通道
+ * 三种切法在**用量明细** tab（窗口由那一页选），本页只陈述今天与近 14 天。
  *
  * @module dsh-tokbook/client/LedgerView
  */
@@ -9,7 +10,6 @@ import type { TokBookOverview, UsageDayRow, UsageTotals } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import type { PricingFocus } from './contract.ts'
 import { UsageGlyph } from './icons.tsx'
-import { Breakdowns } from './Breakdowns.tsx'
 import {
   formatHitRate, formatMoney, formatTokens,
   localDayKey, shiftDayKey, shortDay,
@@ -359,13 +359,6 @@ export function LedgerView({ overview, onOpenPricing }: {
           </p>
 
           <DailyTrend days={overview.byDay} />
-
-          <Breakdowns
-            byModel={overview.byModel}
-            byWorkspace={overview.byWorkspace}
-            totalTokens={overview.totalTokens}
-            money={money}
-          />
 
           {/* 三条注记都是**全账本累计**口径，而它们上面是今日口径的内容——所以口径词
                 必须写在句子里，不能靠读者的位置感。 */}

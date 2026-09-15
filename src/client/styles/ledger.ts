@@ -1,6 +1,7 @@
 /** styles.ts 片段：ledger。由 `injectStyles` 按序拼接。 */
 export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
-/* 三条线：直角与硬边（工程感）、黄只作"料"、构件而非贴图。字体保持保守，不做字体文章。 */
+/* 三条线：直角与硬边（工程感）、黄只作"料"、构件而非贴图。字体保持保守，不做字体文章。
+   末尾那一节（列头 + 一行读数）是**跨 tab 的行组件**词汇：用量明细 tab 的三种切法共用它。 */
 
 /* hero = 一块被框住的读数仪表：1px 硬边框 + 受光边的金属反光，四角补左上/右下两枚括号，
    底边一条贯通全宽的刻度轨。
@@ -312,13 +313,14 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   margin:6px 0 0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
 }
 
-/* 明细（按模型 / 按工作区）：这一节此前只有两个 tab 标签，而它们说的是**切法**、不是这一节
-   是什么——所以它成了全窗口唯一没有分区词与工业徽记的一节。现在头部与其余两节同一套：
-   黄牌 + 分区词，右端旁注；两个子 tab 挂在这一行上，用「横排 + 竖分隔 + 底部实条」那套
-   （实条取墨色——品牌黄这一屏只留给当前页、峰值、徽记三处）。 */
-[data-plugin="dsh-tokbook"] .dtpl-bd{margin-bottom:20px;}
+/* 明细头部（用量明细 tab 的分区词 + 切法子 tab + 右端旁注）。这一节此前只有两个 tab 标签，
+   而它们说的是**切法**、不是这一节是什么——所以它成了全窗口唯一没有分区词与工业徽记的一节。
+   现在头部与其余各节同一套：黄牌 + 分区词，右端旁注；子 tab 挂在这一行上，用「横排 +
+   竖分隔 + 底部实条」那套（实条取墨色——品牌黄这一屏只留给当前页、峰值、徽记三处）。
+   分区词是**窗口词**（今天 / 近 7 天 / 全账本累计）：这一页陈述的就是某个窗口的用量，
+   所以窗口自己就是它该有的名字（与「近 14 天趋势」同一写法）；切法是它的三种切法。 */
 [data-plugin="dsh-tokbook"] .dtpl-bd-head{
-  display:flex;align-items:center;gap:16px;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
   border-bottom:1px solid var(--dtpl-border);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bd-title{margin:0;}

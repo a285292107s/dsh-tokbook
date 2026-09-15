@@ -19,7 +19,7 @@ import { collectRoutes, DEEPSEEK_ROUTE, routeLabels, routesFromSettings } from '
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
-import { providerCards, splitByProvider, providerKeyOf } from '../src/by-provider.ts'
+import { modelRowsOf, providerCards, splitByProvider, providerKeyOf } from '../src/by-provider.ts'
 import { windowFromCreditsBlock, windowFromUsagePercent, resetEpoch, planInfoFromSubscriptions, unconfiguredCard, errorCard, noSubscriptionCard, hasQuotaContent, isBuiltinQuotaPlan, isQuotaAlert, orderQuotaProviders, quotaGate, balanceGateNote, dayText, BUILTIN_PLAN_TITLES } from '../src/quota.ts'
 import { resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage } from '../src/quota-official.ts'
 import type { PricingSegmentInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
@@ -847,6 +847,18 @@ console.log('provider cards (per-provider tab math)')
   check('same model in both cards', deepseek?.models.length === 1 && opencode?.models.length === 2)
   check('sort: tokens desc', cards[0]?.provider === 'deepseek-official' && cards[1]?.provider === 'opencode-go')
 
+  // 按模型切法 = 各卡模型行摊平：三行（deepseek 1 + opencode 2），键与金额逐行保留，
+  // 合计与卡片那一面相等——两种切法同源，所以同一窗口的两个数字必然对得上。
+  const modelRows = modelRowsOf(cards)
+  const four = (t: { inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }): number =>
+    t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens + t.outputTokens
+  check('model rows = flattened cards', modelRows.length === 3, `got ${modelRows.length}`)
+  check('model rows keep (provider, model)',
+    modelRows.some(r => r.provider === 'opencode-go' && r.model === 'glm-5.3-flash' && r.totals.requests === 1))
+  check('model rows total = card total',
+    modelRows.reduce((sum, r) => sum + four(r.totals), 0) === cards.reduce((sum, c) => sum + c.tokens, 0),
+    `models=${String(modelRows.reduce((sum, r) => sum + four(r.totals), 0))}`)
+
   // Unpriced model surfaces in the card and costs ¥0.
   const unpriced = providerCards([{ requestId: 'r5', time: dayMillis('2026-03-01', 11), sessionId: 's3', provider: 'mystery', model: 'brand-new-x', usage: { inputTokens: 10, outputTokens: 10 } }], pricing, (r) => rateKeyAt(pricing, r.provider, r.model, r.time))
   check('unpriced model flagged', unpriced[0]?.unpricedModels.join() === 'brand-new-x' && unpriced[0]?.cost === 0 && unpriced[0]?.models[0]?.cost === 0)
@@ -863,6 +875,9 @@ console.log('range day window')
   check('last7 = 7 calendar days ending today', week.fromDay === '2026-02-27' && week.toDay === '2026-03-05', JSON.stringify(week))
   const month = rangeDayWindow('last30', now)
   check('last30 spans 30 days', month.fromDay === '2026-02-04' && month.toDay === '2026-03-05', JSON.stringify(month))
+  // `all` = 全账本：下界是空串（不设下界），末日仍是今天。
+  const all = rangeDayWindow('all', now)
+  check('all = no lower bound', all.fromDay === '' && all.toDay === '2026-03-05', JSON.stringify(all))
 }
 
 console.log('readRecordsByDayRange (windowed day-file reads)')

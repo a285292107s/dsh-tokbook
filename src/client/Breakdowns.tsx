@@ -1,123 +1,16 @@
 /**
- * 用量总览 tab 的两个拆分角度，共用一个子 tab 切换：按模型与按工作区。两者是**同一份累计账本**的不同视角。切换只展示存在的内容：无行的拆分不贡献 tab。
+ * 用量明细 tab 的两种行清单：按模型与按工作区。两者是**同一份窗口记录**的不同视角，
+ * 由 `ProviderPanel` 装配（窗口与切法都在那一层选）。
  *
  * @module dsh-tokbook/client/Breakdowns
  */
 
-import { useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { CostedModelRow, WorkspaceUsageRow } from '../types.ts'
 import { totalsTokens } from '../types.ts'
-import { formatDateTime, formatRelative, formatTokens, share } from './format.ts'
-
-/** 当前展示的账本角度。 */
-type BreakdownTab = 'model' | 'workspace'
-
-/** 各面板的右侧旁注：覆盖面 + 行排序（两个角度不共享排序键）。 */
-const PANEL_NOTES: Record<BreakdownTab, { text: string; title: string }> = {
-  model: {
-    text: '全账本累计 · 词元从多到少',
-    title: '每个模型的累计词元与费用（全账本），按词元从多到少排列。',
-  },
-  workspace: {
-    text: '全账本累计 · 最近有操作在前',
-    title: '每个工作区的累计词元（全账本）。记录按会话的创建目录归属到工作区；没有工作区目录、或目录未注册为工作区的记录归入「未归属」。',
-  },
-}
-
-/**
- * 列头。**一行**写：两列各自是一串上下叠起来的事实（身份两行、数值两行），
- * 所以列名也按同样的先后写成「甲 · 乙」——分隔符用的就是这个窗口里表示「一串事实」的 `·`
- * （旁注与工作区事实行都用它）。
- * 早先这里照数据的两行写成了两行列头（模型 / 通道 各占一行），标签能精确落在各自数值
- * 正上方，但代价是四枚孤零零的标签占掉两行、中间大片空白——**表头比它标注的数据还高**。
- * 一行牺牲的是「精确对位」，换来的是它终于像一行表头。
- */
-const COLUMNS: Record<BreakdownTab, { id: string; nums: string }> = {
-  model: { id: '模型 · 通道', nums: '词元 · 金额' },
-  workspace: { id: '工作区 · 目录', nums: '词元 · 金额' },
-}
-
-export function Breakdowns({ byModel, byWorkspace, totalTokens, money }: {
-  byModel: readonly CostedModelRow[]
-  byWorkspace: readonly WorkspaceUsageRow[]
-  totalTokens: number
-  money: (value: number) => string
-}) {
-  const [tab, setTab] = useState<BreakdownTab>('model')
-  const hasModel = byModel.length > 0
-  const hasWorkspace = byWorkspace.length > 0
-  if (!hasModel && !hasWorkspace) return null
-  // 活动 tab 始终重新推导、绝不直接信任：再同步可能清空当前选中的面板，空面板不能对着用户。
-  const active: BreakdownTab = hasModel && (tab === 'model' || !hasWorkspace) ? 'model' : 'workspace'
-  const note = PANEL_NOTES[active]
-  const cols = COLUMNS[active]
-  const onTablistKeyDown = (e: ReactKeyboardEvent): void => {
-    const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
-    if (delta === 0) return
-    e.preventDefault()
-    const order: BreakdownTab[] = hasModel && hasWorkspace ? ['model', 'workspace'] : [active]
-    const next = order[(order.indexOf(active) + delta + order.length) % order.length]!
-    setTab(next)
-    document.getElementById(`dtpl-bd-tab-${next}`)?.focus()
-  }
-  return (
-    <section className="dtpl-bd">
-      {/* 分区词 + 工业徽记，与「今日词元构成」「近 14 天趋势」同一套头部；子 tab 挂在这一行上。
-          此前这里只有两个 tab 标签，而它们说的是**切法**、不是这一节是什么。 */}
-      <div className="dtpl-bd-head">
-        <h2 className="dtpl-sec-title dtpl-bd-title">用量明细</h2>
-        <div className="dtpl-bd-tabs" role="tablist" aria-label="拆分方式" onKeyDown={onTablistKeyDown}>
-          {hasModel && (
-            <button
-              type="button"
-              role="tab"
-              id="dtpl-bd-tab-model"
-              aria-selected={active === 'model'}
-              aria-controls="dtpl-bd-panel"
-              tabIndex={active === 'model' ? 0 : -1}
-              className="dtpl-bd-tab"
-              onClick={() => setTab('model')}
-            >
-              按模型
-            </button>
-          )}
-          {hasWorkspace && (
-            <button
-              type="button"
-              role="tab"
-              id="dtpl-bd-tab-workspace"
-              aria-selected={active === 'workspace'}
-              aria-controls="dtpl-bd-panel"
-              tabIndex={active === 'workspace' ? 0 : -1}
-              className="dtpl-bd-tab"
-              onClick={() => setTab('workspace')}
-            >
-              按工作区
-            </button>
-          )}
-        </div>
-        <span className="dtpl-sec-aside" title={note.title}>{note.text}</span>
-      </div>
-      <div className="dtpl-bd-cols" aria-hidden="true">
-        <span className="dtpl-bd-col-id">{cols.id}</span>
-        <span className="dtpl-bd-col-nums">{cols.nums}</span>
-      </div>
-      <div
-        role="tabpanel"
-        id="dtpl-bd-panel"
-        aria-labelledby={`dtpl-bd-tab-${active}`}
-      >
-        {active === 'model'
-          ? <ModelRows byModel={byModel} totalTokens={totalTokens} money={money} />
-          : <WorkspaceRows rows={byWorkspace} totalTokens={totalTokens} money={money} />}
-      </div>
-    </section>
-  )
-}
+import { formatDateTime, formatRelative, formatShare, formatTokens, share } from './format.ts'
 
 /** 每 (provider, model) 一行：词元、占比、计费金额——订阅通道显示省下的钱，绝不用现金外观包装。 */
-function ModelRows({ byModel, totalTokens, money }: {
+export function ModelRows({ byModel, totalTokens, money }: {
   byModel: readonly CostedModelRow[]
   totalTokens: number
   money: (value: number) => string
@@ -138,8 +31,9 @@ function ModelRows({ byModel, totalTokens, money }: {
         const showsSub = m.spend === 0
         const bucket = showsSub ? '订阅价值' : '实际支出'
         const costText = `${showsSub ? money(m.subscriptionValue) : money(m.spend)} ${bucket}`
+        const tokens = totalsTokens(m.totals)
         return (
-          <div className="dtpl-row" key={`${m.provider}/${m.model}`}>
+          <div className="dtpl-row" key={`${m.provider}/${m.model}`} title={modelDetail(m, totalTokens, money)}>
             <div className="dtpl-model">
               <span className="dtpl-model-name">{m.model}</span>
               {/* 通道由列头命名，行内不再重复「通道」两个字——但那两个字对读屏是**列的意义**，
@@ -150,7 +44,12 @@ function ModelRows({ byModel, totalTokens, money }: {
               )}
             </div>
             <div className="dtpl-model-nums">
-              <span className="dtpl-val"><span className="dtpl-sr">词元 </span>{formatTokens(totalsTokens(m.totals))}</span>
+              {/* 占比条是这一行唯一的形状，而它的分母（本窗口词元合计）不在行里——所以读屏
+                  也在词元后面把比例念出来（只给读屏，不占视觉宽度）。 */}
+              <span className="dtpl-val">
+                <span className="dtpl-sr">词元 </span>{formatTokens(tokens)}
+                <span className="dtpl-sr">，占本窗口 {formatShare(tokens, totalTokens)}</span>
+              </span>
               <span className="dtpl-cost" title={costText}>
                 <span className="dtpl-cost-seg">
                   <span className="dtpl-cost-main">
@@ -164,7 +63,7 @@ function ModelRows({ byModel, totalTokens, money }: {
               </span>
             </div>
             <span className="dtpl-model-bar" role="presentation">
-              <span className="dtpl-model-bar-fill" style={{ width: `${share(totalsTokens(m.totals), totalTokens)}%` }} />
+              <span className="dtpl-model-bar-fill" style={{ width: `${share(tokens, totalTokens)}%` }} />
             </span>
           </div>
         )
@@ -174,12 +73,12 @@ function ModelRows({ byModel, totalTokens, money }: {
 }
 
 /**
- * 每个工作区一行，最近使用在前。未归属行收尾：它持有无注册工作区认领的记录，因此各行才能加回累计词元。它是对账行、不是项目。
+ * 每个工作区一行，最近使用在前。未归属行收尾：它持有无注册工作区认领的记录，因此各行才能加回窗口词元。它是对账行、不是项目。
  *
  * 失败数进**行内**而不是只留在 hover 里：它是这一行唯一会改变动作的事实，而 hover
  * 在触屏与键盘上够不着。四桶拆分与精确时刻是补充细节，留在 hover 里没有代价。
  */
-function WorkspaceRows({ rows, totalTokens, money }: {
+export function WorkspaceRows({ rows, totalTokens, money }: {
   rows: readonly WorkspaceUsageRow[]
   totalTokens: number
   money: (value: number) => string
@@ -222,7 +121,10 @@ function WorkspaceRows({ rows, totalTokens, money }: {
               </span>
             </div>
             <div className="dtpl-model-nums">
-              <span className="dtpl-val"><span className="dtpl-sr">词元 </span>{formatTokens(row.tokens)}</span>
+              <span className="dtpl-val">
+                <span className="dtpl-sr">词元 </span>{formatTokens(row.tokens)}
+                <span className="dtpl-sr">，占本窗口 {formatShare(row.tokens, totalTokens)}</span>
+              </span>
               {/* 工作区跨通道，两个金额桶可同时非零——所以一格里有**两段**「数额 + 桶名」，段之间用
                   这个窗口表示「一串事实」的 `·` 分隔（与 hero 的累计事实带同一条写法）。桶名与模型行
                   共用同一条槽位，所以各段数额的右边缘仍然落在同一条竖线上；两者都无话时用一枚零
@@ -256,17 +158,42 @@ function WorkspaceRows({ rows, totalTokens, money }: {
   )
 }
 
-/** 工作区行的 hover 审计信息：身份、累计词元四桶、请求/失败、两个金额桶、最近使用时间。 */
+/**
+ * 工作区行的 hover 审计信息：身份、窗口词元四桶、请求/失败、两个金额桶、最近使用时间。
+ * 与模型行同一套写法（`modelDetail`）——两面的 hover 说的是同一类事实。
+ */
 function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => string): string {
   const totals = row.totals
   const failed = totals.failures ?? 0
   return [
     row.path === '' ? '未归属用量' : `工作区 ${row.title}`,
     row.path === '' ? '会话没有工作区目录，或目录未注册为工作区。' : `目录 ${row.path}`,
-    `累计 ${formatTokens(row.tokens)} 词元 · ${totals.requests} 请求${failed > 0 ? ` · ${failed} 失败` : ''}`,
+    `窗口 ${formatTokens(row.tokens)} 词元 · ${totals.requests} 请求${failed > 0 ? ` · ${failed} 失败` : ''}`,
     `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
     + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
     `实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`,
     `最近一次 ${formatDateTime(row.lastAt)}`,
+  ].join('\n')
+}
+
+/**
+ * 模型行的 hover 审计信息：身份（模型 + 通道）、窗口词元与占比、请求 / 压缩 / 失败、
+ * 四桶、两个金额桶。行内只放得下身份、词元与一个金额桶，其余留在这里。
+ */
+function modelDetail(row: CostedModelRow, totalTokens: number, money: (value: number) => string): string {
+  const totals = row.totals
+  const tokens = totalsTokens(totals)
+  const failed = totals.failures ?? 0
+  const compactions = totals.compactions ?? 0
+  const unknown = totals.usageUnknown ?? 0
+  return [
+    `模型 ${row.model}`,
+    ...(row.provider === '' ? [] : [`通道 ${row.provider}`]),
+    `窗口 ${formatTokens(tokens)} 词元（占本窗口 ${formatShare(tokens, totalTokens)}）`
+    + ` · ${totals.requests} 请求${compactions > 0 ? ` · ${compactions} 压缩` : ''}`
+    + `${failed > 0 ? ` · ${failed} 失败` : ''}${unknown > 0 ? ` · ${unknown} 次没上报用量` : ''}`,
+    `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
+    + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
+    `实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`,
   ].join('\n')
 }

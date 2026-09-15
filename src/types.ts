@@ -232,9 +232,10 @@ export interface PricingView {
 }
 
 /**
- * 概览「按工作区」一行：该工作区会话下的全部账本记录，用与其余概览相同的
- * 汇总 + 成本层折叠。归属是**读时 join**——账本行只存 `sessionId`，工作区
- * 取自会话持久化 header 的 `cwd`（见 `src/workspaces.ts`）——历史可追溯归属。
+ * 用量明细「按工作区」一行：该工作区会话在**选定窗口内**的账本记录，用与其余
+ * 视图相同的汇总 + 成本层折叠。归属是**读时 join**——账本行只存 `sessionId`，
+ * 工作区取自会话持久化 header 的 `cwd`（见 `src/workspaces.ts`）——历史可追溯
+ * 归属。
  */
 export interface WorkspaceUsageRow {
   /** 工作区 id；兜底「未归属」行为 `''`。 */
@@ -242,13 +243,13 @@ export interface WorkspaceUsageRow {
   title: string
   /** 规范目录路径；未归属行为 `''`（其记录跨目录或未命名）。 */
   path: string
-  /** 全账本累计 totals（含失败，与其余 totals 行一致）。 */
+  /** 窗口内 totals（含失败，与其余 totals 行一致）。 */
   totals: UsageTotals
   /** 四桶之和。 */
   tokens: number
-  /** 全账本真实消费（¥）；未定价记录计 0。 */
+  /** 窗口内真实消费（¥）；未定价记录计 0。 */
   spend: number
-  /** 全账本订阅价值（¥，非现金）。 */
+  /** 窗口内订阅价值（¥，非现金）。 */
   subscriptionValue: number
   /** 本行最新记录时间——排序键（最近有操作在前）。 */
   lastAt: number
@@ -302,11 +303,12 @@ export interface CostedSummary extends TokenSummary {
   byModel: CostedModelRow[]
 }
 
-/** Provider 用量 tab 的回看窗口，按本地日命名（与账本分日文件一致）。 */
-export type ProviderRange = 'today' | 'yesterday' | 'last7' | 'last30'
+/** 用量明细 tab 的回看窗口，按本地日命名（与账本分日文件一致）。`all` =
+ *  全账本：不设下界（见 `rangeDayWindow`），三种切法都有它。 */
+export type ProviderRange = 'today' | 'yesterday' | 'last7' | 'last30' | 'all'
 
 /** 全部合法 {@link ProviderRange}；路由校验复用。 */
-export const PROVIDER_RANGES: readonly ProviderRange[] = ['today', 'yesterday', 'last7', 'last30']
+export const PROVIDER_RANGES: readonly ProviderRange[] = ['today', 'yesterday', 'last7', 'last30', 'all']
 
 /** provider 卡内的一条模型行。 */
 export interface ProviderModelUsage {
@@ -325,7 +327,7 @@ export interface ProviderModelUsage {
   billing?: BillingNature
 }
 
-/** Provider 用量 tab 的一张 provider 卡。 */
+/** 用量明细「按通道」的一张 provider 卡。 */
 export interface ProviderUsageCard {
   /** 账本记录的 route key；无 header 的行归入 `'(未知)'`。 */
   provider: string
@@ -347,10 +349,11 @@ export interface ProviderUsageCard {
   usageUnknown: number
 }
 
-/** Provider 用量路由的 wire 载荷。精简只读：只跨过聚合卡。 */
+/** 用量明细路由的 wire 载荷：同一批窗口记录的三种切法——按模型、按工作区、
+ *  按通道。三者读同一份窗口记录，所以合计逐分对得上。 */
 export interface ProviderUsageView {
   range: ProviderRange
-  /** 窗口首日本地日期（含），如 `2026-09-01`。 */
+  /** 窗口首日本地日期（含）；`all` 为 `''`——不设下界。 */
   fromDay: string
   /** 窗口末日本地日期（含）。 */
   toDay: string
@@ -358,21 +361,36 @@ export interface ProviderUsageView {
   /** 各 route 展示名（settings `displayName` → 适配器 provider 名），卡片可
    * 以「DeepSeek」为题、route key 为副。无人命名时省略，只显示 key。 */
   providerLabels?: Record<string, string>
+  /** 窗口内四桶之和——三种切法共用的量纲：页头合计、按模型 / 按工作区两种切法里
+   *  占比条的分母。 */
+  totalTokens: number
+  /** 窗口内的计费调用数（各通道卡 `requests` 之和；失败不计入，与其余 totals 一致）。 */
+  totalRequests: number
+  /** 窗口内真实消费（¥）：metered 通道的金额。 */
+  totalSpend: number
+  /** 窗口内订阅价值（¥，非现金）。 */
+  totalSubscriptionValue: number
+  /** 按模型切法。空 = 该窗口没有计费过的模型。 */
+  byModel: CostedModelRow[]
+  /** 按工作区切法，最近用过的在前、「未归属」收尾；宿主无 workspace
+   *  registry 时为空。 */
+  byWorkspace: WorkspaceUsageRow[]
+  /** 按通道切法。空 = 该窗口没有通道计费记录。 */
   providers: ProviderUsageCard[]
 }
 
 /**
  * 浏览器浮窗读取的聚合快照。刻意从 {@link CostedSummary} 瘦身：价表、
  * rateRows、byHour 不过 wire——浮窗不渲染它们，成本已折进 spend /
- * subscriptionValue / totalCost / byModel。
+ * subscriptionValue / totalCost。
+ *
+ * 按模型 / 按工作区也不在这里：两者是**窗口**的切法，随
+ * {@link ProviderUsageView} 走（用量明细 tab，窗口由那一页自己选）。
  */
-export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour'> {
+export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour' | 'byModel'> {
   /** 四桶之和（input + cacheRead + cacheWrite + output）。 */
   totalTokens: number
   updatedAt: number
-  /** 按工作区累计，最近用过的在前；无人认领的「未归属」收尾。宿主无
-   * workspace registry 时为空。 */
-  byWorkspace: WorkspaceUsageRow[]
   records: number
   files: number
   lastEventAt: number | null

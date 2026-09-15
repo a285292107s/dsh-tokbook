@@ -36,7 +36,7 @@ import {
 } from './pricing.ts'
 import { ledgerUsageOf, readPricingView, type LedgerUsage } from './pricing-view.ts'
 import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'
-import { providerCards } from './by-provider.ts'
+import { modelRowsOf, providerCards } from './by-provider.ts'
 import { registerTokBookPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
 import { errorCard, isBuiltinQuotaPlan, isQuotaAlert, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
 import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
@@ -355,9 +355,9 @@ export class TokenUsageBook extends Service {
     })
   }
 
-  /** 当前聚合概览快照（带成本，含按日趋势与按工作区累计）。 */
+  /** 当前聚合概览快照（带成本，含按日趋势）。 */
   async overview(): Promise<TokBookOverview> {
-    const snapshots = await this.ensureFresh()
+    await this.ensureFresh()
     const { table, billing, revision, resolve } = await this.rateContext()
     const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger, { pricingRevision: revision })
     const costed = attachCosts(summary, table, billing)
@@ -367,13 +367,11 @@ export class TokenUsageBook extends Service {
     for (const record of records) {
       if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
     }
-    // 按工作区累计，读时 join 会话 header 的 cwd。宿主未挂工作区注册表时为空。
-    const byWorkspace = this.workspaceUsage(records, snapshots, table, billing, resolve)
-    // 精简 wire 载荷：价表与 rateRows 不过 wire，成本已折进 cost 字段。
-    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, ...slim } = costed
+    // 精简 wire 载荷：价表、rateRows、byModel 不过 wire（成本已折进 cost 字段）；
+    // byModel / byWorkspace 随用量明细 tab 走窗口载荷，不在这里。
+    const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, byModel: _byModel, ...slim } = costed
     return {
       ...slim,
-      byWorkspace,
       totalTokens: totalsTokens(costed.total),
       updatedAt: Date.now(),
       records: records.length,
@@ -385,7 +383,7 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * 一次概览读的按工作区行：账本记录按其会话所属工作区折叠。该 join 需要两条
+   * 用量明细「按工作区」一行：账本记录按其会话所属工作区折叠。该 join 需要两条
    * live host 缝——工作区注册表（title + 规范 path）与会话 header（`cwd`）。
    * 列表中缺席的会话（其日志已消失）贡献不了 `cwd`，其记录落入未归属。
    */
@@ -411,10 +409,12 @@ export class TokenUsageBook extends Service {
     return workspaceRows(records, workspaces, id => cwdBySession.get(id), pricing, resolve, billing)
   }
 
-  /** 一个回看窗口的按 provider 视图，Provider 用量 tab 的载荷。复用概览的
-   *  权威新鲜门与价表；只读窗口内的日文件。 */
+  /**
+   * 一个回看窗口的三种切法（按模型 / 按工作区 / 按通道），用量明细 tab 的载荷。
+   * 复用概览的权威新鲜门与价表；只读窗口内的日文件（`all` 不设下界）。
+   */
   async usageByRange(range: ProviderRange): Promise<ProviderUsageView> {
-    await this.ensureFresh()
+    const snapshots = await this.ensureFresh()
     const { table, billing, resolve } = await this.rateContext()
     const { fromDay, toDay } = rangeDayWindow(range)
     const records = await readRecordsByDayRange(this.dir, fromDay, toDay, () => new Date(), this.logger)
@@ -428,6 +428,14 @@ export class TokenUsageBook extends Service {
       toDay,
       updatedAt: Date.now(),
       providerLabels,
+      // 页头那句「窗口合计」的四个数。与按模型 / 按通道同源（见 modelRowsOf），
+      // 所以三种切法的合计逐分相等。
+      totalTokens: cards.reduce((sum, card) => sum + card.tokens, 0),
+      totalRequests: cards.reduce((sum, card) => sum + card.requests, 0),
+      totalSpend: cards.reduce((sum, card) => sum + card.spend, 0),
+      totalSubscriptionValue: cards.reduce((sum, card) => sum + card.subscriptionValue, 0),
+      byModel: modelRowsOf(cards),
+      byWorkspace: this.workspaceUsage(records, snapshots, table, billing, resolve),
       providers: cards,
     }
   }

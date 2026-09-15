@@ -1,12 +1,12 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-14 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-15 · supersedes: —
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区从**侧边栏
 footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含五个 tab:
-**用量总览**(今日 + 词元构成 + 近 14 天趋势 + 按模型 / 按工作区)、**通道用量**、
-**价格表**、**订阅额度**、**统计口径**。
+**用量总览**(今日 + 词元构成 + 近 14 天趋势)、**用量明细**(窗口 × 按模型 / 按工作区 /
+按通道)、**价格表**、**订阅额度**、**统计口径**。
 
 两条贯穿全插件的原则:
 
@@ -46,8 +46,8 @@ src/
   pricing.ts          唯一价格表(路由 → 模型串 → 价段)+ 两级取价(priceAt/slotAt/ratesAt/rateKeyAt)+ costOf
   pricing-view.ts     价格表 tab 的卡片装配(路由目录 ∪ 账本 ∪ 价格文件)
   route-catalog.ts    路由目录:本机设置文档(settings)× 运行时适配器注册表(ctx.llm)
-  by-provider.ts      纯通道卡片聚合(通道用量 tab)
-  workspaces.ts       纯按工作区累计聚合(会话 cwd ↔ 工作区注册表的读时连接 + 未归属兜底)
+  by-provider.ts      纯通道卡片聚合 + 按模型切法(用量明细 tab:摊平卡的模型行)
+  workspaces.ts       纯按工作区聚合(会话 cwd ↔ 工作区注册表的读时连接 + 未归属兜底)
   quota.ts            官方额度归一化 + 内置计划身份
   quota-official.ts   key 解析 + 各通道官方用量抓取器
   routes.ts           host 精确 Fetch 路由(见 CONTRACTS · Host 路由)
@@ -61,8 +61,8 @@ src/
     FooterButton.tsx  sidebar.footer.action 触发器
     LedgerOverlay.tsx shell.overlay 浮窗外壳(五 tab + 焦点/快捷键)
     LedgerView.tsx    用量总览 tab
-    Breakdowns.tsx    用量总览的两个子 tab:按模型 / 按工作区(点击切换)
-    ProviderPanel.tsx 通道用量 tab
+    ProviderPanel.tsx 用量明细 tab 外壳(窗口 + 三种切法)
+    Breakdowns.tsx    用量明细的两种行清单:按模型 / 按工作区
     MethodDoc.tsx     统计口径 tab
     pricing/
       draft.ts        价格表纯逻辑:草稿↔wire 转换、校验、签名(未保存标记)
@@ -170,7 +170,7 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 一次权威重同步。新鲜度**不靠读路径等**:打开浮窗那一次读只做一次**廉价探测**(列出会话 +
 比对逐会话变更签名,签名跨重启持久化在 `sync-progress.json`),确实有工作要折叠时把**权威 walk
 排到后台**、并按 15 s 节流。实时 hook 已把当前会话的行记进账本,而 walk 会把该会话的**整份日志**
-重读重折叠(实测单份会话日志可达 8.6 MB 压缩 / 数万事件)——把读路径挂在它上面就是「打开通道用量 /
+重读重折叠(实测单份会话日志可达 8.6 MB 压缩 / 数万事件)——把读路径挂在它上面就是「打开用量明细 /
 价格表要加载半天」的成因(账本本身的读只要十几到几十毫秒)。代价明说:账本可能比持久化日志晚至多
 一个节流窗口;需要立刻走一遍全部会话时用**重新扫描**。
 

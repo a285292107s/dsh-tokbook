@@ -154,23 +154,9 @@ const overview = {
   total: { requests: 214, ...mk(1_920_000, 6_310_000, 486_000, 214), compactions: 6, failures: 3, usageUnknown: 5 },
   byDay: days(14),
   byHour: [],
-  // 故意**不**按任何键排：概览的模型清单自己按词元降序排（占比条编码的就是词元），
-  // 所以这份乱序 fixture 正好证明排序发生在展示层。
-  byModel: [
-    { provider: 'deepseek', model: 'deepseek-chat', totals: mk(1_510_000, 6_100_000, 402_000, 198), cost: 3.87, spend: 3.87, subscriptionValue: 0 },
-    { provider: 'deepseek', model: 'deepseek-reasoner', totals: mk(410_000, 210_000, 84_000, 16), cost: 1.12, spend: 1.12, subscriptionValue: 0 },
-    { provider: 'opencode-go', model: 'deepseek-v4-flash', totals: mk(800_000, 900_000, 120_000, 34), cost: 2.4, spend: 0, subscriptionValue: 2.4 },
-  ],
+  // 按模型 / 按工作区**不在这里**：两者是窗口的切法，随 `/tokbook/usage` 走
+  // （见下面的 USAGE_CARDS）——用量明细 tab 的三种切法读的是同一批窗口记录。
   rateRows: [],
-  // 按工作区：最近有操作在前，未归属收尾（id ''），tokens = 四桶之和。
-  // 第一行故意跨两条计费性质的路由（实际支出 + 订阅价值同时非零），因为工作区
-  // 不像模型行那样被限定在单个金额桶里。
-  byWorkspace: [
-    { id: 'w-harness', title: 'deepseek-harness', path: 'C:\\Users\\28529\\Desktop\\deepseek-harness', totals: { ...mk(1_510_000, 6_100_000, 402_000, 198), failures: 2 }, tokens: 8_012_000, spend: 3.87, subscriptionValue: 1.2, lastAt: Date.now() - 3 * 60_000 },
-    { id: 'w-wiki', title: 'zzz wiki', path: 'C:\\Users\\28529\\Desktop\\zzz wiki', totals: mk(800_000, 900_000, 120_000, 34), tokens: 1_820_000, spend: 0, subscriptionValue: 2.4, lastAt: Date.now() - 5 * 3_600_000 },
-    { id: 'w-plugins', title: 'dsh-plugins', path: 'C:\\Users\\28529\\Desktop\\dsh-plugins', totals: mk(410_000, 210_000, 84_000, 16), tokens: 704_000, spend: 1.12, subscriptionValue: 0, lastAt: Date.now() - 26 * 3_600_000 },
-    { id: '', title: '未归属', path: '', totals: mk(50_000, 120_000, 8_000, 7), tokens: 178_000, spend: 0, subscriptionValue: 0, lastAt: Date.now() - 40 * 60_000 },
-  ],
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
   totalCost: 8.59,
   spend: 4.99,
@@ -192,7 +178,7 @@ const overview = {
 const emptyOverview = {
   ...overview,
   total: { ...overview.total, ...mk(0, 0, 0, 0), compactions: 0, failures: 0, usageUnknown: 0 },
-  byDay: [], byModel: [], byWorkspace: [],
+  byDay: [],
   totalTokens: 0, totalCost: 0, spend: 0, subscriptionValue: 0, records: 0, files: 0,
   lastEventAt: null, syncStatus: 'idle', syncError: null,
 }
@@ -538,12 +524,12 @@ function quotaCards(mode) {
   }
 }
 
-/* ── 通道用量 tab fixtures ─────────────────────────────────────────────── */
+/* ── 用量明细 tab fixtures ─────────────────────────────────────────────── */
 /**
- * `GET /tokbook/usage?range=…` —— 每个 provider route 一张卡。窗口边界是 host
- * 侧的事实，预览不复刻，只让四个 range 落在**看得见差别**的状态上：今日是一张
- * 小按量卡，昨天多一张订阅卡，两个长窗口才是全集——外加卡片能报的两种降级事实
- * （价格未知模型、没上报用量的调用）。
+ * `GET /tokbook/usage?range=…` —— 同一批窗口记录的**三种切法**：按模型（各卡模型
+ * 行摊平）、按工作区、按通道（卡）。窗口边界是 host 侧的事实，预览不复刻，只让五个
+ * 窗口落在**看得见差别**的状态上：今日是一张小按量卡，昨天多一张订阅卡，两个长窗口
+ * 才是全集——外加卡片能报的两种降级事实（价格未知模型、没上报用量的调用）。
  */
 const usageModel = (model, tokens, { spend = 0, value = 0, requests = 1, billing } = {}) => ({
   model,
@@ -574,7 +560,17 @@ const usageCard = (provider, models, extra = {}) => ({
 })
 
 /** 合法的 `range` 值，与 host 的 `PROVIDER_RANGES` 一致（预览是独立 .mjs，不能 import src 的 .ts）。 */
-const RANGE_IDS = ['today', 'yesterday', 'last7', 'last30']
+const RANGE_IDS = ['today', 'yesterday', 'last7', 'last30', 'all']
+
+/** 按工作区那一面的 fixture 行（tokens = 四桶之和）。第一行故意跨两条计费性质的路由
+ *  （实际支出 + 订阅价值同时非零），因为工作区不像模型行那样被限定在单个金额桶里；
+ *  收尾的「未归属」（id ''）是对账行。窗口越短，可见的行越少。 */
+const WORKSPACE_ROWS = [
+  { id: 'w-harness', title: 'deepseek-harness', path: 'C:\\Users\\28529\\Desktop\\deepseek-harness', totals: { ...mk(1_510_000, 6_100_000, 402_000, 198), failures: 2 }, tokens: 8_012_000, spend: 3.87, subscriptionValue: 1.2, lastAt: Date.now() - 3 * 60_000 },
+  { id: 'w-wiki', title: 'zzz wiki', path: 'C:\\Users\\28529\\Desktop\\zzz wiki', totals: mk(800_000, 900_000, 120_000, 34), tokens: 1_820_000, spend: 0, subscriptionValue: 2.4, lastAt: Date.now() - 5 * 3_600_000 },
+  { id: 'w-plugins', title: 'dsh-plugins', path: 'C:\\Users\\28529\\Desktop\\dsh-plugins', totals: mk(410_000, 210_000, 84_000, 16), tokens: 704_000, spend: 1.12, subscriptionValue: 0, lastAt: Date.now() - 26 * 3_600_000 },
+  { id: '', title: '未归属', path: '', totals: mk(50_000, 120_000, 8_000, 7), tokens: 178_000, spend: 0, subscriptionValue: 0, lastAt: Date.now() - 40 * 60_000 },
+]
 
 const USAGE_CARDS = {
   today: [
@@ -609,17 +605,44 @@ const USAGE_CARDS = {
   ],
 }
 USAGE_CARDS.last30 = USAGE_CARDS.last7
+/** 全账本：与近 30 天同一批卡（fixture 不造第五份数据），窗口词仍不同。 */
+USAGE_CARDS.all = USAGE_CARDS.last30
 
 const USAGE_LABELS = { deepseek: 'DeepSeek', commandcode: 'Command Code', 'opencode-go': 'OpenCode Go' }
 
+/** 窗口 → 可见的工作区行数（越短的窗口越少行——与卡片那一面同步收窄）。 */
+const WORKSPACES_BY_RANGE = { today: 2, yesterday: 2, last7: 4, last30: 4, all: 4 }
+
+/** 按模型那一面 = 各卡模型行摊平（与 host 的 `modelRowsOf` 同源），所以三种切法的合计相等。
+ *  **故意倒着摊**（不按任何键排）：模型清单按词元降序是**展示层**的事，这份乱序 fixture 正好
+ *  证明排序真的发生在那里。 */
+function modelRows(cards) {
+  return cards.slice().reverse().flatMap((card) => card.models.map((model) => ({
+    provider: card.provider,
+    model: model.model,
+    totals: model.totals,
+    cost: model.cost,
+    spend: model.spend,
+    subscriptionValue: model.subscriptionValue,
+  })))
+}
+
 function usageView(range) {
+  const providers = USAGE_CARDS[range] ?? []
   return {
     range,
-    fromDay: '2026-08-16',
+    fromDay: range === 'all' ? '' : '2026-08-16',
     toDay: '2026-09-14',
     updatedAt: Date.now(),
     providerLabels: USAGE_LABELS,
-    providers: USAGE_CARDS[range] ?? [],
+    // 页头「窗口合计」四个数：与按模型 / 按通道同源（host 侧就是各卡求和）。
+    totalTokens: providers.reduce((sum, card) => sum + card.tokens, 0),
+    totalRequests: providers.reduce((sum, card) => sum + card.requests, 0),
+    totalSpend: providers.reduce((sum, card) => sum + card.spend, 0),
+    totalSubscriptionValue: providers.reduce((sum, card) => sum + card.subscriptionValue, 0),
+    byModel: modelRows(providers),
+    byWorkspace: WORKSPACE_ROWS.slice(0, WORKSPACES_BY_RANGE[range] ?? 0),
+    providers,
   }
 }
 

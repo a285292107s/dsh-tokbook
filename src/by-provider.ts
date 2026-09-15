@@ -6,7 +6,7 @@
  */
 
 import type {
-  BillingMap, PricingTable, ProviderModelUsage, ProviderUsageCard, UsageRecord,
+  BillingMap, CostedModelRow, PricingTable, ProviderModelUsage, ProviderUsageCard, UsageRecord,
 } from './types.ts'
 import { totalsTokens } from './types.ts'
 import type { RateResolver } from './stats.ts'
@@ -78,4 +78,29 @@ export function providerCards(
     right.tokens - left.tokens || right.requests - left.requests
     || left.provider.localeCompare(right.provider))
   return cards
+}
+
+/**
+ * 同一批记录的**按模型**切法：把各卡的模型行摊平。
+ *
+ * 直接摊平卡而不另跑一遍 `summarizeRecords` + `attachCosts`,是为了让
+ * 「按模型」与「按通道」**同源**:两者的合计因此天然逐分相等,也共用同一条
+ * 「只有失败的行不成清单」规矩(卡在 `requests === 0` 时整组跳过)。顺序不是
+ * 契约——展示层按词元降序排。
+ */
+export function modelRowsOf(cards: readonly ProviderUsageCard[]): CostedModelRow[] {
+  const rows: CostedModelRow[] = []
+  for (const card of cards) {
+    for (const model of card.models) {
+      rows.push({
+        provider: card.provider,
+        model: model.model,
+        totals: model.totals,
+        cost: model.cost,
+        spend: model.spend,
+        subscriptionValue: model.subscriptionValue,
+      })
+    }
+  }
+  return rows
 }
