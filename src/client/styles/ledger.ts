@@ -3,58 +3,83 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 /* 三条线：直角与硬边（工程感）、黄只作"料"、构件而非贴图。字体保持保守，不做字体文章。
    末尾那一节（列头 + 一行读数）是**跨 tab 的行组件**词汇：用量明细 tab 的三种切法共用它。 */
 
-/* hero = 一块被框住的读数仪表：1px 硬边框 + 受光边的金属反光，四角补左上/右下两枚括号，
-   底边一条贯通全宽的刻度轨。
-   没有别的装饰——终末地的气质是克制，面板自己不需要加戏。
-   这条配方（边框 + --dtpl-panel-bg + --dtpl-metal）就是全窗口的**面板**，五个 tab 共用；
-   任何一块面要长得不一样，都得有理由。 */
+/* hero = **今日**那一块卡：卡首一条图，其下是被框住的读数仪表（总额 + 参照 + 金额），
+   中间一条 1px 分区线，下半是它拆出来的四桶读数格（每桶自带份额——「多少」与「占多少」同处一格）。
+   1px 硬边框 + 受光边的金属反光，四角补左上/右下两枚括号，没有别的装饰——终末地的气质是
+   克制，面板自己不需要加戏。这条配方（边框 + --dtpl-panel-bg + --dtpl-metal）就是全窗口的
+   **面板**，五个 tab 共用；任何一块面要长得不一样，都得有理由。
+   卡内的读数格因此**不是**第二块面板（见 .dtpl-grid）：一个陈述只需要一只框。
+   卡的下沿曾有一条刻度轨（D-034 撤）、每格下方曾有一条 2px 占比尺（D-037 撤）——两样都是
+   「已经有一个数印在它上面」的重复编码，撤掉不欠任何信息。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero{
   position:relative;
   display:flex;flex-direction:column;gap:12px;
+  /* 四边等距：底边原先厚出 10px，是给刻度轨让位的（轨落在下内边距里）。轨撤掉之后
+     那道留白就只是失衡的留白，所以收到 16px——腾出来的高度回给读数格。 */
   padding:16px;margin:0 0 20px;
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
   box-shadow:var(--dtpl-metal);
   overflow:hidden;
 }
+/* 底图 = **卡首独立的一条**（见下方 .dtpl-hero-art 规则）：它占满卡的内容宽、按图片自己的
+   比例定高，排在仪表区之前。图不碰读数格（四桶）那一行——那里四个数字、四份份额都要读。 */
+
 /* 四角括号：只画左上与右下两端，其余两角留空——「方框的四角都补全」会读成相框。
    括号画在 ::before/::after 上，所以控件与焦点环都不受影响。hero 因此读成一台
-   被框住的仪表，而不是一张卡片。 */
+   被框住的仪表，而不是一张卡片。
+   左下与右上留空的另一个缘由现在更实在：左上那一枚**永远压在卡首那条图上**。墨色取 fg 的
+   55% 在深色皮肤上是浅墨、压得住图，但在浅色皮肤上它是深墨——深墨落在深色图上就等于没有，
+   两枚括号只剩一枚（实测角上只剩 1px 卡边框）。所以左上这一枚单独取浅墨：它底下恒为图，
+   与皮肤无关；右下那一枚底下恒为卡面，照旧随 fg 走。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero::before,
 [data-plugin="dsh-tokbook"] .dtpl-hero::after{
   content:"";position:absolute;width:14px;height:14px;pointer-events:none;z-index:2;
   border-color:color-mix(in srgb,var(--dtpl-fg) 55%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-hero::before{top:0;left:0;border-top:2px solid;border-left:2px solid;}
+[data-plugin="dsh-tokbook"] .dtpl-hero::before{
+  top:0;left:0;border-top:2px solid;border-left:2px solid;
+  border-color:color-mix(in srgb,#fff 62%,transparent);
+}
 [data-plugin="dsh-tokbook"] .dtpl-hero::after{right:0;bottom:0;border-right:2px solid;border-bottom:2px solid;}
 
-/* 底边刻度轨。hero 是一块仪表，这条轨就是它的量尺——**带状元素天生适合带状空地**，
-   所以它贯通全宽、不占信息位、也不存在「孤零零」的问题。
-   三层刻度 + 一条基线：细 8px / 主 40px / 长主 200px，分别 3px、6px、9px 高。
-   全部走墨色，**不掺品牌黄**：黄是「料」不是「线」，1px 的黄在白底上只有 1.57:1，
-   做刻度线会直接消失；黄在这一屏只留给口径词那枚徽记。
-   它整条落在 hero 的**下内边距**里（那 16px 的下留白就是给它留的），所以最高的那层刻度
-   也不会碰到「累计」那一行的字——实测轨顶 = hero 高 − 4 − 9，而内容底边在下内边距之上。
-   向左淡出，免得刻度在左端硬生生截断。 */
-[data-plugin="dsh-tokbook"] .dtpl-hero-rail{
-  position:absolute;left:16px;right:16px;bottom:4px;height:9px;pointer-events:none;
-  background-image:
-    repeating-linear-gradient(to right, color-mix(in srgb,var(--dtpl-fg) 28%,transparent) 0 1px, transparent 1px 8px),
-    repeating-linear-gradient(to right, color-mix(in srgb,var(--dtpl-fg) 50%,transparent) 0 1px, transparent 1px 40px),
-    repeating-linear-gradient(to right, color-mix(in srgb,var(--dtpl-fg) 72%,transparent) 0 1px, transparent 1px 200px),
-    linear-gradient(to top, color-mix(in srgb,var(--dtpl-fg) 28%,transparent) 0 1px, transparent 1px);
-  background-size:8px 3px, 40px 6px, 200px 9px, 100% 1px;
-  background-position:left bottom, left bottom, left bottom, left bottom;
-  background-repeat:repeat-x;
-  -webkit-mask-image:linear-gradient(to left, transparent 0, #000 16%);
-  mask-image:linear-gradient(to left, transparent 0, #000 16%);
+/* 底边刻度轨（.dtpl-hero-rail）已撤：它是纯装饰（三层 repeating-linear-gradient + 一条基线），
+   没有量程、不承载任何读数，却占掉卡最底一条信息位与 10px 的下内边距。仪表感的身份由 1px 硬边框
+   与左上/右下两枚角括号承担，这两样已经够；空出来的高度回给读数格。
+   原来那句「向左淡出与右下角括号合成一条边」的理由随之作废——它论证的是一条装饰线该如何自洽，
+   而这条线本身不值得占位。 */
+
+/* 卡首那条图：hero 的第一行，也是这张卡上唯一的图。
+   图**不做任何一层的背景**，就是独立的一行：占满卡的内容宽，高度由图片自己的比例定
+   （资产 940×237，容器与图同比例，所以整幅取景原样落地），随后才是数字与金额。
+   前一版把图当仪表区的背景，那个做法必然要求字与图共处同一块地方——实测在那一层的高度上，
+   36px 的主角数字会压在人物的白发上，浅色皮肤里「今日词元」与 169K 直接读不出来；
+   把图退到几乎看不见才勉强能读，那时图也没剩多少。独立成行之后两件事各自完整：图完整，
+   字落在干净的卡面上。图不留内衬——它与卡的边框齐平，左右上三面都抵到卡的边。
+   下缘是一条**直边**：试过给最后两成做渐隐（mask 落到卡面），浅色皮肤下那条淡出带把图的下半
+   糊成一片灰雾，人物也散掉了——一张取景完整的插画，边界就该是清楚的。 */
+[data-plugin="dsh-tokbook"] .dtpl-hero-art{
+  flex:none;
+  /* 左右上三面抵掉 hero 的内边距：图与卡的边框齐平（卡自己 overflow:hidden，
+     不必再为圆角做处理）。图因此**是卡的首面**，而不是卡里的一张插图；
+     下边不另外加空隙，hero 的 flex 间距（12px）就是图与下面那行数字之间的距离。 */
+  margin:-16px -16px 0;
+  aspect-ratio:940/237;
+  background-image:var(--dtpl-hero-art);
+  background-position:center center;
+  background-size:cover;
+  background-repeat:no-repeat;
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-hero-top{
-  position:relative;z-index:1;
   display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-hero-lead{display:flex;flex-direction:column;gap:7px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-hero-lead{display:flex;flex-direction:column;gap:7px;min-width:0;flex:1 1 auto;}
+/* 口径词那一行只有身份：派生读数不挂在这里。曾经挂过缓存命中率，它后来移到读数格、
+   又自 D-037 起整条不再显示——一个比值挂在口径词上，读者还得回头找它的分母。 */
+[data-plugin="dsh-tokbook"] .dtpl-hero-head{
+  display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+}
 /* 口径词：普通无衬线，靠字号与字距区分层级，不靠字体换家族。
    前面那枚黄牌是**工业徽记**——窗口里每个节标题都带着它，只有 hero 的口径词原先没有，
    这是补上那处不一致（不是给 hero 新增装饰）。黄牌 + 墨边，与 .dtpl-sec-title::before 同一手法。 */
@@ -106,17 +131,10 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 /* 零支出仍占住该行，但走 fg-2（不是三级色）：它是一枚**读数**，12px 正文不能只有 3.47:1；
    「金额为 0」这件事由墨色与字重降一档表达，不靠洗淡。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-v.is-zero{color:var(--dtpl-fg-2);font-weight:400;}
-/* 累计事实带：累计单调递增、永不触发决策，所以它只证明「账本在记账」——一条次要行读完。
-   层级靠**字号 + 只在数字上加字重**：文字部分留在 fg-2（11px 正文要 4.5:1，三级色不够），
-   数字升到主墨色。安静由字号、字距与留白做，不靠把字洗淡到读不清。 */
-[data-plugin="dsh-tokbook"] .dtpl-hero-foot{
-  position:relative;z-index:1;
-  display:flex;align-items:baseline;gap:10px;
-  padding-top:11px;border-top:1px solid var(--dtpl-hairline);
-}
-[data-plugin="dsh-tokbook"] .dtpl-hero-foot-k{
-  flex:none;font-size:12px;line-height:18px;font-weight:600;letter-spacing:.06em;color:var(--dtpl-fg-2);
-}
+/* 「一串事实」的词汇：**跨 tab 共用**——用量明细的窗口合计就是这一串（同一组分隔符、同一档
+   字号），所以两个 tab 的口径读起来是一句话。层级靠**字号 + 只在数字上加字重**：文字部分留在
+   fg-2（11px 正文要 4.5:1，三级色不够），数字升到主墨色。安静由字号、字距与留白做，
+   不靠把字洗淡到读不清。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-facts{
   display:flex;flex-wrap:wrap;align-items:baseline;min-width:0;
   font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
@@ -128,24 +146,6 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   font-family:var(--dtpl-mono);font-weight:600;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-facts i{font-style:normal;color:var(--dtpl-fg-dim);padding:0 5px;}
-/* 今日出过的事：与下面的累计事实带同处 hero，但口径是「今天」，所以自带分区词，
-   且只在有事时占行。数字走 warn-ink 而不是裸 warn——DSH 的浅色 warn 是 #F59E0B，11px
-   正文上只有 2.15:1，混一档墨之后才够 4.5:1（实测见 DESIGN）。这里确实在报告需要处理的
-   事，与参照行的涨跌（中性、不染色）不同。 */
-[data-plugin="dsh-tokbook"] .dtpl-hero-alert{
-  position:relative;z-index:1;
-  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
-  margin:0;
-  font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-hero-alert-k{
-  flex:none;font-weight:600;letter-spacing:.06em;color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-hero-alert b{
-  font-family:var(--dtpl-mono);font-weight:600;color:var(--dtpl-warn-ink);
-  font-variant-numeric:tabular-nums;
-}
-[data-plugin="dsh-tokbook"] .dtpl-hero-alert i{font-style:normal;color:var(--dtpl-fg-dim);}
 /* 行里的两个金额桶按**同一套口径**分主次：现金升到主墨色 + 600，订阅价值留在次要色 + 400
    （并永远带着「订阅价值」这个名字）。此前这里反了——订阅金额拿的是主墨色 600，而现金金额
    是 dtpl-cost 的次要色裸字，于是同一扇窗里 hero 说「现金最重要」、行里却把没花的钱写成
@@ -161,13 +161,14 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 }
 [data-plugin="dsh-tokbook"] .dtpl-cost-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-2);margin-left:3px;}
 
-/* 词元构成：一只带分隔的方框——工程读数正是「框 + 竖分隔」。与 hero 同一块面板配方。 */
+/* 词元构成：**卡内**的一条读数带——工程读数正是「框 + 竖分隔」，框由上方的 hero 给，
+   这里只出格与格之间的竖发丝（额度页的用量摘要活动条同一配方）。
+   它不再是一只独立的面板：一个陈述（今日词元）配一只框。
+   **上边框就是两个区之间那条分区线**——1px、等宽、两端一致，走注册过的边界 token，
+   与页脚、tab 条、面板轮廓是同一种线。分区线不借图形：那是数据的东西。 */
 [data-plugin="dsh-tokbook"] .dtpl-grid{
   display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;
-  margin:0 0 8px;
-  border:1px solid var(--dtpl-border);
-  background:var(--dtpl-panel-bg);
-  box-shadow:var(--dtpl-metal);
+  border-top:1px solid var(--dtpl-border);
 }
 /* 三个桶刚好填满一行，不留参差的半格。 */
 [data-plugin="dsh-tokbook"] .dtpl-grid-3{grid-template-columns:repeat(3,minmax(0,1fr));}
@@ -176,18 +177,29 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   padding:12px 14px 13px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-stat + .dtpl-stat{border-left:1px solid var(--dtpl-border);}
+/* 标签行：一格的名字。它曾与右端的**派生读数**（缓存读取那一格的命中率）两端分开，
+   自 D-037 起那一枚不再显示，这一行回到只有名字。 */
 [data-plugin="dsh-tokbook"] .dtpl-k{
   font-size:12px;line-height:18px;font-weight:500;letter-spacing:.05em;color:var(--dtpl-fg-2);
+  white-space:nowrap;
 }
+/* 一格里的两件东西同行：值（20px 主角）与份额（12px 次级）。
+   对齐走 baseline——20px 与 12px 的等宽数字因此坐在同一条基线上，而不是被行高推得参差。
+   份额取 fg-2 而非三级色：它是**读数**（12px 正文），浅色皮肤的三级色对卡面只有 3.47:1，
+   过不了 4.5:1；值的层级靠字号与字重给，不靠把份额洗淡。
+   份额自己带「占」字：它是值行里唯一的百分比，而这个「占多少」原先只有一个 title 在解释。 */
 [data-plugin="dsh-tokbook"] .dtpl-stat .dtpl-v{
   margin-top:3px;
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
   font-family:var(--dtpl-mono);
   font-size:20px;line-height:26px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;
 }
+[data-plugin="dsh-tokbook"] .dtpl-stat-pct{font-size:12px;line-height:18px;color:var(--dtpl-fg-2);}
 
 /* 节标题 = 工业徽记 + 分区词。徽记是**反复出现**的那枚标记（终末地把「终末地工业」的
    Logo 及衍生图形铺在每个系统面板的头部，这里用同一手法）。它是黄牌 + 墨边——见 tokens
-   里「黄是料不是线」那条。右端旁注靠 space-between 推到边上，不画延伸线。 */
+   里「黄是料不是线」那条。右端旁注（.dtpl-sec-aside）由它所在那一行的 space-between 推到边上，
+   不画延伸线。 */
 [data-plugin="dsh-tokbook"] .dtpl-sec-title{
   display:flex;align-items:baseline;gap:9px;
   font-size:13px;line-height:20px;font-weight:600;letter-spacing:.04em;color:var(--dtpl-fg);
@@ -199,8 +211,6 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   background:var(--dtpl-brand);
   box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
-[data-plugin="dsh-tokbook"] .dtpl-sec-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;}
-[data-plugin="dsh-tokbook"] .dtpl-sec-head .dtpl-sec-title{margin:0 0 11px;}
 [data-plugin="dsh-tokbook"] .dtpl-sec-aside{
   flex:none;margin-bottom:11px;
   font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
@@ -320,7 +330,6 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   display:flex;align-items:center;gap:16px;flex-wrap:wrap;
   border-bottom:1px solid var(--dtpl-border);
 }
-[data-plugin="dsh-tokbook"] .dtpl-bd-title{margin:0;}
 [data-plugin="dsh-tokbook"] .dtpl-bd-tabs{display:inline-flex;gap:0;align-self:stretch;align-items:flex-end;}
 [data-plugin="dsh-tokbook"] .dtpl-bd-tab{
   position:relative;appearance:none;border:0;background:transparent;
@@ -444,7 +453,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   flex:none;font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 失败数染色，因为它与旁边的请求数不是一类事实：请求数是读数，失败是**要看一眼**的状态。
-   色相与 hero 的今日异常行同一个 token（裸 warn 在 11px 正文上只有 2.15:1，warn-ink 才够）。 */
+   走 warn-ink 而不是裸 warn（裸 warn 在 11px 正文上只有 2.15:1，warn-ink 才够）。 */
 [data-plugin="dsh-tokbook"] .dtpl-ws-fail{
   font-weight:600;color:var(--dtpl-warn-ink);font-variant-numeric:tabular-nums;
 }
@@ -458,11 +467,6 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-row.is-unattributed .dtpl-model-name{
   color:var(--dtpl-fg-2);font-weight:400;
 }
-
-/* 注释：装着口径的去处（价格未知 = 不是免费、没上报用量 = 不是 0），是要读的正文。 */
-[data-plugin="dsh-tokbook"] .dtpl-note{font-size:11px;line-height:17px;color:var(--dtpl-fg-2);margin:0 0 8px;}
-/* 四桶底下那条加法律与词表：它是那一节的收尾，所以拿走那一节剩下的下边距。 */
-[data-plugin="dsh-tokbook"] .dtpl-buckets-note{margin:0 0 20px;}
 
 /* 窗口底部（新鲜度 · 重扫） */
 /* 分区靠实线，不靠底色。 */
@@ -541,11 +545,16 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   background-size:200% 100%;
   animation:dtpl-shimmer 1.4s ease infinite;
 }
-/* 骨架块高度 = 对应真块的实测高度，首屏因此不会在数据到达时整体下跳。 */
-[data-plugin="dsh-tokbook"] .dtpl-sk-hero{height:145px;}
+/* 骨架块高度 = 对应真块的**实测**高度，首屏因此不会在数据到达时整体下跳。
+   骨架是按真块的排法分段的（hero / 读数格 / 趋势图），而真块里 hero 与读数格同为一张卡：
+   所以 sk-hero + tile 要等于整卡高（353 = 277 + 76），chart 对上「近 14 天趋势」那一节（159）。
+   1404px 宽下量的（预览台 fixture）。卡首那条图占高的 168px 都在 sk-hero 里——它是卡的一面，
+   不是背景。两次撤件各自把这一串数字往下推：D-036 撤掉今日异常行（sk-hero 307 → 277），
+   D-037 撤掉每格那条占比尺（tile 90 → 76：尺的 2px + 外边距 9px + 与值行之间的 3px 间距）。 */
+[data-plugin="dsh-tokbook"] .dtpl-sk-hero{height:277px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;}
-[data-plugin="dsh-tokbook"] .dtpl-sk-tile{height:78px;}
-[data-plugin="dsh-tokbook"] .dtpl-sk-chart{height:130px;}
+[data-plugin="dsh-tokbook"] .dtpl-sk-tile{height:76px;}
+[data-plugin="dsh-tokbook"] .dtpl-sk-chart{height:159px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-row{height:48px;}
 
 /* 空状态：一只方框，不是虚线占位。 */

@@ -49,14 +49,15 @@ export function formatShare(value: number, total: number): string {
 }
 
 /**
- * 缓存命中率（缓存读取 ÷ 输入侧计费词元），分母 = 未命中输入 + 缓存读 + 缓存写——与 harness 自身会话统计同口径。部分命中绝不会显示为 100%：展示只会低估命中、绝不虚报满命中。
+ * 比率的读法：恒定一位小数、**截断**（`Math.floor`）。原名取自缓存命中率（缓存读取 ÷ 输入侧
+ * 计费词元，分母 = 未命中输入 + 缓存读 + 缓存写，与 harness 自身会话统计同口径）——命中率自
+ * D-037 起不在卡上显示，同一个函数改由四桶的**份额**用（`formatHitRate(share, 100)`）。
+ * 截断而不是四舍五入：展示只会低估，99.95% 不会被印成 100.0%——「满」与「几乎满」是两回事。
  */
 export function formatHitRate(cacheReadTokens: number, billedInputTokens: number): string | null {
   if (billedInputTokens <= 0) return null
-  if (cacheReadTokens >= billedInputTokens) return '100'
-  const percent = (cacheReadTokens / billedInputTokens) * 100
-  const whole = Math.round(percent)
-  return whole < 100 ? String(whole) : (Math.floor(percent * 10) / 10).toFixed(1)
+  const percent = Math.min(100, (cacheReadTokens / billedInputTokens) * 100)
+  return (Math.floor(percent * 10) / 10).toFixed(1)
 }
 
 /** 紧凑词元计数：517 / 12.2K / 1.2M。 */

@@ -113,13 +113,21 @@ if (LEDGER) {
   ctx.plugin(host.default, ledgerDir === undefined ? {} : { path: ledgerDir })
 }
 
+/** `YYYY-MM-DD`，**本地日**：与 `localDayKey()` 同源。此前这里走 `toISOString()`（UTC 日），
+ *  于是 UTC+8 的凌晨那几小时里「今天」那一行会落到前一天——hero 因此整块归零，
+ *  预览看不到有数据的样子。日期键是 UI 的口径，fixture 必须照它算。 */
+function localDay(date) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
 /** Deterministic-ish daily rows for the last 14 days. */
 function days(n) {
   const rows = []
   const base = new Date()
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date(base.getTime() - i * 86_400_000)
-    const day = d.toISOString().slice(0, 10)
+    const day = localDay(d)
     const seed = (i * 73) % 100
     const inputTokens = 40_000 + seed * 3_100
     const outputTokens = 9_000 + seed * 820

@@ -60,6 +60,10 @@ export const CSS_TOKENS = `
      改这里就是改全窗口的材质，所以没有哪个 tab 能长出自己的面板。 */
   --dtpl-panel-bg:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
 
+  /* 5b. 今日仪表卡的底图『--dtpl-hero-art』**不在这里声明**：它的值是一串 data URI，
+     由 styles.ts 从 import 的资产直接拼进去（本文件是静态字符串，拿不到 import）。
+     它只被『.dtpl-hero-art』那一层背景用，见 ledger 片段的 hero 段。 */
+
   /* 6. 「一行读数」的右列宽。『.dtpl-row』是**跨 tab 共用**的行组件（用量明细与通道用量
      都走它），所以这条度量必须挂在插件根上，不能挂在使用者身上。此前它叫 --dtpl-bd-nums-w
      并定义在『.dtpl-bd』（用量明细那一节）里：通道用量 tab 用了同一个类，变量取不到，

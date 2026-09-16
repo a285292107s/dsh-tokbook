@@ -56,6 +56,9 @@ async function main() {
     // (esbuild's default `ascii` charset would escape it to \uXXXX).
     charset: 'utf8',
     external: BASELINE_EXTERNALS,
+    // hero 底图是**内联的 data URI**：client 半区只有 `lib/client.js` 一个产物，没有随包的
+    // 静态目录，也就不存在一个能挂相对 URL 的位置。所以图必须进 bundle（≈60KB base64）。
+    loader: { '.jpg': 'dataurl' },
     write: false,
   })
   const bundled = client.outputFiles[0].text

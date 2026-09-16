@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-15 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-16 · supersedes: —
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区从**侧边栏
@@ -17,8 +17,9 @@ footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含
   但会在界面上列出来);费率为 0 才是免费。
 
 界面词与代码/契约的逐条对应见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 的「术语」段;改界面长相/
-交互前对照的取值与禁令见 [`docs/UI-SPEC.md`](docs/UI-SPEC.md),每个 tab 的界面规格与量出来的
-依据见 [`docs/DESIGN.md`](docs/DESIGN.md)。文档树的地图(每份文件的
+交互前查的**取值**(token 分层与总表、组件规格、量表)见 [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md),
+**禁令与达标线**(颜色预算、窄屏、无障碍、反模式、自检)见 [`docs/UI-SPEC.md`](docs/UI-SPEC.md),
+每个 tab 的界面规格与量出来的依据见 [`docs/DESIGN.md`](docs/DESIGN.md)。文档树的地图(每份文件的
 role / status / 何时读)见 [`docs/INDEX.md`](docs/INDEX.md);必须与代码一致的 host 契约由
 `pnpm selfcheck` 强制同步。
 
@@ -163,8 +164,8 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
   `recordCompaction` 开启时记录。
 - **`turn/end`**(reason `error`)与 **`llm/retry`** — 失败尝试,计入 `failures` 维度。
 - **用量未知** — 通道没上报 `usage` 的计费调用(中途取消的请求、没回报用量的 summarize)仍记
-  一行、仍计入请求次数,但没有 token 可加:概览的**今日异常行**报出今天的次数(界面词是
-  「N 次调用没上报用量」),金额同样按 ¥0 计并由注记说明——**不按 0 词元冒充**。
+  一行、仍计入请求次数,但没有 token 可加:用量明细里通道卡的请求行报出它(界面词是
+  「N 次没上报用量」),金额同样按 ¥0 计、道理写在「统计口径」页——**不按 0 词元冒充**。
 
 首次启动时插件回填安装前发生的历史请求(幂等、按行 id 去重);浮窗里的**重新扫描按钮**可强制
 一次权威重同步。新鲜度**不靠读路径等**:打开浮窗那一次读只做一次**廉价探测**(列出会话 +

@@ -1,6 +1,6 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-15 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-17 · supersedes: —
 
 > 本文件整理本次「UI 优化 + 全中文 + 对齐 DSH 官方设置按钮样式」迭代中踩过的坑与结论，
 > 供后续维护 / 继续开发时对照。结构统一按 **现象 → 根因 → 修复 / 正确做法** 组织。
@@ -80,6 +80,25 @@
 - esbuild 会把这些字符串**编译进 `lib/client.js`**。
 - 因此「改一行样式」= 改变了 lazy-CJS bundle 的字节内容，跟改逻辑**没有区别**，同样受下方 `rev`
   不可变缓存约束。**没有"只改样式就自动热更"这回事。**
+
+### 陷阱：分片里的注释不能出现反引号（2026-09-17）
+
+每个分片都是 `export const CSS_X = ` + 一个**模板字符串**。所以在 CSS 注释里写 Markdown 风格的
+反引号（`` `00:00–24:00` ``、`` `aria-label` ``、`` `!important` ``）会**提前闭合模板串**：后面的
+CSS 变成 JS 语法错误，`pnpm typecheck` / `pnpm build` 当场红。
+
+- **现象**：`src/client/styles/quota.ts(152,62): error TS1005: ',' expected`、`TS1121: Octal
+  literals are not allowed` 之类，报的行号指向**注释那一行**，看代码却毫无问题。
+- **正确做法**：分片里的注释用中文引号（『』「」），或干脆不加反引号；模板串里也不要出现 `${`。
+- **快速自检**：每个分片应恰好 4 个反引号（JSDoc 里一对 + 模板串首尾一对；
+  `pricing-timeline.ts` 是 6 个——它的 JSDoc 里另有一对）：
+
+  ```powershell
+  Get-ChildItem src/client/styles/*.ts | ForEach-Object {
+    $t = Get-Content $_.FullName -Raw
+    "{0,-22} {1}" -f $_.Name, ([regex]::Matches($t,'`').Count)
+  }
+  ```
 
 ---
 

@@ -162,7 +162,7 @@ export function ProviderPanel() {
   }
 
   return (
-    <section className="dtpl-usage-sec" aria-label="用量明细">
+    <section aria-label="用量明细">
       {/* 页头常驻，且**行数固定**：第一行是分区词 + 窗口控件，第二行是窗口合计。合计单独占一整行
           （而不是挤在标题与控件之间）是这里的关键——它随窗口变宽变窄，挤在同一行就会把窗口控件
           推来推去、在「一行 / 两行」之间来回折行；实测那一次折行让切法条与整张列表上下跳 33px。
@@ -318,7 +318,7 @@ function ProviderCard({ card, money, labels }: {
     ? '订阅通道：金额是这些用量按官方价折算的订阅价值，不是实际支出'
     : '按量通道：金额是实际支出口径'
   return (
-    <article className="dtpl-provider-card" data-provider={card.provider}>
+    <article className="dtpl-provider-card">
       <header className="dtpl-provider-head">
         <div className="dtpl-provider-id">
           <span className="dtpl-provider-title">

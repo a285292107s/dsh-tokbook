@@ -104,8 +104,8 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
             <div className="dtpl-model">
               <span className="dtpl-model-name">{row.title}</span>
               {/* 目录在压力下截断（省略号）；两个事实不截——被截断的「最近 …」会被读成坏掉的数字。
-                  「N 失败」是这一行唯一会改变动作的事实，所以它带色相（与 hero 的今日异常行同一条
-                  规矩：色相只给要看一眼的状态），而请求数、最近时刻是读数，不染色。 */}
+                  「N 失败」是这一行唯一会改变动作的事实，所以它带色相（色相只给要看一眼的状态），
+                  而请求数、最近时刻是读数，不染色。 */}
               <span className="dtpl-ws-meta">
                 {row.path !== '' && (
                   <>

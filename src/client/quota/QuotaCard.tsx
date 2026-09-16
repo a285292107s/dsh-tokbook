@@ -29,7 +29,6 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   const ok = card !== null && card.state === 'ok'
   const ctx = ok && card !== null ? planContext(card) : ''
   const ring = ok && card !== null ? ringPressure(card) : undefined
-  const state = card?.state ?? 'loading'
   // 一次性点击反馈：按钮立刻切到 `disabled`（spinner）后，每次按下仍能重新触发弹出动画。
   const [popTick, setPopTick] = useState(0)
 
@@ -39,7 +38,7 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   }
 
   return (
-    <article className="dtpl-quota-card" data-plan={provider} data-state={state}>
+    <article className="dtpl-quota-card">
       <header className="dtpl-quota-head">
         <div className="dtpl-quota-id">
           {ok && card !== null && ring !== undefined ? (
@@ -93,7 +92,11 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
       ) : card === null ? (
         <p className="dtpl-quota-note">暂无数据</p>
       ) : card.state !== 'ok' ? (
-        <div className={`dtpl-quota-msg dtpl-quota-msg-${card.state === 'unconfigured' ? 'muted' : 'err'}`}>
+        // `role="alert"` 只给**真的出错**那一支：未配置是提示，不是错误，把它当告警播报会造假。
+        <div
+          className={`dtpl-quota-msg dtpl-quota-msg-${card.state === 'unconfigured' ? 'muted' : 'err'}`}
+          role={card.state === 'error' ? 'alert' : undefined}
+        >
           <p className="dtpl-quota-msg-title">
             {card.state === 'unconfigured' ? '未配置 API key' : '官方查询失败'}
           </p>
@@ -196,7 +199,7 @@ function QuotaWindowRow({ window }: { window: QuotaWindowView }) {
     ? `剩余 ${money(Math.max(0, (window.capUsd ?? 0) - (window.usedUsd ?? 0)))}`
     : `剩余 ${Math.max(0, Math.round(100 - pct))}%`
   return (
-    <div className="dtpl-quota-window" data-window={window.id} data-tone={tone}>
+    <div className="dtpl-quota-window" data-tone={tone}>
       <div className="dtpl-quota-window-line1">
         <span className="dtpl-quota-window-label">{window.label}</span>
         <span className="dtpl-quota-window-metric">{metric}</span>

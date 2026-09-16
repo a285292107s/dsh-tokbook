@@ -144,12 +144,15 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-n i{
-  font-style:normal;font-size:8px;line-height:1;font-weight:600;
+  font-style:normal;font-size:9px;line-height:1;font-weight:600;
   color:var(--dtpl-fg-3);margin-left:.5px;
 }
-/* 命名这个环所汇总的预算的小号说明。弱化，让色调数字仍是焦点。 */
+/* 命名这个环所汇总的预算的小号说明。**它是信息，不是装饰**：环的高度本身就是「已用多少」，
+   而「这个百分比说的是哪个预算」只由这一行给出（环因此从不静默地换含义，见组件的文档注释）。
+   所以它取 fg-2（≈5.4:1）与 10px——此前是 8px + fg-3，对卡面只有 3.47:1，读屏有『aria-label』
+   兜底、有视力的人却只看到一行 8px 的灰字（2026-09-17 审查）。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-cap{
-  font-size:8px;line-height:1;font-weight:600;color:var(--dtpl-fg-3);
+  font-size:10px;line-height:1;font-weight:600;color:var(--dtpl-fg-2);
 }
 /* 卡内消息面板（加载失败 / 未配置 / 拉取失败）：1px 硬边框，凹进去的一块说明面，
    不是又一层染色洗色块。 */

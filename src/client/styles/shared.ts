@@ -36,10 +36,10 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"] .dtpl-body{padding:12px 16px 14px;}
   [data-plugin="dsh-tokbook"] .dtpl-foot{padding:10px 16px 12px;}
   /* hero 上下两块在窄 sheet 上改为堆叠。金额块整块靠左，但块内不被拉伸：两行仍按最宽那行的宽度
-     对齐，所以金额右端依然成列。 */
+     对齐，所以金额右端依然成列。底图带在窄处不用另调——它按资产比例定高，卡变窄时自己变小。 */
   [data-plugin="dsh-tokbook"] .dtpl-hero-top{flex-direction:column;align-items:flex-start;gap:8px;}
-  /* 累计事实带在窄处换行：「累计」永远领着自己那串事实，分隔点让位给间距——行首不会孤零零出现一个「·」。 */
-  [data-plugin="dsh-tokbook"] .dtpl-hero-foot{gap:9px;}
+  /* 事实带在窄处换行：分隔点让位给间距——行首不会孤零零出现一个「·」。这一串现在只由
+     用量明细的窗口合计在用（概览的累计事实带已撤出，D-033）。 */
   [data-plugin="dsh-tokbook"] .dtpl-hero-facts{flex:1 1 auto;gap:4px 10px;}
   [data-plugin="dsh-tokbook"] .dtpl-hero-facts i{display:none;}
   /* 词元构成：四个桶在手机宽度上排不下，折成 2×2。框与分隔线跟着折：第二行补一条横向分隔，
@@ -159,12 +159,18 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   70%{transform:scale(1.12) rotate(4deg)}
   100%{transform:scale(1)}
 }
+/* 常驻类动画在 reduce 分支里逐个关。**三条「量在变」的填充也在内**（占比条、额度条、表盘）：
+   它们是唯一允许的宽度 / 描边动画，但「量变了」这件事数字本身已经说清，reduce 用户连这点动效
+   都不要——此前漏了这三条，reduce 下它们照播 0.4s（2026-09-17 审查补上）。 */
 @media (prefers-reduced-motion:reduce){
   [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
   [data-plugin="dsh-tokbook"] .dtpl-spin,
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions,
+  [data-plugin="dsh-tokbook"] .dtpl-model-bar-fill,
+  [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill,
+  [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim.dtpl-quota-refresh-pop{animation:none;transition:none;}
 }
 `

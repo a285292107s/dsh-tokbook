@@ -172,12 +172,15 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
         </header>
 
         <div className="dtpl-tabs" role="tablist" aria-label="账本视图" onKeyDown={onTablistKeyDown}>
+          {/* 五个 tab 共指**同一个** tabpanel（`dtpl-panel`）：面板是同一个滚动容器、内容随 tab 换，
+              所以每格写死一个自己的 id 会让四个 `aria-controls` 指向不存在的元素——指向一个不存在的
+              id 比不指更糟（`ProviderPanel` 的切法条是同一条判据的另一处落地）。 */}
           <button
             type="button"
             role="tab"
             id="dtpl-tab-ledger"
             aria-selected={tab === 'ledger'}
-            aria-controls="dtpl-panel-ledger"
+            aria-controls="dtpl-panel"
             tabIndex={tab === 'ledger' ? 0 : -1}
             className="dtpl-tab"
             onClick={() => setTab('ledger')}
@@ -189,7 +192,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             role="tab"
             id="dtpl-tab-quota"
             aria-selected={tab === 'quota'}
-            aria-controls="dtpl-panel-quota"
+            aria-controls="dtpl-panel"
             tabIndex={tab === 'quota' ? 0 : -1}
             className="dtpl-tab"
             onClick={() => setTab('quota')}
@@ -201,7 +204,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             role="tab"
             id="dtpl-tab-provider"
             aria-selected={tab === 'provider'}
-            aria-controls="dtpl-panel-provider"
+            aria-controls="dtpl-panel"
             tabIndex={tab === 'provider' ? 0 : -1}
             className="dtpl-tab"
             onClick={() => setTab('provider')}
@@ -213,7 +216,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             role="tab"
             id="dtpl-tab-pricing"
             aria-selected={tab === 'pricing'}
-            aria-controls="dtpl-panel-pricing"
+            aria-controls="dtpl-panel"
             tabIndex={tab === 'pricing' ? 0 : -1}
             className="dtpl-tab"
             onClick={() => setTab('pricing')}
@@ -226,7 +229,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             role="tab"
             id="dtpl-tab-method"
             aria-selected={tab === 'method'}
-            aria-controls="dtpl-panel-method"
+            aria-controls="dtpl-panel"
             tabIndex={tab === 'method' ? 0 : -1}
             className="dtpl-tab"
             onClick={() => setTab('method')}
@@ -239,7 +242,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
           ref={bodyRef}
           className="dtpl-body"
           role="tabpanel"
-          id={`dtpl-panel-${tab}`}
+          id="dtpl-panel"
           aria-labelledby={`dtpl-tab-${tab}`}
         >
           {tab === 'method'

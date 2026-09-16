@@ -18,7 +18,8 @@
 | [`docs/DESIGN.md`](DESIGN.md) | reason(推理 / 背景) | current | "为什么":DSH 机制背景、一期框架、二期重构说明、硬约束。顶部「阅读指南」区分历史与现状 |
 | [`docs/HMR.md`](HMR.md) | lessons(教训)/ reference(参考) | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
 | [`docs/LESSONS.md`](LESSONS.md) | lessons(教训) | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
-| [`docs/UI-SPEC.md`](UI-SPEC.md) | reference(参考,界面规范) | current | 改 `src/client/**` 的呈现层前对照的**取值与禁令**——token 总表、颜色预算、组件与无障碍底线、反模式与自检命令;"为什么"仍去 DESIGN §4 |
+| [`docs/UI-SPEC.md`](UI-SPEC.md) | reference(参考,界面规范) | current | 改 `src/client/**` 的呈现层前对照的**禁令与达标线**——颜色预算与实测对比度、窄屏契约、无障碍底线、反模式、自检命令与审计历史;**取值**在 DESIGN-SYSTEM,"为什么"仍去 DESIGN §4 |
+| [`docs/DESIGN-SYSTEM.md`](DESIGN-SYSTEM.md) | reference(参考,设计系统) | current | 改呈现层前查**取值**——三层 token 架构与命名、token 总表、组件规格与状态矩阵、字号/间距/控件/动效量表、无障碍语义契约;"不许怎么做"去 UI-SPEC |
 | [`docs/WORKFLOW.md`](WORKFLOW.md) | process(流程) | current | L2/L3(契约面 / 跨 commit / 维护者要求 worktree)对照的「代码 + 文档同 commit」循环;新建文档前先看判据 |
 | [`docs/archive/code-review.md`](archive/code-review.md) | process(流程,归档) | superseded | 追溯 D-011 落地前那轮全面审查的结论与修复时;**不描述此后重构后的文件布局** |
 | [`docs/archive/PLAN.provider-pricing.md`](archive/PLAN.provider-pricing.md) | process(流程,归档) | superseded | 只想追溯当期实施计划与推理时读;**不描述现状**——现状看 README / CONTRACTS / DECISIONS |

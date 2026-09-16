@@ -1,6 +1,9 @@
 /**
- * 用量总览 tab 内容：今日 hero、四桶构成、近 14 天趋势。按模型 / 按工作区 / 按通道
- * 三种切法在**用量明细** tab（窗口由那一页选），本页只陈述今天与近 14 天。
+ * 用量总览 tab 内容：一张**今日仪表卡**（今日词元 + 参照 + 今日金额，其下由一条 1px 分区线接
+ * 四桶构成，每桶自带份额——「多少」与「占多少」同处一格，四格相加就是主角数字）
+ * 与近 14 天趋势。本页只陈述今天
+ * 与近 14 天——**累计事实不在这里**，
+ * 它的去处是用量明细的「全部」窗口（与按模型 / 按工作区 / 按通道三种切法同处一页）。
  *
  * @module dsh-tokbook/client/LedgerView
  */
@@ -29,11 +32,32 @@ const ZERO_TOTALS: UsageTotals = {
   outputTokens: 0,
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+/**
+ * 一格读数：标签 + 值 + **份额**。
+ * 值的来路（这个数占今天多少）原先要读者自己从四格数字里相加除出来——一格里放的不该只是
+ * 戳在格子中央的一个数，而是「多少」与「占多少」两件事。分母是今日四桶之和，与
+ * 「今日词元」严格同源；份额由它算，所以两者不可能对不上。
+ * **份额自己报名**（「占 71.0%」）：卡上不留裸百分比——一个百分比要么带桶名，要么带「占」字。
+ * 比率走 `formatHitRate`（恒定一位小数、向下截断）：一个桶占主角数字的比按同一条诚实规则给
+ * ——0.1% 而不是「0%」，量到的零永远不出现。
+ */
+function Stat({ label, value, share }: {
+  label: string
+  value: string
+  share: number
+}) {
+  const percent = share > 0 ? formatHitRate(share, 100) : null
   return (
     <div className="dtpl-stat">
       <div className="dtpl-k">{label}</div>
-      <div className="dtpl-v">{value}</div>
+      <div className="dtpl-v">
+        <span>{value}</span>
+        {percent !== null && (
+          <span className="dtpl-stat-pct" title={`占今日词元（四桶之和）的 ${percent}%`}>
+            占 {percent}%
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -232,17 +256,10 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
   const empty = overview.records === 0
   const hero = todayHero(overview)
   const today = hero.totals
-  const hitRate = formatHitRate(
-    today.cacheReadTokens,
-    today.inputTokens + today.cacheReadTokens + today.cacheWriteTokens,
-  )
+  // 四桶各自的份额（%），分母就是主角数字本身。桶值不会超过它，所以份额天然落在 0–100。
+  const share = (bucket: number): number => (hero.tokens > 0 ? (bucket / hero.tokens) * 100 : 0)
   // 缓存写入是否是本账本的维度。按安装决定而非按天：聚合无法区分「上报了 0」与「未上报」，按天决定会让通道组合变化时网格 reflow。零桶因此表示「本安装不关心这一维」。
   const showCacheWrite = overview.byDay.some(row => row.totals.cacheWriteTokens > 0)
-  // 「出过事」按**今天**报：失败与未上报用量只在发生的时候可行动，累计值既不及时也没有
-  // 分母（「累计 7 失败」说明不了现在有没有问题）。累计那一侧只留能加总的量。
-  const todayFailures = today.failures ?? 0
-  const todayUnknown = today.usageUnknown ?? 0
-
   return (
     <>
       {empty ? (
@@ -253,13 +270,24 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
         </div>
       ) : (
         <>
-          {/* 首屏只有一个窗口（今日）。累计事实不另占卡，但也不再与今日数字平起平坐：
-              它落在发丝线下一条次要行里，靠「累计」这一个分区词表明口径，而不是每个标签都自带前缀。
-              这样今日金额与累计金额不再同基线并排——此前两行看起来是同一组数字。 */}
+          {/* 首屏只有一个窗口（今日），所以首屏也只有一块卡：**仪表区**（今日词元 + 参照 +
+              今日金额）与它下面的**读数格**（四桶）是同一个陈述的总额与分解，分成两只框会被读成
+              两个陈述——此前正是如此（一个事实两只卡，另一个窗口的累计却挤在前一只卡里）。
+              两区之间是一条 1px 分区线，卡的下沿是刻度轨（见 ledger 片段）。 */}
           <div className="dtpl-hero">
+            {/* 卡首那条图：它是**卡的第一行**，占满卡的内容宽、按自己的比例定高，然后才轮到
+                数字。图不从背景里长出来（此前试过整卡背景、也试过给仪表区那一层当背景），
+                因为那两版都要求字与图共处一块地方——要么读数压在人物身上读不出来，要么把图
+                退到几乎看不见才勉强能读。独立成行之后两件事各自完整：图按原始取景铺满一条，
+                字落在干净的卡面上。 */}
+            <div className="dtpl-hero-art" aria-hidden="true" />
             <div className="dtpl-hero-top">
               <div className="dtpl-hero-lead">
-                <span className="dtpl-total-k">今日词元</span>
+                {/* 口径词那一行只留身份：派生读数不在这一行（一个比值挂在口径词上，读者还得回头
+                    找它的分母）。「缓存命中率」自 D-037 起卡上不再显示，见「统计口径」页。 */}
+                <span className="dtpl-hero-head">
+                  <span className="dtpl-total-k">今日词元</span>
+                </span>
                 <span className="dtpl-hero-figure">
                   <span className="dtpl-total-num">{formatTokens(hero.tokens)}</span>
                   {/* 参照行与主角数字同行：它是这张卡存在的理由（今天算不算多），不再做脚注。 */}
@@ -271,7 +299,7 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
                   )}
                 </span>
               </div>
-              {/* 金额恒为今日，与下方累计事实带分属两个口径，所以各走各的排版。
+              {/* 今日金额是仪表区右端独立的一块，与左侧的总额不在同一条读法上。
                   有话可说的桶各占一行；两者都无话时用一个灰色零撑住行。零从不借强调色：纯订阅日没有现金支出。 */}
               <div className="dtpl-hero-money">
                 {(hero.spend > 0 || hero.subscriptionValue === 0) && (
@@ -288,65 +316,22 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
                 )}
               </div>
             </div>
-            {/* 今日出过的事：只在有事时占行，且明确写「今日」——它与下面那条累计事实分属
-                两个口径，不该混在同一串里。 */}
-            {(todayFailures > 0 || todayUnknown > 0) && (
-              <p className="dtpl-hero-alert">
-                <span className="dtpl-hero-alert-k">今日</span>
-                {todayFailures > 0 && <span><b>{todayFailures}</b> 次失败</span>}
-                {todayFailures > 0 && todayUnknown > 0 && <i aria-hidden="true">·</i>}
-                {todayUnknown > 0 && (
-                  <span title={`${String(todayUnknown)} 次计费调用没有拿到通道上报的用量（多为中途取消的请求）：计入请求次数，但没有词元可加——是「未知」，不是 0。所以今天的词元数比实际略少。`}>
-                    <b>{todayUnknown}</b> 次调用没上报用量
-                  </span>
-                )}
-              </p>
-            )}
-            <div className="dtpl-hero-foot">
-              <span className="dtpl-hero-foot-k">累计</span>
-              <span className="dtpl-hero-facts">
-                <span className="dtpl-hero-fact"><b>{overview.total.requests}</b> 请求</span>
-                <i aria-hidden="true">·</i>
-                <span className="dtpl-hero-fact"><b>{formatTokens(overview.totalTokens)}</b> 词元</span>
-                <i aria-hidden="true">·</i>
-                <span className="dtpl-hero-fact"><b>{money(overview.spend)}</b> 实际支出</span>
-                {overview.subscriptionValue > 0 && (
-                  <>
-                    <i aria-hidden="true">·</i>
-                    <span className="dtpl-hero-fact"><b>{money(overview.subscriptionValue)}</b> 订阅价值</span>
-                  </>
-                )}
-              </span>
+            {/* 读数格：拆解的就是上面那个数字，所以它没有自己的节标题、也不再单占一只框
+                （框由这张卡给）；它与上面的仪表区之间只隔一条 1px 分区线（grid 的上边框）。
+                每一格自带份额：**四桶之和就是主角数字**，于是「今日词元」不再是一个
+                来历不明的标量，四格也不再是四个戳在格子中央的数——读者在这里就能读出构成。 */}
+            <div className={`dtpl-grid${showCacheWrite ? '' : ' dtpl-grid-3'}`}>
+              {/* 「输入」不是「我发过去的全部文字」，而是其中**没命中缓存**的那部分；
+                  标签必须自己说清这一点，否则这一格会把一次很长的对话读成很短。 */}
+              <Stat label="未命中输入" value={formatTokens(today.inputTokens)} share={share(today.inputTokens)} />
+              <Stat label="缓存读取" value={formatTokens(today.cacheReadTokens)} share={share(today.cacheReadTokens)} />
+              {showCacheWrite && <Stat label="缓存写入" value={formatTokens(today.cacheWriteTokens)} share={share(today.cacheWriteTokens)} />}
+              <Stat label="输出" value={formatTokens(today.outputTokens)} share={share(today.outputTokens)} />
             </div>
-            {/* 底边刻度轨：hero 是一块**仪表**，这条轨就是它的量尺。line 由 ledger 片段画
-                （三层 repeating-linear-gradient + 一条基线），这里只出位置与顺序。
-                纯装饰：aria-hidden，且不吃指针。 */}
-            <i className="dtpl-hero-rail" aria-hidden="true" />
+            {/* 卡的下沿不再是刻度轨：那条轨是纯装饰（一层重复渐变 + 基线），却占了卡的最底一条
+                信息位。撤掉之后，仪表感的身份只剩左右两枚角括号与 1px 硬边框——这两样已经足够，
+                腾出来的高度回给读数格。 */}
           </div>
-
-          {/* 首屏只有一个窗口：这些瓦片拆解的是 hero 数字，所以是今天的——不是累计的。 */}
-          <div className="dtpl-sec-head">
-            <h2 className="dtpl-sec-title">今日词元构成</h2>
-            {hitRate !== null && (
-              <span className="dtpl-sec-aside" title="越高，同样的词元越便宜；部分命中不会凑整成 100%。">
-                缓存命中率 {hitRate}%
-              </span>
-            )}
-          </div>
-          <div className={`dtpl-grid${showCacheWrite ? '' : ' dtpl-grid-3'}`}>
-            {/* 「输入」不是「我发过去的全部文字」，而是其中**没命中缓存**的那部分；
-                标签必须自己说清这一点，否则这一格会把一次很长的对话读成很短。 */}
-            <Stat label="未命中输入" value={formatTokens(today.inputTokens)} />
-            <Stat label="缓存读取" value={formatTokens(today.cacheReadTokens)} />
-            {showCacheWrite && <Stat label="缓存写入" value={formatTokens(today.cacheWriteTokens)} />}
-            <Stat label="输出" value={formatTokens(today.outputTokens)} />
-          </div>
-          {/* 这一屏的加法律与词表，就地写一次：四桶与 hero 是同一个窗口，读者不该为了
-              把两处对上而切到「统计口径」页。 */}
-          <p className="dtpl-note dtpl-buckets-note">
-            词元（token）分四类、互不重复，相加即上方的「今日词元」；输出含模型的思考过程。
-            缓存命中率＝缓存读取 ÷ 输入侧三类之和。
-          </p>
 
           <DailyTrend days={overview.byDay} />
         </>

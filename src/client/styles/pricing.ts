@@ -9,7 +9,7 @@ export const CSS_PRICING = `/* 价格表 tab */
   border:1px solid var(--dtpl-border);background:transparent;color:var(--dtpl-fg);
   font:inherit;font-size:12px;
 }
-/* 工具栏搜索框是**唯一一处 placeholder-only** 的字段（空间预算，见 UI-SPEC §6.8）：
+/* 工具栏搜索框是**唯一一处 placeholder-only** 的字段（空间预算，见 DESIGN-SYSTEM §4.11）：
    正因为它没有持久可见的标签，placeholder 就是它唯一可见的名字，所以墨色走 fg-2 而不是三级色。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-search::placeholder{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-price-chip{
@@ -354,9 +354,17 @@ export const CSS_PRICING = `/* 价格表 tab */
   display:inline-flex;align-items:baseline;gap:5px;
   font-size:10px;line-height:14px;color:var(--dtpl-fg-2);white-space:nowrap;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-sub-k em,
-[data-plugin="dsh-tokbook"] .dtpl-price-slots-k em{
-  font-style:normal;font-family:var(--dtpl-mono);color:var(--dtpl-fg-3);
+/* 全时段标记（『00:00–24:00』）是**一段时间**，所以走等宽；墨色取 fg-2 而不是三级色——读它才知道
+   这一段覆盖哪几个小时，它是信息，不是装饰（浅色下三级色 3.47:1 过不了 4.5:1）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-sub-k em{
+  font-style:normal;font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);
+}
+/* 峰谷时段那一行的**说明句**：「留空的档位沿用上面的全天价」是一句要读的话，所以它是 11px 的
+   注释句、走 fg-2、**不借等宽**（等宽是工程语境，不是给句子用的）。它此前与上面那枚时间标记
+   共用一条规则：10px + fg-3 + 强制等宽——正文句下限、墨色、字体三条同时不合规（2026-09-17 审查）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-slots-note{
+  font-style:normal;font-family:inherit;
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
 
 /* 峰谷时段：一行一个。上一版把它整块染成 accent——accent 在 DSH 皮肤里是墨色，于是它
@@ -395,7 +403,9 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-history-foot{
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-history-hint{margin:0;font-size:10px;line-height:15px;color:var(--dtpl-fg-2);}
+/* 抽屉里的说明句：11px（注释句档），不是 10px——10px 那一档只属于列头 / 柱值 / 芯片 / 轴刻度
+   这类短标签，装不下一句话（2026-09-17 审查）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-history-hint{margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
 
 /* 文件的保存状态，放在工具栏里：这是一张会自己写回的表的整个反馈回路，所以失败时要换行，而不是被裁掉。
    「保存中」不借强调色——它既不是成功也不是问题，动静由文字本身给；颜色只留给已保存（ok）与

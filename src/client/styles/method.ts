@@ -231,6 +231,10 @@ export const CSS_METHOD = `/* 统计口径文档 */
   background:transparent;border:0;padding:0;font-size:.92em;
 }
 
+/* 文档脚注（这一节的最后一行）。三处『!important』：**来源没有记录在案**（LESSONS.md 里没有这一条，
+   2026-09-17 审查时也没能从代码里推出是谁需要被压过）——它现在的效果是让这一行的字号/行高/墨色
+   无法被任何普通规则覆盖，而本表是运行时 append 到 head 末尾的，同特异度本来就是我们赢。
+   撤它之前只差一次实测：在真机上量『.dtpl-doc-foot』的 computed font-size，仍是 11px 就删掉。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-foot{
   margin-top:12px;padding-top:10px;
   border-top:1px solid var(--dtpl-border);

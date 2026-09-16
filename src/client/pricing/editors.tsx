@@ -223,7 +223,7 @@ function SegmentEditor({ segment, index, count, active, onChange, onRemove, onDu
         ))}
       </div>
       <div className="dtpl-price-slots">
-        <span className="dtpl-price-slots-k">峰谷时段<em>留空的档位沿用上面的全天价</em></span>
+        <span className="dtpl-price-slots-k">峰谷时段<em className="dtpl-price-slots-note">留空的档位沿用上面的全天价</em></span>
         {segment.slots.map((slot, slotIndex) => (
           <SlotEditor
             key={slot.id}
@@ -309,7 +309,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
 
   return (
     <>
-      <div className="dtpl-price-row" data-dirty={dirty} data-unpriced={unpriced} data-open={open}>
+      <div className="dtpl-price-row" data-dirty={dirty} data-open={open}>
         <div className="dtpl-price-id">
           {/* 第 1 行是身份（有人命名时显示展示名，否则精确串）加上标记。第 2 行是出处。一个身份一行：打印名称**和**精确串等于说两遍。 */}
           <span className="dtpl-price-name">
@@ -401,8 +401,8 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
             </button>
             <span className="dtpl-price-history-hint">
               {row.segments.length <= 1
-                ? '只有一段时,行内四个数字就是这一段的全天价。加第二段即可做调价史。'
-                : `${String(row.segments.length)} 段:行内显示当前生效的那一段,更早/更晚的在这里改。`}
+                ? '只有一段时，行内四个数字就是这一段的全天价。加第二段即可做调价史。'
+                : `${String(row.segments.length)} 段：行内显示当前生效的那一段，更早/更晚的在这里改。`}
             </span>
           </div>
         </div>
@@ -431,7 +431,7 @@ export const RouteCard = memo(function RouteCard({ card, baseline, collapsed, op
   const unknown = models.length - priced
   const panelId = `price-card-${card.route}`
   return (
-    <article className="dtpl-price-card" data-route={card.route} data-collapsed={collapsed}>
+    <article className="dtpl-price-card" data-collapsed={collapsed}>
       <header className="dtpl-price-head">
         <button
           type="button"
