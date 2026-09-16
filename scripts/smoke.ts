@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { summarizeRecords, mergeSummaries, attachCosts, emptyTotals, buildSummary, isLedgerStale, staleSessionIds, readRecordsByDayRange, rangeDayWindow } from '../src/stats.ts'
 import { pathKey, workspaceRows } from '../src/workspaces.ts'
-import { billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, EARLIEST, instantKey, instantMs, parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_FILE, rateKeyAt, ratesAt, readPriceFile, writePriceFile } from '../src/pricing.ts'
+import { billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, EARLIEST, instantKey, instantMs, parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_FILE, rateKeyAt, ratesAt, readPriceFile, slotAt, writePriceFile } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import {
   anchoredRow, baselinesOf, composePriceBody, draftFromView, duplicateSlot, editableSegment, effectiveSegments,
@@ -425,6 +425,53 @@ console.log('peak/off-peak slots and hourly effective instants')
     ],
   }] } }, { error: () => {} })
   check('lenient read drops a slot a daily one already covers', (clash.table.r?.m?.[0]?.slots ?? []).length === 1)
+}
+
+console.log('时段身份：改费率就地重算，改时段 / 删时段 = 价格未知')
+{
+  const route = 'deepseek-official'
+  const model = 'deepseek-v4-flash'
+  // 2026-09-14 is a Monday: 10:00 falls inside the 09:00–12:00 weekday slot.
+  const inside = dayMillis('2026-09-14', 10)
+  const slot = (start: number, inputPerMillion: number, days: 'daily' | 'weekdays' = 'weekdays') => ({
+    days,
+    start,
+    end: 12,
+    rates: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
+  })
+  const table = (slots: ReturnType<typeof slot>[]): PricingTable => ({
+    [route]: { [model]: [{
+      from: EARLIEST,
+      rates: { inputPerMillion: 1, outputPerMillion: 4 },
+      ...(slots.length > 0 ? { slots } : {}),
+    }] },
+  })
+
+  const before = table([slot(9, 2)])
+  const segment = priceAt(before, route, model, inside)
+  const key = rateKeyAt(before, route, model, inside)
+  check('那一刻生效的时段身份 = start + days',
+    segment !== null && slotAt(segment, inside)?.start === 9 && slotAt(segment, inside)?.days === 'weekdays')
+  check('费率行身份 = 价段 from + 时段身份',
+    key.from === EARLIEST && key.slot?.start === 9 && key.slot.days === 'weekdays', JSON.stringify(key))
+
+  // (a) 只改费率：身份一模一样，同一行就地重算——历史不需要动。
+  const rerated = table([slot(9, 3)])
+  const afterRate = rateKeyAt(rerated, route, model, inside)
+  check('改费率 → 费率行身份不变', JSON.stringify(afterRate) === JSON.stringify(key), JSON.stringify(afterRate))
+  check('改费率 → 该身份就地重算为新价', priceOfKey(rerated, route, model, key)?.inputPerMillion === 3)
+
+  // (b) 改 start（或 days）：那一刻有一个新身份在生效，旧身份却回查不到 →
+  // 价格未知，绝不按邻近时段静默重算。
+  const moved = table([slot(8, 2)])
+  check('改 start → 那一刻解析到新身份', rateKeyAt(moved, route, model, inside)?.slot?.start === 8)
+  check('改 start → 旧身份 = 价格未知', priceOfKey(moved, route, model, key) === null)
+  check('改 days → 旧身份 = 价格未知', priceOfKey(table([slot(9, 2, 'daily')]), route, model, key) === null)
+
+  // (c) 删掉它：那一刻回落到全天价，但旧身份不再存在 = 价格未知。
+  const deleted = table([])
+  check('删时段 → 那一刻回落到全天价', ratesAt(deleted, route, model, inside)?.inputPerMillion === 1)
+  check('删时段 → 旧身份 = 价格未知', priceOfKey(deleted, route, model, key) === null)
 }
 
 console.log('price-table draft: unfinished blocks, inheritance, slot edits')
@@ -1080,6 +1127,46 @@ console.log('quota: fetcher failure/unconfigured shapes (no live network)')
   check('commandcode no-key → unconfigured card', cc.state === 'unconfigured' && cc.windows.length === 0)
   const unknown = await fetchOfficialQuota('not-a-provider', {})
   check('unknown provider → error card', unknown.state === 'error')
+}
+
+console.log('额度：门只从答复推导，绝不从失败推导')
+{
+  const now = 1_800_000_000_000
+  // 纯门函数只把**答复过的**计划身份翻成门，出口只有 subscription / balance。
+  // `undefined` 身份 = 端点答了却没有计划节点（不是「调用失败」——那一路根本
+  // 不调它），此时先读作 balance，再由调用方按有无余额降级为 none。
+  check('答复在订阅期内 → subscription', quotaGate({ status: 'active' }, now) === 'subscription')
+  check('答复已过周期 → balance', quotaGate({ status: 'canceled', periodEnd: now - 1 }, now) === 'balance')
+  check('门函数从不产出 none', quotaGate(undefined, now) === 'balance' && quotaGate({}, now) === 'balance')
+
+  // 端点没答复时端出的是这些卡：卡上没有门，也就没有一句关于订阅状态的话——
+  // 缺省读作 subscription、窗口照旧渲染，绝不对着订阅期的账户说「未检测到
+  // 生效中的订阅」。
+  const failed = errorCard('commandcode', '官方接口返回 HTTP 500。')
+  check('失败的卡不设门（缺省 = subscription）', failed.gate === undefined, String(failed.gate))
+  check('失败的卡不谈订阅状态',
+    failed.gateNote === undefined && !(failed.message ?? '').includes('未检测到生效中的订阅'))
+  check('未配置的卡同样不设门', unconfiguredCard('opencode-go').gate === undefined)
+
+  // 「没有订阅」是**答复**出来的状态，不是失败的读法：门与说明一起给。
+  const answered = noSubscriptionCard('opencode-go', '该 key 有效，但当前没有生效中的 OpenCode Go 订阅。')
+  check('答复「没有订阅」→ none + 说明',
+    answered.gate === 'none' && (answered.gateNote ?? '').includes('没有生效中的'))
+  check('none 的门不进告急', isQuotaAlert(answered) === false)
+
+  // 真实路径：整组端点网络失败（超时也走这里）→ error 卡，仍不设门、不说话。
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => { throw new Error('network down') }) as typeof fetch
+  try {
+    const offline = await fetchCommandCodeQuota({ plan: { apiKey: 'k' } })
+    check('网络失败 → error 卡', offline.state === 'error', offline.state)
+    check('网络失败 → 不设门、不谈订阅状态',
+      offline.gate === undefined && offline.gateNote === undefined
+      && !(offline.message ?? '').includes('未检测到生效中的订阅'),
+      `${String(offline.gate)} ${String(offline.message)}`)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 }
 
 console.log('quota: commandcode gate is read only from the answering endpoint (mocked HTTP)')

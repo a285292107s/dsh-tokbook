@@ -11,6 +11,10 @@
  *     instances (a host reload / second instance can never double-write the
  *     same row), and survives a process restart: a fresh UsageLog re-derives
  *     the dedupe set from the on-disk rows before its first write.
+ *  4. A changed price file invalidates the WHOLE rollup: the fold records the
+ *     price-file signature (`pricingRevision`), mismatch reads as absent, and
+ *     the days are re-read with the current table — per-day money follows the
+ *     new prices and the rate-row identities are re-derived.
  *
  * Run: node --experimental-strip-types scripts/selfcheck-rebuild.ts
  *
@@ -23,10 +27,11 @@ import { join } from 'node:path'
 import { UsageLog, dayFileNameOf, resetUsageLogState } from '../src/usage-log.ts'
 import { serializeRecord } from '../src/usage-record.ts'
 import {
-  buildSummary, clearRecordCache, readRecordsByDayRange, summarizeRecords,
+  attachCosts, buildSummary, clearRecordCache, readRecordsByDayRange, summarizeRecords,
   type RateResolver,
 } from '../src/stats.ts'
-import type { UsageRecord } from '../src/types.ts'
+import { EARLIEST, rateKeyAt, readPriceFile, writePriceFile } from '../src/pricing.ts'
+import type { PricingTable, UsageRecord } from '../src/types.ts'
 import { UNPRICED_KEY } from '../src/types.ts'
 
 let failures = 0
@@ -242,6 +247,89 @@ console.log('dedupe: shared per directory, survives restart')
     await rm(dir, { recursive: true, force: true })
     clearRecordCache(dir)
     resetUsageLogState(dir)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. A changed price file invalidates the whole rollup (pricingRevision)
+// ---------------------------------------------------------------------------
+console.log('rollup: a changed pricingRevision discards the whole rollup')
+{
+  const dir = await cleanDir()
+  try {
+    // 2026-09-14 is a Monday, 2026-09-15 a Tuesday: hour 10 falls inside a
+    // 09:00–12:00 weekday slot, so the exception rate is the one that bills.
+    const rows = [
+      { ...rec('pr-1', '2026-09-14', 10, 'deepseek-chat', { inputTokens: 1_000_000, outputTokens: 0 }), provider: 'deepseek-official' },
+      { ...rec('pr-2', '2026-09-15', 10, 'deepseek-chat', { inputTokens: 1_000_000, outputTokens: 0 }), provider: 'deepseek-official' },
+    ]
+    const log = new UsageLog(dir, quiet)
+    for (const row of rows) await log.record(row)
+
+    // The real input is the price file: rollup records the djb2 signature of
+    // its TEXT, and the rate-row identity comes from the same table — the slot
+    // is identified by (start, days), so moving the start changes those keys.
+    const prices = (slotStart: number, inputPerMillion: number): PricingTable => ({
+      'deepseek-official': {
+        'deepseek-chat': [{
+          from: EARLIEST,
+          rates: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
+          slots: [{
+            days: 'weekdays',
+            start: slotStart,
+            end: 12,
+            rates: { inputPerMillion: inputPerMillion * 2, outputPerMillion: inputPerMillion * 8 },
+          }],
+        }],
+      },
+    })
+    const resolverOf = (table: PricingTable) =>
+      (row: UsageRecord) => rateKeyAt(table, row.provider, row.model, row.time)
+    const foldedRevision = async (): Promise<string> =>
+      (JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8')) as { pricingRevision: string }).pricingRevision
+    const daySpend = (costed: ReturnType<typeof attachCosts>): number[] =>
+      costed.byDay.map(row => row.spend ?? 0)
+
+    await writePriceFile(dir, { table: prices(9, 2), billing: {}, revision: '' }, quiet)
+    const first = await readPriceFile(dir, quiet)
+    check('the price file signs its own content', first.revision !== '', first.revision)
+
+    const before = await buildSummary(dir, never, resolverOf(first.table), quiet, { pricingRevision: first.revision })
+    check('the fold is stamped with the signature it folded under', await foldedRevision() === first.revision)
+    const beforeCost = attachCosts(before, first.table)
+    check('each day bills the slot in force (¥4/day)',
+      daySpend(beforeCost).length === 2 && daySpend(beforeCost).every(spend => Math.abs(spend - 4) < 1e-9),
+      JSON.stringify(daySpend(beforeCost)))
+
+    // The price file changes: the slot's start moves (its rate-row identity
+    // changes) and the rate drops. Rows folded under the old signature name a
+    // slot the new table no longer holds, so the whole rollup must go.
+    await writePriceFile(dir, { table: prices(8, 1), billing: {}, revision: '' }, quiet)
+    const second = await readPriceFile(dir, quiet)
+    check('a changed price file is a different signature', second.revision !== first.revision)
+
+    const after = await buildSummary(dir, never, resolverOf(second.table), quiet, { pricingRevision: second.revision })
+    const afterCost = attachCosts(after, second.table)
+    check('the rollup is restamped with the new signature', await foldedRevision() === second.revision)
+    check('rate rows are rebuilt with the new slot identity',
+      after.rateRows.length === 2 && after.rateRows.every(row => row.rate.slot?.start === 8),
+      JSON.stringify(after.rateRows.map(row => row.rate)))
+    check('per-day money follows the new prices (¥2/day)',
+      daySpend(afterCost).length === 2 && daySpend(afterCost).every(spend => Math.abs(spend - 2) < 1e-9),
+      JSON.stringify(daySpend(afterCost)))
+    check('nothing is left reading as 价格未知', afterCost.unpricedModels.length === 0, afterCost.unpricedModels.join(','))
+
+    // And it came from the day files, not from the discarded fold: identical to
+    // a direct full aggregation under the new table.
+    const all = await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', never, quiet)
+    const direct = summarizeRecords(all, resolverOf(second.table))
+    check('rebuild == direct full aggregation under the new prices',
+      JSON.stringify(direct) === JSON.stringify({
+        total: after.total, byDay: after.byDay, byHour: after.byHour, byModel: after.byModel, rateRows: after.rateRows,
+      }))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+    clearRecordCache(dir)
   }
 }
 
