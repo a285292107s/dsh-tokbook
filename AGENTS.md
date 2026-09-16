@@ -39,9 +39,9 @@ footer 按钮 + shell.overlay 浮窗展示它们(汇总、按通道、价格表�
 
 | 改动 | 门 |
 | --- | --- |
-| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm selfcheck:ui`(秒级静态断言)+ `pnpm build` + 刷新页面 |
+| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm build` + 刷新页面;界面禁令自查 `docs/UI-SPEC.md` §3 |
 | 别的 `src/**` | `pnpm typecheck`(只查 `src/`);碰了 host 逻辑或 `src/client/pricing/axis.ts` 再加 `pnpm test` |
-| README / `docs/**` | `pnpm docs:check`(selfcheck 的文档段) |
+| README / `docs/**` | 无门禁——按「同 commit」的规矩人工改 |
 | 提交、或合并回主检出之前 | `pnpm test`,需要线上产物时再 `pnpm build` |
 
 `pnpm test` = `pnpm smoke` + `pnpm selfcheck`(聚合 / 计价 / 额度纯逻辑 + 不变量自检)。
@@ -71,7 +71,7 @@ footer 按钮 + shell.overlay 浮窗展示它们(汇总、按通道、价格表�
 **L0 / L1 不需要读本节。** 按 `docs/INDEX.md` 的「何时读」列跳到**那一份**叶子,不整树通读:
 `README.md` 需要全貌时;`docs/WORKFLOW.md` 只在 L2/L3(§8 的 worktree 流程**只在维护者明确
 要求时才走**,不要自行判断主检出忙不忙)。契约与决策在 **L2** 时随代码同 commit 更新
-(`docs/CONTRACTS.md` / `docs/DECISIONS.md`,`selfcheck-docs` 会在漂移时失败);文档与代码冲突
+(`docs/CONTRACTS.md` / `docs/DECISIONS.md`);文档与代码冲突
 时以代码为准并修文档。文档统一中文,代码、命令与标识符保留英文原样。
 
 ## 保持本文件精简

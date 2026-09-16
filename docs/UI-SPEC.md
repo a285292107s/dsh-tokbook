@@ -94,14 +94,17 @@
 - **静态行不给 hover 洗色**——行不可点,hover 是假的可点承诺。
 - **固定列数字必须等宽 + `tabular-nums`**,否则位宽错开、固定列的可比对性消失。
 - 改样式分片时**注释里不能出现反引号**(模板串会被提前闭合,`pnpm typecheck` 当场红)。
-- 以上可机判的部分已经由 `pnpm selfcheck:ui` 强制,**不必靠记住它们**。
+- **死类要双向清**:样式表里定义了却没人用的 `dtpl-*`,与 TSX 里挂着却没有规则的 `dtpl-*`,都是残留
+  (结构性锚点 `id` / `aria-controls` 与 `dtpl-price-table` / `dtpl-price-col-more` 两个钩子不算)。
+- **硬编码色值只许两处**:`var(--宿主变量, #兜底)` 的兜底里,或 `color-mix()` 内的 `#000` / `#fff`;
+  其余进 `tokens.ts` 登记。**虚线为 0**(`dashed` / `dotted`),**圆角只许 `0` / `50%` / `var(...)`**。
+- 以上是可判定的,改完样式逐条自查——`pnpm selfcheck:ui` 已于 2026-09-16 删除,没有脚本替你守。
 
 ---
 
 ## 4. 自检
 
 ```bash
-pnpm selfcheck:ui   # 秒级静态断言:死类双向、硬编码色值、虚线、圆角、直连宿主变量、reduced-motion
 pnpm build          # 改了 styles/** 或 .tsx 后必须构建,再刷新页面看真实渲染
 pnpm typecheck      # 改了别的 src/**
 ```

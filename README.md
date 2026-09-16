@@ -17,10 +17,10 @@ footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含
   但会在界面上列出来);费率为 0 才是免费。
 
 界面词与代码/契约的逐条对应见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 的「术语」段;改界面长相 / 交互前读
-[`docs/UI-SPEC.md`](docs/UI-SPEC.md)(只写**不变量 / 达标线 / 陷阱**三类,一页读完)。**规格的真源是代码**:
-token 与「什么时候用哪个」在 `src/client/styles/tokens.ts` 的注释里,各个面长什么样看 `src/client/styles/**`
-(可判定的禁令由 `pnpm selfcheck:ui` 强制)。为什么这么定见 [`docs/DESIGN.md`](docs/DESIGN.md) §3.1;
-文档树地图见 [`docs/INDEX.md`](docs/INDEX.md),host 契约由 `pnpm selfcheck` 强制同步。
+[`docs/UI-SPEC.md`](docs/UI-SPEC.md)(只写**不变量 / 达标线 / 陷阱**三类,一页读完;可判定的那几条是自查表,
+没有脚本替你守)。**规格的真源是代码**:token 与「什么时候用哪个」在 `src/client/styles/tokens.ts` 的注释里,
+各个面长什么样看 `src/client/styles/**`。为什么这么定见 [`docs/DESIGN.md`](docs/DESIGN.md) §3.1;
+文档树地图见 [`docs/INDEX.md`](docs/INDEX.md)。
 
 > **术语**:本文档与界面说的**通道**就是代码与契约里的 provider —— 你从哪接入、按什么方式付费的
 > 那条路,route key 即账本里记录的通道标识。做模型、定官方价的那一方叫**模型厂商**,不是通道;
@@ -81,12 +81,8 @@ src/
 scripts/
   build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS)
   preview-overlay.mjs      浮窗预览台(fixture 数据)与独立查看器(--ledger,读真账本)
-  smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试
-  selfcheck-baseline.ts    重启/同步进度语义自检
-  selfcheck-readpath.ts    读路径不被权威同步拖住(不等 walk、节流、冷账本例外)自检
-  selfcheck-rebuild.ts     折叠重建 / refile / 跨实例去重自检
-  selfcheck-docs.ts        文档自检:CONTRACTS 路由 ↔ 代码、INDEX 链接、Doc meta、README 布局、ADR 体量
-  selfcheck-ui.ts          界面自检:死类双向、硬编码色值、虚线、圆角、直连宿主变量、reduced-motion
+  smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试(一条不变量一个断言)
+  selfcheck-rebuild.ts     账本不变量:折叠无损重建 / refile / 跨实例去重 / 价格签名 / 重启基线
 ```
 
 ## 构建
@@ -94,7 +90,7 @@ scripts/
 ```sh
 pnpm install      # 安装 @deepseek-ai/cordis、react、esbuild、typescript
 pnpm build        # tsc 产出 lib/types/*.d.ts,再由 esbuild 打包 host + client
-pnpm selfcheck    # 重启/基线 + 折叠重建/refile/去重不变量自检(含 docs 与 ui)
+pnpm selfcheck    # 账本不变量:折叠重建 / refile / 跨实例去重 / 价格签名 / 重启基线
 pnpm test         # smoke(聚合 + 计价 + 额度)+ selfcheck
 ```
 
