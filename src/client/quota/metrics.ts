@@ -91,6 +91,24 @@ export function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; c
   return { pct: worst.usagePercent, tone: toneOf(worst.usagePercent), cap: worst.label }
 }
 
+/** 环**没有读数**时写在环里的话（环照旧只画轨道）。槽位空着等于 54px 缩进里什么都没有，
+ *  读作「少了东西」；假装一个 0% 的环则是另一句假话。判据是「有没有环」，不是 gate：
+ *  有订阅但端点一个窗口都没报的卡同样是「无读数」，绝不能错说成「无订阅」。
+ *  「过期」也只在 provider 真的报了一个已经过去的周期终点时才用——端点只说「没有生效中的
+ *  订阅」时（按量账户 / 从未订阅 / 欠费），不替它把话升级成「过期」。 */
+export function headStateWord(card: QuotaCard | null): { word: string; alert: boolean } {
+  if (card === null) return { word: '—', alert: false }
+  if (card.state === 'error') return { word: '失败', alert: true }
+  if (card.state === 'unconfigured') return { word: '未配置', alert: false }
+  if (card.gate !== undefined && card.gate !== 'subscription') {
+    const ended = card.planInfo?.periodEnd
+    return ended !== undefined && ended !== null && ended <= Date.now()
+      ? { word: '过期', alert: false }
+      : { word: '无订阅', alert: false }
+  }
+  return { word: '无读数', alert: false }
+}
+
 /** 一个窗口的「重置」倒计时文本。 */
 export function resetLabel(window: QuotaWindowView): string {
   if (window.resetAt === null) return '—'

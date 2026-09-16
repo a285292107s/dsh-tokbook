@@ -1,7 +1,9 @@
 /**
  * 订阅额度卡的标记：壳（身份 + 新鲜度 + 仪表 + 刷新）、ok 正文与状态面板。
  *
- * 环回答固定问题——本月预算已用多少——并在数字下方自报指代，绝不静默换窗口。非订阅 gate 渲染不同正文（余额没有分母，不画环）。
+ * 环回答固定问题——本月预算已用多少——并在数字下方自报指代，绝不静默换窗口。没有读数时同一只环
+ * 只画轨道、中心改写状态词（过期 / 无订阅 / 未配置 / 失败 / 无读数），形状与位置都不换；正文照旧按
+ * gate 分（非订阅 gate 的正文与环无关——余额没有分母，不画环）。
  *
  * 数据半区在 `QuotaPanel.tsx`；算术在 `metrics.ts`。
  *
@@ -13,7 +15,7 @@ import type { QuotaCard, QuotaWindowView } from '../../types.ts'
 import { formatTokens } from '../format.ts'
 import { RefreshGlyph } from '../icons.tsx'
 import {
-  balanceUsd, extraCreditsUsd, formatClock, money, monthlyAllowanceWindow, planContext, resetLabel,
+  balanceUsd, extraCreditsUsd, formatClock, headStateWord, money, monthlyAllowanceWindow, planContext, resetLabel,
   ringPressure, toneOf, type QuotaTone,
 } from './metrics.ts'
 
@@ -29,6 +31,8 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   const ok = card !== null && card.state === 'ok'
   const ctx = ok && card !== null ? planContext(card) : ''
   const ring = ok && card !== null ? ringPressure(card) : undefined
+  // 同一只环的另一种形态：没有读数（无分母 / 无数据）时只画轨道、中心写状态词，标题因此从不位移。
+  const idle = headStateWord(card)
   // 一次性点击反馈：按钮立刻切到 `disabled`（spinner）后，每次按下仍能重新触发弹出动画。
   const [popTick, setPopTick] = useState(0)
 
@@ -41,10 +45,10 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
     <article className="dtpl-quota-card">
       <header className="dtpl-quota-head">
         <div className="dtpl-quota-id">
-          {ok && card !== null && ring !== undefined ? (
+          {card !== null && ring !== undefined ? (
             <QuotaGauge pct={ring.pct} tone={ring.tone} cap={ring.cap} />
           ) : (
-            <span className="dtpl-quota-state-gap" aria-hidden="true" />
+            <QuotaIdleRing word={idle.word} alert={idle.alert} />
           )}
           <span className="dtpl-quota-id-text">
             <span className="dtpl-quota-name">{title}</span>
@@ -55,15 +59,6 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
         <div className="dtpl-quota-head-side">
           {ok && card !== null && card.fetchedAt !== undefined && (
             <span className="dtpl-quota-updated">更新于 {formatClock(card.fetchedAt)}</span>
-          )}
-          {card !== null && card.gate !== undefined && card.gate !== 'subscription' && (
-            <span className="dtpl-quota-chip dtpl-quota-chip-gate">无生效订阅</span>
-          )}
-          {card !== null && card.state === 'unconfigured' && (
-            <span className="dtpl-quota-chip dtpl-quota-chip-muted">未配置</span>
-          )}
-          {card !== null && card.state === 'error' && (
-            <span className="dtpl-quota-chip dtpl-quota-chip-err">查询失败</span>
           )}
           <button
             type="button"
@@ -153,7 +148,7 @@ function QuotaNoSubscriptionBody({ card }: { card: QuotaCard }) {
   )
 }
 
-/** 余额门控卡的正文：滚动窗口不是它承受的约束故隐藏，环也去掉（无分母）。充值和免费额度在计划过期后存活，来源逐项列出。 */
+/** 余额门控卡的正文：滚动窗口不是它承受的约束故隐藏，环也去掉（无分母，环心改写状态词）。充值和免费额度在计划过期后存活，来源逐项列出。 */
 function QuotaBalanceBody({ card }: { card: QuotaCard }) {
   return (
     <>
@@ -261,11 +256,39 @@ function ActivityStrip({ usage }: { usage: NonNullable<QuotaCard['usage']> }) {
   )
 }
 
+/** 两种环形态共用的几何。分开写就会漂——而「两只环长得一样」正是这两只环存在的理由。 */
+const GAUGE_R = 15.5
+const GAUGE_C = 2 * Math.PI * GAUGE_R
+
+/** 环本身：外圈轨道 + 可选弧。两种形态共用它，所以半径 / 粗细 / viewBox 只有一份。 */
+function GaugeRing({ dash }: { dash?: string }) {
+  return (
+    <svg viewBox="0 0 40 40" aria-hidden="true" className="dtpl-quota-gauge-svg">
+      <circle className="dtpl-quota-gauge-track" cx="20" cy="20" r={GAUGE_R} />
+      {dash !== undefined && (
+        <circle className="dtpl-quota-gauge-fill" cx="20" cy="20" r={GAUGE_R} strokeDasharray={dash} />
+      )}
+    </svg>
+  )
+}
+
+/** 环**没有读数**的形态：同一只 44×44 的轨道环，中心换写状态词。环的**形状**因此不随状态换语言
+ *  （方形徽记会在这列里引入第二种形状），而词写在数字该在的位置上，不会被误读成「已用 0%」。
+ *  中心是普通文本，读屏照读，不用 aria 名称。 */
+function QuotaIdleRing({ word, alert }: { word: string; alert: boolean }) {
+  return (
+    <span className={`dtpl-quota-gauge dtpl-quota-gauge-idle${alert ? ' dtpl-quota-tone-danger' : ''}`}>
+      <GaugeRing />
+      <span className="dtpl-quota-gauge-n">
+        <span className="dtpl-quota-gauge-word">{word}</span>
+      </span>
+    </span>
+  )
+}
+
 /** 卡身份行的环形仪表。百分比指代的预算以小标题写在数字下方，环绝不静默换窗口。同一文本喂给无障碍名称 / tooltip。 */
 function QuotaGauge({ pct, tone, cap }: { pct: number; tone: QuotaTone; cap: string }) {
   const p = Math.max(0, Math.min(100, pct))
-  const R = 15.5
-  const C = 2 * Math.PI * R
   return (
     <span
       className={`dtpl-quota-gauge dtpl-quota-tone-${tone}`}
@@ -273,16 +296,7 @@ function QuotaGauge({ pct, tone, cap }: { pct: number; tone: QuotaTone; cap: str
       aria-label={`${cap} 已用 ${Math.round(p)}%`}
       title={`${cap} 已用 ${Math.round(p)}%`}
     >
-      <svg viewBox="0 0 40 40" aria-hidden="true" className="dtpl-quota-gauge-svg">
-        <circle className="dtpl-quota-gauge-track" cx="20" cy="20" r={R} />
-        <circle
-          className="dtpl-quota-gauge-fill"
-          cx="20"
-          cy="20"
-          r={R}
-          strokeDasharray={`${(p / 100) * C} ${C}`}
-        />
-      </svg>
+      <GaugeRing dash={`${(p / 100) * GAUGE_C} ${GAUGE_C}`} />
       <span className="dtpl-quota-gauge-n" aria-hidden="true">
         <span>{Math.round(p)}<i>%</i></span>
         <span className="dtpl-quota-gauge-cap">{cap}</span>

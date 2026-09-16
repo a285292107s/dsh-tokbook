@@ -54,10 +54,8 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-id{
   display:flex;align-items:center;gap:10px;min-width:0;
 }
-/* 月度环形量规的预留槽；加载 / 出错 / 未配置（无环）时标题不位移。 */
-[data-plugin="dsh-tokbook"] .dtpl-quota-state-gap{
-  flex:none;width:44px;height:44px;
-}
+/* 卡头左列＝这张卡自己的标记，永远占住同一个 44×44：有分母时是环形量规，没有读数时是**同一只环**
+   （环心词的规则随环一起写在下面）。形状不随状态换语言——方形徽记会在这列里引入第二种形状。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-id-text{display:flex;flex-direction:column;gap:1px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-name{
   color:var(--dtpl-fg);font-size:14px;line-height:20px;font-weight:600;
@@ -89,41 +87,20 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   animation:dtpl-refresh-pop .35s cubic-bezier(.34,1.56,.64,1);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-ico{width:15px;height:15px;display:block;}
-/* 状态 chip（未配置 / 查询失败 / 无生效订阅）。上一版是纯色块（圆角 + 染色底 + 无边框），
-   和总览的「黄牌 + 墨边」是两套语言；现在统一成**描边芯片 + 前置状态点**：
-   边界由 1px 线给，色相只留给真正需要看的状态。 */
-[data-plugin="dsh-tokbook"] .dtpl-quota-chip{
-  flex:none;display:inline-flex;align-items:center;gap:6px;
-  height:20px;padding:0 8px;
-  border:1px solid var(--dtpl-border);
-  font-size:11px;line-height:16px;font-weight:600;white-space:nowrap;
-  color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-quota-chip::before{
-  content:"";width:6px;height:6px;border-radius:50%;corner-shape:round;
-  background:currentColor;
-}
-/* 「未配置」是**状态文字**（11px），所以走 fg-2：quiet 由前置状态点与描边表达，
-   不靠把字洗淡——三级色在浅色皮肤上只有 3.47:1。 */
-[data-plugin="dsh-tokbook"] .dtpl-quota-chip-muted{
-  color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-quota-chip-err{
-  color:var(--dtpl-err);
-  border-color:color-mix(in srgb,var(--dtpl-err) 45%,transparent);
-}
-/* 余额门控 chip（无生效订阅）：不是错误——账号仍可用，只是不再按套餐滚动窗口节奏。
-   文字走 --dtpl-warn-ink：裸 warn 在浅色下作 11px 正文只有 2.15:1（见 tokens 那条实测），
-   混一档墨之后 5.57:1；边框这类非文本用途才用裸 warn（那里只要 3:1）。 */
-[data-plugin="dsh-tokbook"] .dtpl-quota-chip-gate{
-  color:var(--dtpl-warn-ink);
-  border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
-}
 /* 月度预算环形量规。环描边带色调，已用 % 数字居中在环*内*，它所指的预算以小号说明挂在数字下方，环从不静默地换含义。
    （真圆是这套直角语言里**写明的一处例外**——表盘本来就是个圆。） */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge{
   position:relative;flex:none;width:44px;height:44px;
   color:var(--dtpl-fg);
+}
+/* 没有读数的那只环：只画轨道，环心写状态词。词取 fg-2（它替掉的是环里最响的数字，但
+   「没有读数」不该比真读数更响）。这条必须排在 .dtpl-quota-gauge 之后、色调块之前——
+   同特异性下靠源码顺序，色相才算数（.dtpl-quota-tone-danger 在更后面，故错误态仍是红的）。 */
+[data-plugin="dsh-tokbook"] .dtpl-quota-gauge-idle{color:var(--dtpl-fg-2);}
+/* 词的字号受环内径限制：内圈净空 ≈30px，汉字步进就是字号，三个字在 9.5px 已贴到描边上，故取 9px
+   （仍在「短标签」带内）。所以环心的词天然只容得下两三个字——长句归正文，不归这里。 */
+[data-plugin="dsh-tokbook"] .dtpl-quota-gauge-word{
+  font-size:9px;line-height:1;font-weight:600;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-svg{width:44px;height:44px;display:block;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-track{
@@ -167,8 +144,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-title{margin:0;font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-err .dtpl-quota-msg-title{color:var(--dtpl-err);}
-/* 「未配置」不是错误：同一块说明面，只是标题降一档到次要色——与 dtpl-quota-chip-muted
-   同一档。此前这个类只写在 TSX 里、样式表里没有规则，于是它和普通说明面长得一模一样。 */
+/* 「未配置」不是错误：同一块说明面，只是标题降一档到次要色——与环心的词同一档。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-muted .dtpl-quota-msg-title{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-body{
   margin:0;font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
