@@ -21,6 +21,24 @@ const AUTO_PRESETS: ReadonlyArray<{ min: number; label: string }> = [
   { min: 30, label: '30 分' },
 ]
 
+/** 未选择过时的间隔。 */
+const DEFAULT_AUTO_MIN = 5
+
+/**
+ * 自动刷新间隔存放处。这是**视图偏好**（每台浏览器自己决定多久看一眼官方用量），不是账本数据，
+ * 所以进 localStorage 而不是宿主配置：无需契约、无需重启、不同浏览器可各选各的。
+ */
+const AUTO_MIN_KEY = 'dsh-tokbook.quota-auto-min'
+
+/** 读回上次选的间隔。只认预设值——存储里的旧值或坏值一律回落到默认，不让它决定控件显示什么。 */
+function readAutoMinutes(): number {
+  const saved = localStorage.getItem(AUTO_MIN_KEY)
+  // 先判 null：`Number(null)` 是 0，而 0 是合法预设（关闭）——缺键会静默变成「关闭」。
+  if (saved === null) return DEFAULT_AUTO_MIN
+  const min = Number(saved)
+  return AUTO_PRESETS.some((preset) => preset.min === min) ? min : DEFAULT_AUTO_MIN
+}
+
 /** 已服务的 'ok' 数据在进入 tab 触发就地刷新前允许多旧。额度窗口按分钟尺度变化，预算内的数据原样展示。 */
 const QUOTA_FRESH_MS = 60_000
 
@@ -30,7 +48,7 @@ const QUOTA_REFRESH_COOLDOWN_MS = 30_000
 export function QuotaPanel() {
   const [providers, setProviders] = useState<readonly string[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
-  const [autoMinutes, setAutoMinutes] = useState(5)
+  const [autoMinutes, setAutoMinutes] = useState(readAutoMinutes)
   const [autoTicker, setAutoTicker] = useState(0)
   /** 每张卡最近一次报告的 gate，按 provider 键控。缺席意味着「尚不知道」，排序时按生效处理。 */
   const [gates, setGates] = useState<Readonly<Record<string, QuotaGate>>>({})
@@ -76,6 +94,12 @@ export function QuotaPanel() {
     return () => clearInterval(timer)
   }, [autoMinutes])
 
+  // 用户选的档位立刻落盘：面板随 tab 切换/浮窗关闭卸载，组件状态活不过那一刻。
+  const chooseAutoMinutes = useCallback((min: number) => {
+    setAutoMinutes(min)
+    localStorage.setItem(AUTO_MIN_KEY, String(min))
+  }, [])
+
   const hasProviders = providers !== null && providers.length > 0
   // 展示顺序：退役计划在后（见 `orderQuotaProviders`）。卡报告 gate 时重新计算——宿主列表是静态的，真相一张一张到来。
   const ordered = useMemo(
@@ -89,7 +113,7 @@ export function QuotaPanel() {
       </p>
 
       {hasProviders && (
-        <AutoRefreshControl value={autoMinutes} onChange={setAutoMinutes} />
+        <AutoRefreshControl value={autoMinutes} onChange={chooseAutoMinutes} />
       )}
 
       {listError !== null && (
