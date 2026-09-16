@@ -286,14 +286,15 @@ box-shadow:var(--dtpl-metal);
 
 ### 4.4 今日仪表卡（`.dtpl-hero`）
 
-**解剖**（自上而下）：`.dtpl-hero-art`（卡首一条图，占满卡内容宽）→ `.dtpl-hero-top`
-（`.dtpl-hero-lead`：`.dtpl-total-k` + `.dtpl-total-num` + `.dtpl-hero-figure`；右侧 `.dtpl-hero-money`）
+**解剖**（自上而下）：`.dtpl-hero-art`（卡首一条图，占满卡内容宽、高度封顶）→ `.dtpl-hero-top`
+（`.dtpl-hero-lead`：口径词一行，主角数字 + `.dtpl-hero-figure` 一行；右侧 `.dtpl-hero-money`）
 → 1px 分区线（`.dtpl-grid` 的上边框）→ 四桶读数格（§4.5）。
 
 | 件 | 几何 / 取值 |
 |---|---|
 | `.dtpl-hero` | `padding:16`，flex column gap 12，`margin:0 0 20`，`overflow:hidden` + §3.1 配方；角括号 14×14（§3.4） |
-| `.dtpl-hero-art` | `margin:-16 -16 0`（左右上三面抵到卡沿），`aspect-ratio:940/237`，`background:var(--dtpl-hero-art) center/cover`；下缘**直边**，与下面那行数字的距离就是 hero 的 12px gap。**它不是任何一层的背景**，图与字各占一行 |
+| `.dtpl-hero-art` | `margin:-16 -16 0`（左右上三面抵到卡沿），`aspect-ratio:940/237` + `max-height:140`，`background:var(--dtpl-hero-art) center 40%/cover`；下缘**直边**，与下面那行数字的距离就是 hero 的 12px gap。**它不是任何一层的背景**，图与字各占一行。窄处图带自然高度不到 140px 时按比例整幅落地、不裁（见 §5.2）；帽子的值由首屏预算定（D-038） |
+| `.dtpl-hero-lead` | flex column gap 7；口径词一行、数字与参照一行（D-038 试过并成一行，又按维护者的意思还回两行，见 DESIGN §4） |
 | `.dtpl-total-k` | 12/18/500，`.06em`，`fg-2` + 7×13 徽记，gap 8 |
 | `.dtpl-total-num` | mono 36/42/600，`fg`，`-.02em`，`tabular-nums` |
 | `.dtpl-hero-delta` | 11/16 `fg-2`，数字 13/18/600 mono 主墨；基准取**不含今日的前 7 个完整日**，不足 7 天或无用量则不显示参照 |
@@ -307,9 +308,9 @@ box-shadow:var(--dtpl-metal);
 |---|---|
 | `.dtpl-grid` | `grid-template-columns:repeat(4,minmax(0,1fr))`，`gap:0`，**上边框 = 与仪表区之间的分区线** |
 | `.dtpl-grid-3` | `repeat(3,…)`——四桶里某一桶不是这个账本的维度时用（判定粒度是账本而非当天），不留半格 |
-| `.dtpl-stat` | flex column gap 3，`padding:12 14 13`；`.dtpl-stat + .dtpl-stat` → 左边 1px `border` |
+| `.dtpl-stat` | flex column gap 3，`padding:10 14 11`；`.dtpl-stat + .dtpl-stat` → 左边 1px `border` |
 | `.dtpl-k` | 12/18/500，`.05em`，`fg-2`，`nowrap` |
-| `.dtpl-stat .dtpl-v` | mono 20/26/600，`-.01em`，`margin-top:3`，`align-items:baseline` |
+| `.dtpl-stat .dtpl-v` | mono 20/26/600，`-.01em`，`align-items:baseline`（与标签的 3px 间隔只由父级 gap 给，D-038） |
 | `.dtpl-stat-pct` | 12/18 `fg-2`，自带"占"字（份额，分母就是主角数字） |
 
 **每格只说三件事**：桶名、桶值、份额。**占比尺与缓存命中率已撤（D-037）**——尺的量就是旁边那个份额数，
@@ -513,8 +514,9 @@ box-shadow:var(--dtpl-metal);
 | `.dtpl-body` | `18 20 20`，`scroll-padding:8px`，滚动条 8px |
 | `.dtpl-foot` | `11 20 14` |
 | `.dtpl-hero` | `16`（四边等距），gap 12，下外边距 20 |
-| `.dtpl-hero-art` | 宽 = 卡内容宽 + 32（`-16px` 左右外边距顶到卡沿），高按资产比例（940/237）→ 实测 668×168 @1404、376×95 @420 |
-| `.dtpl-stat` | `12 14 13` |
+| `.dtpl-hero-art` | 宽 = 卡内容宽 + 32（`-16px` 左右外边距顶到卡沿），高 = `min(宽/3.97, 140px)` → 实测 668×140 @1404（帽子削掉 28px：上下各一点空边）、376×95 @420（未到顶，整幅落地） |
+| `.dtpl-stat` | `10 14 11` |
+| `.dtpl-trend` | 下外边距 `0`（本 tab 的最后一节，那 20px 不指向任何东西；D-038 把它计进首屏预算并归零） |
 | `.dtpl-provider-head` / `-models` | `11 14 10` / `9 14 11` |
 | `.dtpl-quota-card` | `13 15 12` |
 | `.dtpl-price-head` / `-row` / `-cols` | `8 10 8 8` / `4 10`（`min-height:40`）/ `6 10 4` |

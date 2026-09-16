@@ -50,14 +50,22 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
    而这条线本身不值得占位。 */
 
 /* 卡首那条图：hero 的第一行，也是这张卡上唯一的图。
-   图**不做任何一层的背景**，就是独立的一行：占满卡的内容宽，高度由图片自己的比例定
-   （资产 940×237，容器与图同比例，所以整幅取景原样落地），随后才是数字与金额。
+   图**不做任何一层的背景**，就是独立的一行：占满卡的内容宽，随后才是数字与金额。
    前一版把图当仪表区的背景，那个做法必然要求字与图共处同一块地方——实测在那一层的高度上，
    36px 的主角数字会压在人物的白发上，浅色皮肤里「今日词元」与 169K 直接读不出来；
    把图退到几乎看不见才勉强能读，那时图也没剩多少。独立成行之后两件事各自完整：图完整，
    字落在干净的卡面上。图不留内衬——它与卡的边框齐平，左右上三面都抵到卡的边。
    下缘是一条**直边**：试过给最后两成做渐隐（mask 落到卡面），浅色皮肤下那条淡出带把图的下半
-   糊成一片灰雾，人物也散掉了——一张取景完整的插画，边界就该是清楚的。 */
+   糊成一片灰雾，人物也散掉了——一张取景完整的插画，边界就该是清楚的。
+   **高度戴一顶帽子（max-height:140px）。** 比例仍由资产给（940×237），所以窄处图带自然高度
+   不到 140px 时照旧是整幅取景、两边都不裁（@420 的 95px 正在此列）；宽处自然高度 168px，帽子
+   削掉 28px——上下各切掉一点空边，人物与构图仍是整幅。
+   **帽子的值不是一个审美数字，是首屏预算算出来的：** 这张卡存在的理由是「今日词元（口径词
+   自成一行 + 读数一行）与近 14 天趋势一屏读完」，而读数窗可视高度只有 539px（卡 680 − 标题 −
+   tab − 页脚）。把这份预算逐项摆开——页内上下余白 38 + 图带 140 + 两处 12px 间距 24 + 仪表区
+   两行 67 + 读数格 69 + hero 自己的下内边距与上下边框 18 + hero 的下外边距 20 + 趋势 159 =
+   **535 ≤ 539**。168px 的图带让这个和溢出 24px，被裁掉的正是趋势图；再矮就是白压（装饰没有被
+   要求最小化，被要求的是**两件都完整**）。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-art{
   flex:none;
   /* 左右上三面抵掉 hero 的内边距：图与卡的边框齐平（卡自己 overflow:hidden，
@@ -65,8 +73,9 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
      下边不另外加空隙，hero 的 flex 间距（12px）就是图与下面那行数字之间的距离。 */
   margin:-16px -16px 0;
   aspect-ratio:940/237;
+  max-height:140px;
   background-image:var(--dtpl-hero-art);
-  background-position:center center;
+  background-position:center 40%;
   background-size:cover;
   background-repeat:no-repeat;
 }
@@ -74,6 +83,10 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-top{
   display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
 }
+/* 仪表区分两行：口径词一行（身份），主角数字与参照一行（读数），金额块在右端另起一列。
+   曾把口径词并进数字那一行（省 25px），装得下，单行也确实更紧凑——但它省下的是这一屏里
+   **最便宜**的那 25px，代价是「这个数是谁」不再自成一行。首屏预算付得起，于是还给版式
+   （见 .dtpl-hero-art 那段：帽子的值就是为了让这两样都成立）。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-lead{display:flex;flex-direction:column;gap:7px;min-width:0;flex:1 1 auto;}
 /* 口径词那一行只有身份：派生读数不挂在这里。曾经挂过缓存命中率，它后来移到读数格、
    又自 D-037 起整条不再显示——一个比值挂在口径词上，读者还得回头找它的分母。 */
@@ -172,9 +185,12 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 }
 /* 三个桶刚好填满一行，不留参差的半格。 */
 [data-plugin="dsh-tokbook"] .dtpl-grid-3{grid-template-columns:repeat(3,minmax(0,1fr));}
+/* 四桶那一排：内边距收到 10/11（原先 12/13），标签与值之间的间隔只由父级那 3px gap 给
+   （.dtpl-v 原先另加 3px margin-top，等于同一处间隔付了两遍）。读数格因此 76 → 69px
+   （每格 75 → 68px）；读数本身一个没动——这一档压的是空白，不是字号。 */
 [data-plugin="dsh-tokbook"] .dtpl-stat{
   display:flex;flex-direction:column;gap:3px;min-width:0;
-  padding:12px 14px 13px;
+  padding:10px 14px 11px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-stat + .dtpl-stat{border-left:1px solid var(--dtpl-border);}
 /* 标签行：一格的名字。它曾与右端的**派生读数**（缓存读取那一格的命中率）两端分开，
@@ -189,7 +205,6 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
    过不了 4.5:1；值的层级靠字号与字重给，不靠把份额洗淡。
    份额自己带「占」字：它是值行里唯一的百分比，而这个「占多少」原先只有一个 title 在解释。 */
 [data-plugin="dsh-tokbook"] .dtpl-stat .dtpl-v{
-  margin-top:3px;
   display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
   font-family:var(--dtpl-mono);
   font-size:20px;line-height:26px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;
@@ -218,7 +233,10 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 }
 
 /* 日趋势 */
-[data-plugin="dsh-tokbook"] .dtpl-trend{margin-bottom:20px;}
+/* 这一节是本 tab 的最后一节，所以那条 20px 的节末外边距在这里不指向任何东西——它只是
+   首屏预算表上一行白占的高度（页内那 20px 下余白已经给了同一处呼吸）。归零，把高度还给
+   仪表区那一行口径词（见 .dtpl-hero-lead）。 */
+[data-plugin="dsh-tokbook"] .dtpl-trend{margin-bottom:0;}
 /* 图不是一块面板：柱直接站在卡面上，脚下只有一条基线。 */
 [data-plugin="dsh-tokbook"] .dtpl-bars{
   position:relative;
@@ -547,13 +565,14 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 }
 /* 骨架块高度 = 对应真块的**实测**高度，首屏因此不会在数据到达时整体下跳。
    骨架是按真块的排法分段的（hero / 读数格 / 趋势图），而真块里 hero 与读数格同为一张卡：
-   所以 sk-hero + tile 要等于整卡高（353 = 277 + 76），chart 对上「近 14 天趋势」那一节（159）。
-   1404px 宽下量的（预览台 fixture）。卡首那条图占高的 168px 都在 sk-hero 里——它是卡的一面，
-   不是背景。两次撤件各自把这一串数字往下推：D-036 撤掉今日异常行（sk-hero 307 → 277），
-   D-037 撤掉每格那条占比尺（tile 90 → 76：尺的 2px + 外边距 9px + 与值行之间的 3px 间距）。 */
-[data-plugin="dsh-tokbook"] .dtpl-sk-hero{height:277px;}
+   所以 sk-hero + tile 要等于整卡高（318 = 250 + 68），chart 对上「近 14 天趋势」那一节（159）。
+   1404px 宽下量的（预览台 fixture）。卡首那条图占高的 140px 都在 sk-hero 里——它是卡的一面，
+   不是背景。这一串数字被历次改动推着走：D-036 撤掉今日异常行（sk-hero 307 → 277）、
+   D-037 撤掉每格那条占比尺（tile 90 → 76）、本轮按首屏预算压 hero（图带封顶 140px，
+   sk-hero 277 → 250；tile 76 → 68：内边距收 2px + 去掉重复的 3px margin-top）。 */
+[data-plugin="dsh-tokbook"] .dtpl-sk-hero{height:250px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;}
-[data-plugin="dsh-tokbook"] .dtpl-sk-tile{height:76px;}
+[data-plugin="dsh-tokbook"] .dtpl-sk-tile{height:68px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-chart{height:159px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-row{height:48px;}
 
