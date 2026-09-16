@@ -24,6 +24,11 @@ export interface LedgerOverlayProps {
   view: TokBookViewStore
 }
 
+/** 追一轮后台 walk 的轮询步长与上限（30 s）：够覆盖一次「整份会话日志重读」，又不至于
+ *  在状态真卡住时无限打路由。 */
+const SYNC_FOLLOW_INTERVAL_MS = 500
+const SYNC_FOLLOW_ATTEMPTS = 60
+
 export function LedgerOverlay({ view }: LedgerOverlayProps) {
   useEffect(() => injectStyles(), [])
   const { open, overview, error, pricingDirty } = useSyncExternalStore(view.subscribe, view.getSnapshot)
@@ -36,30 +41,41 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       .catch((err: unknown) => { if (!signal?.aborted) view.setError(err instanceof Error ? err.message : String(err)) })
   }, [view])
 
-  // 每次打开拉取一次；关闭/重开后忽略过期响应。
+  // host 的读路径刻意**不**等后台的权威 walk（D-030），所以一次读到的 `running` 只是
+  // 那一刻的事实：不追它，footer 就会一直停在「正在重新扫描…」。打开浮窗（读路径自己
+  // 排了 walk）与按下重新扫描（路由在扫描完成前就返回）都靠它把状态追到落定——否则
+  // 不仅状态是假的，walk 补进来的行也不会出现在屏上。
+  const followSync = useCallback(async (signal?: AbortSignal): Promise<void> => {
+    for (let attempt = 0; attempt < SYNC_FOLLOW_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, SYNC_FOLLOW_INTERVAL_MS))
+      if (signal?.aborted === true) return
+      await fetchOverview(signal)
+      if (view.getSnapshot().overview?.syncStatus !== 'running') return
+    }
+  }, [fetchOverview, view])
+
+  // 每次打开拉取一次（读到 running 则继续追到落定）；关闭/重开后忽略过期响应。
   useEffect(() => {
     if (!open) return
     const controller = new AbortController()
-    void fetchOverview(controller.signal)
+    void fetchOverview(controller.signal).then(() => {
+      if (view.getSnapshot().overview?.syncStatus === 'running') return followSync(controller.signal)
+    })
     return () => { controller.abort() }
-  }, [open, fetchOverview])
+  }, [open, fetchOverview, followSync, view])
 
-  // 触发一次权威再同步，然后轮询总览直到同步结束（再同步路由在扫描完成前就返回，固定延迟会读到中途快照）。
+  // 触发一次权威再同步，然后轮询总览直到同步结束。
   const onRescan = useCallback(async () => {
     setScanning(true)
     try {
       await fetch('/tokbook/rescan', { method: 'POST' }).then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
-      for (let attempt = 0; attempt < 20; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 250))
-        await fetchOverview()
-        if (view.getSnapshot().overview?.syncStatus !== 'running') break
-      }
+      await followSync()
     } catch (err) {
       view.setError(err instanceof Error ? err.message : String(err))
     } finally {
       setScanning(false)
     }
-  }, [fetchOverview, view])
+  }, [followSync, view])
 
   if (!open) return null
   return (
