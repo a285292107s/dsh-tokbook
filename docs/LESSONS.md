@@ -1,6 +1,6 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-17 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-16 · supersedes: —
 
 > 本文件整理本次「UI 优化 + 全中文 + 对齐 DSH 官方设置按钮样式」迭代中踩过的坑与结论，
 > 供后续维护 / 继续开发时对照。结构统一按 **现象 → 根因 → 修复 / 正确做法** 组织。
@@ -74,14 +74,14 @@
 
 ## 2. 此插件的"样式"就是 JS bundle 的一部分，不是独立 CSS
 
-- CSS 拆在 `src/client/styles/*.ts`（tokens / footer / overlay / ledger / method /
-  provider / quota / pricing / shared），由 `styles.ts` 的 `injectStyles()` 按固定顺序
-  拼接后在运行时注入 `<style>`——**级联顺序是契约**。
+- CSS 拆在 `src/client/styles/*.ts`，由 `styles.ts` 的 `injectStyles()` 按**固定顺序**拼接后
+  在运行时注入 `<style>`——**级联顺序是契约**，顺序以 `styles.ts` 的 import 为准(不在此处抄
+  一份清单:抄的那份漏过 `pricing-timeline`)。
 - esbuild 会把这些字符串**编译进 `lib/client.js`**。
 - 因此「改一行样式」= 改变了 lazy-CJS bundle 的字节内容，跟改逻辑**没有区别**，同样受下方 `rev`
   不可变缓存约束。**没有"只改样式就自动热更"这回事。**
 
-### 陷阱：分片里的注释不能出现反引号（2026-09-17）
+### 陷阱：分片里的注释不能出现反引号（2026-09-16）
 
 每个分片都是 `export const CSS_X = ` + 一个**模板字符串**。所以在 CSS 注释里写 Markdown 风格的
 反引号（`` `00:00–24:00` ``、`` `aria-label` ``、`` `!important` ``）会**提前闭合模板串**：后面的
@@ -104,54 +104,18 @@ CSS 变成 JS 语法错误，`pnpm typecheck` / `pnpm build` 当场红。
 
 ## 3. 客户端 bundle 按 `rev` 不可变缓存 + HMR 的正确姿势
 
-> ⚠️ 本节（「免刷新的 HMR」与「Host 侧与 Client 侧的 HMR」两小节）已按 2026-09-07 的
-> **运行中实测**更新。完整机制与本项目接线见 [`HMR.md`](HMR.md)。
-
-### 服务端机制（`packages/client/modules/src/index.ts`）
-
-- 对 `/plugins/<id>/client.js` 用 `IMMUTABLE_CACHE = 'public, max-age=31536000, immutable'`。
-- 每个插件的 **`rev`（内容哈希）在宿主启动时算好**，写进 `window.__DSH_BOOT__`；但 `client-hmr`
-  会**在运行中**重哈希改写 entry 的 `rev` 并广播（见下），所以宿主并非“永远只服务启动时的 rev”。
-
-### 结论
+> **机制与接线的真源是 [`HMR.md`](HMR.md)**（§2 源码落点、§3 本项目实况与判定方法、§5 一页
+> Checklist）。本节只留动手时最容易踩错的那条判断。
 
 | 动作 | 结果 |
 |------|------|
 | 只改代码 + 保存 | 浏览器看到的是旧 bundle（要 `pnpm build` 落盘 `lib/client.js`） |
-| `pnpm build`（有 `dsh web` 连着、client-hmr 活着） | client-hmr 活着时 ≤500ms 内免刷新热更（2026-09-07 实测，加分项）；**本项目主路径仍 = `pnpm build` + 刷新浏览器**，不依赖它 |
-| `pnpm build` 后重启 `dsh web` + **硬刷新**（`Cmd/Ctrl+Shift+R`） | 永远能取到新 `rev` 的 bundle（兜底，推荐用于首次接线后） |
-| 只刷新、不重启 | **只有热更链没生效时才有风险**：宿主已按新内容重哈希（`rebuilt()` 改写 rev 与响应表），而浏览器仍按启动时的旧 `rev` 请求 → `/plugins/<id>/client.js` 按“pathname+rev”精确匹配不到 → **404**（源码注释口径：“mismatched revisions are rejected”），插件可能加载失败（按钮消失） |
+| `pnpm build`（client-hmr 活着） | ≤500ms 内免刷新热更——**加分项,不是保证**;主路径仍 = `pnpm build` + 刷新浏览器 |
+| `pnpm build` 后重启 `dsh web` + **硬刷新**（`Cmd/Ctrl+Shift+R`） | 永远取到新 `rev` 的 bundle（兜底） |
+| 只刷新、不重启 | **危险**:宿主已重哈希 `rev`,浏览器仍按启动时的旧 `rev` 请求 → `/plugins/<id>/client.js` 按「pathname+rev」精确匹配不到 → **404**,插件可能加载失败（按钮消失）。判定热更链是否活着见 HMR.md §3.2 |
 
-> ⚠️ **热更链没生效前不要只刷新**。判定“client-hmr 是否活着”见 [`HMR.md`](HMR.md) §3.2
-> （探测 `GET /plugins/events` 的 SSE）。`pnpm build` 后若 graph 里该插件的 `rev` 变了，说明
-> 运行中已重哈希，浏览器会免刷新热换。
-
-### 免刷新的 HMR（链路活着时可用；本项目主路径仍 = `pnpm build` + 刷新）
-
-1. 在 dsh-tokbook 里 `pnpm build`（**必须**：让 `lib/client.js` 落盘变化）。
-2. **无需**在 DSH 源码跑 `pnpm run dev:web` —— 那个 watcher 只重建 DSH 仓库内包，不会构建外置
-   dsh-tokbook。本项目里“重建 bundle”就是自己的 `pnpm build`：
-   - `@deepseek-ai/dsh-client-hmr` 由 web-app bundle **常驻挂载**（不是 dev-only）；
-   - 它的 node 半区默认每 500ms stat-poll 每个插件 bundle 文件，变化 → 重哈希 → SSE
-     `/plugins/events` → 浏览器热换 fiber，**页面无需刷新**。
-
-当前客户端 HMR 链**是活的**（`GET http://127.0.0.1:3080/plugins/events` 可收到 SSE，graph 含
-`@deepseek-ai/dsh-client-hmr`，且 `dsh-tokbook` 的 rev 与启动批前缀不同 = 已被运行中重哈希）。
-
-> 口径（2026-09-07 更新）：浏览器刷新成本可接受，**client 改动以 `pnpm build` + 刷新为主路径**，
-> 免刷新热更是加分项、不是保证——某次没生效就硬刷新兜底。
-
-### Host 侧与 Client 侧的 HMR 是两套机制，不互通（各管各的产物）
-
-- **Host（Node / Cordis）**：`@deepseek-ai/cordis-plugin-hmr`（`id: hmr`）。base bundle 里这行
-  **默认 `disabled: true`**；本项目已在 `$DSH_HOME/profiles/web/cordis.patch.yml` 显式
-  `disabled: false` + `base: 'file:///C:/Users/28529/Desktop/dsh-tokbook'` 启用。改 host 源码、
-  重建 `lib/index.js` 后触发「卸载旧插件 → 重载 → 重新 `apply`」，注册自动清理；改 `hmr` 行本身
-  需重启一次 `dsh web`。官方文档：<https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>。
-- **Client（浏览器 bundle）**：走 `client-modules` 的 `rev` 缓存 + `@deepseek-ai/dsh-client-hmr`
-  （web-app 常驻挂载）；变化经 `pnpm build` 落盘 `lib/client.js`，**主路径 = 刷新浏览器取新 rev**
-  （client-hmr 活着时可能 ≤500ms 免刷新热更，加分项非保证；见 [`HMR.md`](HMR.md) §3.2）。
-- **两者互不影响**：host HMR 只重载 host 半区，**不会**热更浏览器端的 `lib/client.js`；反之亦然。
+改动时的完整清单（`disabled: false`、junction 安装、跨模块重载的双写边界）见
+[`HMR.md`](HMR.md) §5。
 
 ---
 
@@ -187,24 +151,15 @@ CSS 变成 JS 语法错误，`pnpm typecheck` / `pnpm build` 当场红。
 
 ## 5. 构建与安装要点
 
-- `pnpm build` = `tsc -b tsconfig.json`（产 `lib/types/**/*.d.ts`）+ `node scripts/build-client.mjs`
-  （esbuild 产 `lib/index.js`（host）与 `lib/client.js`（client，lazy-CJS factory））。
-- `pnpm watch` 只跑 `tsc --watch`（**不重建** esbuild 的 `lib/client.js`）→ 改源码后要手动 `pnpm build`；
-  需要自动重建，得改 watch 脚本。
-- `build-client.mjs`：client 构建加 `charset: 'utf8'`，让产物保留**字面中文**（默认会转义成 `\uXXXX`，
-  不便于排查）。
-- client 入口**不要 `export default`**（cordis loader `exports.default ?? exports` 会让 default 掩盖
-  `.inject`，报 "cannot get property ... without inject"）；只导出具名 `inject` / `apply`。
-- `dsh.client` 必须 `platform:'web'`，且 `./client` 可解析出 `lib/client.js`；`BASELINE_EXTERNALS`
-  列表要跟 DSH 的 `PLATFORM_MODULES` 保持一致。
-- 安装：`dsh plugin --profile web add <path>` 会做成 **link/junction**（指向仓库，宿主导入实时文件）；
-  `$DSH_HOME/profiles/web/cordis.patch.yml` 加一行挂载 host 半区：
+命令清单与产物见 [`../README.md`](../README.md)「构建」。这里只留会踩的三条:
 
-  ```yaml
-  - insert:
-      - id: tokbook
-        name: 'dsh-tokbook'
-  ```
+- **`pnpm watch` 只跑 `tsc --watch`,不重建 `lib/client.js`**——改了源码要手动 `pnpm build`;
+  想要自动重建得改 watch 脚本。
+- `build-client.mjs` 给 client 构建加了 `charset:'utf8'`,让产物保留**字面中文**(默认会转义成
+  `\uXXXX`,不便于排查)。
+- **client 入口不要 `export default`**(cordis loader 的 `exports.default ?? exports` 会让它掩盖
+  `.inject`);`dsh.client` 必须 `platform:'web'`、`./client` 能解析到 `lib/client.js`,且
+  `BASELINE_EXTERNALS` 要跟 DSH 的 `PLATFORM_MODULES` 保持一致(随 DSH 升级同步)。
 
 ---
 
@@ -301,3 +256,6 @@ padding-top:24px` ❌（居中照旧）。**判据**：固定高度 + 绝对定�
 - [ ] 预览台端口被占：换 `PORT=8955`（旧进程还活着、服务的是旧 bundle），别急着杀；空/错态用 `TOKBOOK_MODE=empty|err` 环境变量。
 - [ ] 判断颜色别用整页截图：`backdrop-filter` 会让深色卡拍成浅色；用元素截图或 `getComputedStyle`。
 - [ ] 绝对定位 + 固定高度的 `<button>`：内容会被 UA 布局**垂直居中**；要贴顶就 `display:flex;flex-direction:column;justify-content:flex-start`（见 §7）。
+- [ ] **动自动保存链（`PricingPanel`）时记住它的隐含前提：draft 永不原地 mutate。** 成功路径必须用
+  **compose 前冻结的 snapshot** 推进 baseline，而不是 await 之后的 live draft——否则 PUT 在途的键入
+  会被标成「已保存」、重写被跳过，**静默丢字**。这是那轮审查里唯一的 critical。

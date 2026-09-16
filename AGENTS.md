@@ -39,7 +39,7 @@ footer 按钮 + shell.overlay 浮窗展示它们(汇总、按通道、价格表�
 
 | 改动 | 门 |
 | --- | --- |
-| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm build` + 刷新页面 |
+| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm selfcheck:ui`(秒级静态断言)+ `pnpm build` + 刷新页面 |
 | 别的 `src/**` | `pnpm typecheck`(只查 `src/`);碰了 host 逻辑或 `src/client/pricing/axis.ts` 再加 `pnpm test` |
 | README / `docs/**` | `pnpm docs:check`(selfcheck 的文档段) |
 | 提交、或合并回主检出之前 | `pnpm test`,需要线上产物时再 `pnpm build` |

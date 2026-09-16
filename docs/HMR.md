@@ -13,46 +13,19 @@
 
 ## 1. 官方文档怎么说（framework 页 · HMR 一节）
 
-DSH 的插件模型（Cordis 派生）把每个被加载的插件放进一个 **Fiber 作用域**，状态机为：
+> 原文与 fiber 状态机（`PENDING → LOADING → ACTIVE` / `→ UNLOADING → DISPOSED` / `→ FAILED`）
+> 逐态含义见官方页,不在此复述:
+> <https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>。
 
-```
-PENDING → LOADING → ACTIVE
-                 ↘ FAILED
-ACTIVE → UNLOADING → DISPOSED
-```
+**一句话: HMR = 一次受控的「卸载旧插件 → 重载新代码 → 重新 `apply`」**,安全的前提是
+「所有注册自动清理、异步清理可被等待」。三条与写代码直接有关的保证:
 
-| 状态 | 含义 |
-| --- | --- |
-| PENDING | 已声明，但所需依赖未就绪 |
-| LOADING | 依赖就绪，正在执行 `apply` |
-| ACTIVE | 插件运行中 |
-| FAILED | `apply` 抛出异常 |
-| UNLOADING | 插件正在卸载并释放资源 |
-| DISPOSED | 已完全卸载 |
-
-关于 **HMR（热模块替换）**，官方原话的机制是：
-
-> 通过 `cordis.yml` 加载 `@deepseek-ai/cordis-plugin-hmr` 后，修改插件源文件会触发：
-> 1. **卸载旧插件**（清理所有注册）
-> 2. **重新加载新代码**
-> 3. **执行新的 `apply`**
->
-> 因为插件注册会被自动清理，所以热替换不会保留旧实例的注册。
-
-配套的生命周期保证（HMR 正确性依赖它们）：
-
-- **依赖驱动的加载**：声明 `inject` 的插件等待所需服务就绪；若依赖的服务消失（例如提供方被替换），
-  插件被自动卸载（ACTIVE → DISPOSED），服务恢复后重新加载。
-- **自动清理机制**：凡经 `ctx` 做的注册在插件卸载时自动撤销——`ctx.on(event, handler)` 事件监听、
-  `ctx.tools.register(tool)`、`ctx.llm.registerAdapter(...)`、`ctx.effect(() => cleanup)` 自定义资源。
-  处置器按注册顺序的**逆序**开始调用；多个异步处置器**并发**执行、不保证逐个完成，所以有顺序依赖的
-  清理必须放进**同一个** `ctx.effect()` 返回的处置器里自行串行。
-- **`dispose` 语义**：`ctx.plugin(...)` 返回的 fiber 可手动 `await fiber.dispose()`，保证：
-  ① 该插件所有注册被移除；② 子插件被递归卸载；③ 返回的 Promise 在所有异步清理完成后兑现。
-- **嵌套上下文**：`ctx.plugin()` 创建子 Fiber，继承父上下文但有独立生命周期，随父一起卸载。
-
-> 一句总结官方语义：**HMR = 一次受控的卸载 + 重载 + 重新 `apply`**，安全的前提是“所有注册自动清理、
-> 异步清理可被等待”，即 `Fiber.UNLOADING → DISPOSED` 是**干净**的。
+- 凡经 `ctx` 做的注册在插件卸载时**自动撤销**(`ctx.on` / `ctx.tools.register` /
+  `ctx.llm.registerAdapter` / `ctx.effect(() => cleanup)`);处置器按注册顺序的**逆序**开始调用。
+- 多个异步处置器**并发**执行、不保证逐个完成 —— 所以**有顺序依赖的清理必须放进同一个
+  `ctx.effect()` 返回的处置器里自行串行**。
+- `ctx.plugin(...)` 返回的 fiber 可 `await fiber.dispose()`,保证注册被移除、子插件递归卸载、
+  Promise 在所有异步清理完成后兑现;`inject` 的服务消失时插件自动卸载,恢复后重新加载。
 
 ---
 
@@ -246,6 +219,7 @@ pnpm build     # scripts/build-client.mjs（esbuild）重写 lib/index.js（host
 - [ ] 插件须以 **link/junction** 装进 profile（`node_modules/dsh-tokbook → 本仓库`），否则 profile 读到的是拷贝、重建产物不可见。
 - [ ] 启用/修改 `hmr` 行本身需要重启一次 `dsh web`；挂载后才是免重启热更。
 - [ ] 兜底：某次没热更成功 → 重启 `dsh web` + 硬刷新（永远取到当前 rev）。
+- [ ] **热更链没生效时不要只刷新**：宿主已按新内容重哈希、浏览器仍按启动时的旧 `rev` 请求 → `/plugins/<id>/client.js` 按「pathname+rev」精确匹配不到（源码注释口径 "mismatched revisions are rejected"）→ **404**，插件可能加载失败（按钮消失）。先按 §3.2 确认链活着再刷新。
 - [ ] `dev:web` 只重建 DSH 仓库内包；外置插件的重建 = 仓库自己的 `pnpm build`。
 - [ ] 依赖本插件的派生收尾都要查 `disposed`；同一模块副本内的实例共享按数据目录的队列/去重，**跨模块级 HMR 不共享**——双写安全靠磁盘 JSONL + 首写 scan 重建。
 

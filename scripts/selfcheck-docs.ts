@@ -2,20 +2,33 @@
  * Self-check that the documentation layer stays honest (pure file checks, no
  * harness or data-directory access):
  *
- *  1. every host route path registered in `src/routes.ts` is documented in
- *     `docs/CONTRACTS.md`, and every `/tokbook/*` token there exists in code
- *     (a contract doc may not drift from the code, and may not invent routes);
+ *  1. `docs/CONTRACTS.md` does **not** re-list host routes: routes are code
+ *     (`src/routes.ts`), so the old route↔doc comparison was guarding a mirror
+ *     that should not exist. The check is inverted — a `/tokbook/...` path
+ *     appearing in CONTRACTS is now the failure;
  *  2. every relative markdown link in `docs/INDEX.md` resolves to an existing
  *     file (the map must never point into the void);
  *  3. every tracked markdown doc (README + all of docs/, including archive/)
  *     carries a `> **Doc meta**` line near the top with `role:` and `status:`,
  *     so every file is classifiable and stale/unclassified docs are visible by
- *     construction;
+ *     construction; `last-reviewed` must be a real, non-future date;
  *  4. every entry in `docs/DECISIONS.md` carries a machine-parsable `Status`
  *     line, its supersession edges exist and are recorded on BOTH entries, the
  *     status agrees with those edges, and the index table at the top is a
  *     row-for-row projection of the entries (id / date / title / status) — so
  *     the "what is in force now" table can never drift from the body.
+ *  5. the tree in `README.md` · 布局 names only files that exist and names
+ *     every file under `src/` and `scripts/` — it is the code map, so it may
+ *     neither invent paths nor silently omit them (a directory line such as
+ *     `styles/` covers everything below it);
+ *  6. no `docs/DECISIONS.md` entry exceeds 80 lines, and the entries over the
+ *     40-line 判据 are printed as `info` — the 「越界条目」 list used to be a
+ *     hand-maintained table in `docs/WORKFLOW.md`, i.e. a mirror that rotted;
+ *     it is derived here instead.
+ *  7. `docs/UI-SPEC.md` stays under 200 lines. It is the only UI document left
+ *     (取值与规格的真源是 `src/client/styles/**`,可判定的禁令在
+ *     `scripts/selfcheck-ui.ts`), so it must stay a checklist rather than grow
+ *     back into a spec — same brake `AGENTS.md` has at 80 lines.
  *
  * Run: node --experimental-strip-types scripts/selfcheck-docs.ts
  *
@@ -45,20 +58,12 @@ async function collectMarkdown(dir: string): Promise<string[]> {
   return out
 }
 
-// --- 1. host routes in src/routes.ts == /tokbook/* tokens in docs/CONTRACTS.md ---
-const routesSource = await readFile(join(root, 'src', 'routes.ts'), 'utf8')
-const codeRoutes = new Set<string>()
-for (const m of routesSource.matchAll(/path:\s*'(\/tokbook\/[\w-]+)'/g)) codeRoutes.add(m[1])
-
+// --- 1. CONTRACTS 不复述路由(路由是代码) ------------------------------------
+// 路由真源是 `src/routes.ts`,读它比读文档直接。所以这里反过来守:文档里**不该**出现路由路径。
 const contractsPath = join(root, 'docs', 'CONTRACTS.md')
 const contractsText = await readFile(contractsPath, 'utf8')
-const docRoutes = new Set<string>()
-for (const m of contractsText.matchAll(/(\/tokbook\/[\w-]+)/g)) docRoutes.add(m[1])
-
-const notDocumented = [...codeRoutes].filter((r) => !docRoutes.has(r)).sort()
-const invented = [...docRoutes].filter((r) => !codeRoutes.has(r)).sort()
-check('docs/CONTRACTS.md documents every host route', notDocumented.length === 0, { notDocumented })
-check('docs/CONTRACTS.md lists no route absent from code', invented.length === 0, { invented })
+const contractRoutes = [...new Set([...contractsText.matchAll(/(\/tokbook\/[\w-]+)/g)].map((m) => m[1]))].sort()
+check('docs/CONTRACTS.md 不复述路由路径(真源是 src/routes.ts)', contractRoutes.length === 0, { contractRoutes })
 
 // --- 2. every relative link in docs/INDEX.md resolves ---
 const indexPath = join(root, 'docs', 'INDEX.md')
@@ -82,6 +87,9 @@ check('every relative link in docs/INDEX.md resolves', broken.length === 0, { br
 const ALLOWED_STATUS = new Set(['current', 'superseded', 'draft'])
 const docs = [join(root, 'README.md'), ...await collectMarkdown(join(root, 'docs'))]
 const missingMeta: string[] = []
+const badReviewDates: string[] = []
+const now = new Date()
+const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 for (const file of docs) {
   const text = await readFile(file, 'utf8')
   const head = text.split('\n').slice(0, 15).join('\n')
@@ -91,8 +99,15 @@ for (const file of docs) {
   if (line === undefined || role === undefined || status === undefined || !ALLOWED_STATUS.has(status)) {
     missingMeta.push(relative(root, file))
   }
+  // `last-reviewed` is a self-declared hint, not a freshness authority (git
+  // is) — but a malformed or future date is still a lie worth failing on.
+  const reviewed = line?.match(/last-reviewed:\s*(\S+)/)?.[1]
+  if (reviewed === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(reviewed) || reviewed > today) {
+    badReviewDates.push(`${relative(root, file)}: ${reviewed ?? '(缺)'}`)
+  }
 }
 check('every tracked doc carries a valid Doc meta line', missingMeta.length === 0, { missingMeta })
+check('every Doc meta last-reviewed is a real, non-future date', badReviewDates.length === 0, { badReviewDates })
 
 // --- 4. docs/DECISIONS.md: status lines, two-way supersession, index = projection ---
 const decisionsText = await readFile(join(root, 'docs', 'DECISIONS.md'), 'utf8')
@@ -176,6 +191,111 @@ const indexProblems = [
   ...actual.filter((a) => !expected.includes(a)).map((a) => `表里多/不符: ${a}`),
 ]
 check('DECISIONS index table is a projection of the entries', indexProblems.length === 0, { indexProblems })
+
+// --- 5. the README · 布局 tree == what is actually under src/ and scripts/ ---
+const readmeLines = (await readFile(join(root, 'README.md'), 'utf8')).split('\n')
+const layoutAt = readmeLines.findIndex((l) => /^##\s+布局\s*$/.test(l))
+const fenceAt = layoutAt < 0 ? -1 : readmeLines.findIndex((l, i) => i > layoutAt && /^```/.test(l))
+const fenceEnd = fenceAt < 0 ? -1 : readmeLines.findIndex((l, i) => i > fenceAt && /^```/.test(l))
+
+const layoutFiles = new Set<string>()
+const layoutDirs = new Set<string>()
+const inventedPaths: string[] = []
+if (fenceAt < 0 || fenceEnd < 0) {
+  inventedPaths.push('README.md:找不到 `## 布局` 下的代码块')
+} else {
+  const stack: { indent: number; path: string }[] = []
+  for (const raw of readmeLines.slice(fenceAt + 1, fenceEnd)) {
+    if (raw.trim() === '') continue
+    const indent = raw.length - raw.trimStart().length
+    const name = raw.trim().split(/\s+/)[0]
+    if (!/^[\w.-]+\/?$/.test(name)) continue
+    while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop()
+    const parent = stack.length > 0 ? `${stack[stack.length - 1].path}/` : ''
+    const path = parent + name.replace(/\/$/, '')
+    if (name.endsWith('/')) {
+      stack.push({ indent, path })
+      layoutDirs.add(path)
+    } else {
+      layoutFiles.add(path)
+    }
+  }
+  for (const p of [...layoutDirs, ...layoutFiles]) {
+    try {
+      await stat(join(root, p))
+    } catch {
+      inventedPaths.push(p)
+    }
+  }
+}
+check('every path in README · 布局 exists', inventedPaths.length === 0, { inventedPaths })
+
+async function collectAll(rel: string): Promise<string[]> {
+  const out: string[] = []
+  for (const entry of await readdir(join(root, rel), { withFileTypes: true })) {
+    const child = `${rel}/${entry.name}`
+    if (entry.isDirectory()) out.push(...await collectAll(child))
+    else if (entry.isFile()) out.push(child)
+  }
+  return out
+}
+
+const missingFromLayout: string[] = []
+// 只有**叶子**目录行才表示「这里整片不逐项列出」(如 `styles/`);带子项的目录
+// (如 `src/`、`client/`)只是树的骨架,不提供覆盖 —— 否则根行 `src/` 会让这条
+// 检查恒真,漏掉的文件再也抓不到。
+const groups = [...layoutDirs].filter((d) => ![...layoutFiles, ...layoutDirs].some((p) => p.startsWith(`${d}/`)))
+for (const base of ['src', 'scripts']) {
+  for (const rel of await collectAll(base)) {
+    const covered = layoutFiles.has(rel) || groups.some((d) => rel.startsWith(`${d}/`))
+    if (!covered) missingFromLayout.push(rel)
+  }
+}
+check('README · 布局 lists every file under src/ and scripts/', missingFromLayout.length === 0, { missingFromLayout })
+
+// --- 6. DECISIONS entry size: 40 行是判据(只打印),80 行是硬顶 ---
+const ADR_SOFT = 40
+const ADR_HARD = 80
+const entrySizes: { id: string; lines: number }[] = []
+{
+  const all = decisionsText.split('\n')
+  const starts: number[] = []
+  let fence = false
+  for (let i = 0; i < all.length; i += 1) {
+    if (/^\s*```/.test(all[i])) fence = !fence
+    // `## ` 也算边界:条目之后的章节(「如何追加条目」)不该被算进最后一条的体量。
+    else if (!fence && /^#{2,3} /.test(all[i])) starts.push(i)
+  }
+  for (let k = 0; k < starts.length; k += 1) {
+    const heading = HEADING.exec(all[starts[k]])
+    if (heading === null) continue
+    const to = k + 1 < starts.length ? starts[k + 1] : all.length
+    const from = all.findIndex((l, i) => i > starts[k] && i < to && l.startsWith('**Status:'))
+    if (from < 0) continue
+    const body = all.slice(from, to)
+    let end = body.length
+    // 计数规则(见 docs/WORKFLOW.md §7):从状态行到条目末尾、含空行;
+    // 标题与 `---` 分隔线不计。
+    while (end > 0 && (body[end - 1].trim() === '' || /^---\s*$/.test(body[end - 1]))) end -= 1
+    entrySizes.push({ id: heading[1], lines: end })
+  }
+}
+const oversized = entrySizes.filter((e) => e.lines > ADR_SOFT)
+console.log(`  info DECISIONS 条目 > ${ADR_SOFT} 行:${oversized.map((e) => `${e.id} ${e.lines}`).join(' · ') || '(无)'}`)
+const overHard = entrySizes.filter((e) => e.lines > ADR_HARD).map((e) => `${e.id} ${e.lines}`)
+check(`no DECISIONS entry exceeds ${ADR_HARD} lines`, overHard.length === 0, { overHard })
+
+// --- 7. 两份「只写规则」的文档各装一道体量闸门 -------------------------------
+// UI-SPEC(不变量 / 达标线 / 陷阱)与 CONTRACTS(读不出来的规则)都是**不该复述代码**的文件:
+// 取值与规格的真源是 `src/client/styles/**`,路由与 wire 的真源是 `src/`。
+// 它们一旦重新长成规格,就说明有人又开始抄代码了 —— 给它们与 `AGENTS.md` 同样的刹车。
+async function sizeBrake(file: string, max: number): Promise<void> {
+  const lines = (await readFile(join(root, file), 'utf8')).split('\n').length
+  console.log(`  info ${file} ${lines} 行(体量闸门 ${max})`)
+  check(`${file} stays under ${max} lines`, lines <= max, { lines })
+}
+await sizeBrake('docs/UI-SPEC.md', 200)
+await sizeBrake('docs/CONTRACTS.md', 120)
 
 console.log(failures === 0 ? 'docs selfcheck: all good' : `docs selfcheck: ${failures} failure(s)`)
 process.exitCode = failures > 0 ? 1 : 0
