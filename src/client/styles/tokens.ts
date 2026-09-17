@@ -1,78 +1,85 @@
-/** styles.ts 片段：tokens。由 `injectStyles` 按序拼接。 */
-export const CSS_TOKENS = `
-[data-plugin="dsh-tokbook"]{
-  --dtpl-fg:var(--dsw-alias-label-primary,#1f2328);
-  --dtpl-fg-2:var(--dsw-alias-label-secondary,#59636e);
-  --dtpl-fg-3:var(--dsw-alias-label-tertiary,#81858c);
-  --dtpl-fg-dim:var(--dsw-alias-label-dimmed,#a0a4a8);
-  --dtpl-accent:var(--dsw-alias-brand-primary,#4d6bfe);
+/**
+ * styles.ts 片段：tokens —— 全插件唯一的取值登记处，由 `injectStyles` 按序拼接。
+ * 只做三件事：从宿主取色（`--dsw-alias-*` + 兜底）、登记插件自有常量、在值旁写"为什么"。
+ * 某个面长什么样在 `styles/*.ts`，规则与达标线在 `docs/UI-SPEC.md`。
+ *
+ * 加一条之前三问，都过了才加：
+ *   ① 别处是否已经表达过同样的色值 / 圆角 / 名字——是就不加；
+ *   ② 是否真有两个使用处——只有一个就写在使用处的类上，别挂根；
+ *   ③ 色值是否必须来自宿主——是就走 `--dsw-alias-*` + 兜底，不许抄解析后的具体值。
+ * 加完把使用者写进注释；没有使用者 = 死 token，删。
+ *
+ * 两个前提（别的片段不用管）：
+ *   ① 必须挂在插件根上：自定义属性在计算值阶段解析，定义在使用者自己的类里，
+ *      别处取不到，整条声明（如 grid-template-columns）会静默失效。
+ *   ② 必须同时成立于浅色与深色皮肤；恒定值要自己给出理由。
+ */
+
+export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
+
+  /* ── 一、文字墨阶：按"要不要读"分档 ────────────────────────────────────────
+     要读的文本只许用 fg / fg-2；fg-3 是装饰，dim 是"·"这类行内分隔符。
+     三级色压白卡 3.47:1、压浅色卡面 4.12:1，都不是正文色（UI-SPEC §2）。 */
+  --dtpl-fg:var(--dsw-alias-label-primary,#1f2328);      /* 主墨：读数与标题 */
+  --dtpl-fg-2:var(--dsw-alias-label-secondary,#59636e);  /* 次级：说明句、标签、未选中项 */
+  --dtpl-fg-3:var(--dsw-alias-label-tertiary,#81858c);   /* 只给装饰：插入符、缀点 */
+  --dtpl-fg-dim:var(--dsw-alias-label-dimmed,#a0a4a8);   /* 只给行内分隔符 */
+
+  /* ── 二、面与线 ───────────────────────────────────────────────────────────
+     card 是卡面，surface 是凹进去的一块（输入框、占位块）。
+     border 是分区线（页脚、tab 条、面板轮廓共用），hairline 是 .5px 发丝线。 */
   --dtpl-card:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1,#ffffff));
   --dtpl-surface:var(--dsw-alias-bg-layer-1,#ffffff);
   --dtpl-border:var(--dsw-alias-border-l2,rgba(0,0,0,.12));
   --dtpl-hairline:var(--dsw-alias-border-l1,rgba(0,0,0,.08));
-  /* --dsw-corner-shape 是超椭圆形状关键字（superellipse(1.5)），绝不是长度——
-     喂进 border-radius 会让声明失效、在真实 DSH 皮肤上圆角塌成 0。半径保持
-     纯长度；曲率由 DSH 自己的 'corner-shape' 通用规则叠加，全圆形状再在
-     局部配 'corner-shape:round'。 */
+
+  /* ── 三、状态色：只在真的要看一眼时用 ─────────────────────────────────────
+     ok 只给价表"已保存"；warn 只作边框与底色，不许直接做正文；err 是错误。
+     这一档不外借给分类——需要分类时用形状。 */
   --dtpl-ok:var(--dsw-alias-state-success-primary,#1a7f37);
-  --dtpl-warn:var(--dsw-alias-state-warn-primary,#9a6700);
+  --dtpl-warn:var(--dsw-alias-state-warn-primary,#9a6700);    /* 全部非文本 */
   --dtpl-err:var(--dsw-alias-state-error-primary,#cf222e);
-  /* 告警**文字**用的一档。DSH 的浅色 warn 实测是 #F59E0B，压在白卡上只有 2.15:1——
-     作为 11px 正文严重不足（正文要 4.5:1）。混 45% 前景墨之后才成立；warn 本身仍留给
-     非文本用途（边框、底色），那里只要 3:1。 */
+  /* 告警文字走这一档：warn 压白卡只有 2.15:1（11px 正文要 4.5:1），混 45% 前景墨才成立；
+     比例恒定，警告信息一多就改这一条。 */
   --dtpl-warn-ink:color-mix(in srgb,var(--dtpl-warn) 55%,var(--dtpl-fg));
-  --dtpl-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);
 
-  /* ── 明日方舟：终末地 风格层 ───────────────────────────────────────────────
-     依据：终末地的配色围绕「黄 / 黑 / 白」，黄与浅灰是「终末地工业」的品牌色（罗德岛才是
-     蓝黑）；气质是克制、清晰、**不在字体上下功夫**；底材是金属与管线。推理与出处见
-     docs/DESIGN.md §3.1「界面设计：仍然成立的取舍理由」，决策见 DECISIONS D-025 / D-027。
-     以下几组 token 就是这些特质的载体。 */
+  /* ── 四、系统信号：跟随宿主，不参与这套视觉语言 ───────────────────────────
+     焦点环、输入框聚焦边框、调价史"当前生效"点走它。
+     它不可当强调色用：DSH 默认皮肤里这档等于墨色，拿它做分类或状态是空操作，
+     换皮肤又会变蓝。兜底取墨色而非某个蓝——端出 DSH 里不存在的强调色更糟。 */
+  --dtpl-accent:var(--dsw-alias-brand-primary,#1f2328);
 
-  /* 1. 品牌黄。**它是"料"，不是"线"。**
-     一个恒定的黄在物理上无法同时当浅底与深底上的线条色：#FFCD00 压在白卡上只有
-     1.57:1，做 1px 分隔线、做浅底上的文字、做细柱子都会糊掉。所以恒定只落在**实心块**
-     上——凡是出现黄的地方，它都自带墨色描边或墨色内容（工业标识本来就这么画：
-     黄牌 + 黑字/黑边）。这样两个主题共用一套形态，只有它周围的面色随主题翻转。 */
-  --dtpl-brand:#ffcd00;
-  --dtpl-on-brand:#14150f;
+  /* ── 五、品牌黄：它是"料"，不是"线" ───────────────────────────────────────
+     恒定黄无法同时当浅底与深底上的线条色（#FFCD00 压白卡 1.57:1），
+     所以只以实心块 + 墨边出现，两个主题共用形态，周围面色随主题翻转。 */
+  --dtpl-brand:#ffcd00;    /* 当前页标记、峰值牌、工业徽记、草稿点、选区 */
+  --dtpl-on-brand:#14150f; /* 黄块上的字与墨边 */
 
-  /* 2. 直角。圆角在这套语言里不存在。状态点、表盘这类真圆不走这两个 token。 */
-  --dtpl-radius:0px;
-  --dtpl-radius-sm:0px;
-
-  /* 3. 字体：**保守**。终末地的原话是「字体使用太保守，没有使用在字体上下功夫，好处就是
-     不像某些使用粗体字的压根看不清」——所以这里不做衬线/等宽的字体文章：中文回无衬线，
-     只有数字走等宽（那一条留的是工程语境，不是装饰）。 */
-
-  /* 4. 金属色点缀。终末地的底材是「金属、管线」，所以面板的边不是一条印刷线，而是
-     一块机加工面在**受光边的反光**加**背光边的投影**。两个方向都用固定黑白、极低透明度：
-     深色面上只有顶部那道亮线读得出来，浅色面上只有底部那道暗线读得出来——同一套材质，
-     两个主题各自成立，不需要为深色再补一条规则。
-     只走 1px、≤12%：要的是「金属」，不是高光；这条预算和黄一样是刻意的。
-     它叠在 1px 硬边框之内（外轮廓 + 内倒角），所以面板的边界仍由 --dtpl-border 单独负责——
-     材质与边界是两件事，不许一条半像素阴影同时充当两者。 */
+  /* ── 六、材质：面板的两条配方 ─────────────────────────────────────────────
+     金属边 = 受光边 + 背光边，固定黑白、只走 1px、≤12%；
+     深色面上只有顶亮线读得出，浅色面上只有底暗线读得出，同一套材质两个主题各自成立。
+     它叠在 1px 硬边框之内，材质与边界是两件事。 */
   --dtpl-metal:
     inset 0 1px 0 0 color-mix(in srgb,#fff 7%,transparent),
     inset 0 -1px 0 0 color-mix(in srgb,#000 12%,transparent);
-
-  /* 5. 面板：这一屏所有「一块读数面」共用的一条配方（1px 硬边框 + 这一档洗色 + 金属边）。
-     改这里就是改全窗口的材质，所以没有哪个 tab 能长出自己的面板。 */
+  /* 所有"一块读数面"共用的面板底（3% 洗色）；深色不再单独提亮，否则同屏出现两种面板。 */
   --dtpl-panel-bg:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
 
-  /* 5b. 今日仪表卡的底图『--dtpl-hero-art』**不在这里声明**：它的值是一串 data URI，
-     由 styles.ts 从 import 的资产直接拼进去（本文件是静态字符串，拿不到 import）。
-     它只被『.dtpl-hero-art』那一层背景用，见 ledger 片段的 hero 段。 */
+  /* ── 七、几何与字体 ───────────────────────────────────────────────────────
+     直角是这套形态的判据之一，不是当前偏好；状态点、表盘这类真圆写 50%。
+     不做衬线、不做字体文章，只有数字走等宽。 */
+  --dtpl-radius:0px; /* 唯一允许的圆角值（footer 按钮基线在用） */
+  --dtpl-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace); /* 全部是数字 */
 
-  /* 6. 「一行读数」的右列宽。『.dtpl-row』是**跨 tab 共用**的行组件（用量明细与通道用量
-     都走它），所以这条度量必须挂在插件根上，不能挂在使用者身上。此前它叫 --dtpl-bd-nums-w
-     并定义在『.dtpl-bd』（用量明细那一节）里：通道用量 tab 用了同一个类，变量取不到，
-     『grid-template-columns:minmax(0,1fr) var(...)』整条在计算值阶段失效、回落到单列
-     ——实测行高 75px（两列时 38px），同一个类在两个 tab 里长得完全不一样。
-     名字随之改掉：它约束的是「行」，不是「明细」那一节。
-      宽度按**这一列里最宽的那种内容**定：工作区行跨通道，一格里有**两段**「数额 + 桶名」
-     （『¥1234.56 实际支出 · ¥1234.56 订阅价值』实测 222px），所以它比按模型行（一段，~90px）
-     需要的宽——按它定，模型行只是多留白，反之则金额被裁。 */
+  /* 「一行读数」的右列宽，由跨 tab 共用的 .dtpl-row 使用，故必须挂根（见文件头 ①）。
+     它是下限不是定宽，使用处写 minmax(min-content,var(--dtpl-row-nums-w))：
+     最宽内容（工作区一格两段「数额 + 桶名」）实测 222px，而金额位数不受控，
+     写死会让右列溢出、金额被裁。 */
   --dtpl-row-nums-w:224px;
+
+  /* ⚠️ 两条不在本文件声明的量：
+     · --dtpl-hero-art：值是 data URI，由 styles.ts 从 import 的资产拼进去。
+     · --dsw-corner-shape：超椭圆形状关键字（superellipse(1.5)），不是长度；
+       喂进 border-radius 会让声明失效、圆角塌成 0。半径一律纯长度。 */
 }
 `

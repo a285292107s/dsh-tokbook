@@ -376,11 +376,12 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
         有订阅的行把数字推左，整列读不成一列。
    列头也照数据的**两行**写，行高与行内两行一致，标签因此落在对应数值正上方。
    右列宽 --dtpl-row-nums-w 定义在 tokens 片段：『.dtpl-row』是**跨 tab 共用**的行组件
-   （通道用量也走它），度量挂在插件根上，否则另一个 tab 取不到变量、整条声明静默失效。 */
+   （通道用量、按工作区也走它），度量挂在插件根上，否则另一个 tab 取不到变量、整条声明静默失效。
+   它取 minmax 的**下限**：224px 是按当前这种金额量出来的，位数不受控，写死会让金额在轨道里被裁。 */
 [data-plugin="dsh-tokbook"] .dtpl-bd-cols,
 [data-plugin="dsh-tokbook"] .dtpl-row{
   display:grid;
-  grid-template-columns:minmax(0,1fr) var(--dtpl-row-nums-w);
+  grid-template-columns:minmax(0,1fr) minmax(min-content,var(--dtpl-row-nums-w));
   column-gap:16px;
 }
 /* 列头：**一行**。两列各是一串上下叠起来的事实，所以列名写成「甲 · 乙」，与旁注、工作区

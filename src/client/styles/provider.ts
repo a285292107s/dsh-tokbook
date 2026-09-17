@@ -95,13 +95,17 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
 /* 计费性质：**用形区分，不用色相**。按量 = 描边芯片（一条通道的分类），
    订阅 = 实心墨芯片（这个数不是现金）。上一版把它染成 --dtpl-accent，而 DSH 皮肤里
    accent 本就等于墨色、换个皮肤又会变成蓝——分类从不该由颜色承担，何况这两个桶
-   永远不许被混成一个「支出」。 */
+   永远不许被混成一个「支出」。
+   文字取 fg-2 不是 fg-3：它是一枚**要读的词**（这个数是按量还是订阅），10px 不能
+   因此比同一张卡上的 11px 说明句还淡（浅色皮肤下三级色对卡面只有 3.47:1）。
+
+   它与实心墨的「订阅」仍分得开：层级由**形**给（描边 vs 实心），不由墨色深浅给。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-bill{
   flex:none;display:inline-flex;align-items:center;
   height:15px;padding:0 5px;
   border:1px solid var(--dtpl-border);
   font-size:10px;line-height:13px;font-weight:600;white-space:nowrap;
-  color:var(--dtpl-fg-3);
+  color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-bill[data-billing="subscription"]{
   border-color:var(--dtpl-fg);

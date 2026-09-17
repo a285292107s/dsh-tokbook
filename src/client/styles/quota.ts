@@ -70,11 +70,14 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   display:flex;align-items:center;gap:8px;flex:none;
   min-width:0;
 }
-/* 单卡刷新：紧凑图标钮，请求在飞时禁用。 */
+/* 单卡刷新：紧凑图标钮，请求在飞时禁用。
+   图标取 fg-2 而不是 fg-3：它是这张卡上**唯一的动作**（要去看一眼的东西），三级色
+   对卡面只有 3.47:1——虽然非文本只要 3:1，但一枚功能钮不该比它周围的说明句还淡；
+   悬停再升到主墨色那一档给反馈。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh{
   display:inline-flex;align-items:center;justify-content:center;
   width:28px;height:28px;padding:0;
-  border:none;background:transparent;color:var(--dtpl-fg-3);
+  border:none;background:transparent;color:var(--dtpl-fg-2);
   cursor:pointer;transition:background .15s ease,color .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh:hover:not(:disabled){background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);color:var(--dtpl-fg);}
@@ -120,9 +123,12 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   font-variant-numeric:tabular-nums;white-space:nowrap;
   pointer-events:none;
 }
+/* 百分比那枚「%」：这一行环心是 aria-hidden——读屏拿到的是 aria-label，有视力的人只有这枚
+   单位能读出「这是个百分比」。所以它是**要读的文本**，走 fg-2（fg-3 压卡面只有 3.47:1）。
+   字号仍受环内径限制（见 .dtpl-quota-gauge-word），但那不是把它洗淡的理由。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-n i{
   font-style:normal;font-size:9px;line-height:1;font-weight:600;
-  color:var(--dtpl-fg-3);margin-left:.5px;
+  color:var(--dtpl-fg-2);margin-left:.5px;
 }
 /* 命名这个环所汇总的预算的小号说明。**它是信息，不是装饰**：环的高度本身就是「已用多少」，
    而「这个百分比说的是哪个预算」只由这一行给出（环因此从不静默地换含义，见组件的文档注释）。

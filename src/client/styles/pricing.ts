@@ -182,15 +182,18 @@ export const CSS_PRICING = `
   text-align:right;white-space:nowrap;
 }
 /* 徽章 = 三级描边芯片，层级只由边界与填充表达，色相留给真正要看的状态：
-     默认（不在配置）描边 + 三级文字；要看一眼（价格未知 / 未生效 / 未保存）amber 边 + warn-ink 文字；
+     默认（不在配置）描边 + 次级文字；要看一眼（价格未知 / 未生效 / 未保存）amber 边 + warn-ink 文字；
      还有更多（峰谷价）1px 墨边，从灰芯片里抬一档。
+   默认那一档取 fg-2 而不是三级色：它不是装饰，是**要读的状态**（这枚说的是「配置里没有它」），
+   而三级色压卡面只有 4.12:1，10px 正文不够（UI-SPEC §2：要读的文本都走 fg-2）。
+   层级仍分得开：默认（fg-2 + 灰边）< 峰谷（fg + 墨边）< 需看一眼（warn-ink + amber 边）。
    flex:none + nowrap 是硬约束：折行会撑高一行，截断会丢状态。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge{
   flex:none;
   display:inline-flex;align-items:center;height:15px;padding:0 5px;
   border:1px solid var(--dtpl-border);
   font-size:10px;line-height:13px;font-weight:600;white-space:nowrap;
-  color:var(--dtpl-fg-3);
+  color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-unknown{
   color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);

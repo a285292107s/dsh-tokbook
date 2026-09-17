@@ -790,14 +790,19 @@ const server = createServer((req, res) => {
     --dsw-alias-label-dimmed:#b4b8bc;
     --dsw-alias-label-primary-foreground:#ffffff;
     --dsw-alias-label-primary-inverted:#ffffff;
-    --dsw-alias-brand-primary:#4d6bfe;
+    /* 品牌强调色按 **DSH 的真实取值**给：浅色皮肤 = neutral-bluish-1000（等于墨色），
+       深色皮肤 = neutral-bluish-50。DSH 里这一档是「身份色」，恰好等于主文字色——预览台此前
+       填的是 #4d6bfe（那只存在于插件自己的 CSS 兜底里），于是焦点环、调价史「当前生效」那枚点
+       在预览里是蓝的、在真宿主里是墨的：拿预览验颜色会得出相反的结论（UI-SPEC §2 那条
+       「accent 不是自由强调色」）。宿主另有一个还在推的 -new-color 蓝（#4176e6）。 */
+    --dsw-alias-brand-primary:#0f1115;
     --dsw-alias-button-primary-fill:#4d6bfe;
     --dsw-alias-button-primary-hover:#3f5ce0;
     --dsw-alias-button-ghost-active-border:rgb(0 0 0 / 14%);
     --dsw-alias-interactive-bg-hover:rgb(0 0 0 / 6%);
     --dsw-alias-interactive-bg-active:rgb(0 0 0 / 10%);
     --dsw-alias-state-success-primary:#1a7f37;
-    --dsw-alias-state-warn-primary:#9a6700;
+    --dsw-alias-state-warn-primary:#f59e0b;
     --dsw-alias-state-error-primary:#cf222e;
     --dsw-alias-scrollbar-bg-l2:rgb(0 0 0 / 20%);
     --dsw-alias-scrollbar-hover-l2:rgb(0 0 0 / 30%);
@@ -805,7 +810,9 @@ const server = createServer((req, res) => {
     --dsw-elevation-prominent:0 8px 40px rgb(0 0 0 / 18%);
     --dsw-elevation-stroke-color:rgb(0 0 0 / 8%);
     --dsw-mask-blur:blur(2px);
-    --dsw-corner-shape:20px;
+    /* 形状关键字（超椭圆），不是长度：DSH 真实给的是 superellipse(1.5)。填一个长度会让人
+       以为 --dsw-corner-shape 是半径（tokens 片段那条注释正是为这个坑写的）。 */
+    --dsw-corner-shape:superellipse(1.5);
     --ds-font-family-code:"SF Mono","JetBrains Mono",Consolas,"Liberation Mono",monospace;
   }
   body.dark{
@@ -822,14 +829,14 @@ const server = createServer((req, res) => {
     --dsw-alias-label-tertiary:#adb2b8;
     --dsw-alias-label-dimmed:#6b7075;
     --dsw-alias-label-primary-foreground:#ffffff;
-    --dsw-alias-brand-primary:#7b93ff;
+    --dsw-alias-brand-primary:#f9fafb;
     --dsw-alias-button-primary-fill:#4d6bfe;
     --dsw-alias-button-primary-hover:#5d78ff;
     --dsw-alias-button-ghost-active-border:rgb(255 255 255 / 18%);
     --dsw-alias-interactive-bg-hover:rgb(255 255 255 / 8%);
     --dsw-alias-interactive-bg-active:rgb(255 255 255 / 12%);
     --dsw-alias-state-success-primary:#3fb950;
-    --dsw-alias-state-warn-primary:#d29922;
+    --dsw-alias-state-warn-primary:#f59e0b;
     --dsw-alias-state-error-primary:#f85149;
     --dsw-alias-scrollbar-bg-l2:rgb(255 255 255 / 22%);
     --dsw-alias-scrollbar-hover-l2:rgb(255 255 255 / 32%);
