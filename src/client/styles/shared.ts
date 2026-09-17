@@ -138,6 +138,9 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-head{flex-wrap:wrap;}
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{opacity:1;}
+  /* 价格表的卡头：身份行与事实行之外还有计费性质开关，最窄处让它换到下一行，
+     而不是把通道名与 route key 压成几个字。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-fold{flex:1 1 200px;}
 }
 
 /* 动效（共享 keyframes；尊重 reduced motion） */

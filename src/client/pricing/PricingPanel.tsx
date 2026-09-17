@@ -5,6 +5,11 @@
  * 时候（半输入的数字）不写也不报，等这个字段交代完才说——口径与理由见 D-040。磁盘上的内容是
  * 唯一状态，工具栏只报告它。行内四个数字只读，改价在展开的抽屉里（第一张是托底价）。
  *
+ * 页头三样东西各管一件事：**工具栏**（搜索 / 筛选 / 这次写没写进去）、**事实带**（整张表的
+ * 规模与缺口，随改动当场跟手）、**图例**（那四个数字是什么、`—` 是什么）。首屏因此不必先展开
+ * 任何东西就知道这张表要不要管——而**第一条通道默认展开**，使第一屏至少有一张真实的价目行。
+ * 每张卡折叠时也不是一个空头：身份行下面是这条通道自己的读数（见 `RouteCard`）。
+ *
  * @module dsh-tokbook/client/pricing/PricingPanel
  */
 
@@ -12,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PricingView } from '../../types.ts'
 import { ROUTE_PRICING } from '../../route-paths.ts'
 import {
-  baselineOfDraft, baselinesOf, composePriceBody, draftFromView, isUnpriced, priceUnknown, stagedChanges, rowKey,
+  baselineOfDraft, baselinesOf, composePriceBody, draftFromView, priceUnknown, stagedChanges, rowKey,
   type ModelDraft, type PriceDraft, type RouteDraft,
 } from './draft.ts'
 import { RouteCard } from './editors.tsx'
@@ -75,6 +80,33 @@ function clockOf(epochMs: number): string {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}:${String(at.getSeconds()).padStart(2, '0')}`
 }
 
+/** 整张表的规模与缺口——**不受筛选影响**，所以它报的永远是这张表本身。 */
+interface PriceStats {
+  routes: number
+  models: number
+  /** 价格未知的模型数（同一个判定见 `priceUnknown`）。 */
+  unknown: number
+  /** 这些模型名下有多少条账本请求计 ¥0。与 `unknown` 用**同一个判定**取，所以补上托底价之后
+   *  两者一起归零，屏幕上不会出现「0 个模型未知、却还有 N 次请求没价」这种自相矛盾的读数。 */
+  unpricedRequests: number
+}
+
+function priceStats(draft: PriceDraft): PriceStats {
+  let models = 0
+  let unknown = 0
+  let unpricedRequests = 0
+  for (const card of draft.values()) {
+    for (const row of card.models.values()) {
+      models += 1
+      if (priceUnknown(row)) {
+        unknown += 1
+        unpricedRequests += row.unpriced ?? 0
+      }
+    }
+  }
+  return { routes: draft.size, models, unknown, unpricedRequests }
+}
+
 export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [view, setView] = useState<PricingView | null>(() => staged?.view ?? null)
   const [draft, setDraft] = useState<PriceDraft>(() => staged?.draft ?? new Map())
@@ -84,8 +116,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [query, setQuery] = useState('')
   const [unknownOnly, setUnknownOnly] = useState(false)
   const [openKey, setOpenKey] = useState<string | null>(null)
-  // 通道卡默认收纳：这里记的是**被点开过**的路由，空集 = 全部收起。
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  /** 通道卡的展开态：只记**被手动改过**的通道，其余走默认（第一条展开，见 `openRoutes`）。 */
+  const [folds, setFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map())
 
   const changes = useMemo(() => stagedChanges(draft, baseline), [draft, baseline])
 
@@ -119,6 +151,21 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     setBaseline(baselinesOf(next))
   }, [])
 
+  /** 读一次宿主的价格表视图。**读失败是一个可重试的状态**，不是「这张表是空的」——所以它自己
+   *  带一次重新读取（与用量明细 / 额度两个 tab 同一形状：错误条 + 重试），而错误条在场时下面不再
+   *  补一句「没有可显示的路由」。 */
+  const loadView = useCallback(async (): Promise<void> => {
+    setLoadError(null)
+    try {
+      const res = await fetch(ROUTE_PRICING)
+      if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
+      const body = await res.json() as PricingView
+      if (aliveRef.current) seed(body)
+    } catch (err) {
+      if (aliveRef.current) setLoadError(err instanceof Error ? err.message : String(err))
+    }
+  }, [seed])
+
   // 首次挂载：从未到达磁盘的草稿优先于宿主文件。
   useEffect(() => {
     // 回到面板 = 一次提交点：上次没写完的坏草稿要说出原因，而不是只挂着一句「待保存…」。
@@ -126,19 +173,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       committedRef.current = true
       return
     }
-    let alive = true
-    void (async () => {
-      try {
-        const res = await fetch(ROUTE_PRICING)
-        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
-        const body = await res.json() as PricingView
-        if (alive) seed(body)
-      } catch (err) {
-        if (alive) setLoadError(err instanceof Error ? err.message : String(err))
-      }
-    })()
-    return () => { alive = false }
-  }, [seed])
+    void loadView()
+  }, [loadView])
 
   /**
    * 写入整个文件。草稿尚无效时拒绝（不写入），使半输入的数字不能阻塞或破坏其余内容；
@@ -276,11 +312,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     setOpenKey(current => (current === rowKey(route, model) ? null : rowKey(route, model)))
   }, [])
 
-  const toggleCard = useCallback((route: string) => {
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (next.has(route)) next.delete(route)
-      else next.add(route)
+  const toggleCard = useCallback((route: string, open: boolean) => {
+    setFolds((current) => {
+      const next = new Map(current)
+      next.set(route, !open)
       return next
     })
   }, [])
@@ -303,28 +338,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [changes, writeNow])
 
-  const pricedCount = useMemo(() => {
-    let count = 0
-    for (const card of draft.values()) {
-      for (const row of card.models.values()) if (!isUnpriced(row)) count += 1
-    }
-    return count
-  }, [draft])
+  const stats = useMemo(() => priceStats(draft), [draft])
 
-  const unknownCount = useMemo(() => {
-    let count = 0
-    for (const card of draft.values()) {
-      for (const row of card.models.values()) if (priceUnknown(row)) count += 1
-    }
-    return count
-  }, [draft])
-
-  /** 卡收起时关闭其抽屉，避免内容藏在收纳后面。 */
-  useEffect(() => {
-    if (openKey === null) return
-    const route = openKey.split('\u0000')[0] ?? ''
-    if (!expanded.has(route)) setOpenKey(null)
-  }, [expanded, openKey])
+  /** 筛选态：搜索词或「只看价格未知」任一在场。它决定卡片是否忽略折叠（匹配藏在折叠后面会被读成「无结果」）。 */
+  const filtering = query.trim() !== '' || unknownOnly
 
   const cards = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -347,8 +364,29 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     return out
   }, [draft, query, unknownOnly])
 
-  const filtering = query.trim() !== '' || unknownOnly
-  const stateText = saveStateText(save, pricedCount)
+  /** 这一刻哪些通道是展开的。**默认展开请求数最多的那一条**（host 正按请求数排序，所以就是第一张）：
+   *  价格表 tab 的第一屏至少要看得见一张真实的价目行，账本再大也不会是一堵折叠头。筛选时全部展开。 */
+  const openRoutes = useMemo(() => {
+    const out = new Set<string>()
+    cards.forEach((card, index) => {
+      if (filtering || (folds.get(card.route) ?? index === 0)) out.add(card.route)
+    })
+    return out
+  }, [cards, filtering, folds])
+
+  /** 卡收起时关闭其抽屉，避免内容藏在收纳后面。 */
+  useEffect(() => {
+    if (openKey === null) return
+    const route = openKey.split('\u0000')[0] ?? ''
+    if (!openRoutes.has(route)) setOpenKey(null)
+  }, [openRoutes, openKey])
+
+  const clearFilter = useCallback(() => {
+    setQuery('')
+    setUnknownOnly(false)
+  }, [])
+
+  const stateText = saveStateText(save)
   /** 写不进去（草稿无效 / 宿主或磁盘拒绝）：行上那枚「未保存」徽章只在这种时候出现。 */
   const writeStuck = save.kind === 'invalid' || save.kind === 'error'
 
@@ -380,7 +418,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           title="整行没有价，或账本里有早于最早一段价的记录（那些按 ¥0 计）"
           onClick={() => setUnknownOnly(value => !value)}
         >
-          {unknownOnly ? '只看价格未知' : '价格未知'} {String(unknownCount)} 个模型
+          {unknownOnly ? '只看价格未知' : '价格未知'}
         </button>
         <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
           {stateText}
@@ -390,31 +428,80 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         )}
       </div>
 
-      {cards.length > 0 && (
-        <p className="dtpl-price-legend">
-          右侧四个数字是此刻计费所用的价（含正在生效的峰谷时段），只读；行尾的 ▸ 展开这一行。
-          展开后的第一张是<b>托底价</b>——它没有生效时间，没被下面任一段调价覆盖的时间都按它算。
-          <b>—</b> 表示这一刻还没有价（暂按 ¥0 计，不是免费）。改动会自动写进文件：行左侧的墨条 =
-          还没落盘（不用管），行上多出「未保存」= 这次没能写进去（看上方那条消息）。
-        </p>
+      {/* 事实带 + 图例是一组：带说这张表**现在是什么样**（随改动当场跟手），图例说那四个数字**是什么**。
+          两个都只在真有表时出现——空态自己有话说。 */}
+      {(draft.size > 0 || cards.length > 0) && (
+        <div className="dtpl-price-read">
+          {/* 「其中」不能省：这个数**不是**「没有价的模型数」，而是「有账本记录落在价外」的模型数
+              ——它可能已经写着价（写下的生效时间静默截断了它之前的一切），所以它与上面那个总数
+              之间不是「有价 / 无价」的划分。写成并列的两个类别会让读者以为这里面有一批模型压根没价。 */}
+          <span className="dtpl-hero-facts">
+            <span className="dtpl-hero-fact"><b>{String(stats.routes)}</b> 条通道</span>
+            <i aria-hidden="true">·</i>
+            <span className="dtpl-hero-fact"><b>{String(stats.models)}</b> 个模型</span>
+            <i aria-hidden="true">·</i>
+            {stats.unknown === 0
+              ? <span className="dtpl-hero-fact">全部有价</span>
+              : (
+                <span className="dtpl-hero-fact dtpl-price-fact-unknown">
+                  其中 <b>{String(stats.unknown)}</b> 个价格未知
+                  {stats.unpricedRequests > 0 && <>（<b>{String(stats.unpricedRequests)}</b> 次请求按 ¥0 记）</>}
+                </span>
+              )}
+          </span>
+          {cards.length > 0 && (
+            <p className="dtpl-price-legend">
+              四个数字是此刻计费所用的价（¥/百万词元），只读；<b>「—」</b>= 这一刻还没有价，
+              暂按 ¥0 计（不是免费）。改价点开这一行，改动自动写进文件。
+            </p>
+          )}
+        </div>
       )}
 
       {loadError !== null && (
         <div className="dtpl-error" role="alert">
-          <p className="dtpl-error-text">{loadError}</p>
-          <button type="button" className="dtpl-retry" onClick={() => setLoadError(null)}>知道了</button>
+          <p className="dtpl-error-text">价格表加载失败：{loadError}</p>
+          <button type="button" className="dtpl-retry" onClick={() => void loadView()}>重试</button>
         </div>
       )}
 
-      {view === null && loadError === null
-        ? <div className="dtpl-skeleton" aria-hidden="true"><div className="dtpl-sk dtpl-sk-card" /><div className="dtpl-sk dtpl-sk-card" /></div>
+      {/* 读不到就是读不到：错误条已经说了原因，下面不再补一句「没有可显示的路由」——
+          那句话在说「这里本来就没有内容」，而真相是这一份没读到（UI-SPEC §1 不变量 7）。 */}
+      {view === null
+        ? (loadError === null
+          ? (
+            <div className="dtpl-skeleton" aria-hidden="true">
+              <div className="dtpl-sk dtpl-price-sk-facts" />
+              <div className="dtpl-sk dtpl-price-sk-open" />
+              <div className="dtpl-sk dtpl-price-sk-card" />
+            </div>
+          )
+          : null)
         : cards.length === 0
           ? (
             <div className="dtpl-empty">
-              <p className="dtpl-empty-title">{unknownOnly ? '没有价格未知的模型' : '没有可显示的路由'}</p>
-              <p className="dtpl-empty-sub">
-                卡片来自本机 settings.yaml 的路由与正在运行的适配器；账本或价格表里出现过的路由也会列出来。
-              </p>
+              {filtering && draft.size > 0
+                ? (
+                  <>
+                    <p className="dtpl-empty-title">
+                      {unknownOnly && query.trim() === '' ? '没有价格未知的模型' : '没有匹配的模型'}
+                    </p>
+                    <p className="dtpl-empty-sub">
+                      {`这张表里有 ${String(stats.models)} 个模型${stats.unknown > 0 ? `，其中 ${String(stats.unknown)} 个价格未知` : ''}；当前筛选一个都没留下。`}
+                    </p>
+                    <button type="button" className="dtpl-price-add dtpl-price-empty-act" onClick={clearFilter}>
+                      清除筛选
+                    </button>
+                  </>
+                )
+                : (
+                  <>
+                    <p className="dtpl-empty-title">没有可显示的路由</p>
+                    <p className="dtpl-empty-sub">
+                      卡片来自本机 settings.yaml 的路由与正在运行的适配器；账本或价格表里出现过的路由也会列出来。
+                    </p>
+                  </>
+                )}
             </div>
           )
           : (
@@ -425,7 +512,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                   card={card}
                   baseline={baseline.models}
                   stuck={writeStuck}
-                  collapsed={!filtering && !expanded.has(card.route)}
+                  collapsed={!openRoutes.has(card.route)}
                   openKey={openKey}
                   onToggleCard={toggleCard}
                   onToggleRow={toggleRow}
@@ -439,15 +526,15 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   )
 }
 
-/** 那条状态文字的说法：先报保存状态，无可报告时显示表自身的规模。 */
-function saveStateText(save: SaveState, priced: number): string {
+/** 那条状态文字的说法：只说**这次写没写进去**。表本身的规模在事实带上，不在这里复述一遍。 */
+function saveStateText(save: SaveState): string {
   switch (save.kind) {
     case 'pending': return '待保存…'
     case 'saving': return '保存中…'
     case 'saved': return `已保存 ${clockOf(save.at)}`
     case 'invalid': return `未保存：${save.message}`
     case 'error': return `保存失败：${save.message}`
-    default: return `已定价 ${String(priced)} 条模型`
+    default: return ''
   }
 }
 

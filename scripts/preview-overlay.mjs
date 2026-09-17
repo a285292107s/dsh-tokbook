@@ -21,9 +21,14 @@
  * 落到 HTML 兜底、以「加载失败：Unexpected token '<'」的形式出现在界面上。这条只在
  * 预览模式成立：独立查看器不看 fixture。
  *
- * Query flags: ?dark=1 dark skin, ?tab=ledger|provider|quota|method,
+ * Query flags: ?dark=1 dark skin, ?tab=ledger|provider|quota|pricing|method（值就是 tab 的 id
+ * 后缀，见 LedgerOverlay 的 `dtpl-tab-*`）,
  * ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none quota-tab
  * fixture + auto-switch to the quota tab.
+ *
+ * 无头校验（playwright 等）在导航前设 `window.__PREVIEW_NO_AUTO = true` 可关掉那个
+ * auto-open 循环：它每 100ms 点一次，会跟校验脚本自己的点击抢，而且只认 URL 上的 ?tab=，
+ * 顺序点好几个面时对不上。
  *
  * The overview fixture shape is picked by the **TOKBOOK_MODE env var** (`empty` / `err`), not
  * by a query flag: the payload is served by the same process that renders the page, so one
@@ -324,6 +329,10 @@ const PRICING_FIXTURE = {
         { model: 'retired-model', configured: false, records: 41,
           firstAt: Date.UTC(2026, 8, 1, 6), lastAt: Date.UTC(2026, 8, 1, 7, 30), unpriced: 41,
           segments: [] },
+        // 没有价、账本也从没调用过它:刚加进配置、还没定价的一条串。行上四个格子是「—」,
+        // 判定带说的是「还没有价;它还没有被调用过」——而不是「它的请求都按 ¥0 记」
+        // (那些请求不存在,那是一句假话)。
+        { model: 'glm-5.4-air', configured: true, records: 0, segments: [] },
       ],
     },
     {
@@ -881,17 +890,23 @@ const server = createServer((req, res) => {
     // attempt, and click it only while the overlay is still absent (the trigger
     // TOGGLES — a second click would close it again).
     const tabFlag = params.has('tab') ? params.get('tab') : (params.has('quota') ? 'quota' : null);
-    let tries = 0;
-    setTimeout(function open() {
-      if (document.querySelector('.dtpl-overlay') === null) {
-        const trigger = document.querySelector('[data-plugin="dsh-tokbook"]');
-        if (trigger) trigger.click();
-      } else if (tabFlag !== null) {
-        const tabEl = document.getElementById('dtpl-tab-' + tabFlag);
-        if (tabEl) { tabEl.click(); return; }
-      }
-      if (++tries < 25) setTimeout(open, 100);
-    }, 200);
+    // 无头校验（playwright）用 window.__PREVIEW_NO_AUTO=true 关掉这个自动循环：
+    // 它每 100ms 点一次，会跟校验脚本自己的点击抢（先开浮窗、再切 tab），
+    // 而且它只认 URL 上的 ?tab=——校验要顺序点好几个面时根本对不上。
+    // 注意：这是普通 <script>（不是 module），顶层的 return 是语法错误。
+    if (window.__PREVIEW_NO_AUTO !== true) {
+      let tries = 0;
+      setTimeout(function open() {
+        if (document.querySelector('.dtpl-overlay') === null) {
+          const trigger = document.querySelector('[data-plugin="dsh-tokbook"]');
+          if (trigger) trigger.click();
+        } else if (tabFlag !== null) {
+          const tabEl = document.getElementById('dtpl-tab-' + tabFlag);
+          if (tabEl) { tabEl.click(); return; }
+        }
+        if (++tries < 25) setTimeout(open, 100);
+      }, 200);
+    }
   </script>
 </body>
 </html>`)

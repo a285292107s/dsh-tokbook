@@ -346,9 +346,12 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
     decls.push({
       chip: `价格未知${(row.unpriced ?? 0) > 0 ? ` ${String(row.unpriced!)} 次` : ''}`,
       tone: 'dtpl-price-badge-unknown',
-      // 两种行都会落到这里，后果不同：整行没有价（那些请求一个价都没有）vs 有价但覆盖不到最早的记录。
+      // 三种行都会落到这里，后果不同：整行没有价（那些请求一个价都没有）vs 有价但覆盖不到最早的记录。
+      // 第三种是没有价、账本也从没调用过它——那时说「它的请求都按 ¥0 记」是句假话（那些请求不存在）。
       text: isUnpriced(row)
-        ? '这一行还没有价，它的请求都按 ¥0 记'
+        ? (row.records === 0
+          ? '这一行还没有价；它还没有被调用过'
+          : '这一行还没有价，它的请求都按 ¥0 记')
         : '第一个价段之前记的那些请求按 ¥0 记；补上托底价后自始有价',
     })
   }
@@ -503,7 +506,9 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
   )
 })
 
-/** 一张 route 卡：可折叠的头（名称、key、计数、计费性质）盖在模型表上。头上的 chevron 是唯一的折叠方式，旁边保持为开关。 */
+/** 一张 route 卡：可折叠的头（身份行 + 这条通道自己的读数）盖在模型表上。头上的 chevron 是唯一的折叠方式，旁边保持为开关。
+ *  **折叠头不是空头**：默认只有第一条通道展开，所以这一行往往就是读者看到的全部内容——它自己得说清
+ *  「这条通道多大（模型数 / 请求数）、有没有洞（价格未知）」，用与表头事实带同一套「一串事实」的写法。 */
 export const RouteCard = memo(function RouteCard({ card, baseline, stuck, collapsed, openKey, onToggleCard, onToggleRow, onRowChange, onBilling }: {
   card: RouteDraft
   /** 上次写入时的行签名（见 {@link ModelRow}）。 */
@@ -512,14 +517,17 @@ export const RouteCard = memo(function RouteCard({ card, baseline, stuck, collap
   stuck: boolean
   collapsed: boolean
   openKey: string | null
-  onToggleCard: (route: string) => void
+  /** 第二参是**点击前**这一张是不是开着的——折叠态是派生的（第一条默认展开），所以由卡片把当前态交回去。 */
+  onToggleCard: (route: string, open: boolean) => void
   onToggleRow: (route: string, model: string) => void
   onRowChange: (route: string, model: string, next: ModelDraft) => void
   onBilling: (route: string, billing: BillingNature) => void
 }) {
   const models = [...card.models.values()]
-  const priced = models.filter(model => !isUnpriced(model)).length
   const unknown = models.filter(priceUnknown).length
+  // 请求数报**这一行下面真正列出来的**那些模型：不筛选时它与卡上的 route 合计逐字相等（host 用同一次
+  // 折叠算出两者），筛选时它跟着留下的行走——否则「1 个模型 · 367 次请求」会对着一个「没记过」的行说话。
+  const records = models.reduce((sum, model) => sum + model.records, 0)
   const panelId = `price-card-${card.route}`
   return (
     <article className="dtpl-price-card" data-collapsed={collapsed}>
@@ -529,17 +537,29 @@ export const RouteCard = memo(function RouteCard({ card, baseline, stuck, collap
           className="dtpl-price-fold"
           aria-expanded={!collapsed}
           aria-controls={panelId}
-          onClick={() => onToggleCard(card.route)}
+          onClick={() => onToggleCard(card.route, !collapsed)}
         >
-          <span className="dtpl-price-caret" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
-          <span className="dtpl-price-label">{card.label}</span>
-          {card.label !== card.route && <span className="dtpl-price-key">{card.route}</span>}
-          <span className="dtpl-price-count">
-            {String(models.length)} 个模型 · 已定价 {String(priced)}
-            {/* 「其中」不能省：这两个数**不是**一个划分——有价的行也可能有价格未知的历史，
-                写成两个并列的类别会让读者以为加法不对。 */}
-            {unknown > 0 ? ` · 其中 ${String(unknown)} 个价格未知` : ''}
-            {card.records > 0 ? ` · ${String(card.records)} 次请求` : ''}
+          <span className="dtpl-price-fold-top">
+            <span className="dtpl-price-caret" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+            <span className="dtpl-price-label">{card.label}</span>
+            {card.label !== card.route && <span className="dtpl-price-key">{card.route}</span>}
+          </span>
+          <span className="dtpl-hero-facts">
+            <span className="dtpl-hero-fact"><b>{String(models.length)}</b> 个模型</span>
+            {records > 0 && (
+              <>
+                <i aria-hidden="true">·</i>
+                <span className="dtpl-hero-fact"><b>{String(records)}</b> 次请求</span>
+              </>
+            )}
+            {unknown > 0 && (
+              <>
+                <i aria-hidden="true">·</i>
+                {/* 「其中」不能省，与面板事实带同一条理由：它数的是「有记录落在价外」的模型，
+                    不是「没有价」的模型——一条写着价的模型也可能在里面。 */}
+                <span className="dtpl-hero-fact dtpl-price-fact-unknown">其中 <b>{String(unknown)}</b> 个价格未知</span>
+              </>
+            )}
           </span>
         </button>
         <div

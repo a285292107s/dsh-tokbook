@@ -21,6 +21,14 @@ export const CSS_PRICING = `
   color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
   background:color-mix(in srgb,var(--dtpl-warn) 10%,transparent);
 }
+/* 事实带 + 图例同处一小节：带报这张表**现在是什么样**，图例说那四个数字**是什么**。
+   带本身走跨 tab 共用的「一串事实」词汇（.dtpl-hero-facts，见 ledger 片段），价格表只多一条：
+   「价格未知」那一项染 warn-ink——它是这张表上唯一要动手的地方。
+   b 也要单独指一次：.dtpl-hero-facts b 把数字按主墨色给了（那份规则的优先级与本条相同，
+   而 pricing 片段在 ledger 之后拼接，所以这里赢）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-read{display:flex;flex-direction:column;gap:6px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-fact-unknown,
+[data-plugin="dsh-tokbook"] .dtpl-price-fact-unknown b{color:var(--dtpl-warn-ink);}
 /* 一次性图例：解释「—」的含义，说一遍，不每行都说。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-legend{
   margin:0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
@@ -34,30 +42,32 @@ export const CSS_PRICING = `
   box-shadow:var(--dtpl-metal);
   overflow:hidden;
 }
+/* 卡头两行：**身份行**（折叠钮那一块，整块可点）与**事实行**（这条通道自己的读数）。
+   默认只有第一条通道展开，所以这个头往往就是读者看到的全部——它得自己说清「多大、有没有洞」。
+   hover 洗色只挂在可点的那一块上（.dtpl-price-fold），贴边的内边距留给它。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-head{
-  display:flex;align-items:center;gap:8px;
-  padding:8px 10px 8px 8px;border-bottom:1px solid var(--dtpl-border);
+  display:flex;align-items:flex-start;gap:8px;
+  padding:7px 10px 7px 8px;border-bottom:1px solid var(--dtpl-border);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-card[data-collapsed="true"] .dtpl-price-head{border-bottom:0;}
-/* 折叠头整体换行而不是压碎计数：route key 是唯一不可预测的值，只截它自己，摘要保持完整。 */
+/* 折叠钮是上下两块：身份行（route key 是唯一不可预测的值，只截它自己）与事实行。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-fold{
   appearance:none;border:0;background:transparent;text-align:left;
-  flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-  row-gap:2px;
+  flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;
   padding:3px 4px;
   font:inherit;color:inherit;cursor:pointer;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-fold:hover{background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);}
+/* 身份行整体换行而不是压碎名字：名字与 key 都留着，放不下时 key 让位到下一行。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-fold-top{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;row-gap:2px;min-width:0;
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-caret{flex:none;width:10px;color:var(--dtpl-fg-3);font-size:9px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-label{flex:none;font-size:13px;line-height:20px;font-weight:600;color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-price-key{
   flex:0 1 auto;min-width:0;
   font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-count{
-  flex:none;white-space:nowrap;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
 /* 计费性质切换：全窗口唯一的「当前项」语言——横排 + 竖发丝分隔 + 底部实条（窗口 tab 条、总览子 tab 同款）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-switch{
@@ -414,4 +424,16 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-saving{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-invalid{color:var(--dtpl-warn-ink);}
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-error{color:var(--dtpl-err);font-weight:600;}
+
+/* 骨架屏：按这一屏**真实的排法**分段——事实带 + 图例那一组、第一条展开的卡、后面跟上来的折叠卡。
+   高度是实测值（1440px 宽、预览夹具）：带上那组 59（事实 19 + 6 间距 + 两行图例 34）、
+   折叠卡 63。展开的那张没法预料行数（夹具里 7 行实测 449），按四条行量一个中位数 214——
+   骨架的任务是「首屏别整体下跳」，不是预告行数。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-sk-facts{height:59px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-sk-open{height:214px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-sk-card{height:63px;}
+
+/* 空态里的出路：筛没筛到东西时，读者要能一键回到整张表（面板上的筛选芯片就在他刚看过的位置上方，
+   但空态是「我什么都没找到」那一眼的落点，出路放在这里才是放在他要找的地方）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-empty-act{margin-top:12px;}
 `
