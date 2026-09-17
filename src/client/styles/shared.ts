@@ -102,17 +102,20 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"] .dtpl-provider-nums{align-items:flex-start;}
   [data-plugin="dsh-tokbook"] .dtpl-provider-cost{align-items:flex-start;}
 
-  /* 价格表：四列费率加模型身份塞不进手机。整行改为堆叠——身份、再 2×2 带标签的格子、再展开钮——并去掉已对不齐的列头。 */
+  /* 价格表：四列费率加模型身份塞不进手机。整行改为堆叠——身份 + 请求数 + 展开钮一行、再 2×2 带标签的
+     格子、再判定带——并去掉已对不齐的列头。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-cols{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-price-row{
-    grid-template-columns:minmax(0,1fr) auto;row-gap:6px;
+    grid-template-columns:minmax(0,1fr) auto auto;row-gap:6px;
   }
-  [data-plugin="dsh-tokbook"] .dtpl-price-id{grid-column:1;}
+  /* 窄屏的列头没了，所以请求数落在身份右边、展开钮左边，仍然读得出「这一行有多少次调用」。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-title{grid-column:1;grid-row:1;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-reqs{grid-column:2;grid-row:1;}
   /* 展开钮是进入一行调价史的唯一入口，触控 sheet 上给完整 44px 热区。
      这里只覆盖**几何**、不覆盖字形：字形全窗口一个值（14px，见 pricing 片段）——
      触控与鼠标的差别是热区大小，不是这个符号该画多大。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-more{
-    grid-column:2;grid-row:1;width:44px;height:44px;
+    grid-column:3;grid-row:1;width:44px;height:44px;
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-rates{
     grid-column:1 / -1;

@@ -83,17 +83,15 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
 
 /** 行内的一个价：只读。它不是输入框——这里显示的是**此刻计费所用的价**，改它没有意义（那是改历史），
  *  所以改价一律走展开后的抽屉。列名跟着读屏（`.dtpl-sr`），窄屏下同一份文字变成可见的小标签。 */
-function RateValue({ label, value, note }: {
+function RateValue({ label, value }: {
   label: string
   value: string
-  /** 悬停时说明这个数此刻从哪来（峰谷生效中有话可说）。 */
-  note?: string
 }) {
   const text = value.trim()
   return (
     <div className="dtpl-price-cell">
       <span className="dtpl-sr dtpl-price-value-k">{`${label} `}</span>
-      <span className="dtpl-price-value" data-empty={text === ''} title={note}>
+      <span className="dtpl-price-value" data-empty={text === ''}>
         {text === '' ? '—' : text}
       </span>
     </div>
@@ -310,7 +308,10 @@ function SegmentEditor({ segment, where, floor, active, onChange, onRemove, onDu
   )
 }
 
-/** 一个模型行：身份 + 标记 | 此刻计费所用的四档价（只读） | 展开。整行可点，展开后第一张是托底价。 */
+/** 一个模型行 = **这一行此刻的价目**：身份 | 请求数 | 四档价 | 展开。四样都是定长列（身份那一列伸缩、
+ *  超长只截它自己），所以整张表可以逐列往下比。
+ *  价**怎么读**（可信不可信、是不是全部）另起一条整行宽的**判定带**，只在有话要说时才存在——
+ *  见下面的 decls；安静的行就只有一条。 */
 export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, open, onToggle, onChange }: {
   route: string
   row: ModelDraft
@@ -329,23 +330,70 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
   const unknown = priceUnknown(row)
   // 行内四个数字的来源：此刻生效的那一段叠上此刻生效的峰谷时段。null = 这一刻没有一段在生效。
   const live = ratesInForce(row)
-  const slots = live === null ? 0 : effectiveSlots(live.segment).length
   const ordered = sortedSegments(row)
   // 托底价不是一次调价，所以调价史的编号只数有生效时刻的那些张。
   const changes = ordered.filter(segment => !isFloorSegment(segment))
   // 行的身份**只打印一个**：有人命名该串时显示展示名，否则显示精确串本身。精确串仍是账本的计费键，保持可达：hover 标签与每个单元格的无障碍名称。
+  // 没人命名时它是**精确串**——那一种走等宽（见 styles/pricing 的 [data-exact]），所以这个判断落到 DOM 上，
+  // 而不是让样式去猜（此前猜的是「标题是不是唯一的孩子」，于是同一串带不带徽章会换字体）。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
-  // 第二行只放这四个数字的来龙去脉：账本里计过多少请求、此刻由谁定价、这一段的备注。生效时间**不在行上**——
-  // 它的起点在抽屉的卡片与时间轴上比半行字说得更完整。
-  // 这个数在「通道用量」tab 里就叫「N 请求」（同一个计数），所以这里用同一个词：量词对象不明的
-  // 「账本 N 次」要读者自己补上「记了什么」，而「账本」是容器、不是被数的东西。
-  const meta: string[] = [row.records > 0 ? `${String(row.records)} 次请求` : '没记过请求']
-  // 「此刻没有价」不再用文字说第二遍：四个「—」（图例已解释）+ 那一枚 chip（价格未知 / 未生效）
-  // 已经把这件事说全，而这一行会被截断。峰谷也不在这里重说一次——芯片已建立这个词，这里只说此刻
-  // 按的是哪一个窗口。
-  if (live !== null && live.slot !== null) meta.push(`此刻按${dayLabel(live.slot)}`)
-  if (live !== null && live.segment.note.trim() !== '') meta.push(live.segment.note.trim())
-  const metaText = meta.join(' · ')
+  // 请求数是一**列**（列头「请求」），不是句子尾巴——这里只给数字，单位由列头说一次。
+  // 上一版把它拼成「N 次请求」塞进身份列跟芯片抢位置，于是它成了这一行里唯一会被省略号吃掉的事实：
+  // host 正是按这个数把表排出来的，而一张按它排序的表读不到它，等于没排序。「没记过」是 0 的读法：
+  // 账本是权威，没记过就是没记过，不是「未知」（未知的是**价**，那是判定带的事）。
+  const countText = row.records > 0 ? `${String(row.records)} 次` : '没记过'
+  // 「未生效」得说得出**什么时候**生效：此刻没有任何一段在生效时，按效力顺序的第一张带生效时刻的段
+  // 就是那一张（更晚的都要先等它过去）。
+  const startsAt = live === null ? (ordered.find(segment => segment.from.trim() !== '')?.from ?? null) : null
+  // 判定带（见下面 .dtpl-price-decl）：**一条 = 一枚芯片 + 一句话**。芯片是可纵向扫读的类，句子是
+  // 这个类对**这一行**的意思（数量、时刻、后果）。两者都印在行上，所以这一行的任何一个判定都不再
+  // 需要悬停才知道（UI-SPEC §2：信息不能只存在 title 里）——上一版把定义写在 title 里，等于要求
+  // 读者先知道该去悬停它。
+  // 顺序按**问题域**，不按代码顺序：钱的诚实性（价格未知 / 未生效）→ 价的结构（峰谷价）→
+  // 身份（不在配置）→ 会话写入（未保存）。左起第一枚因此永远是最该看的那一枚；
+  // 「未生效」与「价格未知」构造上互斥，所以现实中最常见的是一两枚。
+  const decls: { chip: string; tone: string; text: string }[] = []
+  if (unknown) {
+    decls.push({
+      chip: `价格未知${(row.unpriced ?? 0) > 0 ? ` ${String(row.unpriced!)} 次` : ''}`,
+      tone: 'dtpl-price-badge-unknown',
+      // 两种行都会落到这里，后果不同：整行没有价（那些请求一个价都没有）vs 有价但覆盖不到最早的记录。
+      text: isUnpriced(row)
+        ? '这一行还没有价，它的请求都按 ¥0 记'
+        : '第一个价段之前记的那些请求按 ¥0 记；补上托底价后自始有价',
+    })
+  }
+  if (live === null && !unknown) {
+    decls.push({
+      chip: '未生效',
+      tone: 'dtpl-price-badge-idle',
+      text: startsAt === null ? '价还没到生效时间，此刻按 ¥0 记' : `${fmtFrom(startsAt)}生效，此刻按 ¥0 记`,
+    })
+  }
+  if (live !== null) {
+    const slots = effectiveSlots(live.segment).length
+    if (slots > 0) {
+      decls.push({
+        chip: '峰谷价',
+        tone: 'dtpl-price-badge-slot',
+        // 芯片只说「这一段里有峰谷价」，说不清**此刻**按的是哪一档——而那正是同一件事里读者要看的一半。
+        // 数出来的只是**生效这一段**里的时段（托底价与别的调价段各有各的时段），所以那句「生效的这段里」
+        // 的限定词不能省。
+        text: live.slot === null
+          ? `此刻按全天价；生效的这段里另有 ${String(slots)} 个时段价`
+          : `此刻按峰谷价计费（${dayLabel(live.slot)}）`,
+      })
+    }
+  }
+  // 身份事实，不是钱：**两种**行都会落到这里（配置删了但账本记得 / 只写在价表里）。说「**本通道**」
+  // 不是啰嗦：同一个模型串可以在一条通道上不在配、在另一条上正常在配（fixture 里就有），
+  // 所以「它已经调不到了」这种不带限定的说法会在那张还活着的卡上说假话。
+  if (!row.configured) {
+    decls.push({ chip: '不在配置', tone: '', text: '本通道的配置里已没有它，这个价只影响历史金额' })
+  }
+  if (dirty && stuck) {
+    decls.push({ chip: '未保存', tone: 'dtpl-price-badge-dirty', text: '这次改动还没写进文件，原因见上方那条消息' })
+  }
 
   return (
     <>
@@ -360,79 +408,29 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
           onToggle(route, row.model)
         }}
       >
-        <div className="dtpl-price-id">
-          {/* 第 1 行是身份（有人命名时显示展示名，否则精确串）加上标记。第 2 行是出处。一个身份一行：打印名称**和**精确串等于说两遍。
-              标记按**问题域**排，不按代码顺序：钱的诚实性（价格未知 / 未生效）→ 价的结构（峰谷）→ 身份（不在配置）→ 会话写入（未保存）。
-              左起第一枚因此永远是最该看的那一枚；「未生效」与「价格未知」构造上互斥，所以现实中最多两三枚。 */}
-          <span className="dtpl-price-name">
-            <span
-              className="dtpl-price-title"
-              title={named ? `${row.name!}\n${row.model}` : row.model}
-            >
-              {named ? row.name : row.model}
-            </span>
-            {/* 有价的行也可能挂这枚徽标：账本里有落在所有价段之外的记录。带上条数才说得清是哪一种，
-                而不是让读者以为行内那个数不作数。 */}
-            {unknown && (
-              <span
-                className="dtpl-price-badge dtpl-price-badge-unknown"
-                title="账本里有没被任何价段覆盖的请求（按 ¥0 计）；托底价填上后，这些时间就自始有价了"
-              >
-                价格未知{(row.unpriced ?? 0) > 0 ? ` ${String(row.unpriced!)} 次` : ''}
-              </span>
-            )}
-            {/* 价写好了、日子还没到（只有「没记过账、只写了未来价」的行能落到这里）：此刻确实没有价，
-                所以给它一句解释，而不是让读者自己猜这一行为什么是空的。 */}
-            {live === null && !unknown && (
-              <span
-                className="dtpl-price-badge dtpl-price-badge-idle"
-                title="这一行的价都还没到生效时间，此刻没有价（按 ¥0 计）"
-              >
-                未生效
-              </span>
-            )}
-            {/* 「里面还有更多定价」——存在性才是动作触发（决定要不要展开），段数属于 hover 才知道的事。 */}
-            {slots > 0 && (
-              <span
-                className="dtpl-price-badge dtpl-price-badge-slot"
-                title={`这一行的价里还有 ${String(slots)} 个峰谷时段：展开这一行看`}
-              >
-                峰谷
-              </span>
-            )}
-            {/* 身份事实，不是钱：**两种**行都会落到这里（配置删了但账本记得 / 只写在价表里），
-                所以不能叫「仅账本」——后一种行账本从没记过它，那一行会同时说「不在配置」与「没记过请求」。 */}
-            {!row.configured && (
-              <span
-                className="dtpl-price-badge"
-                title="settings 与适配器目录都不再列这个模型：它已经调不到了，这个价只影响历史金额"
-              >
-                不在配置
-              </span>
-            )}
-            {dirty && stuck && (
-              <span
-                className="dtpl-price-badge dtpl-price-badge-dirty"
-                title="这一行的改动还没写进文件（原因看上方那条消息）"
-              >
-                未保存
-              </span>
-            )}
-          </span>
-          <span className="dtpl-price-meta">
-            {/* 这一行会被压缩截断尾部，title 兜住全文。 */}
-            <span className="dtpl-price-meta-text" title={metaText}>{metaText}</span>
-          </span>
-        </div>
+        {/* 身份：一行**一个**（有人命名时显示展示名，否则精确串）。它是这一行唯一长度不可预测的值，
+            所以也是唯一让位的值——名字长到装不下时省略的是它自己，旁边那些定长的东西（请求数、
+            四个价、判定带）都不跟着动。上一版把它和芯片、计数挤在同一列里，名字一长就换行/挤压；
+            这一版它独占一列，只有它自己会被省略号截。 */}
+        <span
+          className="dtpl-price-title"
+          data-exact={!named}
+          title={named ? `${row.name!}\n${row.model}` : row.model}
+        >
+          {named ? row.name : row.model}
+        </span>
+        {/* 请求数 = **列**，不是这一行里的一句话。列头是 aria-hidden 的视觉标签（见 .dtpl-price-cols），
+            所以这里给读屏一份同样的字：请求 322 次，而不是让 AT 只念一个光秃秃的数。 */}
+        <span className="dtpl-price-reqs">
+          <span className="dtpl-sr">请求 </span>
+          {countText}
+        </span>
         <div className="dtpl-price-rates">
           {CELLS.map(({ field, label }) => (
             <RateValue
               key={field}
               label={label}
               value={live === null ? '' : live.values[field]}
-              {...(live !== null && live.slot !== null
-                ? { note: `此刻按峰谷 ${dayLabel(live.slot)} 计费` }
-                : {})}
             />
           ))}
         </div>
@@ -446,6 +444,22 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
         >
           <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         </button>
+        {/* 判定带：**整行宽**，**只在有话要说时才存在**（见上面的 decls）——所以「这一行有第二行」
+            本身就是那个要先看它一眼的信号，而安静的行仍然只有一条。
+            芯片在行首排成一条可纵向扫读的类列（每行都从同一个 x 起，与名字长短无关），句子跟在
+            同一条带上说这一行自己的后果。它横跨整行而不是缩在身份列里：它是一句要读的话，
+            身份列那 224–282px 装不下（实测自然宽 200–330px，缩在那里只剩开头几个字）。
+            与句子同样重要的另一半：四个数字的 hover 不再重复它——同一个事实不给两种措辞。 */}
+        {decls.length > 0 && (
+          <p className="dtpl-price-decl">
+            {decls.map(decl => (
+              <span key={decl.chip} className={`dtpl-price-badge${decl.tone === '' ? '' : ` ${decl.tone}`}`}>
+                {decl.chip}
+              </span>
+            ))}
+            <span className="dtpl-price-decl-text">{decls.map(decl => decl.text).join(' · ')}</span>
+          </p>
+        )}
       </div>
       {open && (
         <div className="dtpl-price-history">
@@ -569,6 +583,7 @@ export const RouteCard = memo(function RouteCard({ card, baseline, stuck, collap
             <>
               <div className="dtpl-price-cols" aria-hidden="true">
                 <span className="dtpl-price-col-id">模型</span>
+                <span className="dtpl-price-col-reqs">请求</span>
                 <span className="dtpl-price-rates">
                   {CELLS.map(({ field, label }) => <span key={field} className="dtpl-price-col-rate">{label}</span>)}
                 </span>

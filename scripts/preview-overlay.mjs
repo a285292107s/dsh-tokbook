@@ -251,7 +251,9 @@ const PRICING_FIXTURE = {
         // 首记在生效时间之后:那个边界在区间之外、区间里没有别的调价,所以整条轴都不画
         // (只有首记与今天时,空轨道说不了行内四档价没说过的事)。这一段从 09-01 起、
         // 覆盖了全部账本,所以行上没有「价格未知」——只是托底价那一张还空着。
-        { model: 'deepseek-v4-pro', configured: true, records: 2745,
+        // 目录给了展示名:身份行随之走比例体(精确串才走等宽),而且它**没有徽章**——
+        // 正是「有没有名字」与「有没有徽章」必须分开判的那一格(见 styles/pricing 的 [data-exact])。
+        { model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', configured: true, records: 2745,
           firstAt: Date.UTC(2026, 8, 5, 3), lastAt: Date.UTC(2026, 8, 11, 10), unpriced: 0,
           segments: [
           { from: '2026-09-01', inputPerMillion: 4.5, outputPerMillion: 13.5, cacheWritePerMillion: 0.15 },
@@ -277,12 +279,19 @@ const PRICING_FIXTURE = {
     {
       route: 'commandcode', label: 'commandcode', billing: 'subscription', records: 3240,
       models: [
-        // 托底价 + 完整覆盖(这一段没有生效时刻):它管全部时间,行内四个数字就是它的价,
-        // 没有调价史可画,所以不画轴。
-        { model: 'deepseek/deepseek-v4-flash', configured: true, records: 2964,
+        // **最长的一个身份串**（命名空间前缀 + 长版本串），而且同时挂两枚徽章（峰谷 + 不在配置）：
+        // 上一版在这种行上会把徽章挤到第二行——实测行高从 48 涨到 60，而且两枚里只有一枚掉下去。
+        // 现在身份行只有名字（整列宽都归它），徽章整组落在出处行的行首。
+        // 托底价 + 一段带峰谷的调价：行内四个数字报的是正在生效的那一段。
+        { model: 'deepseek/deepseek-v4-flash', configured: false, records: 2964,
           firstAt: Date.UTC(2026, 8, 6, 11, 3), lastAt: Date.UTC(2026, 8, 8, 11, 2), unpriced: 0,
           segments: [
           { from: null, inputPerMillion: 1.5, outputPerMillion: 4.5 },
+          { from: '2026-09-10T12:00', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
+            note: '官方空闲价，高峰按 GOAT 页工作日另计',
+            slots: [
+              { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
+            ] },
         ] },
         { model: 'z-ai/glm-5.3-flash', configured: true, records: 276, unpriced: 276, segments: [] },
       ],

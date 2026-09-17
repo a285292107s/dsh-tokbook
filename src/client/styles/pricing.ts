@@ -109,16 +109,28 @@ export const CSS_PRICING = `/* 价格表 tab */
   --dtpl-rate-w:74px;
   --dtpl-rate-gap:6px;
   --dtpl-rates-w:calc(4 * var(--dtpl-rate-w) + 3 * var(--dtpl-rate-gap));
+  /* 请求数列：最宽的内容是「2964 次」（5 个等宽数字 + 一个汉字 ≈ 44px），列头「请求」比它还窄。 */
+  --dtpl-reqs-w:44px;
 }
 
-/* 每行是自己的网格，轨道与上方列头相同：身份（伸展）| 四个固定费率列 | 一个展开槽。
+/* 每行是自己的网格，轨道与上方列头相同：身份（伸展）| 请求数 | 四个固定费率列 | 一个展开槽。
 
    费率轨道按费率实际是什么来定，而不是按列标签：最窄的安全列宽把剩余宽度留给唯一放不可预测文本的列——模型身份。
-   展开槽 32px 由下面 .dtpl-price-more 的命中区决定，两处必须一起改（列宽小于控件会把控件压回去）。 */
+   展开槽 32px 由下面 .dtpl-price-more 的命中区决定，两处必须一起改（列宽小于控件会把控件压回去）。
+   请求数是**列**而不是身份列里的一句话：它是 host 排这一张表的键，缩在可截断的文本里时读不到，
+   而它自己只有 44px、永远完整（见 .dtpl-price-reqs）。身份列因此少 54px，但它换回来的是
+   「这一列只会因为名字太长而截断」——定长的事实不再跟它抢宽度。
+   第一格的高度写死为 minmax(32px,auto)：那是这一行**唯一的高度来源**——展开钮 32px（桌面）或 44px（窄屏，
+   minmax 的 max 是 auto，所以那一格自己会长），名字那一行 16px 远低于它。行高因此与「有没有判定带」
+   无关，只有判定带自己那一格会把它撑高；名字在每一行里落在同一条横线上。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-cols,
 [data-plugin="dsh-tokbook"] .dtpl-price-row{
   display:grid;
-  grid-template-columns:minmax(0,1fr) var(--dtpl-rates-w) 32px;
+  /* 请求数列是 minmax(44px,max-content)：44px 是常见位数的下限（见 --dtpl-reqs-w），
+     位数再多也**不截断、不溢出**——轨道跟着长，让位的仍然是可伸缩的身份列。
+     它的**右边缘**因此与位数无关（右侧两条轨道是定宽、钉在卡片右缘的），
+     列头（内容只有「请求」两字）与每一行的数仍然结束在同一条竖线上。 */
+  grid-template-columns:minmax(0,1fr) minmax(var(--dtpl-reqs-w),max-content) var(--dtpl-rates-w) 32px;
   column-gap:10px;align-items:center;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cols{
@@ -126,6 +138,8 @@ export const CSS_PRICING = `/* 价格表 tab */
   font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-col-id{padding-left:0;}
+/* 列头与它下面那一列**结束在同一条竖线**上——这是列头存在的全部意义（数值列右对齐的同一套规矩）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-col-reqs{text-align:right;}
 [data-plugin="dsh-tokbook"] .dtpl-price-cols .dtpl-price-rates{
   display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
   column-gap:var(--dtpl-rate-gap);
@@ -135,7 +149,9 @@ export const CSS_PRICING = `/* 价格表 tab */
   text-align:right;padding-right:var(--dtpl-cell-pad-x);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-row{
-  min-height:40px;padding:4px 10px;border-top:1px solid var(--dtpl-hairline);
+  grid-template-rows:minmax(32px,auto);
+  min-height:32px;padding:4px 10px;border-top:1px solid var(--dtpl-hairline);
+  row-gap:2px;
   scroll-margin-block:56px;
   cursor:pointer;
 }
@@ -163,28 +179,41 @@ export const CSS_PRICING = `/* 价格表 tab */
   box-shadow:inset 2px 0 0 var(--dtpl-fg),
     inset 0 0 0 1px color-mix(in srgb,var(--dtpl-accent) 45%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-id{display:flex;flex-direction:column;gap:2px;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-price-name{
-  display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap;row-gap:2px;
-}
-/* 模型选择器的身份拆分，各占一行，互不抢宽度：人读的 NAME 是标签、永不缩没；精确 model 字符串是身份（计费键），占下一行整宽。 */
+/* 身份：一行只有它，也只有它会截断。名字是这张表里唯一长度不可预测的值（模型串由人写），
+   所以让位的永远是它自己：overflow:hidden 让这一格在网格里的自动最小宽度变成 0，
+   省略号才是真的（否则网格项会被内容顶宽、把右边的列挤出卡片）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-title{
-  flex:0 1 auto;min-width:0;
+  display:block;min-width:0;
   font-size:12px;line-height:16px;font-weight:500;color:var(--dtpl-fg);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-/* 没有名字的行只靠精确字符串站立，所以接过标签的色调和字重，而不是读成被弱化的旁注。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-title:only-child{
+/* 没有名字的行只靠精确字符串站立，所以接过标签的色调和字重，而不是读成被弱化的旁注。
+   判据是**这一串是不是精确模型串**（TSX 上的 data-exact），不是它旁边有没有徽章——
+   上一版用的是 :only-child，徽章的多少因此会改变名字的字体。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-title[data-exact="true"]{
   color:var(--dtpl-fg);font-family:var(--dtpl-mono);
+}
+/* 请求数：一**列**，不是一个句子尾巴。它比四个价安静一档（11px / fg-2 对 12px 等宽 / fg），
+   因为这一行要读的是价；但它必须**永远完整**——host 按它降序排这张表，读不到它就等于没排序。
+   所以它右对齐 + 等宽数字（tabular-nums）：位数不同的行也落在同一条竖线上，而且只占 --dtpl-reqs-w
+   这一条轨道——它永远不会被省略号吃掉（列头 .dtpl-price-col-reqs 与它结束在同一条竖线上）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-reqs{
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-variant-numeric:tabular-nums;
+  text-align:right;white-space:nowrap;
 }
 /* 徽章 = 三级**描边芯片**，不是一个色块矩阵：
      默认（不在配置）            描边 + 三级文字 —— 只是说明这个值从哪来；
      需要看一眼（价格未知 / 未生效 / 未保存）1px amber 边框 + warn-ink 文字；
-     还有更多（峰谷）            1px 墨边，从灰芯片里抬一档。
-   上一版一律是圆角 + --dtpl-accent 染色底：accent 在 DSH 皮肤里等于墨色，于是「峰谷」
+     还有更多（峰谷价）            1px 墨边，从灰芯片里抬一档。
+   上一版一律是圆角 + --dtpl-accent 染色底：accent 在 DSH 皮肤里等于墨色，于是「峰谷价」
    和「不在配置」在界面上是同一块灰，等于没有层级；换个皮肤又会整片变蓝。
    现在层级只由**边界与填充**表达，色相留给真正要看的状态。实心墨那一档只剩「当前项」
-   （按量 / 订阅的选中段）——「未保存」自 D-040 起只在写不进去时出现，它属于「要看一眼」。 */
+   （按量 / 订阅的选中段）——「未保存」自 D-040 起只在写不进去时出现，它属于「要看一眼」。
+   位置：全部落在**判定带的带首**（见 .dtpl-price-decl），与名字**不同行也不同格**——
+   它们是这一行里的定长事实，不跟唯一可伸缩的那一列抢宽度，所以 flex:none + nowrap 是硬约束：
+   折行会撑高一行、截断会丢状态，两者都不允许。
+   line-height 13px 与 1px 描边一起，让芯片的基线落在判定带那句说明句的基线上（那里 11px/16px）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge{
   flex:none;
   display:inline-flex;align-items:center;height:15px;padding:0 5px;
@@ -198,7 +227,7 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-dirty{
   color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
 }
-/* 峰谷标记：这一行可见的四个数字不是全部——它必须一眼读成「里面还有更多定价」。
+/* 峰谷价标记：这一行可见的四个数字不是全部——它必须一眼读成「里面还有更多定价」。
    它不抢颜色，靠 1px 墨边把自己从「不在配置」那类中性芯片里抬一档。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-slot{
   color:var(--dtpl-fg);border-color:color-mix(in srgb,var(--dtpl-fg) 35%,transparent);
@@ -207,14 +236,28 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-idle{
   color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
 }
-/* 出处行：这个价是什么，以及这一行在账本里有多少次请求。行的身份不在此重复——上一行已经说过一次。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-meta{
-  display:flex;align-items:baseline;gap:5px;min-width:0;
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
+/* 判定带 = **这一行的第二句话**，不是这一行的第二行版式：它只在有话要说时存在（TSX 里整段条件渲染），
+   所以「这一行有第二行」本身就是那个要先看它一眼的信号，而安静的行仍然只有一条（40px）。
+   它横跨整行（grid-column:1/-1），而不是缩在身份列里：它是一句要读的话，身份列那 224–282px 装不下
+   （实测自然宽 200–330px，缩在那里只剩 49–76px），而**结论绝不能靠悬停才知道**。
+   带首是芯片（可纵向扫读的**类**列：每行都从同一个 x 起，与名字长短无关），后面跟着这一行自己的
+   后果（数量 / 时刻 / 影响）——芯片说类，句子说这一行，两者都在屏幕上。
+   它是**一句要读的话**，所以走 11px/16px（说明句档，与抽屉里的说明句同一个字号）；
+   9–10px 那一档只给短标签（列头 / 柱值 / 芯片 / 轴刻度），装不下一句话（见 UI-SPEC §2）。
+   间距一律 10px：句子的长度由代码拼出来，一行放得下就与芯片同行，放不下就整句落到下一行——
+   所以那 10px 不能写成句子的 margin（换行后它会变成一句莫名其妙的 5px 缩进，而芯片之间的 5px
+   是因为它们同类）。不在这里用「·」连接芯片与句子：那是**同一串事实**的连接符（见 .dtpl-cost-sep），
+   用它反而会把类与它的解释粘成一句。
+   行上的 row-gap:2px 只在这里起作用——它与上面那条价目带之间留一条缝；窄屏的 6px 在
+   shared 的 ≤640px 段里（那张表在 CSS 里排在 pricing 之后，所以那里的值仍然说了算）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-decl{
+  grid-column:1 / -1;margin:0;min-width:0;
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-meta-text{
-  flex:0 1000 auto;min-width:0;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+/* 句子可以换行（它长度可预测、由代码拼出来），但**不截断**：截掉的判定等于没有判定。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-decl-text{
+  flex:1 1 auto;min-width:0;overflow-wrap:anywhere;
 }
 /* 这一行哪里不对，紧挨在自己的格子下面。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-issue{
