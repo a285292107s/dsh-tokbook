@@ -85,7 +85,7 @@ const consoleLogger: StatsLogger = console
 const DAY_FILE = /^usage-(\d{4}-\d{2}-\d{2})\.jsonl$/u
 
 /** 分日文件名中的日期部分；外来文件名为 null。 */
-export function fileDay(name: string): string | null {
+function fileDay(name: string): string | null {
   return DAY_FILE.exec(name)?.[1] ?? null
 }
 
@@ -369,7 +369,7 @@ export async function writeRollup(dir: string, rollup: RollupFile): Promise<void
 // ---------------------------------------------------------------------------
 
 /** 置零的 totals。 */
-export function emptyTotals(): UsageTotals {
+function emptyTotals(): UsageTotals {
   return {
     requests: 0,
     inputTokens: 0,

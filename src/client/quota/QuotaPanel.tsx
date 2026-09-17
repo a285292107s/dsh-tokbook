@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { QuotaCard, QuotaGate, QuotaView } from '../../types.ts'
+import { QUERY_PROVIDER, QUERY_REFRESH, ROUTE_QUOTA } from '../../route-paths.ts'
 import { orderQuotaProviders } from '../../quota.ts'
 import { UsageGlyph } from '../icons.tsx'
 import { QuotaCardView } from './QuotaCard.tsx'
@@ -68,7 +69,7 @@ export function QuotaPanel() {
   useEffect(() => {
     let cancelled = false
     setListError(null)
-    fetch('/tokbook/quota')
+    fetch(ROUTE_QUOTA)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json() as Promise<QuotaView>
@@ -198,7 +199,7 @@ function QuotaCardController({ provider, autoTicker, onGate }: {
     const token = ++inFlight.current
     setLoading(true)
     setError(null)
-    return fetch(`/tokbook/quota?provider=${encodeURIComponent(provider)}${force ? '&refresh=1' : ''}`)
+    return fetch(`${ROUTE_QUOTA}?${QUERY_PROVIDER}=${encodeURIComponent(provider)}${force ? `&${QUERY_REFRESH}=1` : ''}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return await res.json() as QuotaCard

@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PricingView } from '../../types.ts'
+import { ROUTE_PRICING } from '../../route-paths.ts'
 import {
   anchoredRow, baselineOfDraft, baselinesOf, composePriceBody, draftFromView, isUnpriced, stagedChanges, rowKey,
   type ModelDraft, type PriceDraft, type RouteDraft,
@@ -47,7 +48,7 @@ interface Staged {
 let staged: Staged | null = null
 
 function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
-  return fetch('/tokbook/pricing', {
+  return fetch(ROUTE_PRICING, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -106,7 +107,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     let alive = true
     void (async () => {
       try {
-        const res = await fetch('/tokbook/pricing')
+        const res = await fetch(ROUTE_PRICING)
         if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
         const body = await res.json() as PricingView
         if (alive) seed(body)

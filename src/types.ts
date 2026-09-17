@@ -395,8 +395,25 @@ export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRo
   updatedAt: number
   records: number
   lastEventAt: number | null
-  syncStatus: 'idle' | 'running' | 'done' | 'error'
+  syncStatus: SyncStatus
   syncError: string | null
+}
+
+/** 后台权威同步的状态机。 */
+export type SyncStatus = 'idle' | 'running' | 'done' | 'error'
+
+/**
+ * 同步状态探针（`/tokbook/sync`）的载荷：调度器状态的只读投影，**不含任何账本数据**。
+ *
+ * client 追一轮 walk 落定时读它，而不是反复拉 `TokBookOverview`——后者每次都是全量聚合
+ * （实测 200–340 ms），而追的 tick 次数正比于 walk 耗时，等于把负载加在正被 walk 压着的
+ * 那条路径上。落定之后 client 再拉一次概览，新折进来的行就在那一次里。
+ */
+export interface SyncStatusView {
+  status: SyncStatus
+  error: string | null
+  /** 最近一次 walk 落定的时刻；本进程从未走过则为 null。 */
+  lastSyncAt: number | null
 }
 
 /** 插件配置（可选旋钮；皆有默认值）。 */

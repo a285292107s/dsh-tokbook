@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  BillingMap, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
+  BillingMap, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
 } from './types.ts'
 import { totalsTokens } from './types.ts'
 import { coercePlansConfig, validateConfig } from './config.ts'
@@ -218,6 +218,7 @@ export class TokenUsageBook extends Service {
       ctx.effect(() => registerTokBookRoutes(
         webServer,
         () => this.overview(),
+        () => this.syncState(),
         () => this.rescan(),
       ))
       ctx.effect(() => registerTokBookUsageRoute(
@@ -543,6 +544,19 @@ export class TokenUsageBook extends Service {
     return card
   }
 
+  /**
+   * 同步状态探针的载荷：只读内存里的调度器状态，**不触碰账本**。读路径的廉价观察点
+   * ——client 追一轮 walk 落定时读它（≈0 ms），落定后再拉一次概览；反过来拿概览当探针
+   * 就是每 500 ms 一次全量聚合，而 tick 次数正比于 walk 耗时。
+   */
+  syncState(): SyncStatusView {
+    return {
+      status: this.syncStatus,
+      error: this.syncError,
+      lastSyncAt: this.lastSyncAt > 0 ? this.lastSyncAt : null,
+    }
+  }
+
   /** 强制对全部会话做一次权威再同步（绕过新鲜探针）并报告其启动，供扫描按钮用。 */
   async rescan(): Promise<{ status: 'running' | 'skipped'; lastSyncAt: number | null }> {
     const persistence = this.persistence
@@ -588,12 +602,15 @@ export class TokenUsageBook extends Service {
    * route → model → 价格段），因此写路径整体替换 `pricing.json`，被省略的
    * (route, model) 停止定价（其记录落到价格未知）。读时成本层在下次读时重算历史
    * ——不重写账本或 rollup。
+   *
+   * **不回视图**：自动保存是全程最热的写路径（每次停止输入一拍就写一次），而 client 读
+   * 响应只取 `ok` / `error`——回一份 `pricingView()` 等于每次白跑一次全表读 + 16 KB 载荷。
    */
-  async savePricing(body: unknown): Promise<PriceParse & { view: PricingView }> {
+  async savePricing(body: unknown): Promise<PriceParse> {
     const parsed = parsePriceInput(body)
-    if (!parsed.ok) return { ok: false, error: parsed.error, view: await this.pricingView() }
+    if (!parsed.ok) return parsed
     await writePriceFile(this.dir, parsed.file, this.logger)
-    return { ok: true, file: parsed.file, view: await this.pricingView() }
+    return parsed
   }
 
 }

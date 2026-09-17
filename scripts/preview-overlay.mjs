@@ -698,6 +698,12 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(mode === 'empty' ? emptyOverview : overview))
     return
   }
+  if (url.pathname === '/tokbook/sync') {
+    // 预览台永远没有在跑的 walk：探针照 host 的形状答，但状态恒为落定。
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ status: 'done', error: null, lastSyncAt: null }))
+    return
+  }
   if (url.pathname === '/tokbook/rescan') {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end('{}')
@@ -721,7 +727,7 @@ const server = createServer((req, res) => {
           const parsed = JSON.parse(body === '' ? '{}' : body)
           withPricingWrite(parsed)
           res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify({ ok: true, view: pricingView() }))
+          res.end(JSON.stringify({ ok: true }))
         } catch (error) {
           res.writeHead(400, { 'content-type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: String(error) }))

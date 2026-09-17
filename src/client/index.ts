@@ -8,6 +8,7 @@
 
 import type { QuotaView } from '../types.ts'
 import type { TokBookContext } from './contract.ts'
+import { ROUTE_QUOTA } from '../route-paths.ts'
 import { createTokBookViewStore, type TokBookViewStore } from './store.ts'
 import { FooterButton } from './FooterButton.tsx'
 import { LedgerOverlay } from './LedgerOverlay.tsx'
@@ -19,7 +20,7 @@ const QUOTA_ALERT_POLL_MS = 5 * 60_000
 
 /** 拉取非网络的额度列表并写入 alert 位。失败时保留上一次徽标——宿主抖动不得清除真实的告警。 */
 function refreshQuotaAlert(view: TokBookViewStore): Promise<void> {
-  return fetch('/tokbook/quota')
+  return fetch(ROUTE_QUOTA)
     .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<QuotaView> })
     .then((data) => { view.setQuotaAlert(data.alert === true) })
     .catch(() => undefined)

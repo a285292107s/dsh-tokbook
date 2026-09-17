@@ -9,7 +9,11 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { PROVIDER_RANGES, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type TokBookOverview } from './types.ts'
+import {
+  QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH,
+  ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SYNC, ROUTE_USAGE,
+} from './route-paths.ts'
+import { PROVIDER_RANGES, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SyncStatusView, type TokBookOverview } from './types.ts'
 import type { PriceParse } from './pricing.ts'
 
 /** 本插件用到的 host webserver 子集。 */
@@ -37,11 +41,12 @@ function refuse(res: ServerResponse, status: number, message: string): void {
   res.end(message)
 }
 
-/** 把概览 route 绑到新鲜快照提供方、扫描 route 绑到强制同步触发器。返回
- *  合并 disposer。 */
+/** 把概览 route 绑到新鲜快照提供方、同步状态 route 绑到内存探针、扫描 route 绑到强制
+ *  同步触发器。返回合并 disposer。 */
 export function registerTokBookRoutes(
   webServer: WebServerLike | undefined,
   overview: () => TokBookOverview | Promise<TokBookOverview>,
+  syncState: () => SyncStatusView | Promise<SyncStatusView>,
   rescan: () => RescanView | Promise<RescanView>,
 ): () => void {
   if (webServer === undefined) return () => {}
@@ -53,6 +58,20 @@ export function registerTokBookRoutes(
       const snapshot = await overview()
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
       res.end(JSON.stringify(snapshot))
+    } catch (error) {
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  /** 与概览同形，但提供方只读内存——它是「追 walk」的廉价观察点（见 `route-paths.ts`）。 */
+  const handleSyncState = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (req.method !== 'GET') return refuse(res, 405, 'method not allowed')
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    try {
+      const state = await syncState()
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(state))
     } catch (error) {
       res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
@@ -74,22 +93,28 @@ export function registerTokBookRoutes(
 
   const disposeOverview = webServer.register({
     kind: 'exact',
-    path: '/tokbook/overview',
+    path: ROUTE_OVERVIEW,
     handler: handleOverview,
+  })
+  const disposeSyncState = webServer.register({
+    kind: 'exact',
+    path: ROUTE_SYNC,
+    handler: handleSyncState,
   })
   const disposeRescan = webServer.register({
     kind: 'exact',
-    path: '/tokbook/rescan',
+    path: ROUTE_RESCAN,
     handler: handleRescan,
   })
   return () => {
     disposeOverview()
+    disposeSyncState()
     disposeRescan()
   }
 }
 
 export function parseProviderRange(req: IncomingMessage): ProviderRange | null {
-  const raw = new URL(req.url ?? '/', 'http://tokbook.local').searchParams.get('range')
+  const raw = new URL(req.url ?? '/', 'http://tokbook.local').searchParams.get(QUERY_RANGE)
   if (raw === null) return null
   return (PROVIDER_RANGES as readonly string[]).includes(raw) ? raw as ProviderRange : null
 }
@@ -123,7 +148,7 @@ export function registerTokBookUsageRoute(
 
   return webServer.register({
     kind: 'exact',
-    path: '/tokbook/usage',
+    path: ROUTE_USAGE,
     handler: handleUsage,
   })
 }
@@ -142,9 +167,9 @@ export function registerTokBookQuotaRoute(
     if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
     try {
       const params = new URL(req.url ?? '/', 'http://tokbook.local').searchParams
-      const provider = params.get('provider')
+      const provider = params.get(QUERY_PROVIDER)
       if (provider !== null && provider !== '') {
-        const force = params.get('refresh') === '1'
+        const force = params.get(QUERY_REFRESH) === '1'
         const card = await quotaCardOf(provider, force)
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(card))
@@ -161,7 +186,7 @@ export function registerTokBookQuotaRoute(
 
   return webServer.register({
     kind: 'exact',
-    path: '/tokbook/quota',
+    path: ROUTE_QUOTA,
     handler: handleQuota,
   })
 }
@@ -205,11 +230,12 @@ function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown }
 
 /** 把价格表 route 绑到视图提供方与保存路径。返回 disposer。`/tokbook/pricing`
  *  上一条 exact route 按 method 分发（同一 path 注册两次会撞）：GET 答只读
- *  route 卡视图；PUT 接受完整的期望价表，持久化，并返回解析判决加新鲜视图。 */
+ *  route 卡视图；PUT 接受完整的期望价表，持久化，并答解析判决——**不回视图**
+ *  （client 只读判决，而自动保存是最热的写路径）。 */
 export function registerTokBookPricingRoutes(
   webServer: WebServerLike | undefined,
   pricingView: () => PricingView | Promise<PricingView>,
-  savePricing: (body: unknown) => Promise<PriceParse & { view: PricingView }>,
+  savePricing: (body: unknown) => Promise<PriceParse>,
 ): () => void {
   if (webServer === undefined) return () => {}
 
@@ -238,11 +264,11 @@ export function registerTokBookPricingRoutes(
         const result = await savePricing(body)
         if (!result.ok) {
           res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ error: result.error, view: result.view }))
+          res.end(JSON.stringify({ ok: false, error: result.error }))
           return
         }
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-        res.end(JSON.stringify({ ok: true, view: result.view }))
+        res.end(JSON.stringify({ ok: true }))
       } catch (error) {
         res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
@@ -254,7 +280,7 @@ export function registerTokBookPricingRoutes(
 
   return webServer.register({
     kind: 'exact',
-    path: '/tokbook/pricing',
+    path: ROUTE_PRICING,
     handler: handle,
   })
 }

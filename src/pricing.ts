@@ -14,7 +14,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  DAY_SETS, EARLIEST, instantKey, instantMs, isHourRange, slotCovers, slotsOverlap,
+  DAY_SETS, EARLIEST, MAX_NOTE_LENGTH, PRICING_BILLING_KEY, instantKey, instantMs, isHourRange, slotCovers, slotsOverlap,
 } from './price-format.ts'
 import type {
   BillingMap, BillingNature, ModelPricing, PriceSegment, PriceSlot, PricingSegmentInput, PricingSlotInput,
@@ -24,11 +24,8 @@ import { UNPRICED_KEY } from './types.ts'
 
 export const PRICING_FILE = 'pricing.json'
 
-export const PRICING_BILLING_KEY = '$billing'
+export { DAY_SETS, EARLIEST, PRICING_BILLING_KEY, dayKeyOf, dayStartMs, instantKey, instantMs } from './price-format.ts'
 
-export { DAY_SETS, EARLIEST, dayKeyOf, dayStartMs, instantKey, instantMs } from './price-format.ts'
-
-const MAX_NOTE_LENGTH = 120
 const MAX_ROUTE_LENGTH = 128
 const MAX_MODEL_LENGTH = 256
 
@@ -388,7 +385,7 @@ function slotBody(slot: PriceSlot): Record<string, unknown> {
 
 /** 价文件的文件体：route 与 model 排序，`$billing` 段在前，段按生效时刻升序，
  *  段内例外时段按 start 小时升序。 */
-export function priceFileBody(file: PriceFile): Record<string, unknown> {
+function priceFileBody(file: PriceFile): Record<string, unknown> {
   const body: Record<string, unknown> = {}
   const billingRoutes = Object.keys(file.billing).sort((left, right) => left.localeCompare(right))
   if (billingRoutes.length > 0) {
@@ -473,7 +470,7 @@ export function slotAt(segment: PriceSegment, timeMs: number): PriceSlot | null 
 }
 
 /** `timeMs` 生效时段的身份，或 null = 全天价。 */
-export function slotRefAt(segment: PriceSegment, timeMs: number): SlotRef | null {
+function slotRefAt(segment: PriceSegment, timeMs: number): SlotRef | null {
   const slot = slotAt(segment, timeMs)
   return slot === null ? null : { start: slot.start, days: slot.days }
 }

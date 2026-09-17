@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ProviderRange, ProviderUsageCard, ProviderUsageView } from '../types.ts'
+import { QUERY_RANGE, ROUTE_USAGE } from '../route-paths.ts'
 import { UsageGlyph } from './icons.tsx'
 import { formatMoney, formatShare, formatTokens, share } from './format.ts'
 import { ModelRows, WorkspaceRows } from './Breakdowns.tsx'
@@ -114,7 +115,7 @@ export function ProviderPanel() {
     const token = ++activeRef.current
     setError(null)
     try {
-      const res = await fetch(`/tokbook/usage?range=${target}`)
+      const res = await fetch(`${ROUTE_USAGE}?${QUERY_RANGE}=${target}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const view = await res.json() as ProviderUsageView
       if (token !== activeRef.current) return // 被更新的切换取代

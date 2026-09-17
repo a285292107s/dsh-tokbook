@@ -1,13 +1,13 @@
 # Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-16 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-17 · supersedes: —
 
 > 本文只写**代码里读不出来的规则**：违反了它不会报错，但会把钱算错、把状态搞坏。
 > 路由表、wire 字段清单、配置键、数据文件清单、事件投影**都不在这里**——它们是代码，直接读：
 
 | 想确认什么 | 直接读 |
 |---|---|
-| host 路由（方法 / 路径 / query） | `src/routes.ts` |
+| host 路由（方法 / handler） | `src/routes.ts`，路径与 query 键在 `src/route-paths.ts`（两半区共享的真源） |
 | wire 载荷与共享类型（逐字段） | `src/types.ts` |
 | 会话事件 → 账本行的投影 | `src/usage-record.ts` |
 | 数据目录的文件布局与写入方式 | `src/ledger.ts`、`src/usage-log.ts` |
@@ -54,6 +54,12 @@
 - **「未知」必须在某处说出生效，绝不静默按 ¥0 展示**：用量未知与价格未知都由用量明细的通道卡报出、
   价格未知另有价格表的筛选，道理写在「统计口径」页。金额层**没有**「未知」这个值——未知行按 ¥0 计入，
   所以 `spend` / `subscriptionValue` 对它们偏低；这只能靠**可见**解决，不能靠拆桶。
+- **价表写路径上，client 的 `composePriceBody` 必须覆盖 host 接受规则的全集**：host 是校验者而非
+  变换者（只排序、不改内容语义），成功写入即「磁盘 ≡ 草稿」，所以 client **从不**用响应回灌草稿
+  （回灌会让正在输入的输入框 remount）。只覆盖一半不会报错，但后果不对称：host 拒绝是**可见**的
+  （用户当场看到报错），而 host 静默规范化了 client 没规范化的东西 → 草稿与磁盘**无声分叉**。
+  改任一侧的接受规则时两侧一起改；共享词表（保留键、备注上限）在 `src/price-format.ts`。唯一的
+  对账点是重新挂载 tab（会重新 GET 并重新播种）。
 
 > **本节这几条不靠"记住"兜底**：费率行身份与「改时段 → 价格未知」由 `pnpm test` 的「时段身份」一节
 > 断言,`pricingRevision` → 折叠整份重建由「pricingRevision」一节断言,门不从失败推导由「额度」一节

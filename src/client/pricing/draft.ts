@@ -8,15 +8,12 @@
  * @module dsh-tokbook/client/pricing/draft
  */
 
+// 价文件的共享词表（保留键、备注长度上限）从共享内核取——client 不能 import
+// `src/pricing.ts`（它拉了 `node:fs`），两条字面量各写一遍就会静默漂移。
 import {
-  DAY_SETS, DAY_SET_LABELS, EARLIEST, instantKey, instantMs, isHourRange, rangeLabel, slotsOverlap,
+  DAY_SETS, DAY_SET_LABELS, EARLIEST, MAX_NOTE_LENGTH, PRICING_BILLING_KEY, instantKey, instantMs, isHourRange, rangeLabel, slotsOverlap,
 } from '../../price-format.ts'
 import type { BillingNature, DaySet, ModelPricing, PricingSegmentInput, PricingSlotInput, PricingView } from '../../types.ts'
-
-/** 文件唯一的保留顶层键；镜像 `src/pricing.ts`（client 不能 import 那个，它拉了 `node:fs`）。 */
-export const BILLING_KEY = '$billing'
-
-const MAX_NOTE_LENGTH = 120
 
 /** 一份价格的四个 ¥/M 桶，数字形式，键与草稿字段一致（未填写时桶缺席）。 */
 export interface DraftRates {
@@ -142,7 +139,7 @@ export function slotRange(slot: SlotDraft): { start: number; end: number } {
 // ---------------------------------------------------------------------------
 
 /** 四档 rate 组是否完全没填。这样的块不参与有效性、签名或写入——「＋ 加一段价」永远不会弄脏行或阻塞保存。 */
-export function isBlankRates(holder: RateTexts): boolean {
+function isBlankRates(holder: RateTexts): boolean {
   return RATE_INPUTS.every(([field]) => holder[field].trim() === '')
 }
 
@@ -639,7 +636,7 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
     }
     if (Object.keys(models).length > 0) body[route] = models
   }
-  if (Object.keys(billing).length > 0) body[BILLING_KEY] = billing
+  if (Object.keys(billing).length > 0) body[PRICING_BILLING_KEY] = billing
   return { ok: true, body }
 }
 

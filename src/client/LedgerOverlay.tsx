@@ -8,7 +8,8 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
-import type { TokBookOverview } from '../types.ts'
+import type { SyncStatusView, TokBookOverview } from '../types.ts'
+import { ROUTE_OVERVIEW, ROUTE_RESCAN, ROUTE_SYNC } from '../route-paths.ts'
 import type { TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
 import { PricingPanel } from './pricing/PricingPanel.tsx'
@@ -25,7 +26,7 @@ export interface LedgerOverlayProps {
 }
 
 /** 追一轮后台 walk 的轮询步长与上限（30 s）：够覆盖一次「整份会话日志重读」，又不至于
- *  在状态真卡住时无限打路由。 */
+ *  在状态真卡住时无限打路由。tick 本身是内存探针，代价与上限无关。 */
 const SYNC_FOLLOW_INTERVAL_MS = 500
 const SYNC_FOLLOW_ATTEMPTS = 60
 
@@ -35,24 +36,43 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
   const [scanning, setScanning] = useState(false)
 
   const fetchOverview = useCallback((signal?: AbortSignal): Promise<void> => {
-    return fetch('/tokbook/overview')
+    return fetch(ROUTE_OVERVIEW)
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() })
       .then((data: TokBookOverview) => { if (!signal?.aborted) view.setOverview(data) })
       .catch((err: unknown) => { if (!signal?.aborted) view.setError(err instanceof Error ? err.message : String(err)) })
   }, [view])
 
+  /** 只读 host 内存的同步状态探针（≈0 ms）。追 walk 落定靠它，不靠反复拉概览：概览每次
+   *  都是全量聚合（实测 200–340 ms），而追的 tick 次数正比于 walk 耗时——那等于把负载加在
+   *  正被 walk 压着的那条路径上。读不到就返回 null（调用方按「已落定」处理，随后照常拉
+   *  一次概览：同一份包里 client 与 host 同版本，探针失败只可能是路由之外的意外）。 */
+  const fetchSyncState = useCallback((signal?: AbortSignal): Promise<SyncStatusView | null> => {
+    return fetch(ROUTE_SYNC)
+      .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<SyncStatusView> })
+      .then((state) => (signal?.aborted === true ? null : state))
+      .catch(() => null)
+  }, [])
+
   // host 的读路径刻意**不**等后台的权威 walk（D-030），所以一次读到的 `running` 只是
   // 那一刻的事实：不追它，footer 就会一直停在「正在重新扫描…」。打开浮窗（读路径自己
   // 排了 walk）与按下重新扫描（路由在扫描完成前就返回）都靠它把状态追到落定——否则
   // 不仅状态是假的，walk 补进来的行也不会出现在屏上。
+  //
+  // 退出条件看**屏上那份快照**、不看探针：探针比概览早几百毫秒，可能在 walk 真正开始前
+  // 就报 `done`（`rescan` 的 walk 是 fire-and-forget 起跑的）。所以探针说落定后仍拉一次
+  // 概览，若它报 `running` 就继续追，而不是停下留下一个卡住的状态。
   const followSync = useCallback(async (signal?: AbortSignal): Promise<void> => {
     for (let attempt = 0; attempt < SYNC_FOLLOW_ATTEMPTS; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, SYNC_FOLLOW_INTERVAL_MS))
       if (signal?.aborted === true) return
+      const state = await fetchSyncState(signal)
+      if (state !== null && state.status === 'running') continue
       await fetchOverview(signal)
       if (view.getSnapshot().overview?.syncStatus !== 'running') return
     }
-  }, [fetchOverview, view])
+    // 上限内没落定：数据仍取一次——walk 可能还在跑，状态由载荷自己说。
+    await fetchOverview(signal)
+  }, [fetchOverview, fetchSyncState, view])
 
   // 每次打开拉取一次（读到 running 则继续追到落定）；关闭/重开后忽略过期响应。
   useEffect(() => {
@@ -68,7 +88,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
   const onRescan = useCallback(async () => {
     setScanning(true)
     try {
-      await fetch('/tokbook/rescan', { method: 'POST' }).then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
+      await fetch(ROUTE_RESCAN, { method: 'POST' }).then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
       await followSync()
     } catch (err) {
       view.setError(err instanceof Error ? err.message : String(err))

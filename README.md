@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-16 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-17 · supersedes: —
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区从**侧边栏
@@ -42,7 +42,7 @@ src/
   sync.ts             首次启动 + 手动历史回填(幂等)
   sync-state.ts       首次运行标记 + 持久化同步基线
   stats.ts            聚合(totals/byDay/byHour/(provider,model))+ 折叠 + 缓存
-  price-format.ts     价格表时间轴的纯规则(整点生效 / 每日时段 / 星期几 / 冲突),与 browser 共用
+  price-format.ts     价格表时间轴的纯规则(整点生效 / 每日时段 / 星期几 / 冲突)+ 价文件共享词表(保留键 / 备注上限),与 browser 共用
   pricing.ts          唯一价格表(路由 → 模型串 → 价段)+ 两级取价(priceAt/slotAt/ratesAt/rateKeyAt)+ costOf
   pricing-view.ts     价格表 tab 的卡片装配(路由目录 ∪ 账本 ∪ 价格文件)
   route-catalog.ts    路由目录:本机设置文档(settings)× 运行时适配器注册表(ctx.llm)
@@ -51,7 +51,8 @@ src/
   quota.ts            官方额度归一化 + 内置计划身份
   quota-official.ts   key 解析 + 各通道官方用量抓取器
   quota-cache.ts      额度快照的磁盘缓存(stale-while-revalidate 的持久一侧)
-  routes.ts           host 精确 Fetch 路由(路由的真源)
+  route-paths.ts      host 与 browser 共用的 HTTP 路径 / query 键词表(两半区唯一的真源)
+  routes.ts           host 精确 Fetch 路由(handler / method 的真源)
   client/
     index.ts          client: apply(ctx),注册两个 slot
     contract.ts       最小 client 契约:插件被授予的 ctx/slots 面
@@ -154,7 +155,7 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 
 价格**全部由你自己写**,只有一份文件 `pricing.json`(默认 `$DSH_HOME/tokbook/`):路由 → 精确模型串 → **价段
 数组**(`from` 生效时刻 + 四档 ¥/M 价 + 可选 `slots` 峰谷时段)。字段与校验的真源是 `src/types.ts`
-与 `src/routes.ts` 的写入 handler;畸形文件只把受影响的 (路由, 模型) 降级为价格未知(¥0)。
+与 `src/pricing.ts` 的 `parsePriceInput`(写入 handler 只做传输);畸形文件只把受影响的 (路由, 模型) 降级为价格未知(¥0)。
 
 **价格表 tab** 的交互(就地编辑 / 自动保存 / 搜索 / 调价史抽屉 / 徽章语义)见 [`docs/UI-SPEC.md`](docs/UI-SPEC.md)
 与 `src/client/pricing/`——真源是代码。

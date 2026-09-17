@@ -1,10 +1,12 @@
 /**
- * 价文件时间轴的纯规则，host 半区与 browser 半区共享。
+ * 价文件的纯规则，host 半区与 browser 半区共享：文件本身的词表（保留键、长度上限）
+ * 与时间轴的取值规则。
  *
  * 两级独立轴决定一个价格：生效时刻（本地日，或本地日 + 整点小时）选定生效段；
  * 日内时段（小时区间 + 覆盖的星期集合）选定段内的例外价。两个半区用同一套规则
  * 校验手写 `pricing.json`，因此 browser 草稿接受的表永远不会被 host writer
- * 拒绝。这也是本模块独立且无依赖的原因。
+ * 拒绝。这也是本模块独立且无依赖的原因——词表也放这里，因为 client 不能 import
+ * `pricing.ts`（它拉了 `node:fs`），而这几条字面量一旦两处各写一遍就会静默漂移。
  *
  * @module dsh-tokbook/price-format
  */
@@ -14,6 +16,12 @@ import type { DaySet } from './types.ts'
 /** 无生效时刻的段的 `from`：最早一段，即自始生效。存为 0，使朴素的
  *  `from <= timeMs` 比较直接可用。 */
 export const EARLIEST = 0
+
+/** 价文件唯一的保留顶层键：route → `"metered" | "subscription"`。 */
+export const PRICING_BILLING_KEY = '$billing'
+
+/** 段备注的长度上限（读路径截断，写路径拒绝超长；两半区同一把尺子）。 */
+export const MAX_NOTE_LENGTH = 120
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/u
 const HOUR_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:00$/u
@@ -126,7 +134,7 @@ export function hourRangesOverlap(left: HourRange, right: HourRange): boolean {
 }
 
 /** 两个 day set 是否有共同星期。 */
-export function daySetsIntersect(left: DaySet, right: DaySet): boolean {
+function daySetsIntersect(left: DaySet, right: DaySet): boolean {
   return left === 'daily' || right === 'daily' || left === right
 }
 
