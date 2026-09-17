@@ -185,7 +185,7 @@ console.log('手写价表:日期 / 价段 / 取价')
       quiet,
     )
     const onlyRow = view.routes.find(c => c.route === 'opencode-go')?.models.find(m => m.model === 'mimo-v2.5')
-    check('卡片:用过的路由排前面,仅账本(没配置)的模型也成行并带上账本事实',
+    check('卡片:用过的路由排前面,没配置的模型也成行并带上账本事实',
       view.routes.length === 2 && view.routes[0]?.route === 'opencode-go'
       && onlyRow?.configured === false && onlyRow.records === 83 && onlyRow.name === undefined
       && onlyRow.firstAt === Date.UTC(2026, 7, 17) && onlyRow.lastAt === Date.UTC(2026, 8, 2) && onlyRow.unpriced === 11)

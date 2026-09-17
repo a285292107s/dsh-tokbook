@@ -340,8 +340,10 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
   // 这个数在「通道用量」tab 里就叫「N 请求」（同一个计数），所以这里用同一个词：量词对象不明的
   // 「账本 N 次」要读者自己补上「记了什么」，而「账本」是容器、不是被数的东西。
   const meta: string[] = [row.records > 0 ? `${String(row.records)} 次请求` : '没记过请求']
-  if (live === null) meta.push('此刻无价')
-  else if (live.slot !== null) meta.push(`此刻按峰谷 ${dayLabel(live.slot)}`)
+  // 「此刻没有价」不再用文字说第二遍：四个「—」（图例已解释）+ 那一枚 chip（价格未知 / 未生效）
+  // 已经把这件事说全，而这一行会被截断。峰谷也不在这里重说一次——芯片已建立这个词，这里只说此刻
+  // 按的是哪一个窗口。
+  if (live !== null && live.slot !== null) meta.push(`此刻按${dayLabel(live.slot)}`)
   if (live !== null && live.segment.note.trim() !== '') meta.push(live.segment.note.trim())
   const metaText = meta.join(' · ')
 
@@ -359,7 +361,9 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
         }}
       >
         <div className="dtpl-price-id">
-          {/* 第 1 行是身份（有人命名时显示展示名，否则精确串）加上标记。第 2 行是出处。一个身份一行：打印名称**和**精确串等于说两遍。 */}
+          {/* 第 1 行是身份（有人命名时显示展示名，否则精确串）加上标记。第 2 行是出处。一个身份一行：打印名称**和**精确串等于说两遍。
+              标记按**问题域**排，不按代码顺序：钱的诚实性（价格未知 / 未生效）→ 价的结构（峰谷）→ 身份（不在配置）→ 会话写入（未保存）。
+              左起第一枚因此永远是最该看的那一枚；「未生效」与「价格未知」构造上互斥，所以现实中最多两三枚。 */}
           <span className="dtpl-price-name">
             <span
               className="dtpl-price-title"
@@ -367,7 +371,6 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
             >
               {named ? row.name : row.model}
             </span>
-            {!row.configured && <span className="dtpl-price-badge">仅账本</span>}
             {/* 有价的行也可能挂这枚徽标：账本里有落在所有价段之外的记录。带上条数才说得清是哪一种，
                 而不是让读者以为行内那个数不作数。 */}
             {unknown && (
@@ -378,8 +381,6 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
                 价格未知{(row.unpriced ?? 0) > 0 ? ` ${String(row.unpriced!)} 次` : ''}
               </span>
             )}
-            {/* 两个决定行内四个数字是否真正在计费的标记：始终在会截断的 meta 行之外。 */}
-            {slots > 0 && <span className="dtpl-price-badge dtpl-price-badge-slot">峰谷 {String(slots)} 段</span>}
             {/* 价写好了、日子还没到（只有「没记过账、只写了未来价」的行能落到这里）：此刻确实没有价，
                 所以给它一句解释，而不是让读者自己猜这一行为什么是空的。 */}
             {live === null && !unknown && (
@@ -388,6 +389,25 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
                 title="这一行的价都还没到生效时间，此刻没有价（按 ¥0 计）"
               >
                 未生效
+              </span>
+            )}
+            {/* 「里面还有更多定价」——存在性才是动作触发（决定要不要展开），段数属于 hover 才知道的事。 */}
+            {slots > 0 && (
+              <span
+                className="dtpl-price-badge dtpl-price-badge-slot"
+                title={`这一行的价里还有 ${String(slots)} 个峰谷时段：展开这一行看`}
+              >
+                峰谷
+              </span>
+            )}
+            {/* 身份事实，不是钱：**两种**行都会落到这里（配置删了但账本记得 / 只写在价表里），
+                所以不能叫「仅账本」——后一种行账本从没记过它，那一行会同时说「不在配置」与「没记过请求」。 */}
+            {!row.configured && (
+              <span
+                className="dtpl-price-badge"
+                title="settings 与适配器目录都不再列这个模型：它已经调不到了，这个价只影响历史金额"
+              >
+                不在配置
               </span>
             )}
             {dirty && stuck && (

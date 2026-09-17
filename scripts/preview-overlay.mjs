@@ -194,7 +194,7 @@ const emptyOverview = {
  *  route, one row per model, each carrying its price segments (生效时间 +
  *  全天价四档 + 例外时段). The states worth looking at are all here: a priced
  *  row, a 调价史, a 峰谷时段 row, 价格未知 (both kinds: 整行没价 and 有记录早于
- *  最早一段价), 托底价 (present and missing), a 仅账本 string (the config no
+ *  最早一段价), 托底价 (present and missing), a 不在配置 string (the config no
  *  longer lists it), a 订阅 route, and a route that only exists because the
  *  price file names it.
  *
@@ -311,7 +311,7 @@ const PRICING_FIXTURE = {
         { model: 'mimo-v2.5', configured: true, records: 83,
           firstAt: Date.UTC(2026, 7, 17, 4), lastAt: Date.UTC(2026, 7, 17, 9), unpriced: 83,
           segments: [] },
-        // 配置里已经没有这条串了,只有账本记得它:标「仅账本」,照样可定价。
+        // 配置里已经没有这条串了,只有账本记得它:标「不在配置」,照样可定价。
         { model: 'retired-model', configured: false, records: 41,
           firstAt: Date.UTC(2026, 8, 1, 6), lastAt: Date.UTC(2026, 8, 1, 7, 30), unpriced: 41,
           segments: [] },

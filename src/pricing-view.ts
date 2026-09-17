@@ -136,7 +136,7 @@ export async function readPricingView(
       }
       row.configured = true
       // 配置里的名字优先于稍后适配器目录的名字；账本与价文件从不给串命名，
-      // 故「仅账本」行不带 name。
+      // 故「不在配置」的行不带 name。
       if (row.name === undefined && name !== undefined) row.name = name
     }
   }

@@ -190,11 +190,11 @@ export interface RouteCatalogEntry {
 export interface PricingModelView {
   /** 账本计费所用的精确 model 串。 */
   model: string
-  /** 展示名（settings `models[].name`，否则适配器目录 `name`）。仅账本行
-   * 或仅价表提及的串省略——选择器回落到 `provider/model` 的方式。 */
+  /** 展示名（settings `models[].name`，否则适配器目录 `name`）。配置里没有这一串时
+   * 省略（账本记得它，或价表里手写了它）——选择器回落到 `provider/model` 的方式。 */
   name?: string
-  /** settings / 适配器目录是否列出该串（即 route 上可调用）；false = 配置
-   * 已不再列出的仅账本行，或只手写了价格的串。 */
+  /** settings / 适配器目录是否列出该串（即 route 上可调用）。false 有两种来历——
+   * 账本记得、配置已删，或只在价表里手写：界面上都读作「不在配置」（它已调不到）。 */
   configured: boolean
   records: number
   firstAt?: number

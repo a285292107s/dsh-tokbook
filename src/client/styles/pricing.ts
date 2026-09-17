@@ -178,11 +178,11 @@ export const CSS_PRICING = `/* 价格表 tab */
   color:var(--dtpl-fg);font-family:var(--dtpl-mono);
 }
 /* 徽章 = 三级**描边芯片**，不是一个色块矩阵：
-     默认（仅账本 / 峰谷 N 段）  描边 + 三级文字 —— 只是说明这个值从哪来；
+     默认（不在配置）            描边 + 三级文字 —— 只是说明这个值从哪来；
      需要看一眼（价格未知 / 未生效 / 未保存）1px amber 边框 + warn-ink 文字；
-     还有更多（峰谷 N 段）       1px 墨边，从灰芯片里抬一档。
-   上一版一律是圆角 + --dtpl-accent 染色底：accent 在 DSH 皮肤里等于墨色，于是「峰谷 2 段」
-   和「仅账本」在界面上是同一块灰，等于没有层级；换个皮肤又会整片变蓝。
+     还有更多（峰谷）            1px 墨边，从灰芯片里抬一档。
+   上一版一律是圆角 + --dtpl-accent 染色底：accent 在 DSH 皮肤里等于墨色，于是「峰谷」
+   和「不在配置」在界面上是同一块灰，等于没有层级；换个皮肤又会整片变蓝。
    现在层级只由**边界与填充**表达，色相留给真正要看的状态。实心墨那一档只剩「当前项」
    （按量 / 订阅的选中段）——「未保存」自 D-040 起只在写不进去时出现，它属于「要看一眼」。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge{
@@ -199,7 +199,7 @@ export const CSS_PRICING = `/* 价格表 tab */
   color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
 }
 /* 峰谷标记：这一行可见的四个数字不是全部——它必须一眼读成「里面还有更多定价」。
-   它不抢颜色，靠 1px 墨边把自己从「仅账本」那类中性芯片里抬一档。 */
+   它不抢颜色，靠 1px 墨边把自己从「不在配置」那类中性芯片里抬一档。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-slot{
   color:var(--dtpl-fg);border-color:color-mix(in srgb,var(--dtpl-fg) 35%,transparent);
 }
