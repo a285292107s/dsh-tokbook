@@ -3,7 +3,7 @@
  *
  * 没有保存按钮也没有撤销：变更在停止输入一拍后自动写入，字段失焦则立刻写。草稿写不出来的
  * 时候（半输入的数字）不写也不报，等这个字段交代完才说——口径与理由见 D-040。磁盘上的内容是
- * 唯一状态，工具栏只报告它。行内四个数字只读——报的是此刻计费所用的价，改价在展开的抽屉里（第一张是托底价）。
+ * 唯一状态，工具栏只报告它。行内四个数字只读，改价在展开的抽屉里（第一张是托底价）。
  *
  * @module dsh-tokbook/client/pricing/PricingPanel
  */
@@ -20,8 +20,7 @@ import { RouteCard } from './editors.tsx'
 export interface PricingPanelProps {
   /** 保存成功后通知父级刷新总览。 */
   onChanged: () => void
-  /** 报告 tab 当前是否有未保存的暂存改动（驱动 tab 圆点）。不在 unmount
-   *  时清除：草稿跨面板存活。 */
+  /** 报告 tab 当前是否有未保存的暂存改动（驱动 tab 圆点）。不在 unmount 时清除：草稿跨面板存活。 */
   onDirtyChange?: (dirty: boolean) => void
 }
 
@@ -45,9 +44,7 @@ type SaveState =
   /** 宿主拒绝或请求失败；未写入任何内容。 */
   | { kind: 'error'; message: string }
 
-/**
- * 尚未到达磁盘的草稿在面板 unmount 后存活（切 tab、关浮窗），使尚未触发的自动保存——或被宿主拒绝的保存——绝不被悄悄丢弃。
- */
+/** 尚未到达磁盘的草稿在面板 unmount 后存活（切 tab、关浮窗），使尚未触发的自动保存——或被宿主拒绝的保存——绝不被悄悄丢弃。 */
 interface Staged {
   view: PricingView
   draft: PriceDraft
@@ -184,8 +181,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     const queued = againRef.current
     againRef.current = false
     if (!aliveRef.current) {
-      // 卸载后的补写：状态栏已经不在了，但 tab 上的圆点与父级屏上的金额都还活着——两样都得同步，
-      // 否则刚写进去的价会在「有未保存的改动」和旧金额里各留一处假象。
+      // 卸载后的补写：状态栏已经不在了，但 tab 圆点与父级屏上的金额都还活着——两样都得同步。
       onDirtyChange?.(stagedChanges(draftRef.current, baselineRef.current) > 0)
       notifyChanged()
       if (queued) void writeNow()
@@ -212,8 +208,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       return
     }
     if (timerRef.current !== null) window.clearTimeout(timerRef.current)
-    // 已经报出来的问题不因为继续打字而撤回：它说的地点与原因仍然成立，撤回只会闪一下。
-    // 它由**写成功**或**改动归零**清掉——validation 要用户动手才消失（NN/g 同一条）。
+    // 已经报出来的问题不因为继续打字而撤回：它说的地点与原因仍然成立。它由**写成功**或**改动归零**清掉。
     setSave(current => (current.kind === 'error' || current.kind === 'invalid' ? current : { kind: 'pending' }))
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null
@@ -362,8 +357,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       className="dtpl-price-sec"
       aria-label="价格表"
       // 任一字段失焦 = 提交点：立刻写一次（不必再等防抖），并让此后写不进去的失败说话。
-      // **没有待写的改动就不算一次交代**——否则在这个面板里随便点一下，下一次打字的中途报错
-      // 就被放行了（那正是这一条要挡掉的东西）。
+      // **没有待写的改动就不算一次交代**——否则在这里随便点一下，下一次打字的中途报错就被放行了。
       onBlur={() => {
         if (stagedChanges(draftRef.current, baselineRef.current) === 0) return
         committedRef.current = true

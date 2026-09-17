@@ -1,9 +1,8 @@
 /**
  * 价格表 tab 的行原语：此刻生效的四档价、价格段编辑器、模型行、route 卡。
  *
- * 行**是**表：四个数字只读地报出**此刻计费所用的价**（生效段叠上此刻生效的峰谷时段），
- * 所以它永远说得出出处、也永远不会被就地改掉历史。改价在展开的抽屉里：第一张是**托底价**
- * （没有生效时刻，没被调价史覆盖的时间都按它算），往下的每一张从某个时刻起生效。
+ * 行**是**表：四个数字只读地报出此刻计费所用的价（生效段叠上此刻生效的峰谷时段），所以它永远说得出出处、
+ * 也永远不会被就地改掉历史。改价在展开的抽屉里：第一张是**托底价**（没有生效时刻），往下的每张从某个时刻起生效。
  * 本文件不持有状态：面板持有，通过小回调下发。
  *
  * @module dsh-tokbook/client/pricing/editors
@@ -20,7 +19,7 @@ import {
 } from './draft.ts'
 import { PriceTimeline } from './Timeline.tsx'
 
-/** 四个 ¥/M 桶，按所有 surface 书写顺序。 */
+/** 四个 ¥/M 桶，按所有 surface 的书写顺序。 */
 export const RATE_FIELDS = [
   { key: 'input', label: '输入' },
   { key: 'output', label: '输出' },
@@ -35,7 +34,7 @@ const CELLS: ReadonlyArray<{ field: RateField; label: string }> = RATE_FIELDS.ma
 const START_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
 const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour + 1)
 
-/** 抽屉里的一个数字单元格，原地编辑：聚焦前读作文本，每个值一次点击（或 Tab）即达。行内那四个数字是只读的 {@link RateValue}。 */
+/** 抽屉里的一个数字单元格，原地编辑：聚焦前读作文本，每个值一次点击（或 Tab）即达。行内那个只读的对应物是 {@link RateValue}。 */
 function RateCell({ id, label, hint, value, state, context, placeholder, note, onEdit }: {
   id: string
   label: string
@@ -51,7 +50,7 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   onEdit?: (next: string) => void
 }) {
   const errorId = `${id}-err`
-  // 可见消息保持简短，不撑窄 rate 列；完整句子挂在 input 的 title 上，行下方的问题行以全宽重复第一个问题。
+  // 可见消息保持简短，不撑窄 rate 列；完整句子挂 input 的 title，行下方的问题行以全宽重复第一个问题。
   const message = state === 'bad' ? '须为非负数字' : undefined
   const tip = state === 'bad' ? `${label}必须是非负数字（¥/百万词元）` : note
   return (
@@ -81,8 +80,8 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   )
 }
 
-/** 行内的一个价：只读。它不是输入框——这里显示的是**此刻计费所用的价**，改它没有意义（那是改历史），
- *  所以改价一律走展开后的抽屉。列名跟着读屏（`.dtpl-sr`），窄屏下同一份文字变成可见的小标签。 */
+/** 行内的一个价：只读。改价一律走展开后的抽屉——就地改这个数字等于改历史。
+ *  列名跟着读屏（`.dtpl-sr`），窄屏下同一份文字变成可见的小标签。 */
 function RateValue({ label, value }: {
   label: string
   value: string
@@ -98,7 +97,7 @@ function RateValue({ label, value }: {
   )
 }
 
-/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方全天价行完全相同——留空的桶显示它沿用的全天价。 */
+/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方全天价行相同——留空的桶显示它沿用的全天价。 */
 function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onDuplicate }: {
   slot: SlotDraft
   index: number
@@ -192,8 +191,7 @@ function SegmentEditor({ segment, where, floor, active, onChange, onRemove, onDu
 }) {
   const base = `seg-${String(segment.id)}`
   const slots = effectiveSlots(segment)
-  // 删除要两下。它改的是**那段时间的历史金额**（回落到上一段或托底价），而账本没有撤销——
-  // 一次误点不值得付出重填四档价的代价。聚焦离开即取消，不留一个「待确认」挂在那里。
+  // 删除要两下：它改的是那段时间的历史金额，而账本没有撤销——一次误点不值得付出重填四档价的代价。聚焦离开即取消。
   const [confirming, setConfirming] = useState(false)
   const hint = slots.length === 0
     ? '四档价就是这一天 0–24 点的价。峰谷价用下面的 ＋ 加峰谷时段 加。'
@@ -308,10 +306,8 @@ function SegmentEditor({ segment, where, floor, active, onChange, onRemove, onDu
   )
 }
 
-/** 一个模型行 = **这一行此刻的价目**：身份 | 请求数 | 四档价 | 展开。四样都是定长列（身份那一列伸缩、
- *  超长只截它自己），所以整张表可以逐列往下比。
- *  价**怎么读**（可信不可信、是不是全部）另起一条整行宽的**判定带**，只在有话要说时才存在——
- *  见下面的 decls；安静的行就只有一条。 */
+/** 一个模型行 = **这一行此刻的价目**：身份 | 请求数 | 四档价 | 展开。四样都是定长列（身份那列伸缩、超长只截它自己），
+ *  所以整张表可以逐列往下比。价**怎么读**（可信不可信、是不是全部）另起一条整行宽的判定带，只在有话要说时才存在。 */
 export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, open, onToggle, onChange }: {
   route: string
   row: ModelDraft
@@ -319,7 +315,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
    *  「未保存」徽章另需面板的 {@link stuck}——那是整份文件一次写的事实。 */
   baseline: ReadonlyMap<string, string>
   /** 这次写入没能落盘（草稿无效 / 宿主拒绝）。只在这种时候给「未保存」徽章：
-   *  正常在飞的瞬态由行左侧那道墨条说，不该用最响的芯片去说一个 0.6 s 的状态（见 D-040）。 */
+   *  正常在飞的瞬态由行左侧那道墨条说，不该用最响的芯片去说一个 0.6 s 的状态。 */
   stuck: boolean
   open: boolean
   onToggle: (route: string, model: string) => void
@@ -333,25 +329,18 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
   const ordered = sortedSegments(row)
   // 托底价不是一次调价，所以调价史的编号只数有生效时刻的那些张。
   const changes = ordered.filter(segment => !isFloorSegment(segment))
-  // 行的身份**只打印一个**：有人命名该串时显示展示名，否则显示精确串本身。精确串仍是账本的计费键，保持可达：hover 标签与每个单元格的无障碍名称。
-  // 没人命名时它是**精确串**——那一种走等宽（见 styles/pricing 的 [data-exact]），所以这个判断落到 DOM 上，
-  // 而不是让样式去猜（此前猜的是「标题是不是唯一的孩子」，于是同一串带不带徽章会换字体）。
+  // 行的身份只打印一个：有人命名该串时显示展示名，否则精确串本身。精确串仍是账本的计费键，保持可达（hover 标签与单元格无障碍名）。
+  // 没人命名时它是精确串，走等宽——这个判断必须落到 DOM（data-exact），不能让样式去猜。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
-  // 请求数是一**列**（列头「请求」），不是句子尾巴——这里只给数字，单位由列头说一次。
-  // 上一版把它拼成「N 次请求」塞进身份列跟芯片抢位置，于是它成了这一行里唯一会被省略号吃掉的事实：
-  // host 正是按这个数把表排出来的，而一张按它排序的表读不到它，等于没排序。「没记过」是 0 的读法：
-  // 账本是权威，没记过就是没记过，不是「未知」（未知的是**价**，那是判定带的事）。
+  // 请求数是一**列**（列头「请求」），单位由列头说一次；host 正是按这个数把表排出来的。
+  // 「没记过」是 0 的读法：账本是权威，没记过就是没记过，不是「未知」（未知的是**价**，那是判定带的事）。
   const countText = row.records > 0 ? `${String(row.records)} 次` : '没记过'
-  // 「未生效」得说得出**什么时候**生效：此刻没有任何一段在生效时，按效力顺序的第一张带生效时刻的段
-  // 就是那一张（更晚的都要先等它过去）。
+  // 「未生效」得说得出**什么时候**生效：此刻没有任何一段在生效时，按效力顺序的第一张带生效时刻的段就是那一张。
   const startsAt = live === null ? (ordered.find(segment => segment.from.trim() !== '')?.from ?? null) : null
-  // 判定带（见下面 .dtpl-price-decl）：**一条 = 一枚芯片 + 一句话**。芯片是可纵向扫读的类，句子是
-  // 这个类对**这一行**的意思（数量、时刻、后果）。两者都印在行上，所以这一行的任何一个判定都不再
-  // 需要悬停才知道（UI-SPEC §2：信息不能只存在 title 里）——上一版把定义写在 title 里，等于要求
-  // 读者先知道该去悬停它。
-  // 顺序按**问题域**，不按代码顺序：钱的诚实性（价格未知 / 未生效）→ 价的结构（峰谷价）→
-  // 身份（不在配置）→ 会话写入（未保存）。左起第一枚因此永远是最该看的那一枚；
-  // 「未生效」与「价格未知」构造上互斥，所以现实中最常见的是一两枚。
+  // 判定带：**一条 = 一枚芯片 + 一句话**。芯片是可纵向扫读的类，句子是这个类对**这一行**的意思（数量、时刻、后果）。
+  // 两者都印在行上，所以任何一个判定都不需要悬停才知道（UI-SPEC §2：信息不能只存在 title 里）。
+  // 顺序按**问题域**：钱的诚实性（价格未知 / 未生效）→ 价的结构（峰谷价）→ 身份（不在配置）→ 会话写入（未保存）。
+  // 左起第一枚因此永远是最该看的那一枚；「未生效」与「价格未知」构造上互斥，所以现实中最常见的是一两枚。
   const decls: { chip: string; tone: string; text: string }[] = []
   if (unknown) {
     decls.push({
@@ -376,18 +365,16 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
       decls.push({
         chip: '峰谷价',
         tone: 'dtpl-price-badge-slot',
-        // 芯片只说「这一段里有峰谷价」，说不清**此刻**按的是哪一档——而那正是同一件事里读者要看的一半。
-        // 数出来的只是**生效这一段**里的时段（托底价与别的调价段各有各的时段），所以那句「生效的这段里」
-        // 的限定词不能省。
+        // 芯片只说「这一段里有峰谷价」，说不清此刻按的是哪一档，而那是同一件事里读者要看的另一半。
+        // 数出来的只是生效这一段里的时段，「生效的这段里」这个限定词不能省。
         text: live.slot === null
           ? `此刻按全天价；生效的这段里另有 ${String(slots)} 个时段价`
           : `此刻按峰谷价计费（${dayLabel(live.slot)}）`,
       })
     }
   }
-  // 身份事实，不是钱：**两种**行都会落到这里（配置删了但账本记得 / 只写在价表里）。说「**本通道**」
-  // 不是啰嗦：同一个模型串可以在一条通道上不在配、在另一条上正常在配（fixture 里就有），
-  // 所以「它已经调不到了」这种不带限定的说法会在那张还活着的卡上说假话。
+  // 身份事实，不是钱，两种行都会落到这里（配置删了但账本记得 / 只写在价表里）。「本通道」不能省：
+  // 同一个模型串可以在一条通道上不在配、在另一条上正常在配，所以「它已经调不到了」会在那张还活着的卡上说假话。
   if (!row.configured) {
     decls.push({ chip: '不在配置', tone: '', text: '本通道的配置里已没有它，这个价只影响历史金额' })
   }
@@ -408,10 +395,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
           onToggle(route, row.model)
         }}
       >
-        {/* 身份：一行**一个**（有人命名时显示展示名，否则精确串）。它是这一行唯一长度不可预测的值，
-            所以也是唯一让位的值——名字长到装不下时省略的是它自己，旁边那些定长的东西（请求数、
-            四个价、判定带）都不跟着动。上一版把它和芯片、计数挤在同一列里，名字一长就换行/挤压；
-            这一版它独占一列，只有它自己会被省略号截。 */}
+        {/* 身份：一行一个，也是这一行唯一长度不可预测的值，所以也是唯一让位的值。 */}
         <span
           className="dtpl-price-title"
           data-exact={!named}
@@ -419,8 +403,8 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
         >
           {named ? row.name : row.model}
         </span>
-        {/* 请求数 = **列**，不是这一行里的一句话。列头是 aria-hidden 的视觉标签（见 .dtpl-price-cols），
-            所以这里给读屏一份同样的字：请求 322 次，而不是让 AT 只念一个光秃秃的数。 */}
+        {/* 请求数是**列**，不是这一行里的一句话。列头是 aria-hidden 的视觉标签（见 .dtpl-price-cols），
+            所以这里给读屏一份同样的字：请求 322 次，而不是一个光秃秃的数。 */}
         <span className="dtpl-price-reqs">
           <span className="dtpl-sr">请求 </span>
           {countText}
@@ -444,12 +428,8 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
         >
           <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         </button>
-        {/* 判定带：**整行宽**，**只在有话要说时才存在**（见上面的 decls）——所以「这一行有第二行」
-            本身就是那个要先看它一眼的信号，而安静的行仍然只有一条。
-            芯片在行首排成一条可纵向扫读的类列（每行都从同一个 x 起，与名字长短无关），句子跟在
-            同一条带上说这一行自己的后果。它横跨整行而不是缩在身份列里：它是一句要读的话，
-            身份列那 224–282px 装不下（实测自然宽 200–330px，缩在那里只剩开头几个字）。
-            与句子同样重要的另一半：四个数字的 hover 不再重复它——同一个事实不给两种措辞。 */}
+        {/* 判定带整行宽，只在有话要说时才存在——「这一行有第二行」本身就是那个要先看它一眼的信号。
+            芯片在带首排成可纵向扫读的类列，句子跟在同一条带上说这一行自己的后果。 */}
         {decls.length > 0 && (
           <p className="dtpl-price-decl">
             {decls.map(decl => (

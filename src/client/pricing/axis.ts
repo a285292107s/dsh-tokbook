@@ -1,7 +1,8 @@
 /**
  * 调价史轴（`Timeline.tsx`）的纯规则：哪些时刻成为节点，每个带标签的节点落在轨道上的哪里。
  *
- * 轴括住**一行自己的历史**：左端是首记，右端是今天。括号外的边界不是这段历史看到的变更。位置按时间比例，但相邻标签会被推开直到满足最小间距——轴被当作调价的**顺序**读取、不是比例尺。纯逻辑：无 React、无 DOM。
+ * 轴括住**一行自己的历史**：左端是首记，右端是今天。位置按时间比例，但相邻标签会被推开直到满足
+ * 最小间距——轴被当作调价的**顺序**读取、不是比例尺。纯逻辑：无 React、无 DOM。
  *
  * @module dsh-tokbook/client/pricing/axis
  */
@@ -52,7 +53,7 @@ export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: numbe
   for (const segment of sortedSegments(row)) {
     if (isBlankSegment(segment)) continue
     const at = segmentInstant(segment)
-    // 不可放置的边界：无起点（0——在历史之前、不在其中）或半输入的日期。在括号外——早于首记、或仍在未来——也不是这段历史的调价。
+    // 不可放置的边界：无起点（在历史之前）或半输入的日期；早于首记、或仍在未来，也不属于这段历史。
     if (at === null || at < start || at > nowMs) continue
     const node: AxisNode = {
       ratio: span <= 0 ? 0 : (at - start) / span,
@@ -67,7 +68,7 @@ export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: numbe
     }
     inside.push(node)
   }
-  // 括号内没有调价就无话可说：两个日期之间一条光秃秃的轨不是时间线，行自身的价、徽标和段列表已经说尽了从未改过价的事实。
+  // 括号内没有调价就无话可说：两个日期之间一条光秃秃的轨不是时间线，行自身的价与段列表已经说尽了「从未改过价」。
   if (first.segmentId === null && inside.length === 0) return null
   return [first, ...inside, { ratio: 1, label: '今天', segmentId: null, active: false, cap: 'today' }]
 }
@@ -75,7 +76,7 @@ export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: numbe
 /**
  * 每个节点的圆点落在 `trackWidth` px 宽轨道上的位置（距轨道左端的 px），顺序与传入一致。
  *
- * 每个标签居中于自己的圆点，两端除外：它们的标签被保持在轨道内——它们是括号，不能被推到任何地方。`gap` 是两个相邻标签保留的空隙。
+ * 每个标签居中于自己的圆点，两端除外：它们的标签被保持在轨道内——它们是括号，不能被推到任何地方。
  */
 export function placeNodes(
   ratios: readonly number[],

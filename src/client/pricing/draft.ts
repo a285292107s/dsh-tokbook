@@ -2,9 +2,8 @@
  * 价格表 tab 的纯逻辑：草稿、脏标记签名、保存 wire body。
  *
  * 三条规则让探索不被惩罚：空白段/时段是草稿不写出去；峰谷时段可只重写任意子集，
- * 空着的档继承全天价；**托底价**（没有生效时刻的那一段）永远在场，没被调价史覆盖
- * 的时间都按它算。时间轴规则与宿主共用 `price-format.ts`。刻意无 React——tab 可
- * 测试的那一半。
+ * 空着的档继承全天价；**托底价**（没有生效时刻的那一段）永远在场。时间轴规则与宿主
+ * 共用 `price-format.ts`。刻意无 React——tab 可测试的那一半。
  *
  * @module dsh-tokbook/client/pricing/draft
  */
@@ -52,7 +51,7 @@ const RATE_INPUTS: ReadonlyArray<readonly [keyof RateTexts, string]> = [
   ['cacheWrite', '缓存写价'],
 ]
 
-/** 一个可编辑峰谷时段：覆盖的小时与星期，以及自己的 rate 输入。 */
+/** 一个峰谷时段：覆盖的小时与星期，以及自己的 rate 输入。 */
 export interface SlotDraft extends RateTexts {
   /** 本地 React key；编辑间稳定，输入框不丢焦点。 */
   id: number
@@ -72,7 +71,6 @@ export interface SegmentDraft extends RateTexts {
   slots: SlotDraft[]
   note: string
 }
-
 /** 一张 route 卡的可编辑模型行。 */
 export interface ModelDraft {
   model: string
@@ -82,8 +80,8 @@ export interface ModelDraft {
   configured: boolean
   /** 账本记录了该 (route, model) 的次数。 */
   records: number
-  /** 账本首/末计费时刻，以及多少条记录没有价格段覆盖（¥0）——wire 上的
-   *  只读事实，都不参与保存。省略 = 读不到账本透镜，**不等于**零。 */
+  /** 账本首/末计费时刻，以及多少条记录没有价段覆盖（¥0）。wire 上的只读事实，都不参与保存；
+   *  省略 = 读不到账本透镜，**不等于**零。 */
   firstAt?: number
   lastAt?: number
   unpriced?: number
@@ -130,8 +128,7 @@ function hourValue(text: string): number {
   return /^\d{1,2}$/u.test(raw) ? Number(raw) : Number.NaN
 }
 
-/** 一个时段的小时，转成共享规则与标签接受的区间（非整点文本时 NaN；
- *  校验会报错，这里只喂展示和重叠检查）。 */
+/** 一个时段的小时，转成共享规则与标签接受的区间（非整点文本时 NaN；校验会报错，这里只喂展示与重叠检查）。 */
 export function slotRange(slot: SlotDraft): { start: number; end: number } {
   return { start: hourValue(slot.start), end: hourValue(slot.end) }
 }
@@ -183,8 +180,7 @@ export function newSegment(seed: Partial<Omit<SegmentDraft, 'id'>> = {}): Segmen
   }
 }
 
-/** 一个新的峰谷时段：09:00–12:00 每天（峰谷窗口的起始形状），尚无费率——
- *  留空的桶继承全天价。 */
+/** 一个新的峰谷时段：09:00–12:00 每天（峰谷窗口的起始形状），尚无费率——留空的桶继承全天价。 */
 export function newSlot(seed: Partial<Omit<SlotDraft, 'id'>> = {}): SlotDraft {
   return {
     id: takeId(),
@@ -335,8 +331,8 @@ export function isUnpriced(model: ModelDraft): boolean {
   return effectiveSegments(model).length === 0
 }
 
-/** 行是不是「价格未知」：整行没有价，或有账本记录早于最早的一段有价段——那些记录按 ¥0 计。
- *  托底价在场即覆盖自始至今，所以这条判定等价于「没有托底价，且第一段调价晚于首记」。
+/** 「价格未知」的判定：整行没有价，或有账本记录早于最早的一段有价段——那些记录按 ¥0 计。
+ *  托底价在场即覆盖自始至今，所以等价于「没有托底价，且第一段调价晚于首记」。
  *  账本透镜另有一份权威计数（host 的 `unpriced`）；这里按草稿算，改价后当场跟手。 */
 export function priceUnknown(model: ModelDraft): boolean {
   const first = pricedSegments(model)[0]
@@ -367,8 +363,8 @@ function activeSlot(segment: SegmentDraft, nowMs: number): SlotDraft | null {
   return null
 }
 
-/** 行内四个数字读的东西：此刻计费所用的价——宿主 `ratesOfSegment` 的同一条规则（生效段叠上生效时段，
- *  时段留空的档沿用全天价）。没有一段在生效时为 null = 这一刻价格未知。 */
+/** 行内四个数字读的东西：此刻计费所用的价——宿主 `ratesOfSegment` 的同一条规则。
+ *  没有一段在生效时为 null = 这一刻价格未知。 */
 export function ratesInForce(model: ModelDraft, nowMs: number = Date.now()): InForceRates | null {
   const segment = segmentInForce(model, nowMs)
   if (segment === null) return null

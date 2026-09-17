@@ -4,17 +4,16 @@
  *
  * 两级独立轴决定一个价格：生效时刻（本地日，或本地日 + 整点小时）选定生效段；
  * 日内时段（小时区间 + 覆盖的星期集合）选定段内的例外价。两个半区用同一套规则
- * 校验手写 `pricing.json`，因此 browser 草稿接受的表永远不会被 host writer
- * 拒绝。这也是本模块独立且无依赖的原因——词表也放这里，因为 client 不能 import
- * `pricing.ts`（它拉了 `node:fs`），而这几条字面量一旦两处各写一遍就会静默漂移。
+ * 校验手写 `pricing.json`，因此 browser 草稿接受的表永远不会被 host writer 拒绝。
+ * 独立且无依赖的原因：词表也放这里，因为 client 不能 import `pricing.ts`（它拉了
+ * `node:fs`），而这几条字面量一旦两处各写一遍就会静默漂移。
  *
  * @module dsh-tokbook/price-format
  */
 
 import type { DaySet } from './types.ts'
 
-/** 无生效时刻的段的 `from`：最早一段，即自始生效。存为 0，使朴素的
- *  `from <= timeMs` 比较直接可用。 */
+/** 无生效时刻的段的 `from`：最早一段，即自始生效。存为 0，使朴素的 `from <= timeMs` 比较直接可用。 */
 export const EARLIEST = 0
 
 /** 价文件唯一的保留顶层键：route → `"metered" | "subscription"`。 */
@@ -58,9 +57,8 @@ export function hourOfDay(ms: number): number {
   return new Date(ms).getHours()
 }
 
-/** 包含 `ms` 的小时的本地起点——文件自身的时间单位，即 `YYYY-MM-DDTHH:00`
- *  的 `from` 所命名的时刻。价格轴按此精度读取，账本时刻必须先 floor 到它才能
- *  与之比较。 */
+/** 包含 `ms` 的小时的本地起点——价文件自身的时间单位，即 `from` 所命名的时刻。
+ *  价格轴按此精度读取，账本时刻必须先 floor 到它才能与之比较。 */
 export function hourStartMs(ms: number): number {
   const at = new Date(ms)
   at.setMinutes(0, 0, 0)
