@@ -362,7 +362,6 @@ export class TokenUsageBook extends Service {
     const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger, { pricingRevision: revision })
     const costed = attachCosts(summary, table, billing)
     const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
-    const files = (await listDayFiles(this.dir)).length
     let lastEventAt: number | null = null
     for (const record of records) {
       if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
@@ -376,7 +375,6 @@ export class TokenUsageBook extends Service {
       totalTokens: totalsTokens(costed.total),
       updatedAt: Date.now(),
       records: records.length,
-      files,
       lastEventAt,
       syncStatus: this.syncStatus,
       syncError: this.syncError,

@@ -284,7 +284,9 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
             <div className="dtpl-hero-top">
               <div className="dtpl-hero-lead">
                 {/* 口径词那一行只留身份：派生读数不在这一行（一个比值挂在口径词上，读者还得回头
-                    找它的分母）。「缓存命中率」自 D-037 起卡上不再显示，见「统计口径」页。 */}
+                    找它的分母）。「缓存命中率」自 D-037 起卡上不再显示——在缓存密集的账本里它
+                    与旁边那个「占 x%」往往只差零点几，并排会被读成一个数印了两遍；输入侧三桶都在
+                    卡上，需要时自己相除即可，所以「统计口径」页也不再为它留一段。 */}
                 <span className="dtpl-hero-head">
                   <span className="dtpl-total-k">今日词元</span>
                 </span>

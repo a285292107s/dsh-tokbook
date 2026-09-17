@@ -176,7 +176,6 @@ const overview = {
   usdExchangeRate: 7.2,
   updatedAt: Date.now() - 60_000,
   records: 214,
-  files: 9,
   lastEventAt: Date.now() - 3 * 60_000,
   syncStatus: 'done',
   syncError: null,
@@ -186,7 +185,7 @@ const emptyOverview = {
   ...overview,
   total: { ...overview.total, ...mk(0, 0, 0, 0), compactions: 0, failures: 0, usageUnknown: 0 },
   byDay: [],
-  totalTokens: 0, totalCost: 0, spend: 0, subscriptionValue: 0, records: 0, files: 0,
+  totalTokens: 0, totalCost: 0, spend: 0, subscriptionValue: 0, records: 0,
   lastEventAt: null, syncStatus: 'idle', syncError: null,
 }
 

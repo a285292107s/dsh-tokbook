@@ -25,7 +25,10 @@ export const CSS_METHOD = `/* 统计口径文档 */
 /* 导语里的加重点是**这次要读的那句**，靠字重与墨色，不靠色相。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede b{color:var(--dtpl-fg);font-weight:600;}
 
-/* 三事实条：来源 / 精度 / 完整度。最后一项是这一节的结论，用更实的边框抬一档。 */
+/* 三事实条：来源 / 精度 / 范围。三条是**同类**的方法事实——都在说「怎么记」，都可由
+   §2 的表与 §3 的漏项核对，所以三格等权。最后一格曾按「结论」处理（重边框 + 大字位，
+   装一个「完整度」数字）：那是**给产品自评**，而自评一旦是印象，挂在速览里只会先让人
+   怀疑整页；同一件事改为按作用域陈述后，它就不再需要一个比别人重的框。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-facts{
   display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
   margin-bottom:16px;
@@ -43,18 +46,6 @@ export const CSS_METHOD = `/* 统计口径文档 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-fact-v{
   font-size:12px;line-height:18px;color:var(--dtpl-fg);
 }
-/* 上一版这里是 accent 渐变 + accent 边框。渐变在这套语言里没有出处（终末地的面是平的），
-   而且它把「结论」和「高亮」混成了一件事。现在只有边框重一档。 */
-[data-plugin="dsh-tokbook"] .dtpl-doc-fact-key{
-  border-color:color-mix(in srgb,var(--dtpl-fg) 35%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-doc-fact-key .dtpl-doc-fact-k{color:var(--dtpl-fg-2);font-weight:600;}
-[data-plugin="dsh-tokbook"] .dtpl-doc-fact-big{
-  font-family:var(--dtpl-mono);
-  font-size:17px;line-height:21px;font-weight:600;color:var(--dtpl-fg);
-  font-variant-numeric:tabular-nums;letter-spacing:-.01em;
-}
-[data-plugin="dsh-tokbook"] .dtpl-doc-fact-tail{color:var(--dtpl-fg-2);font-size:11px;}
 
 /* 编号小节标题：1/2/3/4 装在一枚**工业徽记**里——与每个节标题前那枚是同一个记号
    （黄牌 + 墨色数字）。终末地把「终末地工业」的衍生图形铺在每个系统面板的头部，
@@ -96,32 +87,47 @@ export const CSS_METHOD = `/* 统计口径文档 */
   font-size:11.5px;line-height:17px;color:var(--dtpl-fg-2);
 }
 
-/* 累计公式：累计词元 = 输入 + …，一行可换行的方框。 */
-[data-plugin="dsh-tokbook"] .dtpl-doc-eq{
-  display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;
-  margin:0 0 10px;padding:7px 12px;
-  border:1px solid var(--dtpl-border);
-  background:var(--dtpl-panel-bg);
-  font-size:12px;line-height:18px;color:var(--dtpl-fg);
+/* 记了哪些调用：一张判定表。第一列是用户视角的「情况」（行表头），后两列是两个维度的判定。
+   判定沿用同一套芯片语言——描边 = 有数、静默 = 无数；色相不参与，层级由边框与字重给。 */
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge{
+  width:100%;table-layout:fixed;border-collapse:collapse;
+  margin:0 0 8px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-doc-eq-lead{font-weight:600;color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-doc-eq-term{font-weight:600;color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-doc-eq-op{color:var(--dtpl-fg-3);font-weight:600;}
-
-/* 记了哪些调用：chip 引导的行列表。 */
-[data-plugin="dsh-tokbook"] .dtpl-doc-scope{
-  list-style:none;margin:0;padding:0;
-  display:flex;flex-direction:column;
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge th,
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge td{
+  text-align:left;vertical-align:top;
+  padding:7px 8px;
   border-top:1px solid var(--dtpl-hairline);
 }
-[data-plugin="dsh-tokbook"] .dtpl-doc-scope li{
-  display:flex;align-items:baseline;gap:8px;
-  padding:6px 2px;
-  font-size:12px;line-height:20px;color:var(--dtpl-fg-2);
-  border-bottom:1px solid var(--dtpl-hairline);
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th{
+  padding:0 8px 5px;border-top:none;
+  font-size:10px;line-height:14px;font-weight:600;color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-doc-scope li:last-child{border-bottom:none;}
-/* 「记了 / 没记」不是两种状态色，是两种形状：描边芯片 = 会记，静默芯片 = 不记。 */
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:first-child{width:52%;}
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(2),
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(3){width:24%;}
+/* 行表头在视觉上是正文，不是列头：粗体落在句子自己（-what）身上。 */
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge tbody th{font-weight:400;}
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge-what{
+  display:block;font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge-detail{
+  display:block;font-size:11.5px;line-height:17px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge-note{
+  margin:0;font-size:11.5px;line-height:18px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-doc-judge-note b{color:var(--dtpl-fg);font-weight:600;}
+/* 窄处两列判定各只剩约 53px 内容宽，而最长的芯片（四桶累加）要 56px——实测会挤出格子。
+   给判定列多让 3 个百分点、并收紧内边距，而不是让芯片换行或截断。 */
+@media (max-width:640px){
+  [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:first-child{width:46%;}
+  [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(2),
+  [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(3){width:27%;}
+  [data-plugin="dsh-tokbook"] .dtpl-doc-judge th,
+  [data-plugin="dsh-tokbook"] .dtpl-doc-judge td{padding:6px;}
+}
+/* 判定芯片不是两种状态色，是两种形状：描边 = 这个维度有数，静默 = 没有数可加。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-chip{
   flex:none;display:inline-flex;align-items:center;
   height:18px;padding:0 7px;margin-top:1px;

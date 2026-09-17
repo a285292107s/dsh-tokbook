@@ -394,7 +394,6 @@ export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRo
   totalTokens: number
   updatedAt: number
   records: number
-  files: number
   lastEventAt: number | null
   syncStatus: 'idle' | 'running' | 'done' | 'error'
   syncError: string | null
