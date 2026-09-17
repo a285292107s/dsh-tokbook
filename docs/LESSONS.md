@@ -214,8 +214,8 @@ CSS 变成 JS 语法错误，`pnpm typecheck` / `pnpm build` 当场红。
 ### 现象
 
 时间轴的节点是 `position:absolute; height:100%` 的 `<button>`，里面是「日期」+「圆点」。
-同一套 CSS 下，纯 `<span>` 的端点标签停在轨道**上方**，而**有段可点的**那一端（无起点段锚到首记，
-折成节点）标签整整低了 12px，跑进中间那排。
+同一套 CSS 下，纯 `<span>` 的端点标签停在轨道**上方**，而**有段可点的**那一端（一次调价的生效
+时刻正好落在首记，折成节点）标签整整低了 12px，跑进中间那排。
 
 ### 根因
 
@@ -252,6 +252,10 @@ padding-top:24px` ❌（居中照旧）。**判据**：固定高度 + 绝对定�
 - [ ] 对齐 DSH 外观：用 `--dsw-*` 令牌复刻，别 import 私有 CSS module。
 - [ ] client 入口无 `export default`；esbuild 加 `charset:'utf8'`。
 - [ ] 用 kimi-webbridge 时：先 `snapshot`，再 `evaluate` 读 computed style；**每次调用前先 `find_tab`**（当前标签页会漂）。
+- [ ] 验**焦点交互**（失焦保存 / blur 重置 / 焦点环）前先 `cdp` → `Emulation.setFocusEmulationEnabled`：
+  `Page.bringToFront` 只把标签页置前，**窗口自己没被聚焦时 `document.hasFocus()` 仍是 false**，此时
+  `focus()` / `blur()` 一个 focus 事件都不派发——测试会"跑通"却什么都没测（`focusout` 监听器可以
+  先自证：真触发才有事件）。开完先确认 `hasFocus: true` 再下断言。
 - [ ] 用 `scripts/preview-overlay.mjs` 看效果：**每次 `pnpm build` 后重启预览台**（它在启动时读一次 bundle），并确认 8931 端口已释放。
 - [ ] 预览台端口被占：换 `PORT=8955`（旧进程还活着、服务的是旧 bundle），别急着杀；空/错态用 `TOKBOOK_MODE=empty|err` 环境变量。
 - [ ] 判断颜色别用整页截图：`backdrop-filter` 会让深色卡拍成浅色；用元素截图或 `getComputedStyle`。

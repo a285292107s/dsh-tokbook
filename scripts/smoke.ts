@@ -20,12 +20,12 @@ import {
 } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import {
-  anchoredRow, baselinesOf, composePriceBody, draftFromView, duplicateSlot, editableSegment,
-  effectiveSegments, isBlankSegment, isBlankSlot, isUnpriced, modelDirty, newSegment, newSlot,
-  pendingSegment, rowIssue, slotRange, withSlotEnd, withSlotStart,
+  baselinesOf, composePriceBody, draftFromView, duplicateSlot, effectiveSegments, isBlankSegment, isBlankSlot,
+  isFloorSegment, isUnpriced, modelDirty, newSegment, newSlot, priceUnknown, ratesInForce, rowIssue, slotRange,
+  withSegmentFrom, withSlotEnd, withSlotStart,
   type ModelDraft, type PriceDraft, type SegmentDraft,
 } from '../src/client/pricing/draft.ts'
-import { hourStartMs, slotsOverlap } from '../src/price-format.ts'
+import { slotsOverlap } from '../src/price-format.ts'
 import { axisNodes, labelWidth, placeNodes } from '../src/client/pricing/axis.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-catalog.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
@@ -191,9 +191,9 @@ console.log('手写价表:日期 / 价段 / 取价')
       && onlyRow.firstAt === Date.UTC(2026, 7, 17) && onlyRow.lastAt === Date.UTC(2026, 8, 2) && onlyRow.unpriced === 11)
     const flash = view.routes.find(c => c.route === 'deepseek-official')?.models.find(m => m.model === 'deepseek-v4-flash')
     const pro = view.routes.find(c => c.route === 'deepseek-official')?.models.find(m => m.model === 'deepseek-v4-pro')
-    check('卡片:配置过的模型标 configured 并带上名字,当前生效价与起算日一起给出;没价的 = 价格未知',
-      flash?.configured === true && flash.name === 'DeepSeek V4 Flash' && flash.now?.inputPerMillion === 2 && flash.nowFrom === '2026-09-01'
-      && pro?.name === undefined && pro.now === undefined && pro.firstAt === undefined)
+    check('卡片:配置过的模型标 configured 并带上名字,价段整份交出去(此刻价由 client 现算);没价的没有价段',
+      flash?.configured === true && flash.name === 'DeepSeek V4 Flash' && flash.segments.length === 2
+      && pro?.name === undefined && pro.segments.length === 0 && pro.firstAt === undefined)
     check('价格文件里留着一条已被配置删掉的路由(卡片是并集,不是目录)',
       (await readPricingView(dir, [], { byRouteModel: new Map(), byRoute: new Map() }, quiet)).routes.some(c => c.route === 'deepseek-official'))
   } finally {
@@ -408,13 +408,25 @@ console.log('价格表草稿:没写完的不算、不脏、不写')
     && withSlotEnd(newSlot({ start: '14', end: '18' }), '12').start === '11'
     && withSlotStart(newSlot({ start: '9', end: '18' }), '10').end === '18')
 
-  // 行内单元格填的是**已经加过的那段草稿**,不是静默再加一段更早的。
-  const pendingRow = model([real[0]!, newSegment({ from: '2026-09-20' })])
-  check('行内输入填的是待定草稿(没有草稿就没有待定),而点已有价段编辑的是它本身',
-    pendingSegment(pendingRow)?.from === '2026-09-20' && pendingSegment(model([real[0]!])) === null && editableSegment(pendingRow)?.id === real[0]!.id)
+  // 行内的四个数字只读,读的是**此刻计费所用的价**:生效段叠上此刻生效的峰谷时段。
+  const peakRow = model([{
+    ...newSegment({ from: '', input: '1', output: '4', cacheRead: '0.2', cacheWrite: '' }),
+    slots: [newSlot({ days: 'weekdays', start: '9', end: '12', input: '2' })],
+  }])
+  const peak = ratesInForce(peakRow, dayMillis('2026-09-14', 10))     // 周一 10:00,落在 09:00–12:00 里
+  const offPeak = ratesInForce(peakRow, dayMillis('2026-09-14', 13))
+  check('此刻价 = 生效段的全天价叠上此刻生效的峰谷时段(留空的档沿用全天价),没生效时段时就是全天价',
+    peak?.slot?.start === '9' && peak.values.input === '2' && peak.values.output === '4'
+    && peak.values.cacheRead === '0.2' && peak.values.cacheWrite === ''
+    && offPeak?.slot === null && offPeak.values.input === '1' && offPeak.values.cacheRead === '0.2')
+
+  // 一次调价必须有生效时刻:清空日期不落地(「无起点」那一张是托底价,不是删日期变出来的)。
+  const dated = newSegment({ from: '2026-09-20', input: '1', output: '4' })
+  check('清空调价段的生效时间不落地;改日期则就地改到那一段上',
+    withSegmentFrom(dated, '') === dated && withSegmentFrom(dated, '2026-09-21T13:00').from === '2026-09-21T13:00')
 }
 
-console.log('无起点的价:锚在首记那一小时')
+console.log('托底价:没有生效时刻的那一张永远在场')
 {
   const rowView = (firstAt: number | undefined, segments: PricingSegmentInput[]): PricingView => ({
     routes: [{ route: 'r', label: 'r', billing: 'metered', records: 4, models: [
@@ -422,24 +434,47 @@ console.log('无起点的价:锚在首记那一小时')
     ] }],
     dataDir: 'x', updatedAt: 0,
   })
-  const seededRow = (firstAt: number | undefined, segments: PricingSegmentInput[]): ModelDraft =>
-    draftFromView(rowView(firstAt, segments)).get('r')!.models.get('m')!
-  const undated: PricingSegmentInput[] = [{ from: null, inputPerMillion: 1, outputPerMillion: 4 }]
   const firstAt = dayMillis('2026-08-15', 18) + 47 * 60_000
-  const anchored = seededRow(firstAt, undated)
-  const anchoredBody = composePriceBody(new Map([['r', { route: 'r', label: 'r', billing: 'metered' as const, records: 4, models: new Map([['m', anchored]]) }]]))
-  const written = anchoredBody.ok ? (anchoredBody.body.r as Record<string, Record<string, { from?: string }[]>>).m![0]!.from : undefined
-  check('账本已经计过费的行不留「自始生效」:锚在首记那一小时,轴左端、锚点、写出的日期是同一个瞬间',
-    anchored.segments[0]?.from === '2026-08-15T18:00' && hourStartMs(firstAt) === dayMillis('2026-08-15', 18)
-    && instantMs(anchored.segments[0]!.from) === hourStartMs(firstAt)
-    && modelDirty('r', anchored, baselinesOf(rowView(firstAt, undated)).models) === false
-    && (instantMs(anchored.segments[0]!.from) ?? Number.MAX_SAFE_INTEGER) <= firstAt
-    && written === '2026-08-15T18:00')
-  check('没计过费的行保持无起点;首记之前另有边界时也不锚(锚了就把开口的价推过那条边界);清空日期同理被补回',
-    seededRow(undefined, undated).segments[0]?.from === ''
-    && seededRow(firstAt, [undated[0]!, { from: '2026-08-15T10:00', inputPerMillion: 2, outputPerMillion: 8 }]).segments[0]?.from === ''
-    && anchoredRow(anchored) === anchored
-    && anchoredRow({ ...anchored, segments: anchored.segments.map(segment => ({ ...segment, from: '' })) }).segments[0]?.from === '2026-08-15T18:00')
+  const rowOf = (segments: SegmentDraft[], over: Partial<ModelDraft> = {}): ModelDraft =>
+    ({ model: 'm', configured: true, records: 0, segments, ...over })
+  const bodyOf = (row: ModelDraft) => composePriceBody(new Map([['r', {
+    route: 'r', label: 'r', billing: 'metered' as const, records: row.records, models: new Map([['m', row]]),
+  }]]))
+  const wroteSegments = (body: ReturnType<typeof composePriceBody>): { from?: string; inputPerMillion?: number }[] =>
+    body.ok ? ((body.body.r as Record<string, Record<string, { from?: string; inputPerMillion?: number }[]>>).m ?? []) : []
+
+  // 文件里的段可以全是有日期的:播种时给它补一张空的托底价卡(排在最前),空卡写不出去。
+  const datedOnly: PricingSegmentInput[] = [{ from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 8 }]
+  const seeded = draftFromView(rowView(firstAt, datedOnly)).get('r')!.models.get('m')!
+  const floor = seeded.segments[0]!
+  check('全是带日期的段的行,播种补出一张空的托底价卡;空着时不进请求体,也不弄脏这一行',
+    isFloorSegment(floor) === true && isBlankSegment(floor) === true && seeded.segments.length === 2
+    && JSON.stringify(bodyOf(seeded)) === JSON.stringify(bodyOf({ ...seeded, segments: seeded.segments.slice(1) }))
+    && modelDirty('r', seeded, baselinesOf(rowView(firstAt, datedOnly)).models) === false)
+
+  // 托底价写出去就是那一段**没有 from**:自始生效,不是某一刻起的调价。
+  const filled = { ...seeded, segments: [{ ...floor, input: '1', output: '4' }, ...seeded.segments.slice(1)] }
+  const written = wroteSegments(bodyOf(filled))
+  check('填好的托底价写成「无 from」的那一段(自始生效),排在其它段前面',
+    written.length === 2 && written[0]!.from === undefined && written[0]!.inputPerMillion === 1
+    && written[1]!.from === '2026-09-01')
+
+  // 行内报的是**此刻**生效的那一段:调价段开始前是托底价,开始后是那一段。
+  const both = rowOf([
+    { ...newSegment({ from: '', input: '1', output: '4' }) },
+    { ...newSegment({ from: '2026-09-01', input: '2', output: '8' }) },
+  ], { records: 9, firstAt })
+  check('此刻价取最后一段已生效的;一段都没生效时没有价可报(行内显示「—」,不是 ¥0)',
+    ratesInForce(both, dayMillis('2026-08-20', 9))?.values.input === '1'
+    && ratesInForce(both, dayMillis('2026-09-02', 9))?.values.input === '2'
+    && ratesInForce(rowOf([{ ...newSegment({ from: '2026-12-01', input: '1', output: '4' }) }]), dayMillis('2026-09-02', 9)) === null)
+
+  // 价格未知 = 整行没有价,或有账本记录早于最早的一段有价段(托底价在场时它覆盖自始,故不会有)。
+  check('价格未知只由「没有价」与「有记录早于最早一段价」两条触发',
+    priceUnknown(rowOf([newSegment({ from: '' })])) === true
+    && priceUnknown(rowOf([{ ...newSegment({ from: '', input: '1', output: '4' }) }], { records: 9, firstAt })) === false
+    && priceUnknown(rowOf([{ ...newSegment({ from: '2026-09-01', input: '1', output: '4' }) }], { records: 9, firstAt })) === true
+    && priceUnknown(rowOf([{ ...newSegment({ from: '2026-08-01', input: '1', output: '4' }) }], { records: 9, firstAt })) === false)
 }
 
 console.log('路由目录:本机设置 ∪ 运行时注册表')

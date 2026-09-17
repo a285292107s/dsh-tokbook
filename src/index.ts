@@ -603,7 +603,7 @@ export class TokenUsageBook extends Service {
    * (route, model) 停止定价（其记录落到价格未知）。读时成本层在下次读时重算历史
    * ——不重写账本或 rollup。
    *
-   * **不回视图**：自动保存是全程最热的写路径（每次停止输入一拍就写一次），而 client 读
+   * **不回视图**：自动保存是全程最热的写路径（每次停止输入一拍、或字段失焦就写一次），而 client 读
    * 响应只取 `ok` / `error`——回一份 `pricingView()` 等于每次白跑一次全表读 + 16 KB 载荷。
    */
   async savePricing(body: unknown): Promise<PriceParse> {

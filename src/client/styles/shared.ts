@@ -120,6 +120,12 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
     margin-top:2px;
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-cell-k{display:block;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-value{justify-content:flex-start;}
+  /* 窄屏没有列头，所以把行内那一格只给读屏的列名放出来当小标签——同一份文字，不再写第二遍。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-value-k{
+    position:static;width:auto;height:auto;margin:0;overflow:visible;clip-path:none;
+    font-size:9px;line-height:12px;color:var(--dtpl-fg-3);
+  }
   [data-plugin="dsh-tokbook"] .dtpl-price-input{text-align:left;}
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates{
     grid-template-columns:repeat(2,minmax(0,1fr));

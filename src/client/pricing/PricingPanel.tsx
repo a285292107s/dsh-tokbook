@@ -1,7 +1,9 @@
 /**
  * 词元账本浮窗的价格表 tab。
  *
- * 没有保存按钮也没有撤销：任何变更在停止输入一拍后自动写入。磁盘上的内容是唯一状态，工具栏只报告它。账本已计费过的行绝不留下无日期的价（`anchoredRow`）。
+ * 没有保存按钮也没有撤销：变更在停止输入一拍后自动写入，字段失焦则立刻写。草稿写不出来的
+ * 时候（半输入的数字）不写也不报，等这个字段交代完才说——口径与理由见 D-040。磁盘上的内容是
+ * 唯一状态，工具栏只报告它。行内四个数字只读——报的是此刻计费所用的价，改价在展开的抽屉里（第一张是托底价）。
  *
  * @module dsh-tokbook/client/pricing/PricingPanel
  */
@@ -10,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PricingView } from '../../types.ts'
 import { ROUTE_PRICING } from '../../route-paths.ts'
 import {
-  anchoredRow, baselineOfDraft, baselinesOf, composePriceBody, draftFromView, isUnpriced, stagedChanges, rowKey,
+  baselineOfDraft, baselinesOf, composePriceBody, draftFromView, isUnpriced, priceUnknown, stagedChanges, rowKey,
   type ModelDraft, type PriceDraft, type RouteDraft,
 } from './draft.ts'
 import { RouteCard } from './editors.tsx'
@@ -23,10 +25,16 @@ export interface PricingPanelProps {
   onDirtyChange?: (dirty: boolean) => void
 }
 
-/** 最后一次按键后 tab 等待多久才写入。足够长以合并一行的四个数字，足够短以感觉即时。 */
+/** 最后一次按键后 tab 等待多久才写入——**不是唯一的写入时机**：字段失焦会立刻写一次。
+ *  足够长以合并一行的四个数字，足够短以感觉即时。 */
 const AUTO_SAVE_DELAY_MS = 600
 
-/** footer 关于磁盘文件的状态。 */
+/** 一次写成功之后隔多久才通知父级刷新。父级收到后会跑一次**全量**概览聚合（实测 200–340 ms），
+ *  而失焦提交让「离开一个字段 = 一次写」——连改几档就是连着写几次。这一页自己不看概览（概览在
+ *  别的 tab 上），所以合并窗可以给得宽；离开面板时把还没发出的那次立刻补上。 */
+const REFRESH_MERGE_MS = 1000
+
+/** 工具栏那条状态文字（不是页脚：浮窗里没有页脚，状态与搜索、筛选同在顶部那一行）。 */
 type SaveState =
   | { kind: 'clean' }
   | { kind: 'pending' }
@@ -93,6 +101,19 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const writingRef = useRef(false)
   const againRef = useRef(false)
   const aliveRef = useRef(true)
+  /** 用户是否已经「交代过」某个字段（失焦 / 重新回到面板）。打字途中的失败保持沉默——
+   *  半输入的数字不是错误，只有离开这个字段之后它才是（见 D-040）。 */
+  const committedRef = useRef(false)
+  const refreshRef = useRef<number | null>(null)
+
+  /** 合并通知：连着几笔写只在最后一笔之后再让父级刷新一次（见 `REFRESH_MERGE_MS`）。 */
+  const notifyChanged = useCallback(() => {
+    if (refreshRef.current !== null) window.clearTimeout(refreshRef.current)
+    refreshRef.current = window.setTimeout(() => {
+      refreshRef.current = null
+      onChanged()
+    }, REFRESH_MERGE_MS)
+  }, [onChanged])
 
   /** 把新视图同时采纳为渲染源和基线。 */
   const seed = useCallback((next: PricingView) => {
@@ -103,7 +124,11 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
 
   // 首次挂载：从未到达磁盘的草稿优先于宿主文件。
   useEffect(() => {
-    if (staged !== null) return
+    // 回到面板 = 一次提交点：上次没写完的坏草稿要说出原因，而不是只挂着一句「待保存…」。
+    if (staged !== null) {
+      committedRef.current = true
+      return
+    }
     let alive = true
     void (async () => {
       try {
@@ -119,7 +144,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   }, [seed])
 
   /**
-   * 写入整个文件。草稿尚无效时拒绝（不写入），使半输入的数字不能阻塞或破坏其余内容；防抖 effect 在草稿再次变化时重试。保存串行化：在飞的写入期间发生的变更排队一次。
+   * 写入整个文件。草稿尚无效时拒绝（不写入），使半输入的数字不能阻塞或破坏其余内容；
+   * 防抖 effect 在草稿再次变化时重试。保存串行化：在飞的写入期间发生的变更排队一次。
+   * **写不进去这件事只在提交点说出来**（字段失焦 / 回到面板）：打字途中它必然是无效的，
+   * 那一刻报错只会把「还没打完」读成「你错了」（见 D-040）。
    */
   const writeNow = useCallback(async (): Promise<void> => {
     if (stagedChanges(draftRef.current, baselineRef.current) === 0) return
@@ -131,7 +159,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     const snapshot = draftRef.current
     const composed = composePriceBody(snapshot)
     if (!composed.ok) {
-      if (aliveRef.current) setSave({ kind: 'invalid', message: composed.error })
+      if (committedRef.current && aliveRef.current) setSave({ kind: 'invalid', message: composed.error })
       return
     }
     writingRef.current = true
@@ -145,38 +173,48 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     // 基线始终推进到刚写入的内容，即使已 unmount——离场前的 flush 写入必须让 `staged` 保持干净。
     const nextBaseline = baselineOfDraft(snapshot)
     baselineRef.current = nextBaseline
+    // 写成功了：下一次编辑重新从「安静」开始，直到它自己被交代出去。
+    committedRef.current = false
     if (staged !== null) {
       staged = stagedChanges(staged.draft, nextBaseline) > 0
         ? { ...staged, baseline: nextBaseline }
         : null
     }
+    // 在飞期间又攒了改动：接上下一笔，别让这一笔之后的重写被跳过。
+    const queued = againRef.current
+    againRef.current = false
     if (!aliveRef.current) {
-      if (againRef.current) {
-        againRef.current = false
-        void writeNow()
-      }
+      // 卸载后的补写：状态栏已经不在了，但 tab 上的圆点与父级屏上的金额都还活着——两样都得同步，
+      // 否则刚写进去的价会在「有未保存的改动」和旧金额里各留一处假象。
+      onDirtyChange?.(stagedChanges(draftRef.current, baselineRef.current) > 0)
+      notifyChanged()
+      if (queued) void writeNow()
       return
     }
     // 本地草稿保持为唯一真源——从响应重新播种会 remount 用户可能仍在输入的输入框。
     setBaseline(nextBaseline)
     setSave({ kind: 'saved', at: Date.now() })
-    onChanged()
-    if (againRef.current) {
-      againRef.current = false
-      void writeNow()
-    }
-  }, [onChanged])
+    notifyChanged()
+    if (queued) void writeNow()
+  }, [notifyChanged, onDirtyChange])
 
   // 自动保存：任何变更重置短计时器；最后一次变更胜出。写入器经 ref 读取，使父级 re-render 绝不会饿死防抖。
   const writeRef = useRef(writeNow)
   writeRef.current = writeNow
   useEffect(() => {
     if (changes === 0) {
-      setSave(current => (current.kind === 'pending' || current.kind === 'invalid' ? { kind: 'clean' } : current))
+      // 改动被撤回到与磁盘一致：没有问题可报，也没有东西待写——回到「安静」的起点。
+      // 「保存失败」也一起清掉：草稿与基线一致，就确实没有哪一处内容没落盘。
+      committedRef.current = false
+      setSave(current => (current.kind === 'pending' || current.kind === 'invalid' || current.kind === 'error'
+        ? { kind: 'clean' }
+        : current))
       return
     }
     if (timerRef.current !== null) window.clearTimeout(timerRef.current)
-    setSave(current => (current.kind === 'error' ? current : { kind: 'pending' }))
+    // 已经报出来的问题不因为继续打字而撤回：它说的地点与原因仍然成立，撤回只会闪一下。
+    // 它由**写成功**或**改动归零**清掉——validation 要用户动手才消失（NN/g 同一条）。
+    setSave(current => (current.kind === 'error' || current.kind === 'invalid' ? current : { kind: 'pending' }))
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null
       void writeRef.current()
@@ -197,7 +235,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
 
   useEffect(() => { onDirtyChange?.(changes > 0) }, [changes, onDirtyChange])
 
-  // 离开 tab（或关闭浮窗）不能搁浅一次待写的保存。
+  // 离开 tab（或关闭浮窗）不能搁浅一次待写的保存，也不能丢掉一次还没发出的刷新通知。
   useEffect(() => {
     aliveRef.current = true
     return () => {
@@ -206,16 +244,22 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         window.clearTimeout(timerRef.current)
         timerRef.current = null
       }
+      // 那次刷新说的是**已经落盘**的价，别的 tab 正拿它算金额：跟着面板一起丢掉会让它们停在旧数。
+      if (refreshRef.current !== null) {
+        window.clearTimeout(refreshRef.current)
+        refreshRef.current = null
+        onChanged()
+      }
       if (stagedChanges(draftRef.current, baselineRef.current) > 0) void writeNow()
     }
-  }, [writeNow])
+  }, [writeNow, onChanged])
 
   const updateModel = useCallback((route: string, model: string, next: ModelDraft) => {
     setDraft((current) => {
       const card = current.get(route)
       if (card === undefined) return current
       const models = new Map(card.models)
-      models.set(model, anchoredRow(next))
+      models.set(model, next)
       const copy = new Map(current)
       copy.set(route, { ...card, models })
       return copy
@@ -275,7 +319,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const unknownCount = useMemo(() => {
     let count = 0
     for (const card of draft.values()) {
-      for (const row of card.models.values()) if (isUnpriced(row)) count += 1
+      for (const row of card.models.values()) if (priceUnknown(row)) count += 1
     }
     return count
   }, [draft])
@@ -294,7 +338,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       const routeHit = needle !== '' && (card.route.toLowerCase().includes(needle) || card.label.toLowerCase().includes(needle))
       const models = new Map<string, ModelDraft>()
       for (const [model, row] of card.models) {
-        if (unknownOnly && !isUnpriced(row)) continue
+        if (unknownOnly && !priceUnknown(row)) continue
         // 搜索覆盖行显示的内容：展示名、精确模型串，以及整个 route 匹配时其下所有行。
         if (needle !== '' && !routeHit
           && !model.toLowerCase().includes(needle)
@@ -310,9 +354,22 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
 
   const filtering = query.trim() !== '' || unknownOnly
   const stateText = saveStateText(save, pricedCount)
+  /** 写不进去（草稿无效 / 宿主或磁盘拒绝）：行上那枚「未保存」徽章只在这种时候出现。 */
+  const writeStuck = save.kind === 'invalid' || save.kind === 'error'
 
   return (
-    <section className="dtpl-price-sec" aria-label="价格表">
+    <section
+      className="dtpl-price-sec"
+      aria-label="价格表"
+      // 任一字段失焦 = 提交点：立刻写一次（不必再等防抖），并让此后写不进去的失败说话。
+      // **没有待写的改动就不算一次交代**——否则在这个面板里随便点一下，下一次打字的中途报错
+      // 就被放行了（那正是这一条要挡掉的东西）。
+      onBlur={() => {
+        if (stagedChanges(draftRef.current, baselineRef.current) === 0) return
+        committedRef.current = true
+        void writeRef.current()
+      }}
+    >
       <div className="dtpl-price-bar">
         <input
           className="dtpl-price-search"
@@ -326,6 +383,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           type="button"
           className={`dtpl-price-chip${unknownOnly ? ' is-on' : ''}`}
           aria-pressed={unknownOnly}
+          title="整行没有价，或账本里有早于最早一段价的记录（那些按 ¥0 计）"
           onClick={() => setUnknownOnly(value => !value)}
         >
           {unknownOnly ? '只看价格未知' : '价格未知'} {String(unknownCount)} 个模型
@@ -340,9 +398,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
 
       {cards.length > 0 && (
         <p className="dtpl-price-legend">
-          <b>—</b> 表示还没写价（暂按 ¥0 计，<b>不是免费</b>）。行内四个数字改的是
-          <b>当前生效那一段的全天价</b>——改它就是重算用这段价计费的历史；
-          要从现在起调价、或给某个时段单独定价，点行尾的 ▸。
+          右侧四个数字是此刻计费所用的价（含正在生效的峰谷时段），只读；行尾的 ▸ 展开这一行。
+          展开后的第一张是<b>托底价</b>——它没有生效时间，没被下面任一段调价覆盖的时间都按它算。
+          <b>—</b> 表示这一刻还没有价（暂按 ¥0 计，不是免费）。改动会自动写进文件：行左侧的墨条 =
+          还没落盘（不用管），行上多出「未保存」= 这次没能写进去（看上方那条消息）。
         </p>
       )}
 
@@ -371,6 +430,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                   key={card.route}
                   card={card}
                   baseline={baseline.models}
+                  stuck={writeStuck}
                   collapsed={!filtering && !expanded.has(card.route)}
                   openKey={openKey}
                   onToggleCard={toggleCard}
@@ -385,7 +445,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   )
 }
 
-/** footer 关于文件的说法：先报保存状态，无可报告时显示表自身的规模。 */
+/** 那条状态文字的说法：先报保存状态，无可报告时显示表自身的规模。 */
 function saveStateText(save: SaveState, priced: number): string {
   switch (save.kind) {
     case 'pending': return '待保存…'

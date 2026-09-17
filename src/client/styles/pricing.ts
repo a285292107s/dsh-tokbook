@@ -137,9 +137,14 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-row{
   min-height:40px;padding:4px 10px;border-top:1px solid var(--dtpl-hairline);
   scroll-margin-block:56px;
+  cursor:pointer;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-row:first-child{border-top:0;}
-/* 三种行状态，靠同一条约定区分：墨色侧条 =「未保存」，中性抬升 =「已展开」，环 =「焦点」。
+/* 整行是展开价段的热区（行尾的 ▸ 是它的键盘可达形态），所以它**给** hover 反馈——
+   静态行不给 hover 洗色，那会是假的可点承诺；这一行真的可点。行内文字仍可拖选，
+   「拖选」不算一次点击（见 editors 里那条判据）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-row:hover{background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);}
+/* 四种行状态，靠同一条约定区分：墨色侧条 =「未保存」，中性抬升 =「已展开」，环 =「焦点」。
    侧条从不花在脏以外的事情上，而且取墨色不取强调色——「这条还没落盘」是一个**状态**，
    不该借一个在不同 DSH 皮肤下会变蓝的身份色。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-row[data-dirty="true"]{
@@ -172,13 +177,14 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-title:only-child{
   color:var(--dtpl-fg);font-family:var(--dtpl-mono);
 }
-/* 徽章 = 四级**描边芯片**，不是一个色块矩阵：
+/* 徽章 = 三级**描边芯片**，不是一个色块矩阵：
      默认（仅账本 / 峰谷 N 段）  描边 + 三级文字 —— 只是说明这个值从哪来；
-     需要看一眼（价格未知 / 未生效）1px amber 边框 + warn-ink 文字；
-     还没落盘（未保存）          实心墨芯片，与「订阅」同一形——它必须从一列灰芯片里跳出来。
+     需要看一眼（价格未知 / 未生效 / 未保存）1px amber 边框 + warn-ink 文字；
+     还有更多（峰谷 N 段）       1px 墨边，从灰芯片里抬一档。
    上一版一律是圆角 + --dtpl-accent 染色底：accent 在 DSH 皮肤里等于墨色，于是「峰谷 2 段」
    和「仅账本」在界面上是同一块灰，等于没有层级；换个皮肤又会整片变蓝。
-   现在层级只由**边界与填充**表达，色相留给真正要看的状态。 */
+   现在层级只由**边界与填充**表达，色相留给真正要看的状态。实心墨那一档只剩「当前项」
+   （按量 / 订阅的选中段）——「未保存」自 D-040 起只在写不进去时出现，它属于「要看一眼」。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge{
   flex:none;
   display:inline-flex;align-items:center;height:15px;padding:0 5px;
@@ -190,7 +196,7 @@ export const CSS_PRICING = `/* 价格表 tab */
   color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-dirty{
-  color:var(--dtpl-card);background:var(--dtpl-fg);border-color:var(--dtpl-fg);
+  color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
 }
 /* 峰谷标记：这一行可见的四个数字不是全部——它必须一眼读成「里面还有更多定价」。
    它不抢颜色，靠 1px 墨边把自己从「仅账本」那类中性芯片里抬一档。 */
@@ -201,7 +207,7 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge-idle{
   color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
 }
-/* 出处行：这个价是什么，以及账本用它计了多少。行的身份不在此重复——上一行已经说过一次。 */
+/* 出处行：这个价是什么，以及这一行在账本里有多少次请求。行的身份不在此重复——上一行已经说过一次。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-meta{
   display:flex;align-items:baseline;gap:5px;min-width:0;
   font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
@@ -216,10 +222,10 @@ export const CSS_PRICING = `/* 价格表 tab */
   font-size:10px;line-height:15px;color:var(--dtpl-err);
 }
 
-/* 四个格子：平时像文本，聚焦时是真输入框。右对齐等宽数字让整列可纵向比对。
-   **等宽不是这里的装饰，是列宽度的前提**：--dtpl-rate-w 的 64px 就是按 12px 等宽数字
-   量出来的（最宽的一档 0.003625 是 47.9px + 两侧 7px 内边距 = 62px）。上一版漏了
-   font-family，数字实际按比例体渲染，那条度量与真实字形对不上；这里补上。 */
+/* 四个格子：同一套度量给两种形态——抽屉里的输入框，以及行内**只读**的此刻价。
+   等宽不是这里的装饰，是列宽度的前提：--dtpl-rate-w 按 12px 等宽数字量出来，
+   比例体会让同位数字错开，固定列的可比对性随之消失（上一版漏了 font-family，那条度量
+   与真实字形对不上）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-rates{
   display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
   column-gap:var(--dtpl-rate-gap);min-width:0;
@@ -228,6 +234,15 @@ export const CSS_PRICING = `/* 价格表 tab */
 [data-plugin="dsh-tokbook"] .dtpl-price-cell-k{
   display:none;font-size:9px;line-height:12px;color:var(--dtpl-fg-3);
 }
+/* 行内的只读价：报的是此刻计费所用的价，所以它不是控件——没有边框、没有焦点、不进 Tab 序。
+   空的档走 dim 色的「—」，与图例里那句「这一刻还没有价」对上。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-value{
+  display:flex;align-items:center;justify-content:flex-end;
+  min-height:26px;padding:0 var(--dtpl-cell-pad-x);
+  font-family:var(--dtpl-mono);font-size:12px;line-height:16px;
+  font-variant-numeric:tabular-nums;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-value[data-empty="true"]{color:var(--dtpl-fg-dim);}
 [data-plugin="dsh-tokbook"] .dtpl-price-input{
   width:100%;box-sizing:border-box;
   height:26px;padding:0 var(--dtpl-cell-pad-x);
@@ -249,8 +264,8 @@ export const CSS_PRICING = `/* 价格表 tab */
   font-size:10px;line-height:14px;color:var(--dtpl-err);text-align:right;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-/* 展开槽：一行里唯一的按钮，而且是进入该行调价史的**唯一**入口（行本身不可点，费率格是输入框）。
-   所以它必须读成控件而不是装饰。两条规矩分开记：
+/* 展开槽：进入该行价段（托底价 + 调价史）的**主**入口，而整行也是热区——所以它必须读成控件
+   而不是装饰，键盘用户也靠它（行本身只响应鼠标）。两条规矩分开记：
      · **字形尺寸全窗口一个值**（14px、--dtpl-fg-2）。上一版是 10px 的三级色，压在 40px 高、
        右边还挨着四列 74px 数字的行尾，读起来像排版符号——它当时的对比度 5.67:1 是够的，
        所以问题不在看得清，而在**看不出它可以点**。放大提亮靠大小与字重变响，不靠再画一条边框
@@ -282,6 +297,11 @@ export const CSS_PRICING = `/* 价格表 tab */
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);}
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost-danger:hover{color:var(--dtpl-err);background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);}
+/* 删除的第二下：文字已经换成「确认删除」，这里再给它一个持续的红（不是只让 hover 时才红）——
+   状态由文字承载，颜色只负责让人在按下前再看一眼。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-ghost-danger[data-confirm="true"]{
+  color:var(--dtpl-err);background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);
+}
 
 /* ▸ 后面的调价史抽屉——表面阶梯：
      page        （无）
@@ -305,12 +325,21 @@ export const CSS_PRICING = `/* 价格表 tab */
   background:var(--dtpl-surface);
 }
 /* 「当前生效」的那一段：墨色侧条 + 墨色边框。它是一个**身份**（这一段在管现在），
-   不是一个分类，所以不借色相；行内四档价与行尾徽章已经把它说清楚了，这里只补定位。 */
+   不是一个分类，所以不借色相；行内四个数字报的就是它的价，这里只补定位。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg[data-active="true"]{
   border-color:color-mix(in srgb,var(--dtpl-fg) 35%,transparent);
   box-shadow:inset 2px 0 0 var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-head{display:flex;align-items:center;gap:8px;min-width:0;}
+/* 托底价那一张的名字：它没有生效时刻，所以不给输入框——读起来要像这一张卡的标题（12px/600），
+   而不是一个待填的字段。它是**身份**（没被调价覆盖的时间都按它算），不是一次调价。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-floor-k{
+  font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
+}
+/* 托底价的一句话解释：11px（说明句档）、fg-2。它是一句要读的话，不借等宽、不降到三级色。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-floor-note{
+  margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-date{display:flex;align-items:center;gap:6px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-date-k{font-size:10px;line-height:14px;color:var(--dtpl-fg-2);white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-price-input-date{
@@ -322,6 +351,7 @@ export const CSS_PRICING = `/* 价格表 tab */
   font-size:10px;line-height:15px;color:var(--dtpl-fg-3);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-live{
+  font-size:10px;line-height:15px;
   font-style:normal;font-weight:600;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{

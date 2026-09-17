@@ -202,12 +202,9 @@ export interface PricingModelView {
   /** 落在所有价格段之外的记录数（按各自时间戳）——这些记 ¥0。省略 =
    * 未知（无账本透镜），**不等于** 0：有价的行仍可能有未定价历史。 */
   unpriced?: number
-  /** 按生效序的价格段（空 = 价格未知，计 ¥0）。 */
+  /** 按生效序的价格段（空 = 价格未知，计 ¥0）。行内显示的价由 client 从这些段**按当前时刻**
+   *  现算（生效段 + 生效时段），所以 wire 上不带一份会过期的「当前价」。 */
   segments: PricingSegmentInput[]
-  /** 视图时刻生效段的四档 ¥/M——全天价，即行内单元格所编辑的；省略 =
-   * 无人定价。例外时段覆盖的时刻按时段自身费率。 */
-  now?: ModelPricing
-  nowFrom?: string | null
 }
 
 /** 价格表 tab 的一张 route 卡。 */

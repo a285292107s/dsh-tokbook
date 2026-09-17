@@ -10,7 +10,7 @@
  */
 
 import { instantKey, EARLIEST } from './price-format.ts'
-import { billingOf, priceAt, rateKeyAt, readPriceFile } from './pricing.ts'
+import { billingOf, rateKeyAt, readPriceFile } from './pricing.ts'
 import type {
   ModelEntry, PriceSegment, PriceSlot, PricingModelView, PricingRouteView, PricingSegmentInput, PricingSlotInput,
   PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
@@ -38,7 +38,7 @@ export interface LedgerUsage {
 }
 
 /** 把账本行折成价格视图的用量透镜。失败尝试命名 route 但没有计费调用，故
- *  不进——卡片的「账本 N 次」与通道用量 tab 的请求计数同义。未归属行无法定价，
+ *  不进——价格表卡片上的「N 次请求」与通道用量 tab 的请求计数同义。未归属行无法定价，
  *  不进价格表卡片。 */
 export function ledgerUsageOf(records: readonly UsageRecord[], table: PricingTable): LedgerUsage {
   const byRouteModel = new Map<string, Map<string, LedgerModelUsage>>()
@@ -95,8 +95,8 @@ function segmentInput(segment: PriceSegment): PricingSegmentInput {
 
 /**
  * 装配价格表卡片：每个 provider route 一张卡，route 可计费的每个 model 一行。
- * 一行的 `now` 是读取时生效段的**全天价**——正是行内单元格所编辑的；峰谷
- * 例外时段在其 `segments` 的下一级。
+ * 一行只带它的价段（与账本透镜）；**行内那个「此刻的价」不在这里算**——它由 client
+ * 按当前时刻从段里现算，wire 上不带一份会过期的快照。
  */
 export async function readPricingView(
   dir: string,
@@ -173,7 +173,6 @@ export async function readPricingView(
     const models: PricingModelView[] = []
     for (const [model, acc] of entry.models) {
       const segments = file.table[route]?.[model]
-      const hit = segments === undefined ? null : priceAt(file.table, route, model, now)
       models.push({
         model,
         ...(acc.name !== undefined ? { name: acc.name } : {}),
@@ -183,9 +182,6 @@ export async function readPricingView(
         ...(acc.lastAt !== undefined ? { lastAt: acc.lastAt } : {}),
         ...(acc.unpriced !== undefined ? { unpriced: acc.unpriced } : {}),
         segments: (segments ?? []).map(segmentInput),
-        ...(hit !== null
-          ? { now: hit.rates, nowFrom: hit.from > EARLIEST ? instantKey(hit.from) : null }
-          : {}),
       })
     }
     models.sort((left, right) =>
