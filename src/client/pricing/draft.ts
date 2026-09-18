@@ -6,11 +6,11 @@
  * 共用 `price-format.ts`。刻意无 React——tab 可测试的那一半。
  */
 
-// 价文件的共享词表（保留键、备注长度上限）从共享内核取——client 不能 import
+// 价文件的共享词表（保留键、长度上限、备注上限）从共享内核取——client 不能 import
 // `src/pricing.ts`（它拉了 `node:fs`），两条字面量各写一遍就会静默漂移。
 import {
-  DAY_SETS, DAY_SET_LABELS, EARLIEST, MAX_NOTE_LENGTH, PRICING_BILLING_KEY, instantKey, instantMs, isHourRange, rangeLabel,
-  slotCovers, slotsOverlap,
+  DAY_SETS, DAY_SET_LABELS, EARLIEST, MAX_MODEL_LENGTH, MAX_NOTE_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
+  instantKey, instantMs, isHourRange, rangeLabel, slotCovers, slotsOverlap,
 } from '../../price-format.ts'
 import type { BillingNature, DaySet, ModelPricing, PricingSegmentInput, PricingSlotInput, PricingView } from '../../types.ts'
 
@@ -442,6 +442,16 @@ export function ratesOf(holder: RateTexts): DraftRates | null {
   }
 }
 
+/** **填了**却不是非负数字的那一格（`ratesOf` 负责「必填档空着 / 非法」；这里只补
+ *  它看不见的可选档）。写路径与脏标记共用它：填了却写不出去的档既不能悄悄丢掉，
+ *  也不能让那一行看起来「与磁盘一致」。 */
+function badRateField(holder: RateTexts): string | null {
+  for (const [field, label] of RATE_INPUTS) {
+    if (fieldState(holder, field) === 'bad') return `${label}「${holder[field].trim()}」不是有效的非负数字`
+  }
+  return null
+}
+
 /** 一个峰谷时段重写的桶，或首个非数字值。可以只重写任意子集：留空的桶继承段的全天价。 */
 export function slotRates(slot: SlotDraft): { ok: true; rates: SlotRates } | { ok: false; error: string } {
   const rates: SlotRates = {}
@@ -516,11 +526,13 @@ function parseRate(value: string): number | null {
 // 签名与 wire body
 // ---------------------------------------------------------------------------
 
-/** 一个段保存时会写成的样子，草稿被排除。 */
+/** 一个段保存时会写成的样子，草稿被排除。填了却写不出去的档（四档里任一格非法）
+ *  以 `null` 参与签名——那一格正红着，这一行就还没「与磁盘一致」。 */
 function segmentSignature(segment: SegmentDraft): Record<string, unknown> {
+  const rates = ratesOf(segment)
   return {
     from: segment.from.trim() === '' ? null : segment.from.trim(),
-    rates: ratesOf(segment),
+    rates: rates === null || badRateField(segment) !== null ? null : rates,
     slots: effectiveSlots(segment).map((slot) => {
       const rates = slotRates(slot)
       return {
@@ -596,6 +608,22 @@ function slotBody(slot: SlotDraft): Record<string, unknown> {
   return body
 }
 
+/** 一个 keys 层面的写入障碍，或 null：host 的写路径只接受非空的、不以 `$` 开头
+ *  （保留键前缀）、且不超长的 route / model 串。长度上限与保留键同源于
+ *  `price-format.ts`，所以草稿这一侧报得出位置与原因，而不是整份文件被拒。 */
+function routeIssue(route: string): string | null {
+  if (route === '') return '存在空通道路由名'
+  if (route.startsWith('$')) return `通道路由名不得以「$」开头（「$」是价文件的保留键前缀）：${route}`
+  if (route.length > MAX_ROUTE_LENGTH) return `通道路由名超过 ${String(MAX_ROUTE_LENGTH)} 字：${route.slice(0, 40)}…`
+  return null
+}
+
+function modelIssue(model: string): string | null {
+  if (model === '') return '存在空模型串'
+  if (model.length > MAX_MODEL_LENGTH) return `模型串超过 ${String(MAX_MODEL_LENGTH)} 字：${model.slice(0, 40)}…`
+  return null
+}
+
 /** 一次保存发送的 body：**完整的**目标文件。拒绝时给出首个问题的确切位置，与宿主自身解析的报错方式一致。 */
 export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<string, unknown> } | { ok: false; error: string } {
   const body: Record<string, unknown> = {}
@@ -605,7 +633,10 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
     const models: Record<string, unknown[]> = {}
     for (const [model, row] of card.models) {
       const priced = pricedSegments(row)
+      // 只有真会写出去的行才受键规则约束：没价的 route / model 不进 body，也就不该挡住这一笔。
       if (priced.length === 0) continue
+      const modelProblem = modelIssue(model)
+      if (modelProblem !== null) return { ok: false, error: `「${route}」的${modelProblem}` }
       const where = `「${route}」的「${model}」`
       const segments: Record<string, unknown>[] = []
       const seen = new Set<number>()
@@ -620,6 +651,10 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
         seen.add(at)
         const rates = ratesOf(segment)
         if (rates === null) return { ok: false, error: `${where}的输入价 / 输出价必须是非负数字` }
+        // 可选档填了却不是数字：与 `rowIssue` 同一把尺子挡住这一笔，不静默丢掉那一档
+        // （否则草稿里那格红着、工具栏却说「已保存」）。
+        const badRate = badRateField(segment)
+        if (badRate !== null) return { ok: false, error: `${where}的${badRate}` }
         const out: Record<string, unknown> = {}
         if (at !== EARLIEST) out.from = instantKey(at)
         for (const [draftKey, wireKey] of RATE_FIELD_NAMES) {
@@ -649,7 +684,11 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
       }
       models[model] = segments
     }
-    if (Object.keys(models).length > 0) body[route] = models
+    if (Object.keys(models).length > 0) {
+      const routeProblem = routeIssue(route)
+      if (routeProblem !== null) return { ok: false, error: routeProblem }
+      body[route] = models
+    }
   }
   if (Object.keys(billing).length > 0) body[PRICING_BILLING_KEY] = billing
   return { ok: true, body }

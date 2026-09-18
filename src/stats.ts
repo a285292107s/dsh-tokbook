@@ -8,6 +8,7 @@
 import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DAY_SETS } from './price-format.ts'
+import { dayOfFileName } from './usage-log.ts'
 import { parseRecord } from './usage-record.ts'
 import {
   type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type SlotRef, type TokenSummary,
@@ -79,13 +80,6 @@ export type RateResolver = (record: UsageRecord) => RateKey
 export type StatsLogger = { error(...args: unknown[]): void; info?(...args: unknown[]): void }
 
 const consoleLogger: StatsLogger = console
-
-const DAY_FILE = /^usage-(\d{4}-\d{2}-\d{2})\.jsonl$/u
-
-/** 分日文件名中的日期部分；外来文件名为 null。 */
-function fileDay(name: string): string | null {
-  return DAY_FILE.exec(name)?.[1] ?? null
-}
 
 function dayKey(time: number): string {
   const date = new Date(time)
@@ -175,7 +169,7 @@ export async function listDayFiles(dir: string): Promise<string[]> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
   }
-  return names.filter(name => fileDay(name) !== null).sort()
+  return names.filter(name => dayOfFileName(name) !== null).sort()
 }
 
 async function fileStamp(dir: string, name: string): Promise<{ size: number; mtimeMs: number } | null> {
@@ -187,11 +181,12 @@ async function fileStamp(dir: string, name: string): Promise<{ size: number; mti
   }
 }
 
-/** 经目录缓存加载一个分日文件：冻结（今日之前）文件是只追加的历史，首次解析
- * 即最终；今日文件在 size/mtime 相对缓存解析变化时重读。 */
-async function loadFileCached(cache: DirCache, dir: string, name: string, hot: boolean, logger: StatsLogger): Promise<UsageRecord[]> {
+/** 经目录缓存加载一个分日文件：解析结果按 `size:mtimeMs` 版本缓存——版本没变就复用
+ *  内存里那份，变过就重读。**不把「今日之前」当成不可变**：权威 walk 会补写往日、
+ *  模块级 HMR 后的第二个实例也会写，而日文件是可以被追加的，所以冻结日的缓存同样要
+ *  过一次版本核对（一次 `stat`，省下的是整份解码）。 */
+async function loadFileCached(cache: DirCache, dir: string, name: string, logger: StatsLogger): Promise<UsageRecord[]> {
   const cached = cache.files.get(name)
-  if (!hot && cached !== undefined) return cached.records
   const stamp = await fileStamp(dir, name)
   if (stamp === null) {
     cache.files.delete(name)
@@ -205,8 +200,7 @@ async function loadFileCached(cache: DirCache, dir: string, name: string, hot: b
   return records
 }
 
-async function loadDir(dir: string, cache: DirCache, now: () => Date, logger: StatsLogger): Promise<UsageRecord[]> {
-  const today = dayKey(now().getTime())
+async function loadDir(dir: string, cache: DirCache, logger: StatsLogger): Promise<UsageRecord[]> {
   const names = await listDayFiles(dir)
   const live = new Set(names)
   for (const name of cache.files.keys()) {
@@ -214,19 +208,16 @@ async function loadDir(dir: string, cache: DirCache, now: () => Date, logger: St
   }
   const out: UsageRecord[] = []
   for (const name of names) {
-    const day = fileDay(name)!
-    const hot = day >= today
-    out.push(...await loadFileCached(cache, dir, name, hot, logger))
+    out.push(...await loadFileCached(cache, dir, name, logger))
   }
   return out
 }
 
-/** 读入所有分日文件为记录，冻结文件首次解析后从内存提供。数据目录不存在时
- * 返回空列表。 */
-export async function readCachedRecords(dir: string, now: () => Date = () => new Date(), logger: StatsLogger = consoleLogger): Promise<UsageRecord[]> {
+/** 读入所有分日文件为记录，未变过的文件从内存提供。数据目录不存在时返回空列表。 */
+export async function readCachedRecords(dir: string, logger: StatsLogger = consoleLogger): Promise<UsageRecord[]> {
   const cache = stateOf(dir)
   if (cache.inflight !== undefined) return cache.inflight
-  const pending = loadDir(dir, cache, now, logger).finally(() => {
+  const pending = loadDir(dir, cache, logger).finally(() => {
     if (cache.inflight === pending) cache.inflight = undefined
   })
   cache.inflight = pending
@@ -242,28 +233,25 @@ export async function readRecordsByDayRange(
   dir: string,
   fromDay: string,
   toDay: string,
-  now: () => Date = () => new Date(),
   logger: StatsLogger = consoleLogger,
 ): Promise<UsageRecord[]> {
   if (fromDay > toDay) return []
   const cache = stateOf(dir)
-  const today = dayKey(now().getTime())
   const names: string[] = []
   for (const name of await listDayFiles(dir)) {
-    const day = fileDay(name)!
+    const day = dayOfFileName(name)!
     if (day >= fromDay && day <= toDay) names.push(name)
   }
   const out: UsageRecord[] = []
   for (const name of names) {
-    const hot = fileDay(name)! >= today
-    out.push(...await loadFileCached(cache, dir, name, hot, logger))
+    out.push(...await loadFileCached(cache, dir, name, logger))
   }
   return out
 }
 
 /** 预热一个目录的缓存，使首次 stats 轮询是内存命中。 */
-export async function warmRecordCache(dir: string, now?: () => Date, logger?: StatsLogger): Promise<void> {
-  await readCachedRecords(dir, now, logger)
+export async function warmRecordCache(dir: string, logger?: StatsLogger): Promise<void> {
+  await readCachedRecords(dir, logger)
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +260,7 @@ export async function warmRecordCache(dir: string, now?: () => Date, logger?: St
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
-export const ROLLUP_SCHEMA_VERSION = 6
+export const ROLLUP_SCHEMA_VERSION = 7
 
 export interface RollupFile {
   schemaVersion: number
@@ -280,6 +268,10 @@ export interface RollupFile {
   /** 这些 rate 行所折叠的价文件签名。rate 行以**源自价表**的值为键，不同价
    *  文件使每个冻结行失去意义——此时 rollup 从分日文件重建。空 = 无价文件。 */
   pricingRevision: string
+  /** 折进去的每一天分日文件**当时的版本**（`size:mtimeMs`）。`upto` 只是天级
+   *  水位线：它看不见往日被追加（权威 walk 补写、模块级 HMR 后的第二个实例、
+   *  手工编辑），所以折叠必须自己记下它依据的那批文件版本。 */
+  files: Record<string, string>
   total: UsageTotals
   byDay: UsageDayRow[]
   byHour: UsageHourRow[]
@@ -311,17 +303,40 @@ function isRateKey(value: unknown): value is RateKey {
   return key.slot === undefined || key.slot === null || isSlotRef(key.slot)
 }
 
+/** 折叠记下的文件版本表：键必须是本存储的分日文件名，值为非空版本串。 */
+function isFileStamps(value: unknown): value is Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  return Object.entries(value as Record<string, unknown>).every(([name, stamp]) =>
+    dayOfFileName(name) !== null && typeof stamp === 'string' && stamp !== '')
+}
+
 function isRollupFile(value: unknown): value is RollupFile {
   if (typeof value !== 'object' || value === null) return false
   const rollup = value as Record<string, unknown>
   return rollup.schemaVersion === ROLLUP_SCHEMA_VERSION
     && typeof rollup.upto === 'string' && DAY_KEY.test(rollup.upto)
     && typeof rollup.pricingRevision === 'string'
+    && isFileStamps(rollup.files)
     && isTotals(rollup.total)
     && Array.isArray(rollup.byDay)
     && Array.isArray(rollup.byHour)
     && Array.isArray(rollup.byModel)
     && Array.isArray(rollup.rateRows)
+}
+
+/** 折叠是否仍与磁盘上的分日文件相符：它折进去的每一天都还在、且版本没变，
+ *  水位线之内也没有冒出折叠时还不存在的日文件（往日第一次被补写）。
+ *  不相符就必须丢掉整份折叠——`upto` 是天级水位线，看不见往日的追加。 */
+export function rollupIsCurrent(rollup: RollupFile, stamps: ReadonlyMap<string, string>): boolean {
+  for (const [name, stamp] of Object.entries(rollup.files)) {
+    if (stamps.get(name) !== stamp) return false
+  }
+  for (const name of stamps.keys()) {
+    const day = dayOfFileName(name)
+    if (day === null || day > rollup.upto) continue
+    if (rollup.files[name] === undefined) return false
+  }
+  return true
 }
 
 /** 加载一个数据目录的 rollup。缺失、畸形或非法的 rollup 读作 null——调用方
@@ -646,11 +661,17 @@ export function attachCosts(
   }
 }
 
+/** 分日文件版本的比较键，与缓存判新旧用的是同一对字段。 */
+function stampKey(stamp: { size: number; mtimeMs: number }): string {
+  return `${String(stamp.size)}:${String(stamp.mtimeMs)}`
+}
+
 /** 构建一个数据目录的完整 stats 载荷：所有冻结分日文件的 rollup 合并今日文件
  * 的新鲜读取。
  *
  * `pricingRevision` 是调用方解析 rate 所依据的价文件签名；在不同签名下折叠的
- * rollup 会被丢弃并重建，因此改价会重算每个冻结日。 */
+ * rollup 会被丢弃并重建，因此改价会重算每个冻结日。折叠所依据的分日文件版本对
+ * 不上（往日被追加、被删）时同样整份作废重折。 */
 export async function buildSummary(
   dir: string,
   now: () => Date = () => new Date(),
@@ -660,12 +681,20 @@ export async function buildSummary(
 ): Promise<TokenSummary & { dataDir: string }> {
   const pricingRevision = options.pricingRevision ?? ''
   const today = dayKey(now().getTime())
-  const rollup = (await readRollup(dir, logger, pricingRevision))
-    ?? { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', pricingRevision, total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [] }
+  const names = await listDayFiles(dir)
+  const stamps = new Map<string, string>()
+  for (const name of names) {
+    const stamp = await fileStamp(dir, name)
+    if (stamp !== null) stamps.set(name, stampKey(stamp))
+  }
+  const loaded = await readRollup(dir, logger, pricingRevision)
+  const rollup = loaded !== null && rollupIsCurrent(loaded, stamps)
+    ? loaded
+    : { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', pricingRevision, files: {}, total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [] }
   const cold: string[] = []
   const hot: string[] = []
-  for (const name of await listDayFiles(dir)) {
-    const day = fileDay(name)!
+  for (const name of names) {
+    const day = dayOfFileName(name)!
     if (day <= rollup.upto) continue
     if (day < today) cold.push(name)
     else hot.push(name)
@@ -673,11 +702,17 @@ export async function buildSummary(
   let absorbed = rollup
   if (cold.length > 0) {
     const records: UsageRecord[] = []
-    for (const name of cold) records.push(...await readDayFile(dir, name, logger))
+    const files: Record<string, string> = { ...rollup.files }
+    for (const name of cold) {
+      const stamp = stamps.get(name)
+      if (stamp !== undefined) files[name] = stamp
+      records.push(...await readDayFile(dir, name, logger))
+    }
     absorbed = {
-      upto: fileDay(cold[cold.length - 1]!)!,
+      upto: dayOfFileName(cold[cold.length - 1]!)!,
       schemaVersion: ROLLUP_SCHEMA_VERSION,
       pricingRevision,
+      files,
       ...mergeSummaries(rollup, summarizeRecords(records, resolve)),
     }
     await writeRollup(dir, absorbed).catch((error: unknown) => {

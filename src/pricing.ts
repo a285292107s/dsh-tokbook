@@ -12,7 +12,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  DAY_SETS, EARLIEST, MAX_NOTE_LENGTH, PRICING_BILLING_KEY, instantKey, instantMs, isHourRange, slotCovers, slotsOverlap,
+  DAY_SETS, EARLIEST, MAX_MODEL_LENGTH, MAX_NOTE_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
+  instantKey, instantMs, isHourRange, slotCovers, slotsOverlap,
 } from './price-format.ts'
 import type {
   BillingMap, BillingNature, ModelPricing, PriceSegment, PriceSlot, PricingSegmentInput, PricingSlotInput,
@@ -23,9 +24,6 @@ import { UNPRICED_KEY } from './types.ts'
 export const PRICING_FILE = 'pricing.json'
 
 export { DAY_SETS, EARLIEST, PRICING_BILLING_KEY, dayKeyOf, dayStartMs, instantKey, instantMs } from './price-format.ts'
-
-const MAX_ROUTE_LENGTH = 128
-const MAX_MODEL_LENGTH = 256
 
 interface Logger {
   error(...args: unknown[]): void
@@ -400,7 +398,10 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
       priced[model] = segments.map((segment) => {
         const slots = segment.slots ?? []
         return {
-          ...(segment.from > EARLIEST ? { from: instantKey(segment.from) } : {}),
+          // `from === EARLIEST`（0）才是「无起点」那一段。更早的时刻（1970 前）是
+          // 一个真实的身份，必须原样写出去：省掉它会让两段在盘上撞成同一条身份，
+          // 下次读 `normalizeSegments` 就丢掉其中一段。
+          ...(segment.from !== EARLIEST ? { from: instantKey(segment.from) } : {}),
           inputPerMillion: segment.rates.inputPerMillion,
           outputPerMillion: segment.rates.outputPerMillion,
           ...(segment.rates.cacheReadPerMillion !== undefined

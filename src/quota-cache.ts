@@ -34,7 +34,9 @@ function isSnapshotFile(value: unknown): value is QuotaSnapshotFile {
   if (typeof raw.savedAt !== 'number' || !Number.isFinite(raw.savedAt)) return false
   const card = raw.card as Record<string, unknown> | undefined
   if (typeof card !== 'object' || card === null) return false
-  return card.state === 'ok'
+  // `windows` 是告急判定（`isQuotaAlert`）与卡正文都会直接展开的字段：它不在场时
+  // 这张「最近已知」会让额度路由与额度 tab 当场抛错，所以它必须在场才算可信。
+  return card.state === 'ok' && Array.isArray(card.windows)
 }
 
 /** 读一个 provider 最近已知的 'ok' 额度卡。缺失/撕裂/畸形快照读作 null——

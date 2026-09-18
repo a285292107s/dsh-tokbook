@@ -11,7 +11,7 @@ import {
   QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH,
   ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SYNC, ROUTE_USAGE,
 } from './route-paths.ts'
-import { PROVIDER_RANGES, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SyncStatusView, type TokBookOverview } from './types.ts'
+import { PROVIDER_RANGES, type PriceVerdict, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SyncStatusView, type TokBookOverview } from './types.ts'
 import type { PriceParse } from './pricing.ts'
 
 /** 本插件用到的 host webserver 子集。 */
@@ -261,12 +261,14 @@ export function registerTokBookPricingRoutes(
       try {
         const result = await savePricing(body)
         if (!result.ok) {
+          const verdict: PriceVerdict = { ok: false, error: result.error }
           res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ ok: false, error: result.error }))
+          res.end(JSON.stringify(verdict))
           return
         }
+        const verdict: PriceVerdict = { ok: true }
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-        res.end(JSON.stringify({ ok: true }))
+        res.end(JSON.stringify(verdict))
       } catch (error) {
         res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))

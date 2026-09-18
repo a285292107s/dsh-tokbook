@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import {
   summarizeRecords, mergeSummaries, attachCosts, buildSummary, isLedgerStale, staleSessionIds,
-  readRecordsByDayRange, rangeDayWindow,
+  readRecordsByDayRange, rangeDayWindow, rollupIsCurrent, type RollupFile,
 } from '../src/stats.ts'
 import { pathKey, workspaceRows } from '../src/workspaces.ts'
 import {
@@ -25,7 +25,7 @@ import {
   withSegmentFrom, withSlotEnd, withSlotStart,
   type ModelDraft, type PriceDraft, type SegmentDraft,
 } from '../src/client/pricing/draft.ts'
-import { slotsOverlap } from '../src/price-format.ts'
+import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, slotsOverlap } from '../src/price-format.ts'
 import { axisNodes, labelWidth, placeNodes } from '../src/client/pricing/axis.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-catalog.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
@@ -40,7 +40,7 @@ import {
 import {
   resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage,
 } from '../src/quota-official.ts'
-import type { PricingSegmentInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
+import type { BillingNature, PricingSegmentInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
 import { totalsTokens } from '../src/types.ts'
 
 let failed = 0
@@ -477,6 +477,100 @@ console.log('托底价:没有生效时刻的那一张永远在场')
     && priceUnknown(rowOf([{ ...newSegment({ from: '2026-08-01', input: '1', output: '4' }) }], { records: 9, firstAt })) === false)
 }
 
+console.log('价格表写路径:草稿写出去的 body 一定被宿主接受')
+{
+  // 不变量:**client 产出 ⊆ host 接受**(`docs/CONTRACTS.md` §2)。规则在两侧各写一份的
+  // 代价正是「草稿认为能存、写入被拒」(D-013),所以这里不重列规则,而是把
+  // 「草稿 → body → host 解析」真的跑一遍——两侧各写各的检查时,只有往返能发现缺口。
+  const draftOf = (
+    route: string,
+    model: string,
+    segments: SegmentDraft[],
+    billing: BillingNature = 'metered',
+  ): PriceDraft => new Map([[route, {
+    route, label: route, billing, records: 0,
+    models: new Map([[model, { model, configured: true, records: 0, segments }]]),
+  }]])
+  const roundTrip = (draft: PriceDraft): ReturnType<typeof parsePriceInput> => {
+    const body = composePriceBody(draft)
+    return body.ok ? parsePriceInput(body.body) : { ok: false, error: body.error }
+  }
+  const floor = newSegment({ from: '', input: '1', output: '4', cacheRead: '0.02', cacheWrite: '0.5', note: ' 闲时 ' })
+  const dated = newSegment({
+    from: '2026-09-01T13:00', input: '2', output: '8',
+    slots: [
+      newSlot({ days: 'weekdays', start: '9', end: '12', input: '4' }),
+      newSlot({ days: 'weekends', start: '9', end: '12', output: '16' }),
+    ],
+  })
+  const accepted: [string, PriceDraft][] = [
+    ['托底价 + 整点调价 + 两组时段 + 备注', draftOf('deepseek-official', 'deepseek-chat', [floor, dated])],
+    ['订阅通道($billing)', draftOf('commandcode', 'deepseek-chat', [floor], 'subscription')],
+    ['整行都是空白草稿(不进 body)', draftOf('r', 'm', [newSegment()])],
+    ['1970 前的生效时刻', draftOf('r', 'm', [floor, newSegment({ from: '1900-01-01', input: '3', output: '9' })])],
+  ]
+  const refused = accepted.filter(([, draft]) => !roundTrip(draft).ok)
+  check('每一份草稿产出的 body 都被宿主接受',
+    refused.length === 0, refused.map(([label, draft]) => [label, composePriceBody(draft)]))
+
+  // 反向:宿主拒绝的键规则不能是「草稿以为能存」的那种。长度上限与保留键前缀同源于
+  // `price-format.ts`,所以草稿这一侧就报得出位置与原因,而不是整份文件被拒。
+  const longRoute = 'r'.repeat(MAX_ROUTE_LENGTH + 1)
+  const longModel = 'm'.repeat(MAX_MODEL_LENGTH + 1)
+  const keyRefusals: [string, PriceDraft, string][] = [
+    ['空通道路由名', draftOf('', 'm', [floor]), '空通道路由名'],
+    ['保留键前缀', draftOf('$weird', 'm', [floor]), '「$」'],
+    ['过长的通道路由名', draftOf(longRoute, 'm', [floor]), '通道路由名超过'],
+    ['过长的模型串', draftOf('r', longModel, [floor]), '模型串超过'],
+  ]
+  const notRefused = keyRefusals.filter(([, draft, expected]) => {
+    const body = composePriceBody(draft)
+    return body.ok || !body.error.includes(expected)
+  })
+  check('草稿自己在本地就报出宿主的键规则与长度上限(带位置与原因)',
+    notRefused.length === 0, notRefused.map(([label, draft]) => [label, composePriceBody(draft)]))
+
+  // 写不出去的档必须让这一行保持脏:否则工具栏说「已保存」,而那一格还红着。
+  const cacheBaseline = baselinesOf({
+    routes: [{
+      route: 'r', label: 'r', billing: 'metered', records: 0,
+      models: [{ model: 'm', configured: true, records: 0, segments: [{ from: null, inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 1 }] }],
+    }],
+    dataDir: 'x', updatedAt: 0,
+  })
+  const rowWith = (cacheRead: string): ModelDraft =>
+    ({ model: 'm', configured: true, records: 0, segments: [{ ...newSegment({ from: '', input: '1', output: '4' }), cacheRead }] })
+  check('填了却写不出去的缓存档让这一行保持脏(合法的值则与基线一致)',
+    modelDirty('r', rowWith('abc'), cacheBaseline.models) === true
+    && modelDirty('r', rowWith('1'), cacheBaseline.models) === false
+    && composePriceBody(draftOf('r', 'm', rowWith('abc').segments)).ok === false)
+}
+
+console.log('折叠自证有效:天级水位线看不见往日的追加')
+{
+  const rollupOf = (upto: string, files: Record<string, string>): RollupFile => ({
+    schemaVersion: 7, upto, pricingRevision: '', files,
+    total: { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    byDay: [], byHour: [], byModel: [], rateRows: [],
+  })
+  const stamps = new Map([['usage-2026-01-02.jsonl', '10:1'], ['usage-2026-01-03.jsonl', '20:1']])
+  const cases: [string, boolean, boolean][] = [
+    ['折进去的版本没变 → 仍然有效',
+      rollupIsCurrent(rollupOf('2026-01-03', { 'usage-2026-01-02.jsonl': '10:1', 'usage-2026-01-03.jsonl': '20:1' }), stamps), true],
+    ['往日被追加(版本变了) → 作废',
+      rollupIsCurrent(rollupOf('2026-01-03', { 'usage-2026-01-02.jsonl': '11:2', 'usage-2026-01-03.jsonl': '20:1' }), stamps), false],
+    ['折进去的日文件被删掉 → 作废',
+      rollupIsCurrent(rollupOf('2026-01-03', { 'usage-2026-01-02.jsonl': '10:1' }), stamps), false],
+    ['水位线之内冒出折叠时还不存在的日文件 → 作废',
+      rollupIsCurrent(rollupOf('2026-01-03', { 'usage-2026-01-02.jsonl': '10:1', 'usage-2026-01-03.jsonl': '20:1' }), new Map([...stamps, ['usage-2026-01-01.jsonl', '1:1']])), false],
+    ['水位线之外的日文件不参与判定(本轮单独折)',
+      rollupIsCurrent(rollupOf('2026-01-02', { 'usage-2026-01-02.jsonl': '10:1' }), stamps), true],
+  ]
+  check('折叠只在「折进去的那批文件逐版本仍在」时才可信',
+    cases.every(([, actual, expected]) => actual === expected),
+    cases.filter(([, actual, expected]) => actual !== expected).map(([label]) => label))
+}
+
 console.log('路由目录:本机设置 ∪ 运行时注册表')
 {
   const settings = {
@@ -748,7 +842,7 @@ console.log('窗口 → 日界,以及按窗口读账本')
     })
     for (const [id, day] of [['a1', '2026-03-01'], ['a2', '2026-03-04'], ['a3', '2026-03-05']] as const) await log.record(rec(id, day))
     await log.flush()
-    const read = (from: string, to: string) => readRecordsByDayRange(dir, from, to, () => new Date('2026-03-05T10:00:00'), quiet)
+    const read = (from: string, to: string) => readRecordsByDayRange(dir, from, to, quiet)
     const within = await read('2026-03-04', '2026-03-05')
     check('只读范围内的日文件:空档与倒序窗口读作空,不崩',
       within.length === 2 && within.every(r => r.requestId !== 'a1')

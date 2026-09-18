@@ -13,7 +13,7 @@
 | [`AGENTS.md`](../AGENTS.md) | identity(身份) | current | 每个任务——自动载入上下文 |
 | [`README.md`](../README.md) | entry(入口)+ operations(操作) | current | 第一站:范围、布局、构建、安装、配置 |
 | `docs/INDEX.md` | index(地图,本文件) | current | 在文档间导航 |
-| [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts(契约) | current | **改 host 行为前读这一份**(约 83 行):术语与口径、**让数字保持诚实的不变量**、单写者与数据目录、不显然的默认值——只写**代码里读不出来、违反后不会报错但会把钱算错**的规则。路由 / wire 形状 / 配置键 / 数据文件清单都是代码(见它的指针表);路由路径**不得**在这份文档里复述 |
+| [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts(契约) | current | **改 host 行为前读这一份**(约 100 行):术语与口径、**让数字保持诚实的不变量**、单写者与数据目录、不显然的默认值——只写**代码里读不出来、违反后不会报错但会把钱算错**的规则。路由 / wire 形状 / 配置键 / 数据文件清单都是代码(见它的指针表);路由路径**不得**在这份文档里复述 |
 | [`docs/DECISIONS.md`](DECISIONS.md) | decisions(决策,ADR 日志) | current | 改架构、价格/计价、额度或界面结构,或落下任何持久决策时——**先读顶部索引表**,再定点读 1–3 条,不要整份通读;在同一 commit 追加条目 |
 | [`docs/DESIGN.md`](DESIGN.md) | reason(推理 / 背景) | current | **只留从代码推不出来的抽象**(约 277 行):DSH 插件机制与 `dsh web` 的组合方式、**外置包契约与坑**(CJS factory / 禁 `default` 导出 / external 基线)、插槽语义与社区两条路线、**为什么是这个形状**(逐请求行 / 派生折叠可丢 / 本地日历日 / 单写者 / 精确 Fetch 路由)与每条的代价、界面取舍理由(§3.1)、参考坐标。逐文件、逐字段、路由路径、尺寸数字都不在这里。顶部「阅读指南」区分历史与现状——**§8 / §9 已删** |
 | [`docs/HMR.md`](HMR.md) | lessons(教训)/ reference(参考) | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |

@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { PricingView } from '../../types.ts'
+import type { PriceVerdict, PricingView } from '../../types.ts'
 import { ROUTE_PRICING } from '../../route-paths.ts'
 import {
   baselineOfDraft, baselinesOf, composePriceBody, draftFromView, priceUnknown, stagedChanges, rowKey,
@@ -61,10 +61,11 @@ function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: str
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   }).then(async (res) => {
-    const payload = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null
-    if (!res.ok || payload === null || payload.ok !== true) {
-      const message = payload?.error !== undefined && payload.error !== '' ? payload.error : `HTTP ${String(res.status)}`
-      return { ok: false as const, error: message }
+    const payload = await res.json().catch(() => null) as PriceVerdict | null
+    if (!res.ok || payload === null || !payload.ok) {
+      // 宿主的拒绝理由优先于状态码：它说的是哪一段价、错在哪儿。
+      const reason = payload !== null && !payload.ok ? payload.error : ''
+      return { ok: false as const, error: reason !== '' ? reason : `HTTP ${String(res.status)}` }
     }
     return { ok: true as const }
   }).catch((error: unknown) => ({

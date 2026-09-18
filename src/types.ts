@@ -226,6 +226,10 @@ export interface PricingView {
   updatedAt: number
 }
 
+/** 价表写路径（`PUT /tokbook/pricing`）的判决。成功只答 `ok`：成功写入即
+ *  「磁盘 ≡ 草稿」，client 因此从不用响应回灌草稿（见 `docs/CONTRACTS.md` §2）。 */
+export type PriceVerdict = { ok: true } | { ok: false; error: string }
+
 /**
  * 用量明细「按工作区」一行：该工作区会话在**选定窗口内**的账本记录，用与其余
  * 视图相同的汇总 + 成本层折叠。归属是**读时 join**——账本行只存 `sessionId`，

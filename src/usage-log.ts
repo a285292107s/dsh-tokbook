@@ -16,10 +16,15 @@ import { join } from 'node:path'
 import { parseRecord, serializeRecord } from './usage-record.ts'
 import type { UsageRecord } from './types.ts'
 
-const DAY_FILE = /^usage-\d{4}-\d{2}-\d{2}\.jsonl$/u
+const DAY_FILE = /^usage-(\d{4}-\d{2}-\d{2})\.jsonl$/u
 
-/** 本存储的分日文件名测试；migration 共享命名契约。 */
+/** 本存储的分日文件名测试；stats 的读路径与 migration 共享这一份命名契约。 */
 export { DAY_FILE }
+
+/** 分日文件名里的日期部分；不是分日文件时为 null。 */
+export function dayOfFileName(name: string): string | null {
+  return DAY_FILE.exec(name)?.[1] ?? null
+}
 
 export function dayFileName(date: Date): string {
   const year = date.getFullYear()

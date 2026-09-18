@@ -133,7 +133,7 @@ export class TokenUsageBook extends Service {
     // 「一个数据目录、一个写进程」守卫：发现别的存活 host 拥有本目录时告警（双写者
     // 会竞争 rollup/cache），然后把本进程记为当前 owner。只建议，绝不致命。
     void warnIfForeignOwner(this.dir, this.logger).then(() => writeOwnerMarker(this.dir))
-    void warmRecordCache(this.dir, undefined, this.logger)
+    void warmRecordCache(this.dir, this.logger)
 
     // 继承上一进程的同步基线。缺失/撕裂读作 null：探针随后走一遍全量（幂等）并重写。
     this.baselineReady = readSyncProgress(this.dir)
@@ -192,7 +192,7 @@ export class TokenUsageBook extends Service {
             this.logger.warn?.('[tokbook] cannot record baseline after first-run sync:', error)
           }
           // 回填 append 了新行：重读缓存，使首次概览看到它们。
-          await warmRecordCache(this.dir, undefined, this.logger)
+          await warmRecordCache(this.dir, this.logger)
         })
         .catch((error: unknown) => {
           this.logger.error('[tokbook] first-run sync failed:', error)
@@ -213,22 +213,25 @@ export class TokenUsageBook extends Service {
     })
     ctx.inject(['webServer'], (injectedCtx: Context) => {
       const webServer = injectedCtx.get('webServer') as WebServerLike | undefined
-      ctx.effect(() => registerTokBookRoutes(
+      // 注册挂在**注入作用域**上：webServer 单独重载时它们随之一并撤销，而不是留在
+      // 外层 ctx 上等插件卸载。`register` 撞到同一 (kind, path) 会抛错，所以这条
+      // 作用域关系不是整洁问题。
+      injectedCtx.effect(() => registerTokBookRoutes(
         webServer,
         () => this.overview(),
         () => this.syncState(),
         () => this.rescan(),
       ))
-      ctx.effect(() => registerTokBookUsageRoute(
+      injectedCtx.effect(() => registerTokBookUsageRoute(
         webServer,
         (range) => this.usageByRange(range),
       ))
-      ctx.effect(() => registerTokBookQuotaRoute(
+      injectedCtx.effect(() => registerTokBookQuotaRoute(
         webServer,
         () => this.quota(),
         (provider, force) => this.quotaCardOf(provider, force),
       ))
-      ctx.effect(() => registerTokBookPricingRoutes(
+      injectedCtx.effect(() => registerTokBookPricingRoutes(
         webServer,
         () => this.pricingView(),
         (body) => this.savePricing(body),
@@ -360,7 +363,7 @@ export class TokenUsageBook extends Service {
     const { table, billing, revision, resolve } = await this.rateContext()
     const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger, { pricingRevision: revision })
     const costed = attachCosts(summary, table, billing)
-    const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
+    const records = await readCachedRecords(this.dir, this.logger)
     let lastEventAt: number | null = null
     for (const record of records) {
       if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
@@ -415,7 +418,7 @@ export class TokenUsageBook extends Service {
     const snapshots = await this.ensureFresh()
     const { table, billing, resolve } = await this.rateContext()
     const { fromDay, toDay } = rangeDayWindow(range)
-    const records = await readRecordsByDayRange(this.dir, fromDay, toDay, () => new Date(), this.logger)
+    const records = await readRecordsByDayRange(this.dir, fromDay, toDay, this.logger)
     const cards = providerCards(records, table, resolve, billing)
     // 卡片的通道名：settings profile 的 displayName，否则适配器 provider 名，
     // 使 route 与价格表 tab 同名。
@@ -584,7 +587,7 @@ export class TokenUsageBook extends Service {
     let ledger: LedgerUsage = { byRouteModel: new Map(), byRoute: new Map() }
     try {
       // 账本透镜要的是记录数不是价格：读已预热的记录缓存，而不是折叠 rollup。
-      const records = await readCachedRecords(this.dir, () => new Date(), this.logger)
+      const records = await readCachedRecords(this.dir, this.logger)
       const { table } = await this.rateContext()
       ledger = ledgerUsageOf(records, table)
     } catch (error) {
@@ -613,8 +616,9 @@ export class TokenUsageBook extends Service {
 
 }
 
-/** 同步 append 了新行之后丢掉派生态（`upto` 已覆盖该日的 rollup 会跳过新内容；
- *  缓存可能持有过期 parse）。下次读时两者都无损重建。 */
+/** 同步 append 了新行之后丢掉派生态。折叠会自己核对它所依据的文件版本
+ *  （`rollupIsCurrent`）、解析缓存也按版本判新旧，所以这里不再是正确性的依靠——
+ *  提前丢掉只是省下「读到一份注定作废的折叠」那一趟往返。 */
 function invalidateDerivedState(dir: string): void {
   clearRecordCache(dir)
   const rollup = join(dir, ROLLUP_FILE_NAME)

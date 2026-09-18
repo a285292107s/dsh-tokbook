@@ -10,6 +10,8 @@
  *     不符 → **整份折叠作废**、由日文件按当前表重建(逐日金额与费率行身份一起跟上)。
  *  4. **重启后的同步基线**:载入 `sync-progress.json` 后未变的会话不该被重走,漂移 / 新增的才走;
  *     缺失或残缺的基线读作 null(调用方退回全量走一遍并重写一份)。
+ *  5. **派生态自证有效**:往日被补写之后,折叠(逐文件版本)与解析缓存(逐文件版本)都自己作废,
+ *     没有调用方需要「记得」;1970 前的 `from` 写进文件后仍是它自己那一段,不塌成托底价。
  *
  * Run: node --experimental-strip-types scripts/selfcheck-rebuild.ts
  *
@@ -22,7 +24,7 @@ import { join } from 'node:path'
 import { UsageLog, dayFileNameOf, resetUsageLogState } from '../src/usage-log.ts'
 import { serializeRecord } from '../src/usage-record.ts'
 import {
-  attachCosts, buildSummary, clearRecordCache, readRecordsByDayRange, snapshotBaseline,
+  attachCosts, buildSummary, clearRecordCache, readCachedRecords, readRecordsByDayRange, snapshotBaseline,
   staleSessionIds, summarizeRecords, type PersistenceSnapshotLike, type RateResolver,
 } from '../src/stats.ts'
 import { readSyncProgress, writeSyncProgress } from '../src/sync-state.ts'
@@ -122,12 +124,12 @@ console.log('rollup: 派生状态无损重建')
     const restamped = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
     check('旧版本折叠按当前形状重建并盖上新的 schemaVersion',
       foldKey(first) === foldKey(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined)
-      && restamped.schemaVersion === 6, restamped.schemaVersion)
+      && restamped.schemaVersion === 7, restamped.schemaVersion)
     // 用量未知是冻结折叠的一部分:它必须活过往返,而不是读回来变成 0。
     check('用量未知活过折叠往返', first.total.usageUnknown === 2 && rebuilt.total.usageUnknown === 2 && fromV1.total.usageUnknown === 2,
       [first.total.usageUnknown, rebuilt.total.usageUnknown, fromV1.total.usageUnknown])
 
-    const direct = summarizeRecords(await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', never, quiet), resolve)
+    const direct = summarizeRecords(await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', quiet), resolve)
     check('折叠结果 == 直接全量聚合(派生状态永远只是缓存)', foldKey(direct) === foldKey(first))
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -240,7 +242,7 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
       && secondFold.rateRows.length === 2 && secondFold.rateRows.every(row => row.rate.slot?.start === 8)
       && daySpend(afterCost).length === 2 && daySpend(afterCost).every(spend => Math.abs(spend - 2) < 1e-9)
       && afterCost.unpricedModels.length === 0, afterCost.unpricedModels.join(','))
-    const direct = summarizeRecords(await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', never, quiet), resolverOf(after.table))
+    const direct = summarizeRecords(await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', quiet), resolverOf(after.table))
     check('重折的结果来自日文件而不是被丢掉的旧折叠(== 新价下的直接全量聚合)', foldKey(direct) === foldKey(secondFold))
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -278,6 +280,58 @@ console.log('baseline: 重启后只走漂移 / 新增的会话')
     }
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 6. 派生态自证有效:往日被追加后,没有人需要「记得作废」也能看见
+// ---------------------------------------------------------------------------
+console.log('fold: 往日被追加后自动重折 + 缓存不再把冻结日当不可变')
+{
+  const dir = await cleanDir()
+  try {
+    const log = new UsageLog(dir, quiet)
+    await log.record(rec('late-1', '2026-04-01', 9, 'deepseek-chat', { inputTokens: 100, outputTokens: 10 }))
+    // 先让解析缓存与折叠都把这一天当成「已定」。
+    const cachedBefore = await readCachedRecords(dir, quiet)
+    const first = await buildSummary(dir, never, resolve, quiet)
+    // 权威 walk 补写往日就是这条路径:同一个进程、不清缓存、不删 rollup,直接追加。
+    await log.record(rec('late-2', '2026-04-01', 10, 'deepseek-chat', { inputTokens: 200, outputTokens: 20 }))
+    const cachedAfter = await readCachedRecords(dir, quiet)
+    const after = await buildSummary(dir, never, resolve, quiet)
+    check('补写已折过的那一天:聚合与窗口读都看得到新行(不靠 invalidateDerivedState)',
+      cachedBefore.length === 1 && cachedAfter.length === 2
+      && first.total.requests === 1 && after.total.requests === 2 && after.total.inputTokens === 300)
+    const direct = summarizeRecords(await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', quiet), resolve)
+    check('重折后仍等于直接全量聚合(派生状态只是缓存)', foldKey(direct) === foldKey(after))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+    clearRecordCache(dir)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. 1970 前的生效时刻:写路径必须留成一个**有日期**的身份
+// ---------------------------------------------------------------------------
+console.log('price: 1970 前的日期段不塌成托底段')
+{
+  const dir = await cleanDir()
+  try {
+    const ancient = dayMs('1900-01-01', 0)
+    const table: PricingTable = {
+      r: { m: [
+        { from: EARLIEST, rates: { inputPerMillion: 1, outputPerMillion: 4 } },
+        { from: ancient, rates: { inputPerMillion: 2, outputPerMillion: 8 } },
+      ] },
+    }
+    await writePriceFile(dir, { table, billing: {}, revision: '' }, quiet)
+    const back = await readPriceFile(dir, quiet)
+    const segments = back.table.r?.m ?? []
+    check('两段价在盘上是两个身份,读回来还是两段(identity = 「无起点」只有 from 0 一个)',
+      ancient < 0 && segments.length === 2 && segments[0]!.from < 0 && segments[1]!.from === EARLIEST)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+    clearRecordCache(dir)
   }
 }
 
