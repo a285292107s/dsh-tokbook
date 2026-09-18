@@ -41,12 +41,12 @@ footer 按钮 + shell.overlay 浮窗展示它们(汇总、按通道、价格表�
 
 | 改动 | 门 |
 | --- | --- |
-| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm build` + 刷新页面;界面禁令自查 `docs/UI-SPEC.md` §3 |
+| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm build` + 刷新页面 + `pnpm selfcheck:ui`;余下禁令自查 `docs/UI-SPEC.md` §3 |
 | 别的 `src/**` | `pnpm typecheck`(只查 `src/`);碰了 host 逻辑或 `src/client/pricing/axis.ts` 再加 `pnpm test` |
 | README / `docs/**` | 无门禁——按「同 commit」的规矩人工改 |
 | 提交、或合并回主检出之前 | `pnpm test`,需要线上产物时再 `pnpm build` |
 
-`pnpm test` = `pnpm smoke` + `pnpm selfcheck`(聚合 / 计价 / 额度纯逻辑 + 不变量自检)。
+`pnpm test` = smoke(聚合 / 计价 / 额度)+ selfcheck(账本不变量)+ selfcheck:ui(界面静态禁令)。
 `scripts/*.ts` 由 Node 类型剥离运行、**从不由 tsc 编译**,所以只在真正跑起来时才被类型检查;
 `pnpm build` 的产物与 `pnpm watch`(只出类型)见 README · 构建 / 对着源码检出开发。
 

@@ -55,7 +55,7 @@
 - 动了 README / `docs/**` → **没有门禁**——按 §3 的表人工改。2026-09-16 起 `selfcheck-docs`
   已删,文档与代码同 commit 全靠自觉。
 - 动了 host 逻辑或自检覆盖的纯逻辑(`src/*.ts`、`src/client/pricing/axis.ts`)→ `pnpm test`。
-- 只改了 `src/client/styles/**` 或 `.tsx` 的呈现 → `pnpm build` + 刷新页面,不必跑 selfcheck。
+- 只改了 `src/client/styles/**` 或 `.tsx` 的呈现 → `pnpm selfcheck:ui`(纯静态)+ `pnpm build` + 刷新页面。
 - **提交、或合并回主检出之前** → `pnpm test`。红 = 当场修,绿才提交。
 
 ## 5. 状态生命周期回顾

@@ -17,10 +17,10 @@ footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含
   但会在界面上列出来);费率为 0 才是免费。
 
 界面词与代码/契约的逐条对应见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 的「术语」段;改界面长相 / 交互前读
-[`docs/UI-SPEC.md`](docs/UI-SPEC.md)(只写**不变量 / 达标线 / 陷阱**三类,一页读完;可判定的那几条是自查表,
-没有脚本替你守)。**规格的真源是代码**:token 与「什么时候用哪个」在 `src/client/styles/tokens.ts` 的注释里,
-各个面长什么样看 `src/client/styles/**`。为什么这么定见 [`docs/DESIGN.md`](docs/DESIGN.md) §3.1;
-文档树地图见 [`docs/INDEX.md`](docs/INDEX.md)。
+[`docs/UI-SPEC.md`](docs/UI-SPEC.md)(只写**不变量 / 达标线 / 陷阱**三类,一页读完;其中可静态判定的
+那几条由 `pnpm selfcheck:ui` 强制,其余要人看)。**规格的真源是代码**:token 与「什么时候用哪个」在
+`src/client/styles/tokens.ts` 的注释里,各个面长什么样看 `src/client/styles/**`。为什么这么定见
+[`docs/DESIGN.md`](docs/DESIGN.md) §3.1;文档树地图见 [`docs/INDEX.md`](docs/INDEX.md)。
 
 > **术语**:本文档与界面说的**通道**就是代码与契约里的 provider —— 你从哪接入、按什么方式付费的
 > 那条路,route key 即账本里记录的通道标识。做模型、定官方价的那一方叫**模型厂商**,不是通道;
@@ -84,6 +84,7 @@ scripts/
   preview-overlay.mjs      浮窗预览台(fixture 数据)与独立查看器(--ledger,读真账本)
   smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试(一条不变量一个断言)
   selfcheck-rebuild.ts     账本不变量:折叠无损重建 / refile / 跨实例去重 / 价格签名 / 重启基线
+  selfcheck-ui.ts          界面禁令静态检查:死类双向 / 色值 / 虚线 / 圆角 / 焦点与动效分支 / ARIA 引用
 ```
 
 ## 构建
@@ -92,7 +93,8 @@ scripts/
 pnpm install      # 安装 @deepseek-ai/cordis、react、esbuild、typescript
 pnpm build        # tsc 产出 lib/types/*.d.ts,再由 esbuild 打包 host + client
 pnpm selfcheck    # 账本不变量:折叠重建 / refile / 跨实例去重 / 价格签名 / 重启基线
-pnpm test         # smoke(聚合 + 计价 + 额度)+ selfcheck
+pnpm selfcheck:ui # 界面禁令的死类双向 / 硬编码色值 / 虚线 / 圆角 / 宿主变量白名单 / 三段分支存在性
+pnpm test         # smoke(聚合 + 计价 + 额度)+ selfcheck + selfcheck:ui
 ```
 
 产物:`lib/index.js`(host)、`lib/client.js`(browser)、`lib/types/**/*.d.ts`(声明);external 清单见 `scripts/build-client.mjs`。
