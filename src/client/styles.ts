@@ -2,13 +2,11 @@
  * dsh-tokbook 各界面共用的一张注入样式表。
  *
  * 取值走 DSH 的 `--dsw-alias-*` token（不写死颜色，插件随皮肤走）；每个 var 都带浅色兜底。片段在 `styles/*.ts`，按该顺序拼接——CSS 级联顺序是契约，不要打乱。中文界面：标签用正常文本，层级靠小号次级字重表达。
- *
- * @module dsh-tokbook/client/styles
  */
 
 // 今日仪表卡的底图。**走 import 而不是 public 目录**：client 半区只有一个产物
-// （`lib/client.js`），没有随包的静态目录、也没有一个能挂相对 URL 的位置，所以 esbuild 把
-// 它内联成 data URI，由 `--dtpl-hero-art` 交给 CSS（见 styles/ledger.ts 的 hero 段）。
+// （`lib/client.js`），没有能挂相对 URL 的静态目录，所以 esbuild 把它内联成 data URI，
+// 由 `--dtpl-hero-art` 交给 CSS（见 styles/ledger.ts 的 hero 段）。
 import heroArt from './assets/hero-yanagi.jpg'
 
 import { CSS_TOKENS } from './styles/tokens.ts'

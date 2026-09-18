@@ -1,7 +1,5 @@
 /**
  * profile 配置：声明形状严格校验；plan 覆盖宽松纠错（笔误不得拖垮宿主）。
- *
- * @module dsh-tokbook/config
  */
 
 import type { PlanConfig, TokBookConfig } from './types.ts'

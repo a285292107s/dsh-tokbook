@@ -7,8 +7,6 @@
  *
  * 读宽松（畸形段/时段丢弃，不致命）；写严格且整文件替换，坏 PUT 不会半落地。
  * 时间轴规则经 `./price-format.ts` 与 browser 半区共享。
- *
- * @module dsh-tokbook/pricing
  */
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'

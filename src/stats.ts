@@ -3,8 +3,6 @@
  * 按 (provider, model) 行——并保留一行 (日, 模型, provider, rate 身份)。
  * 已冻结的分日文件从落盘 rollup 提供；只有今日文件每次调用都读。解析后的
  * 分日文件缓存在进程内存。
- *
- * @module dsh-tokbook/stats
  */
 
 import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/promises'

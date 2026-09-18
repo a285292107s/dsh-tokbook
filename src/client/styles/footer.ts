@@ -1,4 +1,3 @@
-/** styles.ts 片段：footer。由 `injectStyles` 按序拼接。 */
 export const CSS_FOOTER = `/* 侧边栏入口按钮 */
 /* 对齐设置入口的几何（ui-settings-general SettingsRoot）：宽栏里一条全宽
    42px bar，56px rail 上一个 36px 圆形图标钮。 */

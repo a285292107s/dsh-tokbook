@@ -1,8 +1,6 @@
 /**
  * 内联 SVG 图标。bundle 禁止运行时 import 非基线包，故自带描边图标
  * （2px、圆端点）；继承 `currentColor`，尺寸由 `className` 控制。
- *
- * @module dsh-tokbook/client/icons
  */
 
 export function UsageGlyph({ className }: { className?: string }) {

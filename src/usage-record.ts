@@ -2,8 +2,6 @@
  * token-book 的纯记录词汇：JSONL 行类型、从会话事件的投影（assistant 消息、
  * compaction summary、turn 结束的 LLM 失败、重试的失败尝试），以及供去重扫描
  * 使用的宽松行解析。无 I/O，所有消费方共享同一 wire 格式。
- *
- * @module dsh-tokbook/usage-record
  */
 
 import type { UsageFields, UsageRecord, UsageRecordKind } from './types.ts'

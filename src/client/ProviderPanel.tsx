@@ -8,8 +8,6 @@
  *
  * 数据来自 `GET /tokbook/usage?range=…`（一次拉回三种切法 + 窗口合计）。刻意独立于总览
  * store——总览失败时本 tab 仍可用。
- *
- * @module dsh-tokbook/client/ProviderPanel
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -76,9 +74,7 @@ const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
 
 /** 列头。**一行**写：两列各自是一串上下叠起来的事实（身份两行、数值两行），
  *  所以列名也按同样的先后写成「甲 · 乙」——分隔符用的就是这个窗口里表示「一串事实」的 `·`
- *  （旁注与工作区事实行都用它）。早先这里照数据的两行写成了两行列头（模型 / 通道 各占一行），
- *  标签能精确落在各自数值正上方，但代价是四枚孤零零的标签占掉两行、中间大片空白——**表头比
- *  它标注的数据还高**。一行牺牲的是「精确对位」，换来的是它终于像一行表头。
+ *  （旁注与工作区事实行都用它）。一行牺牲「精确对位」，换来的是它终于像一行表头。
  *  按通道那一面没有列头：通道卡是「铭牌 + 卡身」的两段式，列头会与卡头打架。 */
 const COLUMNS: Partial<Record<Slice, { id: string; nums: string }>> = {
   model: { id: '模型 · 通道', nums: '词元 · 金额' },
@@ -165,9 +161,9 @@ export function ProviderPanel() {
   return (
     <section aria-label="用量明细">
       {/* 页头常驻，且**行数固定**：第一行是分区词 + 窗口控件，第二行是窗口合计。合计单独占一整行
-          （而不是挤在标题与控件之间）是这里的关键——它随窗口变宽变窄，挤在同一行就会把窗口控件
-          推来推去、在「一行 / 两行」之间来回折行；实测那一次折行让切法条与整张列表上下跳 33px。
-          固定成两行之后，页头高度与任何数字无关，窗口控件的右边缘也永远在同一个位置。 */}
+          （而不是挤在标题与控件之间）是关键——它随窗口变宽变窄，挤在同一行就会把窗口控件推来推去、
+          在「一行 / 两行」之间来回折行，下面整块跟着上下跳。固定成两行之后，页头高度与任何数字
+          无关，窗口控件的右边缘也永远在同一个位置。 */}
       <div className="dtpl-usage-head">
         <div className="dtpl-usage-head-top">
           <h2 className="dtpl-sec-title dtpl-usage-title">{RANGE_WORDS[range]}用量</h2>

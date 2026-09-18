@@ -4,8 +4,6 @@
  * 账本行只命名其会话，因此归属是对 workspace registry 与会话 header `cwd`
  * 的**读时 join**。没有 workspace 认领的记录折进「未归属」行，使本节始终
  * 加总回账本自身的 totals。
- *
- * @module dsh-tokbook/workspaces
  */
 
 import { resolve as resolvePath } from 'node:path'

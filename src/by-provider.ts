@@ -1,8 +1,6 @@
 /**
  * provider 用量卡聚合（纯函数，无 I/O）。同一 model 串被不同 provider
  * 计费时分属不同卡；每卡跑与概览一致的 summary + 成本层。
- *
- * @module dsh-tokbook/by-provider
  */
 
 import type {

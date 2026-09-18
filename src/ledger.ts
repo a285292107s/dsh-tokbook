@@ -1,8 +1,6 @@
 /**
  * 数据目录解析与「一目录一写进程」属主标记。默认 `$DSH_HOME/tokbook`，
  * 否则 `~/.dsh/tokbook`；`path` 配置可指向既有存储。
- *
- * @module dsh-tokbook/ledger
  */
 
 import { join } from 'node:path'

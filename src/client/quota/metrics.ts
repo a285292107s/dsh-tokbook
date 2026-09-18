@@ -2,8 +2,6 @@
  * 订阅额度卡的纯规则：头部环概括的是哪个预算、月度额度如何变成窗口形行、已用百分比映射到什么色调。
  *
  * 无 React、无 fetch——`QuotaPanel.tsx` 拥有数据，`QuotaCard.tsx` 拥有标记。
- *
- * @module dsh-tokbook/client/quota/metrics
  */
 
 import type { QuotaCard, QuotaWindowView } from '../../types.ts'

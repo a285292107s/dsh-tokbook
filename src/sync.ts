@@ -5,8 +5,6 @@
  *
  * 本 walk 刻意不取消：这是一次短的权威刷新，不接 `AbortSignal` 管道可
  * 避免向持久化后端喂非 signal。
- *
- * @module dsh-tokbook/sync
  */
 
 import { isInitialized, markInitialized } from './sync-state.ts'

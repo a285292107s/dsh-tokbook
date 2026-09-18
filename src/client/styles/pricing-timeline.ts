@@ -1,18 +1,17 @@
 /**
- * styles.ts 片段：调价史抽屉里的时间轴（`pricing/Timeline.tsx`）。排在 pricing 之后，只加 `.dtpl-tl-*`。
- *
- * 轨道只是量尺：轨、点、标签都按 JS 量出的像素宽度定位——最小间距是像素值，百分比挡不住两个标签在窄抽屉里叠在一起。
+ * 调价史抽屉里的时间轴（`pricing/Timeline.tsx`）：轨道只是量尺，轨、点、标签都按 JS 量出的
+ * 像素宽度定位——最小间距是像素值，百分比挡不住两个标签在窄抽屉里叠在一起。
+ * 排在 pricing 之后，只加 `.dtpl-tl-*`。
  */
 export const CSS_PRICING_TIMELINE = `
 [data-plugin="dsh-tokbook"] .dtpl-tl{padding:1px 0 0;}
-/* 轨道只是量尺，定位全由 JS 给。自上而下三行：括号的两个标签、带点的轨、调价日期——12 + 5 + 3 + 4 + 12 = 36px。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-track{position:relative;height:36px;}
-/* 轨用三级文字色而不是前景色的稀释洗色：它必须读成日期挂靠的那条线。3px，不是 hairline——1px 像一条游离分隔线。 */
+/* 轨用 fg-3 而不是前景色的稀释洗色：它必须读成日期挂靠的那条线。3px，不是 hairline——1px 像一条游离分隔线。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-rail{
   position:absolute;left:0;right:0;top:17px;height:3px;
   border-radius:0;background:var(--dtpl-fg-3);
 }
-/* 一个节点：点在轨上，日期挂在点下方。盒子占满整个轨道高度——这才让 5px 的点拥有 36px 热区。 */
+/* 一个节点：点在轨上，日期挂在点下方。盒子占满整个轨道高度——这才让 5px 的点拥有整条轨的热区。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-node{
   position:absolute;top:0;left:0;height:100%;
   appearance:none;font:inherit;text-align:center;white-space:nowrap;
@@ -31,7 +30,7 @@ export const CSS_PRICING_TIMELINE = `
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-cap] .dtpl-tl-node-k{margin-top:0;}
-/* 点落在轨上：5px 在 16px、3px 的线在 17px，两者中心都在 18.5。fg-2 而非 fg-3：点是非文字物体，需与所处表面 3:1。
+/* 点落在轨上。fg-2 而非 fg-3：点是非文字物体，需与所处表面 3:1。
    直角：轴上的点与趋势图的柱同属数据图形，所以和柱一样是方的。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-dot{
   position:absolute;top:16px;left:50%;

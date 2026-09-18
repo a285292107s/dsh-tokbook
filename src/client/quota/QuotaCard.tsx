@@ -6,8 +6,6 @@
  * gate 分（非订阅 gate 的正文与环无关——余额没有分母，不画环）。
  *
  * 数据半区在 `QuotaPanel.tsx`；算术在 `metrics.ts`。
- *
- * @module dsh-tokbook/client/quota/QuotaCard
  */
 
 import { useState } from 'react'

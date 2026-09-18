@@ -4,8 +4,6 @@
  * 与近 14 天趋势。本页只陈述今天
  * 与近 14 天——**累计事实不在这里**，
  * 它的去处是用量明细的「全部」窗口（与按模型 / 按工作区 / 按通道三种切法同处一页）。
- *
- * @module dsh-tokbook/client/LedgerView
  */
 
 import { useEffect, useRef } from 'react'
@@ -13,7 +11,7 @@ import type { TokBookOverview, UsageDayRow, UsageTotals } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import { UsageGlyph } from './icons.tsx'
 import {
-  formatHitRate, formatMoney, formatTokens,
+  formatMoney, formatRatio, formatTokens,
   localDayKey, shiftDayKey, shortDay,
 } from './format.ts'
 
@@ -34,19 +32,17 @@ const ZERO_TOTALS: UsageTotals = {
 
 /**
  * 一格读数：标签 + 值 + **份额**。
- * 值的来路（这个数占今天多少）原先要读者自己从四格数字里相加除出来——一格里放的不该只是
- * 戳在格子中央的一个数，而是「多少」与「占多少」两件事。分母是今日四桶之和，与
- * 「今日词元」严格同源；份额由它算，所以两者不可能对不上。
+ * 一格里放的不该只是戳在格子中央的一个数，而是「多少」与「占多少」两件事。分母是今日四桶
+ * 之和，与「今日词元」严格同源，所以两者不可能对不上。
  * **份额自己报名**（「占 71.0%」）：卡上不留裸百分比——一个百分比要么带桶名，要么带「占」字。
- * 比率走 `formatHitRate`（恒定一位小数、向下截断）：一个桶占主角数字的比按同一条诚实规则给
- * ——0.1% 而不是「0%」，量到的零永远不出现。
+ * 比率走 `formatRatio`（恒定一位小数、向下截断）：0.1% 而不是「0%」，量到的零永远不出现。
  */
 function Stat({ label, value, share }: {
   label: string
   value: string
   share: number
 }) {
-  const percent = share > 0 ? formatHitRate(share, 100) : null
+  const percent = share > 0 ? formatRatio(share, 100) : null
   return (
     <div className="dtpl-stat">
       <div className="dtpl-k">{label}</div>
@@ -172,10 +168,8 @@ function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
         const isPeak = index === peakIndex
         // 标签骑在柱上而非图区上：偏移量与填充高度同表达式，数字永远停在自己的柱上方 2px。
         // 首尾列和其它列一样居中——图区左右各留了半个标签宽的边距（见 styles/ledger.ts）。
-        // 零日不写数：`.is-zero` 那枚标签在样式表里被撤掉，由基线上的刻度画「量出来的零」。
-        // 这一类必须挂在**柱**上：柱脚那枚零刻度（`::after`）与「零日撤标签」都由
-        // `.dtpl-bar.is-zero` 选中——此前只挂在标签上，两条规则都是死的（零日照旧印出「0」，
-        // 零刻度从不出现）。峰值不需要挂在柱上：它的黄牌挂在标签上、明度与墨边挂在填充上。
+        // 这一类必须挂在**柱**上：柱脚的零刻度（`::after`）与「零日撤标签」都由 `.dtpl-bar.is-zero`
+        // 选中，只挂在标签上这两条规则都是死的。峰值不需要挂在柱上：黄牌在标签上、明度与墨边在填充上。
         const columnH = columnHeight(tokens, max)
         return (
           <div
@@ -272,21 +266,17 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
         <>
           {/* 首屏只有一个窗口（今日），所以首屏也只有一块卡：**仪表区**（今日词元 + 参照 +
               今日金额）与它下面的**读数格**（四桶）是同一个陈述的总额与分解，分成两只框会被读成
-              两个陈述——此前正是如此（一个事实两只卡，另一个窗口的累计却挤在前一只卡里）。
-              两区之间是一条 1px 分区线，卡的下沿是刻度轨（见 ledger 片段）。 */}
+              两个陈述。两区之间是一条 1px 分区线。 */}
           <div className="dtpl-hero">
             {/* 卡首那条图：它是**卡的第一行**，占满卡的内容宽、高度封顶（见 ledger 片段），
-                然后才轮到数字。图不从背景里长出来（此前试过整卡背景、也试过给仪表区那一层
-                当背景），因为那两版都要求字与图共处一块地方——要么读数压在人物身上读不出来，
-                要么把图退到几乎看不见才勉强能读。独立成行之后两件事各自完整：图按卡宽铺开
-                （宽处上下裁一点，焦点仍在人物脸上），字落在干净的卡面上。 */}
+                然后才轮到数字。图不从背景里长出来——当背景用就得让字与图共处一块地方，
+                读数会压在人物身上读不出来。独立成行之后图按卡宽铺开（宽处上下裁一点，
+                焦点仍在人物脸上），字落在干净的卡面上。 */}
             <div className="dtpl-hero-art" aria-hidden="true" />
             <div className="dtpl-hero-top">
               <div className="dtpl-hero-lead">
-                {/* 口径词那一行只留身份：派生读数不在这一行（一个比值挂在口径词上，读者还得回头
-                    找它的分母）。「缓存命中率」自 D-037 起卡上不再显示——在缓存密集的账本里它
-                    与旁边那个「占 x%」往往只差零点几，并排会被读成一个数印了两遍；输入侧三桶都在
-                    卡上，需要时自己相除即可，所以「统计口径」页也不再为它留一段。 */}
+                {/* 口径词那一行只留身份：派生读数不在这一行——一个比值挂在口径词上，读者还得
+                    回头找它的分母（缓存命中率自 D-037 起卡上不再显示，理由见 DECISIONS）。 */}
                 <span className="dtpl-hero-head">
                   <span className="dtpl-total-k">今日词元</span>
                 </span>

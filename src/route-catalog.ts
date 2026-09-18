@@ -4,8 +4,6 @@
  *
  * 真源是 settings 文档与活的适配器 registry 联合；两个源都不知道的（账本
  * 计过费的 route、只带手写价格的串）由 `readPricingView` 补入。
- *
- * @module dsh-tokbook/route-catalog
  */
 
 import type { ModelEntry, RouteCatalogEntry } from './types.ts'

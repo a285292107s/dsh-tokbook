@@ -1,7 +1,5 @@
 /**
  * 统计口径 tab。只留值得记住的事实；实现管道在 README，不在此 tab。
- *
- * @module dsh-tokbook/client/MethodDoc
  */
 
 import type { TokBookOverview } from '../types.ts'
@@ -78,9 +76,8 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </div>
         <div className="dtpl-doc-fact">
           <span className="dtpl-doc-fact-k">范围</span>
-          {/* 这一格曾是「完整度 ≈95%」，再改成「大部分能记到」。两者都是**给产品自评**——
-              一个假精度、一个形容词，挂在速览里只会让读者先怀疑整页。改按**作用域**陈述后它
-              就成立了，而且是可核对的一条边界（§2 的表 + §3 的漏项）。
+          {/* 这一格按**作用域**陈述边界，而不是给产品自评（一个假精度、一个形容词挂在速览里，
+              只会让读者先怀疑整页）；可核对性来自 §2 的表 + §3 的漏项。
               「只记」两个不能省：省掉就与上一格「来源」变成同一件事，边界本身消失。
               这里钉的是**哪个工具**这一维（别的 AI 工具、直连脚本都看不到）；至于**哪台设备**
               那一维——同一账号在多设备上对不齐——由第 3 节的「记账维度不同」负责。两维分开，
@@ -168,9 +165,9 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
                 <span className="dtpl-doc-gap-item-name">记账维度不同</span>
                 <span className="dtpl-doc-gap-item-desc">本账本按「这台设备上的会话」记账，账单按「账号」汇总；同一个账号在多台设备 / 多个工具里使用时，两边必然对不齐。</span>
               </li>
-              {/* 金额与计价只在这里说一次（原先还寄生在「词元分四桶」下面，同一事实印两遍）。
-                  价格表页怎么改价、行内四个数字改的是哪一段，不在这里教——那是价格表 tab 的界面本身
-                  （行内单元格 + 「＋ 加一段价」），文档只留用户对账时用得上的结论。 */}
+              {/* 金额与计价只在这里说一次。价格表页怎么改价、行内四个数字改的是哪一段，
+                  不在这里教——那是价格表 tab 的界面本身（行内单元格 + 「＋ 加一段价」），
+                  文档只留用户对账时用得上的结论。 */}
               <li>
                 <span className="dtpl-doc-gap-item-name">金额是估算</span>
                 <span className="dtpl-doc-gap-item-desc">按每条记录<b>自己的时间戳</b>、用你在价格表页写的价（¥ / 百万词元）逐条算出后累加；同一个模型串在不同<b>通道</b>可以是不同的价。本机价格表跟不上厂商最新费率时，金额会偏离（词元数不受影响）。改价只影响本机账本，不会回写厂商账单。</span>

@@ -6,8 +6,6 @@
  * 上次权威同步时各持久化会话折叠到了哪个变更 token。基线只在同步成功之后写，
  * 因此签名绝不会跑在它所覆盖的账本内容之前。缺失、撕裂或畸形的基线读作 null，
  * 调用方回落到保守全量走，再重写一份新基线。
- *
- * @module dsh-tokbook/sync-state
  */
 
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'

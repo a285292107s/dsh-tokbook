@@ -1,8 +1,6 @@
 /**
  * 用量明细 tab 的两种行清单：按模型与按工作区。两者是**同一份窗口记录**的不同视角，
  * 由 `ProviderPanel` 装配（窗口与切法都在那一层选）。
- *
- * @module dsh-tokbook/client/Breakdowns
  */
 
 import type { CostedModelRow, WorkspaceUsageRow } from '../types.ts'

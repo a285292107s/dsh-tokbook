@@ -3,8 +3,6 @@
  *
  * 轴上只放轴该放的东西——没有柱、节点旁没有状态标签。日期按时间比例但被推开到最小间距，
  * 故轨道用 `ResizeObserver` 实测而非百分比布局。有段可去的节点是按钮——轴是导航而非装饰。
- *
- * @module dsh-tokbook/client/pricing/Timeline
  */
 
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'

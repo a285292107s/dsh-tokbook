@@ -7,8 +7,6 @@
  * 校验手写 `pricing.json`，因此 browser 草稿接受的表永远不会被 host writer 拒绝。
  * 独立且无依赖的原因：词表也放这里，因为 client 不能 import `pricing.ts`（它拉了
  * `node:fs`），而这几条字面量一旦两处各写一遍就会静默漂移。
- *
- * @module dsh-tokbook/price-format
  */
 
 import type { DaySet } from './types.ts'

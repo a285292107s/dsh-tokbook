@@ -9,8 +9,6 @@
  * reload 清空模块缓存并重新 import 插件入口，重建的模块得到一份**全新的** `dirs`
  * 映射。跨该边界的重叠安全来自磁盘，而非本映射：新实例在首次写入前从磁盘行
  * 重建去重集。进程重启以空映射开始；该目录的首次写入会先从磁盘行重建去重集。
- *
- * @module dsh-tokbook/usage-log
  */
 
 import { appendFile, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'

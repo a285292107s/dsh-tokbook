@@ -2,8 +2,6 @@
  * 订阅额度 tab：官方账户用量（宿主侧从 provider 拉取；浏览器不持有 API key）。
  *
  * 打开延迟是一等关切：tab 立即渲染最近已知的卡（宿主 TTL 或持久化快照——首帧不触达 provider），仅当已服务数据老于新鲜度预算时就地刷新。刷新绝不清空卡。无生效订阅的卡被下沉。
- *
- * @module dsh-tokbook/client/quota/QuotaPanel
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'

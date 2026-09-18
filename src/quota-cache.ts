@@ -10,8 +10,6 @@
  * 读严格：缺失、撕裂或畸形的文件读作 null，坏写入永远不能充当假的「最近
  * 已知」。只写 'ok' 卡：`unconfigured`/`error` 卡重推很廉价，且不得遮住稍后
  * 的恢复（把一次瞬时网络失败持久化成「最近已知」会立刻永远渲染）。
- *
- * @module dsh-tokbook/quota-cache
  */
 
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'

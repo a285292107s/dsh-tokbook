@@ -2,8 +2,6 @@
  * 浮窗各 tab 共享的纯展示辅助函数。
  *
  * 日期键沿用宿主本地 `YYYY-MM-DD` 命名；wire 上的金额一律为人民币。无 React、无 fetch——任何面板均可安全 import。
- *
- * @module dsh-tokbook/client/format
  */
 
 /** 日期键平移 N 天；宿主的日文件也按同一方式命名。 */
@@ -36,7 +34,7 @@ export function share(value: number, total: number): number {
 }
 
 /**
- * 占比的读法（百分比字符串）。两条与 `formatHitRate` 同源的诚实规则：**不足 1% 写「<1%」**
+ * 占比的读法（百分比字符串）。两条与 `formatRatio` 同源的诚实规则：**不足 1% 写「<1%」**
  * 而不是取整成 0（那会把「有一点」说成「没有」），**99.x% 不凑整成 100%**（部分占满不是占满）。
  */
 export function formatShare(value: number, total: number): string {
@@ -49,14 +47,12 @@ export function formatShare(value: number, total: number): string {
 }
 
 /**
- * 比率的读法：恒定一位小数、**截断**（`Math.floor`）。原名取自缓存命中率（缓存读取 ÷ 输入侧
- * 计费词元，分母 = 未命中输入 + 缓存读 + 缓存写，与 harness 自身会话统计同口径）——命中率自
- * D-037 起不在卡上显示，同一个函数改由四桶的**份额**用（`formatHitRate(share, 100)`）。
- * 截断而不是四舍五入：展示只会低估，99.95% 不会被印成 100.0%——「满」与「几乎满」是两回事。
+ * 比率的读法：恒定一位小数、**截断**（`Math.floor`）。截断而不是四舍五入：展示只会低估，
+ * 99.95% 不会被印成 100.0%——「满」与「几乎满」是两回事。分母为 0 时无比率可说（null）。
  */
-export function formatHitRate(cacheReadTokens: number, billedInputTokens: number): string | null {
-  if (billedInputTokens <= 0) return null
-  const percent = Math.min(100, (cacheReadTokens / billedInputTokens) * 100)
+export function formatRatio(part: number, whole: number): string | null {
+  if (whole <= 0) return null
+  const percent = Math.min(100, (part / whole) * 100)
   return (Math.floor(percent * 10) / 10).toFixed(1)
 }
 

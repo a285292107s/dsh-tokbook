@@ -1,6 +1,6 @@
 # 文档索引 — dsh-tokbook
 
-> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-16 · supersedes: —
+> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-18 · supersedes: —
 
 本仓库所有文档文件的地图。动手前先读你要触及领域的条目,然后**只读那一份**。本文件
 的存在是为了让 [`AGENTS.md`](../AGENTS.md) 与你的第一跳保持精简:根文件只放面包屑,
@@ -19,6 +19,7 @@
 | [`docs/HMR.md`](HMR.md) | lessons(教训)/ reference(参考) | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
 | [`docs/LESSONS.md`](LESSONS.md) | lessons(教训) | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
 | [`docs/UI-SPEC.md`](UI-SPEC.md) | reference(参考,界面规范) | current | 改 `src/client/**` 的呈现层前**读这一份**(约 120 行):§1 不变量、§2 达标线(对比度 / 字号分带 / 直连宿主变量白名单 / 窄屏 / 无障碍)、§3 陷阱速查、§4 自检;**UI 大调整时只受 §1 约束**。**取值与逐 tab 规格不在文档里**——真源是 `src/client/styles/**`(用法写在 `tokens.ts` 的注释里),可判定的禁令见 §3 的自查清单。2026-09-16 起原 `DESIGN-SYSTEM.md` 的取值表、本文的审计历史与全部实测数字已删;**行数上限 200** 人工量 |
+| [`docs/COMMENTS.md`](COMMENTS.md) | reference(参考,注释规范) | current | **写或改 `src/**` 的注释前读这一份**(约 45 行):一条尺子(代码里读不出来 + 改了必须同步改)、四不写(改动史 / 代码已说的 / 数值推导 / 规则的第二份副本)、形态(一句话优先、文件头只写前提、解释名字=改名信号)与落笔前三问。一次全库注释审核的产物 |
 | [`docs/WORKFLOW.md`](WORKFLOW.md) | process(流程) | current | L2/L3(契约面 / 跨 commit / 维护者要求 worktree)对照的「代码 + 文档同 commit」循环;新建文档前先看判据 |
 
 ## Doc meta 约定

@@ -3,8 +3,6 @@
  *
  * 成本是叠加层：按 (route, model) 解析人工价表（¥ / 百万 token）。金额拆成
  * metered（真实消费）与 subscription（订阅价值）。改价只重算历史计价，不重建聚合。
- *
- * @module dsh-tokbook/types
  */
 
 /** 单次模型调用的 provider token 桶。 */
@@ -396,15 +394,14 @@ export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRo
   syncError: string | null
 }
 
-/** 后台权威同步的状态机。 */
 export type SyncStatus = 'idle' | 'running' | 'done' | 'error'
 
 /**
  * 同步状态探针（`/tokbook/sync`）的载荷：调度器状态的只读投影，**不含任何账本数据**。
  *
- * client 追一轮 walk 落定时读它，而不是反复拉 `TokBookOverview`——后者每次都是全量聚合
- * （实测 200–340 ms），而追的 tick 次数正比于 walk 耗时，等于把负载加在正被 walk 压着的
- * 那条路径上。落定之后 client 再拉一次概览，新折进来的行就在那一次里。
+ * client 追一轮 walk 落定时读它，而不是反复拉 `TokBookOverview`——后者每次都是全量聚合，
+ * 而追的 tick 次数正比于 walk 耗时，等于把负载加在正被 walk 压着的那条路径上。落定之后
+ * client 再拉一次概览，新折进来的行就在那一次里。
  */
 export interface SyncStatusView {
   status: SyncStatus

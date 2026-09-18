@@ -2,8 +2,6 @@
  * 词元账本浮窗（路由 A：`shell.overlay`）——纯壳层。
  *
  * 对话语义：Escape 和点背景都关闭；打开时焦点移入卡片，Tab 被困在内部，关闭后焦点回到触发按钮。
- *
- * @module dsh-tokbook/client/LedgerOverlay
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -43,9 +41,9 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
   }, [view])
 
   /** 只读 host 内存的同步状态探针（≈0 ms）。追 walk 落定靠它，不靠反复拉概览：概览每次
-   *  都是全量聚合（实测 200–340 ms），而追的 tick 次数正比于 walk 耗时——那等于把负载加在
-   *  正被 walk 压着的那条路径上。读不到就返回 null（调用方按「已落定」处理，随后照常拉
-   *  一次概览：同一份包里 client 与 host 同版本，探针失败只可能是路由之外的意外）。 */
+   *  都是全量聚合，而追的 tick 次数正比于 walk 耗时——那等于把负载加在正被 walk 压着的
+   *  那条路径上。读不到就返回 null（调用方按「已落定」处理，随后照常拉一次概览：
+   *  同一份包里 client 与 host 同版本，探针失败只可能是路由之外的意外）。 */
   const fetchSyncState = useCallback((signal?: AbortSignal): Promise<SyncStatusView | null> => {
     return fetch(ROUTE_SYNC)
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<SyncStatusView> })

@@ -3,14 +3,11 @@
  *
  * 两个半区之间只有这一条数据路径（`docs/DESIGN.md` §4）：host 在 `routes.ts` 上按
  * exact path 注册，browser 在各 tab 里 `fetch`。词表放在这里，是为了「路径 / query 键」
- * 只有一处真源——此前 host 与 5 个 client 文件各写一遍字面量，改一处只能靠 grep，
- * 而 exact 路由写错不会报错，只会静默 404。
+ * 只有一处真源——而 exact 路由写错不会报错，只会静默 404。
  *
  * 只放词表，不放 URL 构造器：query 值的编码与省略规则留在各自的调用点（host 侧用
  * `URLSearchParams` 读，client 侧用模版串写）。本模块**零依赖**，因此 browser bundle
  * 可以安全 import（同 `price-format.ts` 的理由）。
- *
- * @module dsh-tokbook/route-paths
  */
 
 /** `GET` 当前聚合概览快照（带成本）。 */

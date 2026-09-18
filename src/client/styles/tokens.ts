@@ -1,7 +1,6 @@
 /**
- * styles.ts 片段：tokens —— 全插件唯一的取值登记处，由 `injectStyles` 按序拼接。
- * 只做三件事：从宿主取色（`--dsw-alias-*` + 兜底）、登记插件自有常量、在值旁写"为什么"。
- * 某个面长什么样在 `styles/*.ts`，规则与达标线在 `docs/UI-SPEC.md`。
+ * tokens —— 全插件唯一的取值登记处。只做三件事：从宿主取色（`--dsw-alias-*` + 兜底）、
+ * 登记插件自有常量、在值旁写"为什么"。某个面长什么样在 `styles/*.ts`，规则与达标线在 `docs/UI-SPEC.md`。
  *
  * 加一条之前三问，都过了才加：
  *   ① 别处是否已经表达过同样的色值 / 圆角 / 名字——是就不加；
@@ -72,8 +71,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace); /* 全部是数字 */
 
   /* 「一行读数」的右列宽，由跨 tab 共用的 .dtpl-row 使用，故必须挂根（见文件头 ①）。
-     它是下限不是定宽，使用处写 minmax(min-content,var(--dtpl-row-nums-w))：
-     最宽内容（工作区一格两段「数额 + 桶名」）实测 222px，而金额位数不受控，
+     它是下限不是定宽，使用处写 minmax(min-content,var(--dtpl-row-nums-w))——金额位数不受控，
      写死会让右列溢出、金额被裁。 */
   --dtpl-row-nums-w:224px;
 

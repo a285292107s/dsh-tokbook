@@ -3,12 +3,10 @@
  * request-id 去重）。实时 hook 是新鲜度的**主路径**；权威 walk 是自愈路径
  * （折叠失败、插件缺席期间写下的行），**排在后台，读路径绝不 await 它**——
  * 当前会话每来一条消息就变一次 revision，await 它等于每次打开都重读那份
- * 完整会话日志（实测单份可达 8.6 MB 压缩，秒级）。
+ * 完整会话日志（单份可达数 MB 压缩、秒级）。
  *
  * WIRE NOTES：事件与持久化面是鸭子类型（待 DSH 类型包接入可收紧）。单个
  * `list()` 只有裸 header，故新鲜度探针走 `listSnapshots()`（带变更令牌）。
- *
- * @module dsh-tokbook
  */
 
 import { join } from 'node:path'
@@ -323,8 +321,8 @@ export class TokenUsageBook extends Service {
         this.syncStatus = 'done'
         this.setBaseline(snapshots, failed)
         if (result.added > 0) invalidateDerivedState(this.dir)
-        // 时长写进日志：这条路径的成本全在「整份日志重读重折叠」上，而它是否
-        // 拖慢了读路径，只能从这行看出来（2026-09-15 那次卡顿排查就是靠它）。
+        // 时长写进日志：这条路径的成本全在「整份日志重读重折叠」上，它是否拖慢了读路径
+        // 只能从这行看出来。
         this.logger.info?.(`[tokbook] sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions (${String(sessionIds.length)} of ${String(snapshots.length)} sessions) in ${String(Date.now() - startedAt)} ms`)
       } catch (error) {
         this.syncStatus = 'error'

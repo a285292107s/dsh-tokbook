@@ -2,8 +2,6 @@
  * dsh-tokbook 的最小客户端契约类型：插件被授予的宿主接缝，以及跨 surface 共享的视图契约。
  *
  * browser bundle 复用 DSH 基线模块表，不得运行时 import 任何 `@deepseek-ai/*` client 包（bundle 纯净性门禁）。因此 `ctx.slots` 在此本地声明。
- *
- * @module dsh-tokbook/client
  */
 
 import type { Context } from '@deepseek-ai/cordis'

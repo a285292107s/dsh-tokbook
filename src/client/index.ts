@@ -2,8 +2,6 @@
  * dsh-tokbook client 入口。
  *
  * 路由 A：填入两个已声明的 root-scoped slot（`sidebar.footer.action` + `shell.overlay`），无需改 DSH 本体。
- *
- * @module dsh-tokbook/client
  */
 
 import type { QuotaView } from '../types.ts'

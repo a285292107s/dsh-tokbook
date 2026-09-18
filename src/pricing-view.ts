@@ -5,8 +5,6 @@
  * 价格的 route——仍可见、可编辑，其金额不会变成孤儿。
  *
  * 与拥有价**文件**本身（读、写、解析）的 `./pricing.ts` 分开。
- *
- * @module dsh-tokbook/pricing-view
  */
 
 import { instantKey, EARLIEST } from './price-format.ts'

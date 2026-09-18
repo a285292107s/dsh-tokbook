@@ -12,8 +12,6 @@
  * 订阅（Zen 与 Go 共享 workspace key），答为 `gate: 'none'` 状态卡而非失败。
  *
  * 每次拉取尽力而为、短超时；失败以 `error` 卡露出而不是抛。
- *
- * @module dsh-tokbook/quota-official
  */
 
 import type { PlanConfig, QuotaCard, QuotaCreditPool, QuotaUsageSummary } from './types.ts'

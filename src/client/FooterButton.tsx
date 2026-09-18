@@ -2,8 +2,6 @@
  * 词元账本的侧栏 footer 触发按钮（路由 A：`sidebar.footer.action`）。
  *
  * 徽标本身从不轮询 provider API；由 client 入口经 `GET /tokbook/quota`（纯磁盘列表 + alert）刷新。
- *
- * @module dsh-tokbook/client/FooterButton
  */
 
 import { useSyncExternalStore } from 'react'

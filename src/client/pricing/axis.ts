@@ -3,8 +3,6 @@
  *
  * 轴括住**一行自己的历史**：左端是首记，右端是今天。位置按时间比例，但相邻标签会被推开直到满足
  * 最小间距——轴被当作调价的**顺序**读取、不是比例尺。纯逻辑：无 React、无 DOM。
- *
- * @module dsh-tokbook/client/pricing/axis
  */
 
 import { hourStartMs, instantKey } from '../../price-format.ts'

@@ -4,8 +4,6 @@
  * tab 从不从本地账本估算——订阅 key 在所有工具/设备间共享，本机账本无法知道
  * 真实账户花费。两个内置 provider 的官方端点暴露的内容不同：Command Code 报告
  * 真实美元金额；OpenCode Go 只报告百分比 + 重置。wire 类型让金额可选。
- *
- * @module dsh-tokbook/quota
  */
 
 import type { QuotaCard, QuotaGate, QuotaPlanInfo, QuotaWindowView } from './types.ts'

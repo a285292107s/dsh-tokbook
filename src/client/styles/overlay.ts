@@ -1,6 +1,4 @@
-/** styles.ts 片段：overlay。由 `injectStyles` 按序拼接。 */
-export const CSS_OVERLAY = `/* 遮罩背景 */
-/* 与 DSH 原生 modal 遮罩同一配方：alias mask 色 + mask blur。 */
+export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias mask 色 + mask blur。 */
 [data-plugin="dsh-tokbook"].dtpl-overlay{
   position:fixed;inset:0;z-index:1000;
   display:flex;align-items:center;justify-content:center;
@@ -9,9 +7,8 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
   backdrop-filter:var(--dsw-mask-blur,blur(2px));
 }
 
-/* 弹窗卡片：方舟的「设备读数窗」——直角、一条硬边、四角括号，外加一层网点底纹。
-   括号画在 ::before/::after 上而不是用 clip-path 切角：切角会连子元素的焦点环一起裁掉，
-   而这两个角只画 L 形边框，控件与焦点环都不受影响。 */
+/* 弹窗卡片：直角、一条硬边、四角括号。括号画在 ::before/::after 上而不是用 clip-path 切角
+   ——切角会连子元素的焦点环一起裁掉，而 L 形边框不影响控件与焦点环。 */
 [data-plugin="dsh-tokbook"] .dtpl-card{
   position:relative;
   width:min(720px,100%);height:min(680px,88dvh);height:min(680px,88vh);
@@ -22,7 +19,7 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
     inset 0 0 0 1px var(--dtpl-border);
   overflow:hidden;
 }
-/* 四角括号：只画左上与右下两端，其余两角留空——「方框的四角都补全」会读成相框。 */
+/* 四角括号只画左上与右下两端，其余两角留空（四角都补全会读成相框）。 */
 [data-plugin="dsh-tokbook"] .dtpl-card::before,
 [data-plugin="dsh-tokbook"] .dtpl-card::after{
   content:"";position:absolute;width:16px;height:16px;pointer-events:none;z-index:2;
@@ -36,9 +33,7 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
 }
 [data-plugin="dsh-tokbook"] .dtpl-card:focus{outline:none;}
 
-/* 标题栏 */
-/* 字体保守：不做衬线/等宽的字体文章（终末地的原话就是「字体使用太保守…好处是不像某些
-   使用粗体字的压根看不清」）。标题回普通无衬线，只保留一点字距。 */
+/* 字体保守：不做衬线 / 等宽的字体文章。标题回普通无衬线，只保留一点字距。 */
 [data-plugin="dsh-tokbook"] .dtpl-head{
   display:flex;align-items:center;justify-content:space-between;gap:16px;
   padding:14px 20px 12px;
@@ -47,8 +42,7 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
   display:flex;align-items:center;gap:10px;min-width:0;
   font-size:16px;line-height:24px;font-weight:600;letter-spacing:.02em;
 }
-/* 工业徽记（第一处出现）：黄底 + 墨色图形。这是**抽象替身**，不是鹰角商标的复刻。 */
-[data-plugin="dsh-tokbook"] .dtpl-title-ico-chip{
+/* 工业徽记（第一处出现）：黄底 + 墨色图形。这是**抽象替身**，不是鹰角商标的复刻。 */[data-plugin="dsh-tokbook"] .dtpl-title-ico-chip{
   display:inline-flex;align-items:center;justify-content:center;flex:none;
   width:22px;height:22px;
   background:var(--dtpl-brand);
@@ -65,17 +59,15 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
 [data-plugin="dsh-tokbook"] .dtpl-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-close-ico{width:16px;height:16px;}
 
-/* 分段 tab（用量总览 / 订阅额度 / 通道用量 / 价格表 / 统计口径） */
-/* 不做药丸轨道：方舟的选择器是一条横排、项与项之间用竖发丝线分隔，当前项由**底部一条
-   警戒色实条**标出。轨道底色会把它读成「一组按钮」，而这里表达的是「这台设备当前的页」。 */
+/* 不做药丸轨道：选择器是一条横排、项与项之间用竖发丝线分隔，当前项由**底部一条实条**标出。
+   轨道底色会把它读成「一组按钮」，而这里表达的是「这台设备当前的页」。 */
 [data-plugin="dsh-tokbook"] .dtpl-tabs{
   display:flex;gap:0;flex:none;
   margin:0;padding:0 20px;
   border-bottom:1px solid var(--dtpl-border);
 }
-/* 未选中项的墨色是 fg-2，不是 fg-3：它是**控件的文字**，不是装饰，浅色皮肤下三级色只有 3.47:1。
-   「当前页」的区别改由字重 600 + 6% 洗色 + 底部那条 5px 黄块三样一起给——状态照样一眼看出，
-   而不用把没选中的字洗淡到读不清（DESIGN §4 那条「安静由字号、字距与留白做」）。 */
+/* 未选中项走 fg-2 而不是 fg-3：它是**控件的文字**，不是装饰。「当前页」的区别由字重 600 +
+   6% 洗色 + 底部那条 5px 黄块三样一起给——不用把没选中的字洗淡到读不清。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab{
   position:relative;appearance:none;flex:1;border:0;background:transparent;
   height:30px;padding:0 12px;
@@ -89,9 +81,8 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
   color:var(--dtpl-fg);font-weight:600;
   background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
 }
-/* 当前页标记：一条 5px 的黄块压在 tab 行的下边界上，**四条边都带 1px 墨边**。
-   那条墨边不是装饰：恒定的黄在白底上只有 1.57:1，边界靠墨边给到 18:1；深底上墨边看不见
-   也无所谓（黄本身对深底有 12:1）。黄以「料」出现，两个主题因此共用一套形态。 */
+/* 当前页标记：一条 5px 的黄块压在 tab 行的下边界上，**四条边都带 1px 墨边**——恒定黄在白底上
+   几乎没有边界，靠墨边成立；黄因此以「料」出现，两个主题共用一套形态。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab[aria-selected="true"]::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:5px;
   background:var(--dtpl-brand);
@@ -105,11 +96,9 @@ export const CSS_OVERLAY = `/* 遮罩背景 */
   vertical-align:middle;
 }
 
-/* 滚动主体 */
 /* 上下留白比横向大一档：首屏第一个元素（hero）因此不贴着 tab 条。
-   scrollbar-gutter:stable 常驻那条滚动条槽：用量明细的窗口一换，行数就从个位数跳到上千（滚
-   动条随之出现或消失），不留槽的话整块正文会横向挪 8px——比滚动条本身显眼得多。不支持这条属性
-   的浏览器只是回到旧行为，不会变差。 */
+   scrollbar-gutter:stable 常驻滚动条槽：用量明细的窗口一换，行数就从个位数跳到上千，
+   不留槽的话整块正文会横向挪 8px——比滚动条本身显眼得多。 */
 [data-plugin="dsh-tokbook"] .dtpl-body{
   flex:1;min-height:0;
   padding:18px 20px 20px;overflow:auto;overscroll-behavior:contain;

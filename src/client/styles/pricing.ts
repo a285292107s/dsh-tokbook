@@ -1,4 +1,4 @@
-/** styles.ts 片段：pricing。由 `injectStyles` 按序拼接，必须排在 shared 之前（窄屏段覆盖这里的高度）。 */
+/** pricing 片段：必须排在 shared 之前（窄屏段覆盖这里的高度）。 */
 export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-sec{display:flex;flex-direction:column;gap:14px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -7,7 +7,7 @@ export const CSS_PRICING = `
   border:1px solid var(--dtpl-border);background:transparent;color:var(--dtpl-fg);
   font:inherit;font-size:12px;
 }
-/* 工具栏搜索框是全窗口唯一 placeholder-only 的字段：placeholder 就是它唯一可见的名字，所以墨色取 fg-2 而不是三级色。 */
+/* 工具栏搜索框是全窗口唯一 placeholder-only 的字段：placeholder 就是它唯一可见的名字，所以墨色取 fg-2。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-search::placeholder{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-price-chip{
   appearance:none;flex:none;height:28px;padding:0 10px;
@@ -24,8 +24,7 @@ export const CSS_PRICING = `
 /* 事实带 + 图例同处一小节：带报这张表**现在是什么样**，图例说那四个数字**是什么**。
    带本身走跨 tab 共用的「一串事实」词汇（.dtpl-hero-facts，见 ledger 片段），价格表只多一条：
    「价格未知」那一项染 warn-ink——它是这张表上唯一要动手的地方。
-   b 也要单独指一次：.dtpl-hero-facts b 把数字按主墨色给了（那份规则的优先级与本条相同，
-   而 pricing 片段在 ledger 之后拼接，所以这里赢）。 */
+   b 也要单独指一次：.dtpl-hero-facts b 的优先级与本条相同，而 pricing 片段拼在 ledger 之后，所以这里赢。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-read{display:flex;flex-direction:column;gap:6px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-fact-unknown,
 [data-plugin="dsh-tokbook"] .dtpl-price-fact-unknown b{color:var(--dtpl-warn-ink);}
@@ -44,7 +43,7 @@ export const CSS_PRICING = `
 }
 /* 卡头两行：**身份行**（折叠钮那一块，整块可点）与**事实行**（这条通道自己的读数）。
    默认只有第一条通道展开，所以这个头往往就是读者看到的全部——它得自己说清「多大、有没有洞」。
-   hover 洗色只挂在可点的那一块上（.dtpl-price-fold），贴边的内边距留给它。 */
+   hover 洗色只挂在可点的那一块上（.dtpl-price-fold）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-head{
   display:flex;align-items:flex-start;gap:8px;
   padding:7px 10px 7px 8px;border-bottom:1px solid var(--dtpl-border);
@@ -96,9 +95,8 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-rows{display:flex;flex-direction:column;}
 
 /* 费率格的唯一度量，定义在 tab 根上，表格与抽屉共用。
-   --dtpl-rate-w 由费率能是什么决定，不是今天的数字：最长 8 字符（0.003625 这类历史价）在
-   12px 等宽下 52.8–57.6px，加两侧 7px 内边距与 2px 边框，取 74px 覆盖最宽的那档字体。
-   数字必须等宽（见 .dtpl-price-input / .dtpl-price-value）：比例体让同位数字错开，固定列就失去可比性。
+   --dtpl-rate-w 由费率能是什么决定，不是今天的数字：它要装下最长的那种历史价（8 字符），
+   数字必须等宽（比例体让同位数字错开，固定列就失去可比性）。
    --dtpl-cell-pad-x 与列头共享：列头必须和下面的数字结束在同一边缘。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-sec{
   --dtpl-cell-pad-x:7px;
@@ -110,9 +108,8 @@ export const CSS_PRICING = `
 
 /* 每行是自己的网格，轨道与上方列头相同：身份（伸展）| 请求数 | 四个固定费率列 | 展开槽。
    身份是唯一放不可预测文本的列，所以只有它伸缩、只有它会截断。
-   展开槽 32px 与 .dtpl-price-more 的命中区必须一起改（列宽小于控件会把控件压回去）。
-   请求数是列而不是身份列里的一句话：它是 host 排这张表的键，缩进可截断的文本里就读不到（见 .dtpl-price-reqs）。
-   第一格 minmax(32px,auto) 是这一行**唯一的高度来源**（展开钮 32px，窄屏 44px），所以行高与有没有判定带无关。 */
+   展开槽宽与 .dtpl-price-more 的命中区**必须一起改**（列宽小于控件会把控件压回去）；
+   第一格 minmax(32px,auto) 是这一行**唯一的高度来源**，所以行高与有没有判定带无关。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-cols,
 [data-plugin="dsh-tokbook"] .dtpl-price-row{
   display:grid;
@@ -184,9 +181,8 @@ export const CSS_PRICING = `
 /* 徽章 = 三级描边芯片，层级只由边界与填充表达，色相留给真正要看的状态：
      默认（不在配置）描边 + 次级文字；要看一眼（价格未知 / 未生效 / 未保存）amber 边 + warn-ink 文字；
      还有更多（峰谷价）1px 墨边，从灰芯片里抬一档。
-   默认那一档取 fg-2 而不是三级色：它不是装饰，是**要读的状态**（这枚说的是「配置里没有它」），
-   而三级色压卡面只有 4.12:1，10px 正文不够（UI-SPEC §2：要读的文本都走 fg-2）。
-   层级仍分得开：默认（fg-2 + 灰边）< 峰谷（fg + 墨边）< 需看一眼（warn-ink + amber 边）。
+   默认那一档是**要读的状态**，故取 fg-2 而非 fg-3（要读的文本都走 fg-2，UI-SPEC §2）；
+   三档仍分得开：默认（fg-2 + 灰边）< 峰谷（fg + 墨边）< 需看一眼（warn-ink + amber 边）。
    flex:none + nowrap 是硬约束：折行会撑高一行，截断会丢状态。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge{
   flex:none;
@@ -210,9 +206,8 @@ export const CSS_PRICING = `
   color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
 }
 /* 判定带：整行宽（grid-column:1/-1），只在有话要说时存在（TSX 里整段条件渲染）。
-   它是一句要读的话，所以走说明句档 11px/16px；9–10px 只给短标签，装不下一句话。
-   带首是芯片（可纵向扫读的类列），后面跟着这一行自己的后果——结论不靠悬停。
-   间距一律 10px，不写成句子的 margin：换行后那会变成莫名其妙的缩进。 */
+   它是一句要读的话，所以走说明句档；带首是芯片（可纵向扫读的类列），后面跟着这一行自己的
+   后果——结论不靠悬停。间距一律 10px，不写成句子的 margin（换行后那会变成莫名其妙的缩进）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-decl{
   grid-column:1 / -1;margin:0;min-width:0;
   display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;
@@ -228,8 +223,7 @@ export const CSS_PRICING = `
   font-size:10px;line-height:15px;color:var(--dtpl-err);
 }
 
-/* 四个格子：同一套度量给两种形态——抽屉里的输入框与行内只读的此刻价。
-   等宽是列宽的前提：--dtpl-rate-w 按 12px 等宽数字量出来，比例体会让同位数字错开。 */
+/* 四个格子：同一套度量给两种形态——抽屉里的输入框与行内只读的此刻价。等宽是列宽的前提。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-rates{
   display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
   column-gap:var(--dtpl-rate-gap);min-width:0;
@@ -267,8 +261,8 @@ export const CSS_PRICING = `
   font-size:10px;line-height:14px;color:var(--dtpl-err);text-align:right;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-/* 展开槽是进入该行价段的主入口（整行也是热区），所以它必须读成控件：命中区与字形尺寸
-   都跟输入方式走——桌面 32px、窄屏 44px（见 shared 的窄屏段），两档都在 WCAG 2.2 的 24px 之上。 */
+/* 展开槽是进入该行价段的主入口（整行也是热区），所以必须读成控件：命中区跟输入方式走
+   ——桌面 32px、窄屏 44px（见 shared 的窄屏段），两档都在 WCAG 2.2 的 24px 之上。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-more{
   appearance:none;border:0;background:transparent;
   width:32px;height:32px;padding:0;
@@ -323,7 +317,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-floor-k{
   font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
 }
-/* 托底价的一句话解释：说明句档、fg-2，不借等宽、不降到三级色。 */
+/* 托底价的一句话解释：说明句档、fg-2。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-floor-note{
   margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
@@ -364,18 +358,18 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-note{display:block;}
 [data-plugin="dsh-tokbook"] .dtpl-price-input-note{text-align:left;font-variant-numeric:normal;font-family:inherit;}
 
-/* 分段的全天价有标签，因为同样的四个桶会在下方再次出现作为例外时段：没有 00:00–24:00 区间，两级会看起来像同一张表的两行。 */
+/* 分段的全天价有标签，因为同样的四个桶会在下方再次出现作为例外时段：没有 00:00–24:00 区间，两级看起来会是同一张表的两行。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-sub{display:flex;align-items:baseline;gap:6px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-sub-k,
 [data-plugin="dsh-tokbook"] .dtpl-price-slots-k{
   display:inline-flex;align-items:baseline;gap:5px;
   font-size:10px;line-height:14px;color:var(--dtpl-fg-2);white-space:nowrap;
 }
-/* 全时段标记（『00:00–24:00』）是一段时间，所以走等宽；墨色取 fg-2——读它才知道这一段覆盖哪几个小时。 */
+/* 全时段标记（『00:00–24:00』）是一段时间，所以走等宽——读它才知道这一段覆盖哪几个小时。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-sub-k em{
   font-style:normal;font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);
 }
-/* 「留空的档位沿用上面的全天价」是一句要读的话，所以走 11px 注释句、fg-2、不借等宽（等宽是工程语境）。 */
+/* 「留空的档位沿用上面的全天价」是一句要读的话：注释句档、不借等宽（等宽是工程语境）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-slots-note{
   font-style:normal;font-family:inherit;
   font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
@@ -415,7 +409,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-history-foot{
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;
 }
-/* 抽屉里的说明句走 11px（注释句档），不是 10px——10px 只属于列头 / 柱值 / 芯片 / 轴刻度这类短标签。 */
+/* 抽屉里的说明句走注释句档（11px），不降到短标签那档。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-history-hint{margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
 
 /* 文件的保存状态，放在工具栏里：这是一张会自己写回的表的整个反馈回路，所以失败时要换行而不是被裁掉。
@@ -429,9 +423,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-error{color:var(--dtpl-err);font-weight:600;}
 
 /* 骨架屏：按这一屏**真实的排法**分段——事实带 + 图例那一组、第一条展开的卡、后面跟上来的折叠卡。
-   高度是实测值（1440px 宽、预览夹具）：带上那组 59（事实 19 + 6 间距 + 两行图例 34）、
-   折叠卡 63。展开的那张没法预料行数（夹具里 7 行实测 449），按四条行量一个中位数 214——
-   骨架的任务是「首屏别整体下跳」，不是预告行数。 */
+   高度是实测值；骨架的任务是「首屏别整体下跳」，不是预告行数（展开那张的行数没法预料）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-sk-facts{height:59px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-sk-open{height:214px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-sk-card{height:63px;}

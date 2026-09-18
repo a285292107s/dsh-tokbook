@@ -4,8 +4,6 @@
  * 所有 handler 守 method + same-origin（浏览器带 `Sec-Fetch-Site`；无该 header
  * 的非浏览器客户端放行），内部错误以 500 JSON body 作答，而不是未处理 rejection。
  * exact route 按 pathname 匹配，query 在 handler 内读。
- *
- * @module dsh-tokbook/routes
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
