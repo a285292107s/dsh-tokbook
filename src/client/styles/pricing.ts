@@ -149,7 +149,9 @@ export const CSS_PRICING = `
   box-shadow:inset 2px 0 0 var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-row[data-open="true"]{
-  background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);
+  /* 与下面的抽屉**同一档面**（见 .dtpl-price-history）：5% 叠在卡面 3% 上合成约 8%。
+     合成后浅 rgb(228,229,230) / 深 rgb(55,56,59)，与卡面的相邻比 1.105 / 1.174。 */
+  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
 }
 /* 焦点环跟随宿主 --dtpl-accent：焦点是系统信号，不跟这套视觉语言抢风格。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-row:focus-within{
@@ -230,7 +232,9 @@ export const CSS_PRICING = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cell{display:flex;flex-direction:column;gap:1px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-cell-k{
-  display:none;font-size:9px;line-height:12px;color:var(--dtpl-fg-3);
+  /* 字段名是要读的（输入 / 输出 / 缓存读 / 缓存写），所以走 fg-2 —— fg-3 只承载装饰。
+     9px 装得下的字更少，不是可以更淡的理由（UI-SPEC §2）。 */
+  display:none;font-size:9px;line-height:12px;color:var(--dtpl-fg-2);
 }
 /* 行内的只读价：报的是此刻计费所用的价，所以它不是控件——没有边框、没有焦点、不进 Tab 序。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-value{
@@ -293,19 +297,26 @@ export const CSS_PRICING = `
   color:var(--dtpl-err);background:color-mix(in srgb,var(--dtpl-err) 10%,transparent);
 }
 
-/* 调价史抽屉的表面阶梯：card 3% → open row 7% → drawer 无填充 + 实线缝（凹槽）→ .seg 硬边框抬出 → .slot 3%。
-   抽屉刻意不加自己的洗色：半透明叠半透明会让抽屉与卡片同调，凹槽靠实线缝与站在上面的块表现。 */
+/* 调价史抽屉的表面阶梯只有三档面：窗口面 0% → 卡 3% → 展开块 8%（展开行与抽屉同一档）。
+   第四档买不到：往墨洗色在浅色皮肤下封顶约 9%，再深说明句那档（fg-2）就掉到 4.5:1 以下
+   （实测 16% 面 3.83:1）。所以 展开块 以内一律换手段，不再换灰：段卡是这一档里唯一的框，
+   时段无框（缩进 + 上边发丝线），字段靠自己的 1px 边框。宿主 bg-layer 阶不在这一架梯上——
+   它与洗色阶构造上反向（浅色越靠内越白、深色越靠内越灰），同屏并用会让「段卡」在两套皮肤下
+   一个读成抬起来的纸、一个读成挖掉的洞。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-history{
   display:flex;flex-direction:column;gap:8px;
   padding:8px 10px 12px;
-  border-top:1px solid var(--dtpl-border);
-  background:transparent;
+  /* 与上面那条展开行同面，所以它们之间**不画缝**：缝会把一整块读成两块。
+     抽屉的结束由下一条行的上边线说（.dtpl-price-row 自带 hairline）。 */
+  border-top:0;
+  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg{
   display:flex;flex-direction:column;gap:5px;
   padding:6px 8px;
+  /* 不给自己的面：与抽屉同档，靠这一档里**唯一的一只框**分开。 */
   border:1px solid var(--dtpl-border);
-  background:var(--dtpl-surface);
+  background:transparent;
 }
 /* 「当前生效」的那一段：墨色侧条 + 墨色边框。它是身份（这一段在管现在），不是分类，所以不借色相。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg[data-active="true"]{
@@ -325,7 +336,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-date-k{font-size:10px;line-height:14px;color:var(--dtpl-fg-2);white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-price-input-date{
   width:auto;min-width:158px;text-align:left;border-color:var(--dtpl-border);
-  background:var(--dtpl-card);padding:0 6px;
+  background:transparent;padding:0 6px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-tag{
   display:inline-flex;align-items:center;gap:5px;min-width:0;
@@ -353,7 +364,8 @@ export const CSS_PRICING = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates .dtpl-price-cell-k{display:block;}
 [data-plugin="dsh-tokbook"] .dtpl-price-seg .dtpl-price-input{
-  text-align:left;border-color:var(--dtpl-border);background:var(--dtpl-card);
+  /* 字段不再取宿主的 layer 面：段卡与抽屉同档，字段的身份由它自己的 1px 边框说。 */
+  text-align:left;border-color:var(--dtpl-border);background:transparent;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-note{display:block;}
 [data-plugin="dsh-tokbook"] .dtpl-price-input-note{text-align:left;font-variant-numeric:normal;font-family:inherit;}
@@ -375,13 +387,14 @@ export const CSS_PRICING = `
   font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
 
-/* 峰谷时段：一行一个，靠凹槽说话——块内 3% 洗色 + 1px 边框，与上面的全天价靠形状分成两层，不靠色相。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-slots{display:flex;flex-direction:column;gap:5px;margin-top:1px;}
+/* 峰谷时段：与它上面的全天价**同面同框**——它们是同一张段卡里的并列项，不是更深一层，
+   所以不给第二只框（段卡那一档里只许有一只），只缩进一道、用上边发丝线断开。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-slots{display:flex;flex-direction:column;gap:6px;margin-top:1px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-slot{
   display:flex;flex-direction:column;gap:5px;
-  padding:5px 7px;
-  border:1px solid var(--dtpl-border);
-  background:var(--dtpl-panel-bg);
+  margin-left:8px;padding:5px 0 0;
+  border:0;border-top:.5px solid var(--dtpl-hairline);
+  background:transparent;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-clock{
@@ -392,7 +405,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-dash{color:var(--dtpl-fg-3);font-size:11px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-select{
   appearance:none;height:24px;padding:0 20px 0 7px;
-  border:1px solid var(--dtpl-border);background:var(--dtpl-card);color:var(--dtpl-fg);
+  border:1px solid var(--dtpl-border);background:transparent;color:var(--dtpl-fg);
   font:inherit;font-size:11px;line-height:16px;cursor:pointer;
   background-image:linear-gradient(45deg,transparent 50%,var(--dtpl-fg-3) 50%),
     linear-gradient(135deg,var(--dtpl-fg-3) 50%,transparent 50%);
