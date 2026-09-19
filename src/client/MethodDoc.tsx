@@ -90,7 +90,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">1</span>词元分四桶</h2>
         {/* 这一节只回答两件事：词元合计是哪四个数加出来的、「未命中输入」不是「我发过去的全部文字」。
             因此只有一句定义 + 四块磁贴。**不再画那条加总公式**——上一句已经说了「加起来」，
-            磁贴的排列就是这四桶，再画一行是同一个事实印两遍（见 UI-SPEC §3 重复编码）。
+            磁贴的排列就是这四桶，再画一行是同一个事实印两遍。
             金额 / 计价 / 价格表页怎么改价都不在这里：前者在「差额从哪来」，后两者是价格表 tab
             自己的操作，界面就地有提示（`pricing/editors.tsx` 的行内单元格与「＋ 加一段价」）。 */}
         <p className="dtpl-doc-sub">

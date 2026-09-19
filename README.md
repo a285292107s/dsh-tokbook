@@ -16,11 +16,9 @@ footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含
   时间戳**取价,金额分「**实际支出**」与「**订阅价值**」两桶。没定价的是**价格未知**(按 ¥0 计,
   但会在界面上列出来);费率为 0 才是免费。
 
-界面词与代码/契约的逐条对应见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 的「术语」段;改界面长相 / 交互前读
-[`docs/UI-SPEC.md`](docs/UI-SPEC.md)(只写**不变量 / 达标线 / 陷阱**三类,一页读完;其中可静态判定的
-那几条由 `pnpm selfcheck:ui` 强制,其余要人看)。**规格的真源是代码**:token 与「什么时候用哪个」在
-`src/client/styles/tokens.ts` 的注释里,各个面长什么样看 `src/client/styles/**`。为什么这么定见
-[`docs/DESIGN.md`](docs/DESIGN.md) §3.1;文档树地图见 [`docs/INDEX.md`](docs/INDEX.md)。
+界面词与代码/契约的逐条对应见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 的「术语」段。**界面规格的真源是代码**:
+token 与「什么时候用哪个」在 `src/client/styles/tokens.ts` 的注释里,各个面长什么样看 `src/client/styles/**`;
+静态可判定的那批禁令由 `pnpm selfcheck:ui` 强制,其余要人看。文档树地图见 [`docs/INDEX.md`](docs/INDEX.md)。
 
 > **术语**:本文档与界面说的**通道**就是代码与契约里的 provider —— 你从哪接入、按什么方式付费的
 > 那条路,route key 即账本里记录的通道标识。做模型、定官方价的那一方叫**模型厂商**,不是通道;
@@ -163,7 +161,7 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 **价格表 tab** 里,模型行右侧那四个数字是**只读**的「此刻计费所用的价」(含正在生效的峰谷时段);
 点这一行展开:第一张固定是**托底价**(没有生效时间,没被调价史覆盖的时间都按它算),往下的每一段
 从某个时刻起生效。规则见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) §2 与 **D-039**,其余交互
-(自动保存 / 搜索 / 徽章语义)见 [`docs/UI-SPEC.md`](docs/UI-SPEC.md) 与 `src/client/pricing/`——真源是代码。
+(自动保存 / 搜索 / 徽章语义)见 `src/client/pricing/`——真源是代码。
 
 ## 配置
 
@@ -181,11 +179,11 @@ plugins:
 设备,本地 token 账本做不到。目前覆盖 Command Code 与 OpenCode Go 两个内置计划。
 
 - **无 key → `unconfigured` 卡;拉取失败 → `error` 卡**,两者都**绝不回退到本地估算**;**browser 从不持有
-  key**。逐通道端点与取数策略见 `src/quota-official.ts`、套餐失效判定见 `src/quota.ts`;界面结构见 [`docs/UI-SPEC.md`](docs/UI-SPEC.md)。
+  key**。逐通道端点与取数策略见 `src/quota-official.ts`、套餐失效判定见 `src/quota.ts`。
 
 ## 状态
 
-五个 tab 都已落地(**界面规格与实测依据**见 DESIGN §3.1 / §4)。剩余缺口:
+五个 tab 都已落地(界面规格的真源是 `src/client/`)。剩余缺口:
 
 - 额度计划每个通道路由只收一个 API key(尚无多账户轮换)。
 - 云端价格镜像(参考价表 / 厂商分组 / 包装路由别名)已整体移除,后期作为独立任务重做——

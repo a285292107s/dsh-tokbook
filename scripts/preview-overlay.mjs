@@ -793,8 +793,8 @@ const server = createServer((req, res) => {
     /* 品牌强调色按 **DSH 的真实取值**给：浅色皮肤 = neutral-bluish-1000（等于墨色），
        深色皮肤 = neutral-bluish-50。DSH 里这一档是「身份色」，恰好等于主文字色——预览台此前
        填的是 #4d6bfe（那只存在于插件自己的 CSS 兜底里），于是焦点环、调价史「当前生效」那枚点
-       在预览里是蓝的、在真宿主里是墨的：拿预览验颜色会得出相反的结论（UI-SPEC §2 那条
-       「accent 不是自由强调色」）。宿主另有一个还在推的 -new-color 蓝（#4176e6）。 */
+       在预览里是蓝的、在真宿主里是墨的：拿预览验颜色会得出相反的结论（accent 不是自由强调色）。
+       宿主另有一个还在推的 -new-color 蓝（#4176e6）。 */
     --dsw-alias-brand-primary:#0f1115;
     --dsw-alias-button-primary-fill:#4d6bfe;
     --dsw-alias-button-primary-hover:#3f5ce0;

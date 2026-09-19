@@ -1,6 +1,6 @@
 # 迭代维护工作流 — dsh-tokbook
 
-> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-14 · supersedes: —
+> **Doc meta** · role: process · language: zh-CN · status: current · last-reviewed: 2026-09-19 · supersedes: —
 
 > **用法**:本文件只服务 **L2/L3**(契约面 / 跨 commit / 维护者要求 worktree)。L0/L1 按
 > [`AGENTS.md`](../AGENTS.md) 的分层表做,**不要往下读**。L2/L3 的目标:功能不断演进时,文档与
@@ -100,7 +100,7 @@
 | 内容 | 去处 |
 |---|---|
 | **代码里读不出来**的:不变量、为什么这么定、代价与取舍 | `DECISIONS.md` 条目(**≤ 40 行**);机制推理 → [`DESIGN.md`](DESIGN.md) |
-| **代码里读得出来**的:路由 / wire 形状 / 配置键 / 数据文件 / 取值与规格 / 逐文件布局 | **不进文档**——直接读 `src/`(界面那批可判定的禁令见 `docs/UI-SPEC.md` §3) |
+| **代码里读得出来**的:路由 / wire 形状 / 配置键 / 数据文件 / 取值与规格 / 逐文件布局 | **不进文档**——直接读 `src/` |
 | 入口与操作(是什么 / 怎么装 / 怎么配 / 怎么跑 / 当前缺口) | [`README.md`](../README.md) |
 | 外部系统的机制与事实(推不出来的那部分) | [`HMR.md`](HMR.md)、[`DESIGN.md`](DESIGN.md) §3 / §6 / §7 |
 | 踩过的坑:现象 → 根因 → 做法 | [`LESSONS.md`](LESSONS.md) |

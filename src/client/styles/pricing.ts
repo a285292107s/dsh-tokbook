@@ -183,7 +183,7 @@ export const CSS_PRICING = `
 /* 徽章 = 三级描边芯片，层级只由边界与填充表达，色相留给真正要看的状态：
      默认（不在配置）描边 + 次级文字；要看一眼（价格未知 / 未生效 / 未保存）amber 边 + warn-ink 文字；
      还有更多（峰谷价）1px 墨边，从灰芯片里抬一档。
-   默认那一档是**要读的状态**，故取 fg-2 而非 fg-3（要读的文本都走 fg-2，UI-SPEC §2）；
+   默认那一档是**要读的状态**，故取 fg-2 而非 fg-3（要读的文本都走 fg-2）；
    三档仍分得开：默认（fg-2 + 灰边）< 峰谷（fg + 墨边）< 需看一眼（warn-ink + amber 边）。
    flex:none + nowrap 是硬约束：折行会撑高一行，截断会丢状态。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-badge{
@@ -233,7 +233,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-cell{display:flex;flex-direction:column;gap:1px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-cell-k{
   /* 字段名是要读的（输入 / 输出 / 缓存读 / 缓存写），所以走 fg-2 —— fg-3 只承载装饰。
-     9px 装得下的字更少，不是可以更淡的理由（UI-SPEC §2）。 */
+     9px 装得下的字更少，不是可以更淡的理由。 */
   display:none;font-size:9px;line-height:12px;color:var(--dtpl-fg-2);
 }
 /* 行内的只读价：报的是此刻计费所用的价，所以它不是控件——没有边框、没有焦点、不进 Tab 序。 */

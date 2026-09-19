@@ -1,6 +1,6 @@
 # Host 与数据契约 — dsh-tokbook
 
-> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-18 · supersedes: —
+> **Doc meta** · role: contracts · language: zh-CN · status: current · last-reviewed: 2026-09-19 · supersedes: —
 
 > 本文只写**代码里读不出来的规则**：违反了它不会报错，但会把钱算错、把状态搞坏。
 > 路由表、wire 字段清单、配置键、数据文件清单、事件投影**都不在这里**——它们是代码，直接读：
@@ -59,7 +59,7 @@
   **① 门只从「真的答复了」的端点推导，绝不从失败推导**——超时 / 5xx / 网络错误是「**不知道**」
   而不是「没有订阅」，此时**不设门**（缺省 = `subscription`），绝不把网络故障说成账户没订阅；
   **② `balance` 门保证带 `credits`**——余额端点同样没答复时，没有数字可以替代窗口，降级为 `none`。
-  门与渲染的关系（哪扇门画窗口与表盘、告急点对谁静默）见 `docs/UI-SPEC.md` §2 与 D-014。
+  门与渲染的关系（哪扇门画窗口与表盘、告急点对谁静默）见 D-014。
 - **读路径不等权威 walk**：它端出的是**账本当前内容**，新鲜度由实时 hook 保证；需要折的行按节流排到
   后台自愈，**例外只有一个**——冷账本（目录里还没有任何日文件）时等一轮，否则首次安装会把「还没回填完」
   显示成「没有记录」。机制细节读 `src/index.ts` / `src/sync.ts`。

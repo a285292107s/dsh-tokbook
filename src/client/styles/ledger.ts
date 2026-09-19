@@ -190,7 +190,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   border-bottom:1px solid var(--dtpl-border);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar{position:relative;flex:1 1 0;min-width:0;height:100%;display:flex;align-items:flex-end;}
-/* 非峰值柱：中性灰取墨色 45%——柱高是这张图的正文，更淡过不了 3:1 非文本对比度（UI-SPEC §2）。 */
+/* 非峰值柱：中性灰取墨色 45%——柱高是这张图的正文，更淡过不了 3:1 非文本对比度。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill{
   position:relative;width:100%;overflow:hidden;
   background-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);

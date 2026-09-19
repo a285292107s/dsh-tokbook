@@ -465,7 +465,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       )}
 
       {/* 读不到就是读不到：错误条已经说了原因，下面不再补一句「没有可显示的路由」——
-          那句话在说「这里本来就没有内容」，而真相是这一份没读到（UI-SPEC §1 不变量 7）。 */}
+          那句话在说「这里本来就没有内容」，而真相是这一份没读到。 */}
       {view === null
         ? (loadError === null
           ? (

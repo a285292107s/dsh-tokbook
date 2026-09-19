@@ -41,7 +41,7 @@ footer 按钮 + shell.overlay 浮窗展示它们(汇总、按通道、价格表�
 
 | 改动 | 门 |
 | --- | --- |
-| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm build` + 刷新页面 + `pnpm selfcheck:ui`;余下禁令自查 `docs/UI-SPEC.md` §3 |
+| `src/client/styles/**` 或 `.tsx` 的呈现 | `pnpm build` + 刷新页面 + `pnpm selfcheck:ui` |
 | 别的 `src/**` | `pnpm typecheck`(只查 `src/`);碰了 host 逻辑或 `src/client/pricing/axis.ts` 再加 `pnpm test` |
 | README / `docs/**` | 无门禁——按「同 commit」的规矩人工改 |
 | 提交、或合并回主检出之前 | `pnpm test`,需要线上产物时再 `pnpm build` |

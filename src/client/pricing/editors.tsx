@@ -336,7 +336,7 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
   // 「未生效」得说得出**什么时候**生效：此刻没有任何一段在生效时，按效力顺序的第一张带生效时刻的段就是那一张。
   const startsAt = live === null ? (ordered.find(segment => segment.from.trim() !== '')?.from ?? null) : null
   // 判定带：**一条 = 一枚芯片 + 一句话**。芯片是可纵向扫读的类，句子是这个类对**这一行**的意思（数量、时刻、后果）。
-  // 两者都印在行上，所以任何一个判定都不需要悬停才知道（UI-SPEC §2：信息不能只存在 title 里）。
+  // 两者都印在行上，所以任何一个判定都不需要悬停才知道（信息不能只存在 title 里）。
   // 顺序按**问题域**：钱的诚实性（价格未知 / 未生效）→ 价的结构（峰谷价）→ 身份（不在配置）→ 会话写入（未保存）。
   // 左起第一枚因此永远是最该看的那一枚；「未生效」与「价格未知」构造上互斥，所以现实中最常见的是一两枚。
   const decls: { chip: string; tone: string; text: string }[] = []
