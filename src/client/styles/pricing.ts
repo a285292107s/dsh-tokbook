@@ -137,7 +137,6 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-row{
   grid-template-rows:minmax(32px,auto);
   min-height:32px;padding:4px 10px;border-top:1px solid var(--dtpl-hairline);
-  row-gap:2px;
   scroll-margin-block:56px;
   cursor:pointer;
 }
@@ -185,26 +184,6 @@ export const CSS_PRICING = `
   border:1px solid var(--dtpl-border);
   font-size:10px;line-height:13px;font-weight:600;white-space:nowrap;
   color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-badge-unknown{
-  color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-badge-dirty{
-  color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-badge-idle{
-  color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
-}
-/* 判定带整行宽（grid-column:1/-1），只在有话要说时渲染（TSX 条件渲染）。
-   间距一律 10px，不写成句子的 margin（换行后那会变成缩进）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-decl{
-  grid-column:1 / -1;margin:0;min-width:0;
-  display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
-}
-/* 判定句可以换行，但不截断。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-decl-text{
-  flex:1 1 auto;min-width:0;overflow-wrap:anywhere;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-issue{
   margin:0;padding:2px 10px 6px 10px;
@@ -317,13 +296,16 @@ export const CSS_PRICING = `
   content:"";position:absolute;left:12px;top:6px;bottom:6px;width:1px;
   background:color-mix(in srgb,var(--dtpl-fg) 14%,transparent);
 }
-/* 分行用 1px 发丝线：.5px 在深色下会整条消失。 */
+/* 一张价 = 一张卡：面与通道卡同档（6% 洗色），于是段与段的分隔不再要发丝线，由 8px 间隙说。
+   左内边距与抽屉同值：卡内四档价的左缘仍与轴上的钉落在同一组竖线上。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg{
   position:relative;
   display:flex;flex-direction:column;gap:5px;
-  padding:5px 8px;
-  border-top:1px solid var(--dtpl-hairline);
-  background:transparent;
+  padding:6px 8px;
+  border:1px solid var(--dtpl-border);border-radius:var(--dtpl-radius);
+  background:color-mix(in srgb,var(--dtpl-fg) 6%,var(--dtpl-card));
+  /* 同一块「金属」材质（受光边 / 背光边），不另立一种卡。 */
+  box-shadow:var(--dtpl-metal);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg::before{
   content:"";position:absolute;left:-21.5px;top:15px;width:8px;height:8px;border-radius:50%;
@@ -332,7 +314,7 @@ export const CSS_PRICING = `
   pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg:hover{
-  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+  background:color-mix(in srgb,var(--dtpl-fg) 9%,var(--dtpl-card));
 }
 /* 钉与孔同径同形同位（改 ::before 的几何要一起改）；这是全抽屉唯一允许色相的地方。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg[data-active="true"]::after{

@@ -378,8 +378,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   }, [])
 
   const stateText = saveStateText(save)
-  /** 写不进去（草稿无效 / 宿主或磁盘拒绝）：行上那枚「未保存」徽章只在这种时候出现。 */
-  const writeStuck = save.kind === 'invalid' || save.kind === 'error'
 
   return (
     <section
@@ -500,7 +498,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                   key={card.route}
                   card={card}
                   baseline={baseline.models}
-                  stuck={writeStuck}
                   collapsed={!openRoutes.has(card.route)}
                   openKey={openKey}
                   onToggleCard={toggleCard}

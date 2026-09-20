@@ -9,8 +9,8 @@ import { memo, useEffect, useId, useState } from 'react'
 import { DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange, rangeLabel } from '../../price-format.ts'
 import type { BillingNature, DaySet } from '../../types.ts'
 import {
-  duplicateSlot, effectiveSlots, fieldState, fmtFrom, fromFieldValue, inheritedRates, isBlankSlot,
-  isFloorSegment, isUnpriced, modelDirty, newSegment, newSlot, priceUnknown, ratesInForce, rowIssue, rowKey, slotRange,
+  duplicateSlot, effectiveSlots, fieldState, fromFieldValue, inheritedRates, isBlankSlot,
+  isFloorSegment, modelDirty, newSegment, newSlot, priceUnknown, ratesInForce, rowIssue, rowKey, slotRange,
   sortedSegments, withSegmentFrom, withSlotEnd, withSlotStart,
   type ModelDraft, type RateField, type RateTexts, type RouteDraft, type SegmentDraft, type SlotDraft,
 } from './draft.ts'
@@ -362,16 +362,12 @@ function SegmentEditor({ segment, where, serial, floor, active, onChange, onRemo
   )
 }
 
-/** 一个模型行 = **这一行此刻的价目**：身份 | 请求数 | 四档价 | 展开；价怎么读另起一条整行宽的判定带。 */
-export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, open, onToggle, onChange }: {
+/** 一个模型行 = **这一行此刻的价目**：身份 | 请求数 | 四档价 | 展开。 */
+export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onToggle, onChange }: {
   route: string
   row: ModelDraft
-  /** 上次写入时的行签名：行据此推导「还没落盘」（左侧墨条），未触碰的行保持引用、不 re-render。
-   *  「未保存」徽章另需面板的 {@link stuck}——那是整份文件一次写的事实。 */
+  /** 上次写入时的行签名：行据此推导「还没落盘」（左侧墨条），未触碰的行保持引用、不 re-render。 */
   baseline: ReadonlyMap<string, string>
-  /** 这次写入没能落盘（草稿无效 / 宿主拒绝）。只在这种时候给「未保存」徽章：
-   *  正常在飞的瞬态由行左侧那道墨条说，不该用最响的芯片去说一个 0.6 s 的状态。 */
-  stuck: boolean
   open: boolean
   onToggle: (route: string, model: string) => void
   onChange: (route: string, model: string, next: ModelDraft) => void
@@ -383,7 +379,6 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
   const panelLabel = `${row.model} 的价段`
   const dirty = modelDirty(route, row, baseline)
   const issue = rowIssue(row)
-  const unknown = priceUnknown(row)
   // 行内四个数字的来源：此刻生效的那一段叠上此刻生效的峰谷时段。null = 这一刻没有一段在生效。
   const live = ratesInForce(row)
   const ordered = sortedSegments(row)
@@ -393,36 +388,8 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
   // 没人命名时它是精确串，走等宽——这个判断必须落到 DOM（data-exact），不能让样式去猜。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
   // host 正是按这个数把表排出来的。「没记过」是 0 的读法：账本是权威，没记过就是没记过，
-  // 不是「未知」（未知的是**价**，那是判定带的事）。
+  // 不是「未知」（未知的是**价**）。
   const countText = row.records > 0 ? `${String(row.records)} 次` : '没记过'
-  // 「未生效」得说得出**什么时候**生效：此刻没有任何一段在生效时，按效力顺序的第一张带生效时刻的段就是那一张。
-  const startsAt = live === null ? (ordered.find(segment => segment.from.trim() !== '')?.from ?? null) : null
-  // 判定带：**一条 = 一枚芯片 + 一句话**，两者都印在行上（判定不能只活在 title 里）。
-  // 顺序按**问题域**：钱的诚实性（价格未知 / 未生效）→ 会话写入（未保存）；前两者构造上互斥。
-  const decls: { chip: string; tone: string; text: string }[] = []
-  if (unknown) {
-    decls.push({
-      chip: `价格未知${(row.unpriced ?? 0) > 0 ? ` ${String(row.unpriced!)} 次` : ''}`,
-      tone: 'dtpl-price-badge-unknown',
-      // 三种行都会落到这里，后果不同：整行没有价（那些请求一个价都没有）vs 有价但覆盖不到最早的记录。
-      // 第三种是没有价、账本也从没调用过它——那时说「它的请求都按 ¥0 记」是句假话（那些请求不存在）。
-      text: isUnpriced(row)
-        ? (row.records === 0
-          ? '这一行还没有价；它还没有被调用过'
-          : '这一行还没有价，它的请求都按 ¥0 记')
-        : '第一个价段之前记的那些请求按 ¥0 记；补上托底价后自始有价',
-    })
-  }
-  if (live === null && !unknown) {
-    decls.push({
-      chip: '未生效',
-      tone: 'dtpl-price-badge-idle',
-      text: startsAt === null ? '价还没到生效时间，此刻按 ¥0 记' : `${fmtFrom(startsAt)}生效，此刻按 ¥0 记`,
-    })
-  }
-  if (dirty && stuck) {
-    decls.push({ chip: '未保存', tone: 'dtpl-price-badge-dirty', text: '这次改动还没写进文件，原因见上方那条消息' })
-  }
 
   // 「＋ 加一段调价」与「＋ 峰谷时段」同一条规矩：新段插在这颗按钮**前面**（它在详情带末尾），
   // 焦点不搬过去的话 Tab 只会离开抽屉，而刚加的那一张落在身后。落点是它的第一格「输入」。
@@ -485,17 +452,6 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
         >
           <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         </button>
-        {/* 判定带整行宽，只在有话要说时渲染。 */}
-        {decls.length > 0 && (
-          <p className="dtpl-price-decl">
-            {decls.map(decl => (
-              <span key={decl.chip} className={`dtpl-price-badge ${decl.tone}`}>
-                {decl.chip}
-              </span>
-            ))}
-            <span className="dtpl-price-decl-text">{decls.map(decl => decl.text).join(' · ')}</span>
-          </p>
-        )}
       </div>
       {open && (
         <div
@@ -564,12 +520,10 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, stuck, op
 })
 
 /** 一张 route 卡：可折叠的头（身份行 + 这条通道自己的读数）盖在模型表上。 */
-export const RouteCard = memo(function RouteCard({ card, baseline, stuck, collapsed, openKey, onToggleCard, onToggleRow, onRowChange, onBilling }: {
+export const RouteCard = memo(function RouteCard({ card, baseline, collapsed, openKey, onToggleCard, onToggleRow, onRowChange, onBilling }: {
   card: RouteDraft
   /** 上次写入时的行签名（见 {@link ModelRow}）。 */
   baseline: ReadonlyMap<string, string>
-  /** 整块面板当前的写入状态（见 {@link ModelRow.stuck}）：一整份文件一次写，所以它是面板级事实。 */
-  stuck: boolean
   collapsed: boolean
   openKey: string | null
   /** 第二参是**点击前**这一张是不是开着的——折叠态是派生的（第一条默认展开），所以由卡片把当前态交回去。 */
@@ -651,7 +605,6 @@ export const RouteCard = memo(function RouteCard({ card, baseline, stuck, collap
                     route={card.route}
                     row={model}
                     baseline={baseline}
-                    stuck={stuck}
                     open={openKey === rowKey(card.route, model.model)}
                     onToggle={onToggleRow}
                     onChange={onRowChange}
