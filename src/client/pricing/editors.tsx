@@ -1,18 +1,18 @@
 /**
- * 价格表 tab 的行原语：此刻生效的四档价、价格段编辑器、模型行、route 卡。
+ * 价格表 tab 的行原语：价格段编辑器与选中模型的详情面。
  *
- * 行内四个数字只读（生效段叠上此刻生效的峰谷时段），改价一律走展开的抽屉；抽屉第一张是**托底价**
- * （没有生效时刻），往下的每张从某个时刻起生效。本文件不持有状态：面板持有，通过小回调下发。
+ * 改价一律走段卡里的输入框；第一张是**托底价**（没有生效时刻），往下的每张从某个时刻起生效。
+ * 谁被选中由面板决定（两个下拉），所以本文件不持有选择状态——只通过小回调下发改动。
  */
 
-import { memo, useEffect, useId, useState } from 'react'
-import { DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange, rangeLabel } from '../../price-format.ts'
+import { memo, useEffect, useState } from 'react'
+import { DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange } from '../../price-format.ts'
 import type { BillingNature, DaySet } from '../../types.ts'
 import {
   duplicateSlot, effectiveSlots, fieldState, fromFieldValue, inheritedRates, isBlankSlot,
-  isFloorSegment, modelDirty, newSegment, newSlot, priceUnknown, ratesInForce, rowIssue, rowKey, slotRange,
+  dayLabel, isFloorSegment, modelDirty, newSegment, newSlot, rowIssue, segmentInForce, slotRange,
   sortedSegments, withSegmentFrom, withSlotEnd, withSlotStart,
-  type ModelDraft, type RateField, type RateTexts, type RouteDraft, type SegmentDraft, type SlotDraft,
+  type ModelDraft, type RateField, type RateTexts, type SegmentDraft, type SlotDraft,
 } from './draft.ts'
 import { PriceTimeline } from './Timeline.tsx'
 
@@ -74,22 +74,6 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   )
 }
 
-/** 行内的一个价：只读。列名跟着读屏（`.dtpl-sr`），窄屏下同一份文字变成可见的小标签。 */
-function RateValue({ label, value }: {
-  label: string
-  value: string
-}) {
-  const text = value.trim()
-  return (
-    <div className="dtpl-price-cell">
-      <span className="dtpl-sr dtpl-price-value-k">{`${label} `}</span>
-      <span className="dtpl-price-value" data-empty={text === ''}>
-        {text === '' ? '—' : text}
-      </span>
-    </div>
-  )
-}
-
 /** 24 小时表盘：全天价与峰谷时段共用（全天是满弧，峰谷是它身上被改写的那一段）。
  *  时间不成段（草稿态）时只剩淡环与刻钉，不画半截弧。 */
 function ClockRing({ start, end, label }: {
@@ -124,7 +108,9 @@ function ClockRing({ start, end, label }: {
   )
 }
 
-/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方全天价行相同——留空的桶显示它沿用的全天价。 */
+/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方全天价行相同——留空的桶显示它沿用的全天价。
+ *  **不画盘**：星期进不了盘，而盘要说的两件事（覆盖哪几个小时、共几小时）三个下拉与一行时长已经说完。
+ *  零覆盖的时段与计价无关（`isBlankSlot`），所以整条降级并直说这一点——空着不写文件是设计，不是待办。 */
 function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onDuplicate }: {
   slot: SlotDraft
   index: number
@@ -138,16 +124,23 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
 }) {
   const context = `第 ${String(index + 1)} 个峰谷时段`
   const { start, end } = slotRange(slot)
+  // 时长是派生的，不进 state：窗口的事实仍然只有三个下拉。
+  const hours = isHourRange({ start, end }) ? end - start : null
   // 删除要两下：它改的是历史金额，账本没有撤销。聚焦离开即取消。
   const [confirming, setConfirming] = useState(false)
+  const inert = isBlankSlot(slot)
   const inherit = (field: RateField): string | undefined => {
     const value = inherited[field].trim()
     return value === '' ? undefined : value
   }
   return (
-    <div className="dtpl-price-slot">
-      {/* 盘只说得出小时区间；日档进可访问名，不进盘（见 ClockRing）。 */}
-      <ClockRing start={start} end={end} label={`${DAY_SET_LABELS[slot.days]} ${rangeLabel({ start, end })}`} />
+    <div className="dtpl-price-slot" data-inert={inert}>
+      {/* 左栅栏：圆点与上面的盘同轴，横线把这条子目接回盘上。两者都不带信息，
+          只回答「这条窗口挂在哪儿」——所以是空的 span，竖轨由整组子目共用一条（见 SegmentEditor）。 */}
+      <span className="dtpl-price-slot-rail" aria-hidden="true">
+        <span className="dtpl-price-slot-dot" />
+        <span className="dtpl-price-slot-stub" />
+      </span>
       <div className="dtpl-price-slot-body">
         <div className="dtpl-price-slot-head">
           <select
@@ -177,6 +170,11 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
               {END_HOURS.map(hour => <option key={hour} value={String(hour)}>{clockLabel(hour)}</option>)}
             </select>
           </span>
+          {/* 时长是派生的：钟点已经说了窗口，这三个字只省一次心算，所以走 dim 档、退到钟点右侧。 */}
+          {hours !== null && (
+            <span className="dtpl-price-slot-span" aria-hidden="true">{`· ${String(hours)} 小时`}</span>
+          )}
+          {inert && <span className="dtpl-price-slot-inert">未改写任何档：不影响计价</span>}
           <span className="dtpl-price-seg-actions">
             <button type="button" className="dtpl-price-ghost" onClick={onDuplicate}>复制</button>
             <button
@@ -204,6 +202,9 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
           </span>
         </div>
         <div className="dtpl-price-rates dtpl-price-slot-rates">
+          {/* 读名只有桶名：四格与上方的全天价落在同一组竖线上，谁覆盖了谁一望即知；
+              序号进可见读名会把格子撑宽，四格就散开了——「第 N 个峰谷时段」在 aria-label
+              （context）里已经说全。 */}
           {CELLS.map(({ field, label }) => (
             <RateCell
               key={field}
@@ -211,7 +212,7 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
               label={label}
               value={slot[field]}
               state={fieldState(slot, field)}
-              context={`${context} ${DAY_SET_LABELS[slot.days]}`}
+              context={context}
               placeholder={inherit(field)}
               note={inherit(field) === undefined ? '留空 = 沿用全天价（全天价这档也是空的）' : `留空 = 沿用全天价 ${inherit(field)!}`}
               onEdit={(next) => onChange({ ...slot, [field]: next })}
@@ -329,6 +330,8 @@ function SegmentEditor({ segment, where, serial, floor, active, onChange, onRemo
       <div className="dtpl-price-seg-detail">
         {slotCount > 0 && (
           <div className="dtpl-price-slots">
+            {/* 整组子目共用一条竖轨：它只在这组有子目时才有意义，且不必知道有几条。 */}
+            <span className="dtpl-price-slots-spine" aria-hidden="true" />
             {segment.slots.map((slot, slotIndex) => (
               <SlotEditor
                 key={slot.id}
@@ -350,10 +353,7 @@ function SegmentEditor({ segment, where, serial, floor, active, onChange, onRemo
             aria-label="添加峰谷时段"
             onClick={addSlot}
           >
-            {/* 幽灵盘与子目同位同径。pathLength=12：共 12 段等距。 */}
-            <svg className="dtpl-price-slot-ring" viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
-              <circle className="dtpl-price-slot-ring-ghost" cx="20" cy="20" r="16" pathLength="12" strokeDasharray="0.6 0.4" />
-            </svg>
+            {/* 没有幽灵盘可对位了（盘已从子目删掉），所以这里只用与「＋ 加一段调价」同一枚字形。 */}
             <span className="dtpl-price-add-slot-k"><span aria-hidden="true">＋</span> 峰谷时段</span>
           </button>
         </div>
@@ -361,38 +361,35 @@ function SegmentEditor({ segment, where, serial, floor, active, onChange, onRemo
     </div>
   )
 }
-
-/** 一个模型行 = **这一行此刻的价目**：身份 | 请求数 | 四档价 | 展开。 */
-export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onToggle, onChange }: {
+/** 选中模型的详情面：身份 | 计费性质 | 调价史直接铺开。
+ *
+ *  它是这一屏的**主体**（两个下拉在上面选谁），所以不再有折叠：段卡、时段、加段的按钮常驻。
+ *  身份行是这一块唯一一行摘要——精确模型串（账本的计费键）与账本记录数都在这里；四档价在读面上
+ *  有且只有一处（段卡的输入框），详情里不再复述一遍只读副本。 */
+export const ModelDetail = memo(function ModelDetail({ route, row, billing, baseline, onRowChange, onBilling }: {
   route: string
   row: ModelDraft
-  /** 上次写入时的行签名：行据此推导「还没落盘」（左侧墨条），未触碰的行保持引用、不 re-render。 */
+  billing: BillingNature
+  /** 上次写入时的行签名：据此推导「还没落盘」（整块的左侧墨条）。 */
   baseline: ReadonlyMap<string, string>
-  open: boolean
-  onToggle: (route: string, model: string) => void
-  onChange: (route: string, model: string, next: ModelDraft) => void
+  onRowChange: (route: string, model: string, next: ModelDraft) => void
+  onBilling: (route: string, billing: BillingNature) => void
 }) {
-  // 展开的抽屉与 ▸ 是**一对**：aria-expanded 说开没开，aria-controls 说开出来的是哪一块。抽屉只在
-  // 展开时存在，所以这条引用也只在展开时给出——指一个不存在的 id 是静默的无障碍失效。
-  // id 用 useId 而不是拼 route/model：行键含 NUL 分隔符（见 rowKey），拿它当 id 是拿数据当锚点。
-  const panelId = useId()
-  const panelLabel = `${row.model} 的价段`
   const dirty = modelDirty(route, row, baseline)
   const issue = rowIssue(row)
-  // 行内四个数字的来源：此刻生效的那一段叠上此刻生效的峰谷时段。null = 这一刻没有一段在生效。
-  const live = ratesInForce(row)
+  // 此刻生效的那一段叠上此刻生效的峰谷时段——null = 这一刻没有一段在生效，轴上的「当前生效」钉就没有落点。
+  const live = segmentInForce(row)
   const ordered = sortedSegments(row)
   // 托底价不是一次调价，所以调价史的编号只数有生效时刻的那些张。
   const changes = ordered.filter(segment => !isFloorSegment(segment))
-  // 行的身份只打印一个：有人命名该串时显示展示名，否则精确串本身。精确串仍是账本的计费键，保持可达（hover 标签与单元格无障碍名）。
-  // 没人命名时它是精确串，走等宽——这个判断必须落到 DOM（data-exact），不能让样式去猜。
+  // 有人命名该串时显示展示名，精确串跟在后面（它仍是账本的计费键，必须可达）；没人命名时它就是精确串。
+  // 这个判断必须落到 DOM（data-exact），不能让样式去猜（见 styles/pricing 的 [data-exact]）。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
-  // host 正是按这个数把表排出来的。「没记过」是 0 的读法：账本是权威，没记过就是没记过，
-  // 不是「未知」（未知的是**价**）。
-  const countText = row.records > 0 ? `${String(row.records)} 次` : '没记过'
+  // 「没记过」是 0 的读法：账本是权威，没记过就是没记过，不是「未知」（未知的是**价**）。
+  const countText = row.records > 0 ? `${String(row.records)} 次请求` : '没记过'
 
   // 「＋ 加一段调价」与「＋ 峰谷时段」同一条规矩：新段插在这颗按钮**前面**（它在详情带末尾），
-  // 焦点不搬过去的话 Tab 只会离开抽屉，而刚加的那一张落在身后。落点是它的第一格「输入」。
+  // 焦点不搬过去的话 Tab 只会离开这一块，而刚加的那一张落在身后。落点是它的第一格「输入」。
   const [pendingFocus, setPendingFocus] = useState<number | null>(null)
   useEffect(() => {
     if (pendingFocus === null) return
@@ -401,219 +398,90 @@ export const ModelRow = memo(function ModelRow({ route, row, baseline, open, onT
   }, [pendingFocus])
   const addSegment = (): void => {
     const segment = newSegment()
-    onChange(route, row.model, { ...row, segments: [...row.segments, segment] })
+    onRowChange(route, row.model, { ...row, segments: [...row.segments, segment] })
     setPendingFocus(segment.id)
   }
 
   return (
-    <>
-      <div
-        className="dtpl-price-row"
-        data-dirty={dirty}
-        data-open={open}
-        onClick={(event) => {
-          // 整行是展开热区；▸ 是它的键盘可达形态，自己处理点击。拖选文字不算「点这一行」。
-          if (event.target instanceof Element && event.target.closest('button') !== null) return
-          if (window.getSelection()?.isCollapsed === false) return
-          onToggle(route, row.model)
-        }}
-      >
-        {/* 身份是这一行唯一长度不可预测的值，所以也是唯一让位的值。 */}
-        <span
-          className="dtpl-price-title"
-          data-exact={!named}
-          title={named ? `${row.name!}\n${row.model}` : row.model}
-        >
-          {named ? row.name : row.model}
+    <section className="dtpl-price-detail" data-dirty={dirty} aria-label={`${row.model} 的价格`}>
+      <div className="dtpl-price-detail-head">
+        <span className="dtpl-price-detail-id">
+          <span className="dtpl-price-name" data-exact={!named}>{named ? row.name : row.model}</span>
+          {/* 命名过才印第二遍：它说的是这个展示名对着账本里的哪个串。 */}
+          {named && <span className="dtpl-price-exact" title={row.model}>{row.model}</span>}
         </span>
-        {/* 请求数是**列**：列头是 aria-hidden 的视觉标签（见 .dtpl-price-cols），
-            所以这里给读屏一份同样的字（请求 322 次，而不是一个光秃秃的数）。 */}
-        <span className="dtpl-price-reqs">
-          <span className="dtpl-sr">请求 </span>
-          {countText}
-        </span>
-        <div className="dtpl-price-rates">
-          {CELLS.map(({ field, label }) => (
-            <RateValue
-              key={field}
-              label={label}
-              value={live === null ? '' : live.values[field]}
-            />
-          ))}
-        </div>
-        <button
-          type="button"
-          className="dtpl-price-more"
-          aria-expanded={open}
-          aria-controls={open ? panelId : undefined}
-          aria-label={`${panelLabel}（托底价${changes.length > 0 ? ` + ${String(changes.length)} 段调价` : ''}）`}
-          title={changes.length > 0 ? `托底价 + ${String(changes.length)} 段调价` : '托底价、峰谷时段与生效时间'}
-          onClick={() => onToggle(route, row.model)}
-        >
-          <span aria-hidden="true">{open ? '▾' : '▸'}</span>
-        </button>
-      </div>
-      {open && (
-        <div
-          className="dtpl-price-history"
-          id={panelId}
-          /* 抽屉在 DOM 上是行的**兄弟**（行是网格，抽屉要占满整行宽），两层的从属只能靠 aria 说：
-             给抽屉一个可被 aria-controls 指到的名字。 */
-          role="group"
-          aria-label={panelLabel}
-        >
-          <PriceTimeline row={row} activeId={live === null ? null : live.segment.id} />
-          {ordered.map(segment => {
-            const floor = isFloorSegment(segment)
-            const place = changes.indexOf(segment) + 1
-            return (
-              <SegmentEditor
-                key={segment.id}
-                segment={segment}
-                where={floor ? '托底价' : `第 ${String(place)} 段调价`}
-                serial={floor ? '00' : String(place).padStart(2, '0')}
-                floor={floor}
-                active={live !== null && segment.id === live.segment.id}
-                onChange={(next) => onChange(route, row.model, {
-                  ...row,
-                  segments: row.segments.map(item => (item.id === segment.id ? next : item)),
-                })}
-                onRemove={() => onChange(route, row.model, {
-                  ...row,
-                  segments: row.segments.filter(item => item.id !== segment.id),
-                })}
-                onDuplicate={() => onChange(route, row.model, {
-                  ...row,
-                  segments: [...row.segments, newSegment({
-                    input: segment.input,
-                    output: segment.output,
-                    cacheRead: segment.cacheRead,
-                    cacheWrite: segment.cacheWrite,
-                    slots: segment.slots.map(slot => newSlot(slot)),
-                  })],
-                })}
-              />
-            )
-          })}
-          <div className="dtpl-price-history-foot">
-            <button
-              type="button"
-              className="dtpl-price-add"
-              aria-label="添加一段调价"
-              onClick={addSegment}
-            >
-              <span aria-hidden="true">＋</span> 加一段调价
-            </button>
-            <span className="dtpl-price-history-hint">
-              {changes.length === 0
-                ? '托底价这一张就是全部价：四个数字是这一天 0–24 点的全天价（¥/百万词元）。'
-                : '每段管到下一段开始为止，其余时间按托底价；每行的四个数字是这一天 0–24 点的全天价，峰谷时段只改被它覆盖的小时。'}
-            </span>
-          </div>
-        </div>
-      )}
-      {issue !== null && (
-        <p className="dtpl-price-issue" role="alert">{row.model}:{issue}</p>
-      )}
-    </>
-  )
-})
-
-/** 一张 route 卡：可折叠的头（身份行 + 这条通道自己的读数）盖在模型表上。 */
-export const RouteCard = memo(function RouteCard({ card, baseline, collapsed, openKey, onToggleCard, onToggleRow, onRowChange, onBilling }: {
-  card: RouteDraft
-  /** 上次写入时的行签名（见 {@link ModelRow}）。 */
-  baseline: ReadonlyMap<string, string>
-  collapsed: boolean
-  openKey: string | null
-  /** 第二参是**点击前**这一张是不是开着的——折叠态是派生的（第一条默认展开），所以由卡片把当前态交回去。 */
-  onToggleCard: (route: string, open: boolean) => void
-  onToggleRow: (route: string, model: string) => void
-  onRowChange: (route: string, model: string, next: ModelDraft) => void
-  onBilling: (route: string, billing: BillingNature) => void
-}) {
-  const models = [...card.models.values()]
-  const unknown = models.filter(priceUnknown).length
-  // 请求数报**这一行下面真正列出来的**那些模型：不筛选时它与卡上的 route 合计逐字相等（host 用同一次
-  // 折叠算出两者），筛选时它跟着留下的行走——否则「1 个模型 · 367 次请求」会对着一个「没记过」的行说话。
-  const records = models.reduce((sum, model) => sum + model.records, 0)
-  const panelId = `price-card-${card.route}`
-  return (
-    <article className="dtpl-price-card" data-collapsed={collapsed}>
-      <header className="dtpl-price-head">
-        <button
-          type="button"
-          className="dtpl-price-fold"
-          aria-expanded={!collapsed}
-          aria-controls={panelId}
-          onClick={() => onToggleCard(card.route, !collapsed)}
-        >
-          <span className="dtpl-price-fold-top">
-            <span className="dtpl-price-caret" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
-            <span className="dtpl-price-label">{card.label}</span>
-            {card.label !== card.route && <span className="dtpl-price-key">{card.route}</span>}
-          </span>
-          <span className="dtpl-hero-facts">
-            <span className="dtpl-hero-fact"><b>{String(models.length)}</b> 个模型</span>
-            {records > 0 && (
-              <>
-                <i aria-hidden="true">·</i>
-                <span className="dtpl-hero-fact"><b>{String(records)}</b> 次请求</span>
-              </>
-            )}
-            {unknown > 0 && (
-              <>
-                <i aria-hidden="true">·</i>
-                {/* 「其中」不能省，与面板事实带同一条理由：它数的是「有记录落在价外」的模型，
-                    不是「没有价」的模型——一条写着价的模型也可能在里面。 */}
-                <span className="dtpl-hero-fact dtpl-price-fact-unknown">其中 <b>{String(unknown)}</b> 个价格未知</span>
-              </>
-            )}
-          </span>
-        </button>
+        <span className="dtpl-price-reqs">{countText}</span>
+        {/* 计费性质是**通道**的属性，而通道名已经进了下拉，所以它跟着选中的这一条摆在详情头上当主语。 */}
         <div
           className="dtpl-price-switch"
           role="group"
-          aria-label={`${card.route} 的计费性质`}
+          aria-label={`${route} 的计费性质`}
           title="按量 = 金额是实际支出；订阅 = 金额是按此处价格折算的订阅价值（非现金）"
         >
-          <button type="button" aria-pressed={card.billing === 'metered'} onClick={() => onBilling(card.route, 'metered')}>
+          <button type="button" aria-pressed={billing === 'metered'} onClick={() => onBilling(route, 'metered')}>
             按量
           </button>
-          <button type="button" aria-pressed={card.billing === 'subscription'} onClick={() => onBilling(card.route, 'subscription')}>
+          <button type="button" aria-pressed={billing === 'subscription'} onClick={() => onBilling(route, 'subscription')}>
             订阅
           </button>
         </div>
-      </header>
-      <div className="dtpl-price-table" id={panelId} hidden={collapsed}>
-        {models.length === 0
-          ? <p className="dtpl-price-empty">这条通道没有列出可调用的模型，账本也没记过它。</p>
-          : (
-            <>
-              <div className="dtpl-price-cols" aria-hidden="true">
-                <span className="dtpl-price-col-id">模型</span>
-                <span className="dtpl-price-col-reqs">请求</span>
-                <span className="dtpl-price-rates">
-                  {CELLS.map(({ field, label }) => <span key={field} className="dtpl-price-col-rate">{label}</span>)}
-                </span>
-                <span className="dtpl-price-col-more" />
-              </div>
-              <div className="dtpl-price-rows">
-                {models.map(model => (
-                  <ModelRow
-                    key={model.model}
-                    route={card.route}
-                    row={model}
-                    baseline={baseline}
-                    open={openKey === rowKey(card.route, model.model)}
-                    onToggle={onToggleRow}
-                    onChange={onRowChange}
-                  />
-                ))}
-              </div>
-            </>
-          )}
       </div>
-    </article>
+      {/* 调价史 + 段卡 + 页脚共用一条左让位层：竖轨画在它上面，段卡的钉正好坐上去。
+          身份行**不在**里面——它是这一块的头，左缘必须和上面的选择带对齐。 */}
+      <div className="dtpl-price-rail">
+        <PriceTimeline row={row} activeId={live === null ? null : live.id} />
+      {ordered.map(segment => {
+        const floor = isFloorSegment(segment)
+        const place = changes.indexOf(segment) + 1
+        return (
+          <SegmentEditor
+            key={segment.id}
+            segment={segment}
+            where={floor ? '托底价' : `第 ${String(place)} 段调价`}
+            serial={floor ? '00' : String(place).padStart(2, '0')}
+            floor={floor}
+            active={live !== null && segment.id === live.id}
+            onChange={(next) => onRowChange(route, row.model, {
+              ...row,
+              segments: row.segments.map(item => (item.id === segment.id ? next : item)),
+            })}
+            onRemove={() => onRowChange(route, row.model, {
+              ...row,
+              segments: row.segments.filter(item => item.id !== segment.id),
+            })}
+            onDuplicate={() => onRowChange(route, row.model, {
+              ...row,
+              segments: [...row.segments, newSegment({
+                input: segment.input,
+                output: segment.output,
+                cacheRead: segment.cacheRead,
+                cacheWrite: segment.cacheWrite,
+                slots: segment.slots.map(slot => newSlot(slot)),
+              })],
+            })}
+          />
+        )
+      })}
+      <div className="dtpl-price-history-foot">
+        <button
+          type="button"
+          className="dtpl-price-add"
+          aria-label="添加一段调价"
+          onClick={addSegment}
+        >
+          <span aria-hidden="true">＋</span> 加一段调价
+        </button>
+        <span className="dtpl-price-history-hint">
+          {changes.length === 0
+            ? '托底价这一张就是全部价：四个数字是这一天 0–24 点的全天价（¥/百万词元）。'
+            : '每段管到下一段开始为止，其余时间按托底价；每行的四个数字是这一天 0–24 点的全天价，峰谷时段只改被它覆盖的小时。'}
+        </span>
+      </div>
+      </div>
+      {/* 行级问题报在让位层之外：它说的是这一行能不能写出去，与竖轨的让位无关。 */}
+      {issue !== null && (
+        <p className="dtpl-price-issue" role="alert">{row.model}:{issue}</p>
+      )}
+    </section>
   )
 })

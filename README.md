@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-17 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-20 · supersedes: —
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区从**侧边栏
@@ -71,15 +71,15 @@ src/
       axis.ts         调价史轴纯几何:节点落位 / 估宽 / 最小间距(无 React,进 smoke)
       Timeline.tsx    调价史抽屉里的那条轴
       draft.ts        价格表纯逻辑:草稿↔wire 转换、校验、签名(未保存标记)
-      editors.tsx     行原语:四档价输入、价段编辑器、模型行、路由卡片
-      PricingPanel.tsx 价格表 tab 外壳:工具栏(搜索 / 筛选 / 保存状态) + 路由卡片
+      editors.tsx     行原语:四档价输入、价段编辑器、选中模型的详情面
+      PricingPanel.tsx 价格表 tab 外壳:通道/模型两个下拉 + 保存状态 + 选中模型的调价史
     quota/
       metrics.ts      订阅额度纯规则:占比/语气/口径/文案(无 React)
       QuotaCard.tsx   订阅额度卡:卡壳 + ok 主体 + 余额/无订阅面板 + gauge/骨架
       QuotaPanel.tsx  订阅额度 tab 外壳:取数 + 刷新策略 + 卡片排序
 scripts/
   build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS)
-  preview-overlay.mjs      浮窗预览台(fixture 数据)与独立查看器(--ledger,读真账本)
+  preview-overlay.ts       浮窗预览台(fixture 数据)与独立查看器(--ledger,读真账本)
   smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试(一条不变量一个断言)
   selfcheck-rebuild.ts     账本不变量:折叠无损重建 / refile / 跨实例去重 / 价格签名 / 重启基线
   selfcheck-ui.ts          界面禁令静态检查:死类双向 / 色值 / 虚线 / 圆角 / 焦点与动效分支 / ARIA 引用
@@ -92,6 +92,7 @@ pnpm install      # 安装 @deepseek-ai/cordis、react、esbuild、typescript
 pnpm build        # tsc 产出 lib/types/*.d.ts,再由 esbuild 打包 host + client
 pnpm selfcheck    # 账本不变量:折叠重建 / refile / 跨实例去重 / 价格签名 / 重启基线
 pnpm selfcheck:ui # 界面禁令的死类双向 / 硬编码色值 / 虚线 / 圆角 / 宿主变量白名单 / 三段分支存在性
+pnpm smoke        # 纯逻辑冒烟(聚合 + 计价 + 额度);加 `--only <节名子串>` 只跑命中的那几节
 pnpm test         # smoke(聚合 + 计价 + 额度)+ selfcheck + selfcheck:ui
 ```
 
@@ -122,10 +123,13 @@ browser 刷新页面拾取,链没活着时硬刷新永远是兜底。
 
 ```sh
 pnpm ledger                                                 # 默认账本目录($DSH_HOME/tokbook)
-node scripts/preview-overlay.mjs --ledger D:/data/tokbook     # 或指定别的目录
+node --experimental-strip-types scripts/preview-overlay.ts --ledger D:/data/tokbook     # 或指定别的目录
 ```
 
-不带 `--ledger` 时同一个脚本退化成 **fixture 预览台**,用来看 UI 的各个状态与空态。
+不带 `--ledger` 时同一个脚本退化成 **fixture 预览台**,用来看 UI 的各个状态与空态:
+`?dark=1` / `?tab=` / `?quota=<模式>` 换皮肤、tab 与额度场景,整台的形状(四路皆空 / 四路皆 500 /
+诊断带的两态)由 `TOKBOOK_MODE=empty|err|sync|syncerr` 按进程选;`lib/client.js` 按请求读盘,
+所以 `pnpm build` 之后刷新页面即可。
 
 ## 它怎么记 token
 
@@ -158,10 +162,12 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 数组**(`from` 生效时刻 + 四档 ¥/M 价 + 可选 `slots` 峰谷时段)。字段与校验的真源是 `src/types.ts`
 与 `src/pricing.ts` 的 `parsePriceInput`(写入 handler 只做传输);畸形文件只把受影响的 (路由, 模型) 降级为价格未知(¥0)。
 
-**价格表 tab** 里,模型行右侧那四个数字是**只读**的「此刻计费所用的价」(含正在生效的峰谷时段);
-点这一行展开:第一张固定是**托底价**(没有生效时间,没被调价史覆盖的时间都按它算),往下的每一段
-从某个时刻起生效。规则见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) §2 与 **D-039**,其余交互
-(自动保存 / 搜索 / 徽章语义)见 `src/client/pricing/`——真源是代码。
+**价格表 tab** 里先用两个下拉选「通道」与「模型」（选项文字自带「N 次」「价格未知」这类摘要，
+另有「只看价格未知」一档收窄两张表）；下面是选中模型的价格:第一张固定是**托底价**(没有生效时间,
+没被调价史覆盖的时间都按它算),往下的每一段从某个时刻起生效,一张卡里四档价紧挨成一簇（与
+段内每个**峰谷时段**的四格落在同一组竖线上,空着的那格就是「沿用全天价」）。规则见
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md) §2,其余交互(自动保存 / 徽章语义)见
+`src/client/pricing/`——真源是代码。
 
 ## 配置
 
@@ -187,4 +193,4 @@ plugins:
 
 - 额度计划每个通道路由只收一个 API key(尚无多账户轮换)。
 - 云端价格镜像(参考价表 / 厂商分组 / 包装路由别名)已整体移除,后期作为独立任务重做——
-  留档与理由见 [`docs/DECISIONS.md`](docs/DECISIONS.md) D-011。
+  背景见 [`docs/DESIGN.md`](docs/DESIGN.md) 顶部「阅读指南」（第三期）。

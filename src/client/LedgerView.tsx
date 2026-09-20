@@ -276,7 +276,7 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
             <div className="dtpl-hero-top">
               <div className="dtpl-hero-lead">
                 {/* 口径词那一行只留身份：派生读数不在这一行——一个比值挂在口径词上，读者还得
-                    回头找它的分母（缓存命中率自 D-037 起卡上不再显示，理由见 DECISIONS）。 */}
+                    回头找它的分母（缓存命中率这类比值卡上不显示）。 */}
                 <span className="dtpl-hero-head">
                   <span className="dtpl-total-k">今日词元</span>
                 </span>

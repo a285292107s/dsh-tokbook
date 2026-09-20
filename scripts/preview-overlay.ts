@@ -4,8 +4,8 @@
  * **预览模式（默认）**—— fixture 台：stubs `window.__ModuleLoader__`, provides the
  * baseline modules (react, jsx-runtime, react-dom/client) the real DSH module
  * table would inject, defines the DSH `--dsw-alias-*` tokens (light + dark),
- * stubs every route the client fetches — `/tokbook/overview`、`/tokbook/rescan`、
- * `/tokbook/usage`、`/tokbook/quota`、`/tokbook/pricing` — then mounts the REAL
+ * stubs every route the client fetches（六个 `ROUTE_*`，路径从 `src/route-paths.ts` 取）,
+ * then mounts the REAL
  * built bundle (`lib/client.js`) through its real `apply()` path and opens the
  * overlay.
  *
@@ -16,10 +16,12 @@
  * `$DSH_HOME/tokbook`，否则 `~/.dsh/tokbook`）。不提供 `sessionPersistence`，所以它
  * **只看已入账的历史**——「重新扫描」回报 skipped，不摄取新会话。
  *
- * **fixture 清单要跟着 client 一起改。** client 换数据源时（例如通道用量 tab 从总览
- * payload 改成自己的 `/tokbook/usage`），漏掉一路 fixture 不会报错——那一 tab 会
- * 落到 HTML 兜底、以「加载失败：Unexpected token '<'」的形式出现在界面上。这条只在
- * 预览模式成立：独立查看器不看 fixture。
+ * **fixture 清单要跟着 client 一起改。** 路径不是手抄的（六个 `ROUTE_*` 从
+ * `src/route-paths.ts` import，路径写错这件事因此不存在），但**每一路载荷**是手写的：
+ * client 换数据源时（例如通道用量 tab 从总览 payload 改成自己的 `ROUTE_USAGE`），漏掉
+ * 一路 fixture 不会报错。为了让它别报成一句指错方向的话，未知的 `/tokbook/*` 在这里
+ * **显式 404**——落到页面 HTML 会让 client 报「Unexpected token '<'」，既不说缺的是
+ * 哪一路，也不说缺在预览台。这条只在预览模式成立：独立查看器由真 host 作答。
  *
  * Query flags: ?dark=1 dark skin, ?tab=ledger|provider|quota|pricing|method（值就是 tab 的 id
  * 后缀，见 LedgerOverlay 的 `dtpl-tab-*`）,
@@ -30,15 +32,18 @@
  * auto-open 循环：它每 100ms 点一次，会跟校验脚本自己的点击抢，而且只认 URL 上的 ?tab=，
  * 顺序点好几个面时对不上。
  *
- * The overview fixture shape is picked by the **TOKBOOK_MODE env var** (`empty` / `err`), not
- * by a query flag: the payload is served by the same process that renders the page, so one
- * server = one mode. Restart with the env set to look at those two states.
+ * 整台的形状由 **TOKBOOK_MODE 环境变量**选（不是 query flag），一个进程 = 一种形状：
+ * `empty` 四路都空（概览 / 用量明细 / 订阅额度 / 价格表各自的空态），`err` 四路都回
+ * 500（照 host 的 catch 形状），`sync` / `syncerr` 是诊断带的两态——屏上停在
+ * 「正在重新扫描…」与「上次重新扫描失败：…」。要看另一种就换 env 重启。
  */
 import { build } from 'esbuild'
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { QUERY_PROVIDER, QUERY_RANGE, ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SYNC, ROUTE_USAGE } from '../src/route-paths.ts'
+import { PROVIDER_RANGES } from '../src/types.ts'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 
@@ -55,10 +60,16 @@ const ledgerDir = ledgerValue === undefined || ledgerValue === '' || ledgerValue
   ? undefined
   : ledgerValue
 
-/** lib/ 是构建产物：两个半区都在启动时读一次（`pnpm build` 之后要重启本进程）。 */
+/** 整台的形状（`empty` / `err` / `sync` / `syncerr`，见文件头）：一个进程一种形状，
+ *  所以在这里读一次而不是按请求读。 */
+const MODE = process.env.TOKBOOK_MODE ?? ''
+
+/** `lib/` 是构建产物。client 半区**按请求读盘**（见下），这里读一次只为在没构建时
+ *  给出那句有用的报错，并作为读盘失败时的退路。 */
+const clientPath = join(root, 'lib', 'client.js')
 let clientJs
 try {
-  clientJs = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
+  clientJs = readFileSync(clientPath, 'utf8')
 } catch {
   console.error('缺少 lib/client.js —— 先跑 pnpm build')
   process.exit(1)
@@ -163,22 +174,25 @@ const mk = (inputTokens, cacheReadTokens, outputTokens, requests = 1) => ({
   requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens: 0,
 })
 
+/**
+ * 概览载荷。**键集合与 `TokBookOverview`（`src/types.ts`）逐字对齐**：host 发的是
+ * `src/index.ts` 那次瘦身后的形状（omit 掉 pricing / rateRows / byHour / byModel /
+ * unpricedModels）。这里此前多带了几个 host 从不发的键（byHour、rateRows、pricing、
+ * currency、usdExchangeRate）——多一个键听着无害，实际是把一整类 bug 藏起来：client 若
+ * 读了一个**只在 preview 里存在**的键，这里一切正常，到真宿主才炸。fixture 只端 host
+ * 端得出来的形状。
+ *
+ * 按模型 / 按工作区**不在这里**：两者是窗口的切法，随 `ROUTE_USAGE` 走（见下面的
+ * USAGE_CARDS）；价格未知同理只在用量明细的通道卡与价格表里可见。
+ */
 const overview = {
   total: { requests: 214, ...mk(1_920_000, 6_310_000, 486_000, 214), compactions: 6, failures: 3, usageUnknown: 5 },
   byDay: days(14),
-  byHour: [],
-  // 按模型 / 按工作区**不在这里**：两者是窗口的切法，随 `/tokbook/usage` 走
-  // （见下面的 USAGE_CARDS）——用量明细 tab 的三种切法读的是同一批窗口记录。
-  rateRows: [],
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
   totalCost: 8.59,
   spend: 4.99,
   subscriptionValue: 3.6,
-  // 概览载荷自 D-032 起不带 unpricedModels：价格未知只在用量明细的通道卡里可见。
-  pricing: {},
   totalTokens: 10_714_000,
-  currency: 'CNY',
-  usdExchangeRate: 7.2,
   updatedAt: Date.now() - 60_000,
   records: 214,
   lastEventAt: Date.now() - 3 * 60_000,
@@ -193,6 +207,13 @@ const emptyOverview = {
   totalTokens: 0, totalCost: 0, spend: 0, subscriptionValue: 0, records: 0,
   lastEventAt: null, syncStatus: 'idle', syncError: null,
 }
+
+/** 诊断带的两态（`TOKBOOK_MODE=sync|syncerr`）。此前这四处界面分支在预览台里
+ *  **完全够不着**：概览恒报 `done`，探针也恒答 `done`——而「正在重新扫描…」与
+ *  「上次重新扫描失败：…」正是数据变旧时用户唯一会读到的两句话。 */
+const runningOverview = { ...overview, syncStatus: 'running' }
+const syncErrorText = 'EACCES: permission denied, scandir C:\\Users\\28529\\.dsh\\sessions'
+const syncErrOverview = { ...overview, syncStatus: 'error', syncError: syncErrorText }
 
 /* ── pricing-tab fixtures ── */
 /** Pricing-tab fixture: the route cards the 价格表 tab renders. One card per
@@ -551,9 +572,6 @@ const usageCard = (provider, models, extra = {}) => ({
   ...extra,
 })
 
-/** 合法的 `range` 值，与 host 的 `PROVIDER_RANGES` 一致（预览是独立 .mjs，不能 import src 的 .ts）。 */
-const RANGE_IDS = ['today', 'yesterday', 'last7', 'last30', 'all']
-
 /** 按工作区那一面的 fixture 行（tokens = 四桶之和）。第一行故意跨两条计费性质的路由
  *  （实际支出 + 订阅价值同时非零），因为工作区不像模型行那样被限定在单个金额桶里；
  *  收尾的「未归属」（id ''）是对账行。窗口越短，可见的行越少。 */
@@ -638,15 +656,32 @@ function usageView(range) {
   }
 }
 
+/** 空窗口（`TOKBOOK_MODE=empty`）：三种切法一行都没有 → 用量明细自己的空态。 */
+function emptyUsageView(range) {
+  return {
+    ...usageView(range),
+    totalTokens: 0, totalRequests: 0, totalSpend: 0, totalSubscriptionValue: 0,
+    byModel: [], byWorkspace: [], providers: [],
+  }
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x')
   if (url.pathname === '/client.js') {
-    res.writeHead(200, { 'content-type': 'text/javascript' })
+    /* **按请求读盘**：此前在启动时快照一次，于是 `pnpm build` 之后必须重启本进程才看得见
+       新 bundle——这条坑曾被读成「改动没生效」，还额外被浏览器缓存放大过一次。读失败
+       （build 正在写那个文件）就沿用上一次的好副本，不拿一个读到一半的 bundle 去糊页面。 */
+    try {
+      const fresh = readFileSync(clientPath, 'utf8')
+      if (fresh !== clientJs) console.log('[preview] lib/client.js 变了，已在服务新构建产物')
+      clientJs = fresh
+    } catch { /* build 正在写：沿用上一次的好副本 */ }
+    res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' })
     res.end(clientJs)
     return
   }
   if (url.pathname === '/baseline.js') {
-    res.writeHead(200, { 'content-type': 'text/javascript' })
+    res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' })
     res.end(baselineJs)
     return
   }
@@ -669,10 +704,11 @@ const server = createServer((req, res) => {
     }
   }
 
-  /* ── fixture 路由：只服务预览模式（独立查看器在上面就返回了，走不到这里） ── */
-  if (url.pathname === '/tokbook/overview') {
-    const mode = process.env.TOKBOOK_MODE ?? ''
-    if (mode === 'err') {
+  /* ── fixture 路由：只服务预览模式（独立查看器在上面就返回了，走不到这里） ──
+     路径全部从 `src/route-paths.ts` 取，所以「host / client 换了路径、预览台还在照着旧
+     字符串 stub」这件事不可能发生。`MODE` 的四种形状在这里同时作用在四路上。 */
+  if (url.pathname === ROUTE_OVERVIEW) {
+    if (MODE === 'err') {
       /* 真 host 的失败是 **500 + 错误体**（`src/routes.ts` 的 catch）。这里必须跟着回 500：
          回 200 + `{error}` 会让客户端把它当成一份合法总览去渲染（`byDay.find` 抛错、整个浮窗
          消失），而那个形状真 host 从不发送——预览台的 err 模式反而看不见真正的错误界面。 */
@@ -680,31 +716,49 @@ const server = createServer((req, res) => {
       res.end(JSON.stringify({ error: 'HTTP 500' }))
       return
     }
+    const body = MODE === 'empty' ? emptyOverview
+      : MODE === 'sync' ? runningOverview
+        : MODE === 'syncerr' ? syncErrOverview
+          : overview
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify(mode === 'empty' ? emptyOverview : overview))
+    res.end(JSON.stringify(body))
     return
   }
-  if (url.pathname === '/tokbook/sync') {
-    // 预览台永远没有在跑的 walk：探针照 host 的形状答，但状态恒为落定。
+  if (url.pathname === ROUTE_SYNC) {
+    // 预览台没有真的在跑的 walk：探针照 host 的形状答。`sync` / `syncerr` 让它答
+    // running / error——client 的追同步循环（500ms × 60 次后放弃）与诊断带因此可达。
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ status: 'done', error: null, lastSyncAt: null }))
+    res.end(JSON.stringify({
+      status: MODE === 'sync' ? 'running' : MODE === 'syncerr' ? 'error' : 'done',
+      error: MODE === 'syncerr' ? syncErrorText : null,
+      lastSyncAt: null,
+    }))
     return
   }
-  if (url.pathname === '/tokbook/rescan') {
+  if (url.pathname === ROUTE_RESCAN) {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end('{}')
     return
   }
   // 通道用量 tab：`?range=` 是唯一入参，非法/缺失就照 host 的 400 回。
-  if (url.pathname === '/tokbook/usage') {
-    const range = url.searchParams.get('range')
-    const ok = RANGE_IDS.includes(range)
-    res.writeHead(ok ? 200 : 400, { 'content-type': 'application/json' })
-    res.end(JSON.stringify(ok ? usageView(range) : { error: 'unknown or missing "range"' }))
+  if (url.pathname === ROUTE_USAGE) {
+    const range = url.searchParams.get(QUERY_RANGE)
+    if (!(PROVIDER_RANGES as readonly string[]).includes(range ?? '')) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'unknown or missing "range"; expected one of ' + PROVIDER_RANGES.join(', ') }))
+      return
+    }
+    if (MODE === 'err') {
+      res.writeHead(500, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'HTTP 500' }))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(MODE === 'empty' ? emptyUsageView(range) : usageView(range)))
     return
   }
   // Pricing tab: the route-card view (GET) + the whole-file write (PUT).
-  if (url.pathname === '/tokbook/pricing') {
+  if (url.pathname === ROUTE_PRICING) {
     if (req.method === 'PUT') {
       let body = ''
       req.on('data', chunk => { body += chunk })
@@ -721,26 +775,46 @@ const server = createServer((req, res) => {
       })
       return
     }
+    if (MODE === 'err') {
+      res.writeHead(500, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'HTTP 500' }))
+      return
+    }
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify(pricingView()))
+    res.end(JSON.stringify(MODE === 'empty' ? { ...pricingView(), routes: [] } : pricingView()))
     return
   }
   // Quota tab: list (no provider) → enabled routes; per-provider → card.
-  if (url.pathname === '/tokbook/quota') {
-    const provider = url.searchParams.get('provider')
-    res.writeHead(200, { 'content-type': 'application/json' })
-    if (provider === null) {
-      res.end(JSON.stringify({ providers: QUOTA_MODES[serverState.quota] ?? [] }))
-    } else {
-      const cards = quotaCards(serverState.quota)
-      const card = cards[provider]
-      if (card === undefined) {
-        res.writeHead(404, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ error: 'unknown provider' }))
-      } else {
-        res.end(JSON.stringify(card))
-      }
+  if (url.pathname === ROUTE_QUOTA) {
+    if (MODE === 'err') {
+      res.writeHead(500, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'HTTP 500' }))
+      return
     }
+    const provider = url.searchParams.get(QUERY_PROVIDER)
+    // 一次只写一次头：此前先 writeHead(200) 再按需 writeHead(404)，那个 200 是个
+    // 已经作废却留在代码里的状态（读到它的人会以为找不到 provider 也回 200）。
+    const payload = provider === null
+      ? { providers: MODE === 'empty' ? [] : (QUOTA_MODES[serverState.quota] ?? []) }
+      : quotaCards(serverState.quota)[provider]
+    if (payload === undefined) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'unknown provider' }))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(payload))
+    return
+  }
+  /* 没有任何一路 fixture 认领这个 `/tokbook/*`。这必须是**显式 404**：落到下面的页面
+     HTML 会让 client 把「Unexpected token '<'」报成加载失败——既指错方向，也不说缺的是
+     哪一路。这一段就是把「fixture 清单要跟着 client 一起改」那条从静默变成一句话。 */
+  if (url.pathname.startsWith('/tokbook/')) {
+    res.writeHead(404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({
+      error: `预览台没有这一路 fixture：${url.pathname}`,
+      hint: '在本文件的路由里补一路，或用 pnpm ledger 直接看真账本',
+    }))
     return
   }
   res.writeHead(200, { 'content-type': 'text/html' })
@@ -938,7 +1012,8 @@ server.listen(port, '127.0.0.1', () => {
     console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}（浮窗带设备皮，?dark=1 换深面）`)
     return
   }
-  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
-  console.log(`  总览的空 / 错两种形状由 **环境变量** 选（一个服务 = 一种形状）：TOKBOOK_MODE=empty|err；账本目录同样由 PORT / TOKBOOK_MODE 所在的进程定。`)
+  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|quota|provider|pricing|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
+  console.log(`  整台的形状由 **环境变量** 选（一个进程 = 一种形状）：TOKBOOK_MODE=empty|err|sync|syncerr（当前：${MODE === '' ? '有数据' : MODE}）。`)
+  console.log(`  lib/client.js 按请求读盘：pnpm build 之后刷新页面即可，不用重启本进程。`)
 })
 

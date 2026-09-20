@@ -5,6 +5,7 @@
 // 去重 / 重启基线)在 `selfcheck-rebuild.ts`,这里不重测。
 //
 // Run: node --experimental-strip-types scripts/smoke.ts
+//      加 `--only <节名子串>` 只跑命中的那几节(改一处计价规则不必跑全 26 节)。
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -56,8 +57,40 @@ function check(name: string, cond: boolean, detail?: unknown): void {
 /** 只吞日志的 seam:`{ error: () => {} }` 那类。 */
 const quiet = { error: () => {} }
 
-console.log('记录往返 / 事件投影')
-{
+// 节过滤。跑全套是**提交门**,不是编辑循环的门:改一条取价规则却要读完整 26 节的输出,
+// 那点输出就是白花的 token。`--only` 只筛节,不改任何断言。
+const only = ((): string | null => {
+  const flag = process.argv.indexOf('--only')
+  return flag === -1 ? null : (process.argv[flag + 1] ?? '')
+})()
+
+let ranSections = 0
+/** 打印节名,并回答这一节该不该跑。 */
+function section(name: string): boolean {
+  if (only !== null && !name.includes(only)) return false
+  ranSections += 1
+  console.log(name)
+  return true
+}
+
+// 「价格表草稿 / 托底价 / 价格表写路径」三节说的是同一件事:一条路由、一个模型、几段价。
+// 形状只在这里写一遍——三份副本不会各自报错,只会各自**漂**,而漂掉的那一份是静默的。
+const modelRow = (segments: SegmentDraft[], over: Partial<ModelDraft> = {}): ModelDraft =>
+  ({ model: 'm', configured: true, records: 0, segments, ...over })
+
+/** 把一行装进一份单路由草稿;`ids` 只在要真实路由名 / 模型名 / $billing 时才给。 */
+const draftOfRow = (row: ModelDraft, ids: { route?: string; model?: string; billing?: BillingNature } = {}): PriceDraft => {
+  const route = ids.route ?? 'r'
+  const model = ids.model ?? row.model
+  return new Map([[route, {
+    route, label: route, billing: ids.billing ?? 'metered', records: row.records,
+    models: new Map([[model, { ...row, model }]]),
+  }]])
+}
+
+const bodyOfRow = (row: ModelDraft, ids?: Parameters<typeof draftOfRow>[1]) => composePriceBody(draftOfRow(row, ids))
+
+if (section('记录往返 / 事件投影')) {
   const rec: UsageRecord = { requestId: 'req-1', time: 1730000000000, sessionId: 's1', model: 'deepseek-chat', usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 50 } }
   const back = coerceRecord(JSON.parse(serializeRecord(rec)))
   check('一行记录 JSONL 往返:字段保留,没上报的桶不凭空出现',
@@ -83,8 +116,7 @@ console.log('记录往返 / 事件投影')
     && bareSummaryRec?.requestId === 'compaction:s1:11' && bareSummaryRec.kind === 'compaction' && bareSummaryRec.usage === undefined)
 }
 
-console.log('聚合:totals / byDay / byModel')
-{
+if (section('聚合:totals / byDay / byModel')) {
   const records: UsageRecord[] = [
     { requestId: '1', time: dayMillis('2026-01-01', 10), sessionId: 's1', model: 'deepseek-chat', usage: { inputTokens: 100, outputTokens: 50 } },
     { requestId: '2', time: dayMillis('2026-01-01', 14), sessionId: 's1', model: 'deepseek-chat', usage: { inputTokens: 200, outputTokens: 100 } },
@@ -100,8 +132,7 @@ console.log('聚合:totals / byDay / byModel')
     merged.total.requests === 3 && merged.total.inputTokens === 340 && merged.byModel.length === 2)
 }
 
-console.log('手写价表:日期 / 价段 / 取价')
-{
+if (section('手写价表:日期 / 价段 / 取价')) {
   const file = parsePriceInput({
     [PRICING_BILLING_KEY]: { 'opencode-go': 'subscription' },
     'deepseek-official': {
@@ -201,8 +232,7 @@ console.log('手写价表:日期 / 价段 / 取价')
   }
 }
 
-console.log('账本透镜:价格表说这一行值多少')
-{
+if (section('账本透镜:价格表说这一行值多少')) {
   const table: PricingTable = {
     'deepseek-official': { 'deepseek-v4-flash': [{ from: dayStartMs('2026-09-01'), rates: { inputPerMillion: 1, outputPerMillion: 4 } }] },
   }
@@ -226,8 +256,7 @@ console.log('账本透镜:价格表说这一行值多少')
     open.byRouteModel.get('deepseek-official')?.get('deepseek-v4-flash')?.unpriced === 0)
 }
 
-console.log('调价史轴:只在首记与今天之间画,标签不许叠')
-{
+if (section('调价史轴:只在首记与今天之间画,标签不许叠')) {
   const segment = (id: number, from: string): SegmentDraft => ({ id, from, input: '1', output: '4', cacheRead: '', cacheWrite: '', slots: [] })
   const row = (over: Partial<ModelDraft>): ModelDraft => ({ model: 'm', configured: true, records: 3, firstAt: dayMillis('2026-08-25', 19), segments: [], ...over })
   const now = dayMillis('2026-09-20', 12)
@@ -257,8 +286,7 @@ console.log('调价史轴:只在首记与今天之间画,标签不许叠')
     && many.every((x, index) => x >= 0 && x <= 600 && (index === 0 || x >= many[index - 1]!)))
 }
 
-console.log('峰谷时段:价段内的第二层取价')
-{
+if (section('峰谷时段:价段内的第二层取价')) {
   // 2026-09-14 是周一,2026-09-20 是周日。
   const parsed = parsePriceInput({
     'deepseek-official': { 'deepseek-v4-flash': [{
@@ -326,8 +354,7 @@ console.log('峰谷时段:价段内的第二层取价')
     Math.abs(costed.totalCost - 2) < 1e-9 && costed.unpricedModels.length === 0)
 }
 
-console.log('时段身份:改费率就地重算,改时段 / 删时段 = 价格未知')
-{
+if (section('时段身份:改费率就地重算,改时段 / 删时段 = 价格未知')) {
   const route = 'deepseek-official'
   const model = 'deepseek-v4-flash'
   const inside = dayMillis('2026-09-14', 10)   // 周一 10:00,落在 09:00–12:00 工作时段里
@@ -358,13 +385,9 @@ console.log('时段身份:改费率就地重算,改时段 / 删时段 = 价格�
     orphaned.totalCost === 0 && orphaned.unpricedModels.includes(model))
 }
 
-console.log('价格表草稿:没写完的不算、不脏、不写')
-{
-  const model = (segments: SegmentDraft[]): ModelDraft => ({ model: 'm', configured: true, records: 0, segments })
-  const draftOf = (segments: SegmentDraft[]): PriceDraft => new Map([['r', {
-    route: 'r', label: 'r', billing: 'metered' as const, records: 0, models: new Map([['m', model(segments)]]),
-  }]])
-  const bodyOf = (segments: SegmentDraft[]) => composePriceBody(draftOf(segments))
+if (section('价格表草稿:没写完的不算、不脏、不写')) {
+  const model = modelRow
+  const bodyOf = (segments: SegmentDraft[]) => bodyOfRow(modelRow(segments))
 
   const blank = newSegment()
   check('空白价段是草稿:不报错、不脏、不写进请求体,行读作价格未知',
@@ -426,8 +449,7 @@ console.log('价格表草稿:没写完的不算、不脏、不写')
     withSegmentFrom(dated, '') === dated && withSegmentFrom(dated, '2026-09-21T13:00').from === '2026-09-21T13:00')
 }
 
-console.log('托底价:没有生效时刻的那一张永远在场')
-{
+if (section('托底价:没有生效时刻的那一张永远在场')) {
   const rowView = (firstAt: number | undefined, segments: PricingSegmentInput[]): PricingView => ({
     routes: [{ route: 'r', label: 'r', billing: 'metered', records: 4, models: [
       { model: 'm', configured: true, records: 4, ...(firstAt !== undefined ? { firstAt } : {}), segments },
@@ -435,11 +457,8 @@ console.log('托底价:没有生效时刻的那一张永远在场')
     dataDir: 'x', updatedAt: 0,
   })
   const firstAt = dayMillis('2026-08-15', 18) + 47 * 60_000
-  const rowOf = (segments: SegmentDraft[], over: Partial<ModelDraft> = {}): ModelDraft =>
-    ({ model: 'm', configured: true, records: 0, segments, ...over })
-  const bodyOf = (row: ModelDraft) => composePriceBody(new Map([['r', {
-    route: 'r', label: 'r', billing: 'metered' as const, records: row.records, models: new Map([['m', row]]),
-  }]]))
+  const rowOf = modelRow
+  const bodyOf = bodyOfRow
   const wroteSegments = (body: ReturnType<typeof composePriceBody>): { from?: string; inputPerMillion?: number }[] =>
     body.ok ? ((body.body.r as Record<string, Record<string, { from?: string; inputPerMillion?: number }[]>>).m ?? []) : []
 
@@ -477,20 +496,12 @@ console.log('托底价:没有生效时刻的那一张永远在场')
     && priceUnknown(rowOf([{ ...newSegment({ from: '2026-08-01', input: '1', output: '4' }) }], { records: 9, firstAt })) === false)
 }
 
-console.log('价格表写路径:草稿写出去的 body 一定被宿主接受')
-{
+if (section('价格表写路径:草稿写出去的 body 一定被宿主接受')) {
   // 不变量:**client 产出 ⊆ host 接受**(`docs/CONTRACTS.md` §2)。规则在两侧各写一份的
-  // 代价正是「草稿认为能存、写入被拒」(D-013),所以这里不重列规则,而是把
+  // 代价正是「草稿认为能存、写入被拒」,所以这里不重列规则,而是把
   // 「草稿 → body → host 解析」真的跑一遍——两侧各写各的检查时,只有往返能发现缺口。
-  const draftOf = (
-    route: string,
-    model: string,
-    segments: SegmentDraft[],
-    billing: BillingNature = 'metered',
-  ): PriceDraft => new Map([[route, {
-    route, label: route, billing, records: 0,
-    models: new Map([[model, { model, configured: true, records: 0, segments }]]),
-  }]])
+  const draftOf = (route: string, model: string, segments: SegmentDraft[], billing: BillingNature = 'metered'): PriceDraft =>
+    draftOfRow(modelRow(segments, { model }), { route, model, billing })
   const roundTrip = (draft: PriceDraft): ReturnType<typeof parsePriceInput> => {
     const body = composePriceBody(draft)
     return body.ok ? parsePriceInput(body.body) : { ok: false, error: body.error }
@@ -539,15 +550,14 @@ console.log('价格表写路径:草稿写出去的 body 一定被宿主接受')
     dataDir: 'x', updatedAt: 0,
   })
   const rowWith = (cacheRead: string): ModelDraft =>
-    ({ model: 'm', configured: true, records: 0, segments: [{ ...newSegment({ from: '', input: '1', output: '4' }), cacheRead }] })
+    modelRow([{ ...newSegment({ from: '', input: '1', output: '4' }), cacheRead }])
   check('填了却写不出去的缓存档让这一行保持脏(合法的值则与基线一致)',
     modelDirty('r', rowWith('abc'), cacheBaseline.models) === true
     && modelDirty('r', rowWith('1'), cacheBaseline.models) === false
     && composePriceBody(draftOf('r', 'm', rowWith('abc').segments)).ok === false)
 }
 
-console.log('折叠自证有效:天级水位线看不见往日的追加')
-{
+if (section('折叠自证有效:天级水位线看不见往日的追加')) {
   const rollupOf = (upto: string, files: Record<string, string>): RollupFile => ({
     schemaVersion: 7, upto, pricingRevision: '', files,
     total: { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
@@ -571,8 +581,7 @@ console.log('折叠自证有效:天级水位线看不见往日的追加')
     cases.filter(([, actual, expected]) => actual !== expected).map(([label]) => label))
 }
 
-console.log('路由目录:本机设置 ∪ 运行时注册表')
-{
+if (section('路由目录:本机设置 ∪ 运行时注册表')) {
   const settings = {
     get(ns: string): unknown {
       if (ns === 'llm-pi-ai') {
@@ -608,8 +617,7 @@ console.log('路由目录:本机设置 ∪ 运行时注册表')
     && catalog.find(e => e.route === DEEPSEEK_ROUTE)?.label === 'DeepSeek')
 }
 
-console.log('工作区:按目录累计用量')
-{
+if (section('工作区:按目录累计用量')) {
   const pricing = {
     'deepseek-official': { 'deepseek-chat': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
     'opencode-go': { 'deepseek-chat': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
@@ -653,8 +661,7 @@ console.log('工作区:按目录累计用量')
     && dayFileNameOf(dayMillis('2026-01-05', 3)) === 'usage-2026-01-05.jsonl')
 }
 
-console.log('端到端:真形状的 DSH 事件 → JSONL 账本 → 聚合 → 成本')
-{
+if (section('端到端:真形状的 DSH 事件 → JSONL 账本 → 聚合 → 成本')) {
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-'))
   try {
     const log = new UsageLog(dir, quiet)
@@ -703,8 +710,7 @@ console.log('端到端:真形状的 DSH 事件 → JSONL 账本 → 聚合 → �
   }
 }
 
-console.log('新鲜度门:什么时候值得重走历史')
-{
+if (section('新鲜度门:什么时候值得重走历史')) {
   const snaps = (ids: string[], revs: string[]): readonly { header: { id: string }; revision: unknown }[] =>
     ids.map((id, i) => ({ header: { id }, revision: revs[i] }))
   const synced = new Map([['a', 'r1'], ['b', 'r2']])
@@ -727,8 +733,7 @@ console.log('新鲜度门:什么时候值得重走历史')
   check('增量变更集:没同步过 = 全部,没变 = 空,删掉的不算工作量,新的立刻算', changeSets.every(([, a, w]) => a === w), changeSets.filter(([, a, w]) => a !== w).map(([label]) => label))
 }
 
-console.log('持久化列表与历史回填')
-{
+if (section('持久化列表与历史回填')) {
   const inspect = async () => ({ meta: { id: 'x' }, events: [] })
   // `list()` 只回带 header 的裸快照,是真实形状;调用方必须归一化(浮窗那次 HTTP 500 的成因)。
   const bare = await listPersistenceSnapshots({ inspect, list: async () => [{ id: 's1' }, { version: 1 }] as never[] })
@@ -743,8 +748,7 @@ console.log('持久化列表与历史回填')
     && staleSessionIds(true, new Map([['s1', 'r1']]), [{ header: { id: 's1' }, revision: 'r1' }, { header: { id: 's2' } }]).join(',') === 's2')
 }
 
-console.log('历史回填 syncHistory')
-{
+if (section('历史回填 syncHistory')) {
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-sync-'))
   try {
     const log = new UsageLog(dir, quiet)
@@ -786,8 +790,7 @@ console.log('历史回填 syncHistory')
   }
 }
 
-console.log('通道卡片与按模型切法')
-{
+if (section('通道卡片与按模型切法')) {
   // 同一个模型串经两条通道计费必须分开:卡片按通道分区,(通道, 模型) 在卡内唯一。
   const records: UsageRecord[] = [
     { requestId: 'r1', time: dayMillis('2026-03-01', 9), sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-v4-flash', usage: { inputTokens: 1000, outputTokens: 200 } },
@@ -820,8 +823,7 @@ console.log('通道卡片与按模型切法')
   check('没定价的模型按 ¥0 计,并在卡上列出来', unpriced[0]?.unpricedModels.join() === 'brand-new-x' && unpriced[0]?.cost === 0 && unpriced[0]?.models[0]?.cost === 0)
 }
 
-console.log('窗口 → 日界,以及按窗口读账本')
-{
+if (section('窗口 → 日界,以及按窗口读账本')) {
   const now = () => new Date('2026-03-05T15:30:00')
   const windows = JSON.stringify([
     rangeDayWindow('today', now), rangeDayWindow('yesterday', now), rangeDayWindow('last7', now),
@@ -854,8 +856,7 @@ console.log('窗口 → 日界,以及按窗口读账本')
   }
 }
 
-console.log('额度:窗口归一化')
-{
+if (section('额度:窗口归一化')) {
   const now = new Date(2026, 2, 10, 15, 0, 0).getTime()
   const cc = windowFromCreditsBlock('fiveHour', '5 小时', { used: 8.4, cap: 14, exceeded: false, resetAt: now + 3 * 3_600_000 }, now)
   const over = windowFromCreditsBlock('weekly', '本周', { used: 40, cap: 35, exceeded: true, resetAt: now + 86_400_000 }, now)
@@ -883,8 +884,7 @@ console.log('额度:窗口归一化')
     info?.planId === 'individual-goat' && info?.status === 'active' && info?.periodEnd === epoch && planInfoFromSubscriptions({}) === undefined)
 }
 
-console.log('额度:门只从答复推导,绝不从失败推导')
-{
+if (section('额度:门只从答复推导,绝不从失败推导')) {
   const now = 1_800_000_000_000
   const gates: [string, string, string][] = [
     ['答复在订阅期内', quotaGate({ status: 'active' }, now), 'subscription'],
@@ -928,8 +928,7 @@ console.log('额度:门只从答复推导,绝不从失败推导')
     alertCases.every(([, a], i) => a === expected[i]), alertCases.filter(([, a], i) => a !== expected[i]).map(([label]) => label))
 }
 
-console.log('额度:卡片排序与计划身份')
-{
+if (section('额度:卡片排序与计划身份')) {
   const gateOf = (p: string): 'subscription' | 'balance' | 'none' | undefined => ({ live: 'subscription', lapsed: 'balance', nosub: 'none' } as const)[p]
   const order = (providers: string[]) => orderQuotaProviders(providers, gateOf).join(',')
   const input = ['lapsed', 'live']
@@ -943,8 +942,7 @@ console.log('额度:卡片排序与计划身份')
     && BUILTIN_PLAN_TITLES['opencode-go'] === 'OpenCode Go' && BUILTIN_PLAN_TITLES['commandcode'] === 'Command Code')
 }
 
-console.log('额度:key 解析(env + 配置,不打网络)')
-{
+if (section('额度:key 解析(env + 配置,不打网络)')) {
   const seam = (map: Record<string, string>) => ({ resolve: async (ref: string) => map[ref] })
   const cases: [string, string | undefined, string | undefined][] = [
     ['哪儿都没有 key', await resolvePlanApiKey('opencode-go', undefined, seam({})), undefined],
@@ -962,8 +960,7 @@ console.log('额度:key 解析(env + 配置,不打网络)')
     && (await fetchOfficialQuota('not-a-provider', {})).state === 'error')
 }
 
-console.log('额度:Command Code 的门只从答复的端点读(桩 HTTP)')
-{
+if (section('额度:Command Code 的门只从答复的端点读(桩 HTTP)')) {
   const originalFetch = globalThis.fetch
   const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   const boom = () => new Response('boom', { status: 500 })
@@ -1007,8 +1004,7 @@ console.log('额度:Command Code 的门只从答复的端点读(桩 HTTP)')
   }
 }
 
-console.log('额度:OpenCode Go 的权益状态(桩 HTTP)')
-{
+if (section('额度:OpenCode Go 的权益状态(桩 HTTP)')) {
   const originalFetch = globalThis.fetch
   const respond = (status: number, body: unknown = {}) => {
     globalThis.fetch = (async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })) as typeof fetch
@@ -1046,8 +1042,7 @@ console.log('额度:OpenCode Go 的权益状态(桩 HTTP)')
   }
 }
 
-console.log('双桶金额:spend vs subscriptionValue')
-{
+if (section('双桶金额:spend vs subscriptionValue')) {
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-dualbucket-'))
   try {
     // 同一个模型串经三条通道:分桶由价格文件的 $billing 决定,什么也没声明的通道按 metered。
@@ -1086,11 +1081,17 @@ console.log('双桶金额:spend vs subscriptionValue')
   }
 }
 
-if (failed > 0) {
+// 过滤后一节都没命中,是这里最坏的一种结果:它一条断言都没跑,却和「全绿」长得一模一样。
+if (only !== null && ranSections === 0) {
+  console.error(`\nno section matches --only ${JSON.stringify(only)}`)
+  process.exit(1)
+} else if (failed > 0) {
   console.error(`\n${failed} check(s) failed`)
   process.exit(1)
 } else {
-  console.log('\nall smoke checks passed')
+  console.log(only === null
+    ? '\nall smoke checks passed'
+    : `\n${ranSections} section(s) passed (--only ${JSON.stringify(only)})`)
 }
 
 /** 额度卡的 ok 主体:告急判定只读这些窗口与门。 */

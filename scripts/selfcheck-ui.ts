@@ -6,7 +6,7 @@
  * 「这一句是不是重复编码」）留给人看。
  *
  *  1. 死类双向比对：样式表里定义了却没人用的 `dtpl-*` 类，以及 TSX 里挂着却没有样式规则的
- *     `dtpl-*`（结构性钩子是例外，例外表必须仍然存在，否则它自己会腐烂成遮羞布）；
+ *     `dtpl-*`（两者都必须是空的——没有例外表）；
  *  2. 硬编码色值：只许出现在 `var(--宿主变量, #兜底)` 的兜底里，或 `color-mix()` 内的
  *     `#000` / `#fff`（全窗口的颜色必须跟着宿主皮肤走）；
  *  3. 虚线：`dashed` / `dotted` 必须为 0；
@@ -61,37 +61,50 @@ const entryText = await readFile(join(root, 'src', 'client', entryName), 'utf8')
 fragments.push({ name: entryName, text: entryText, code: stripComments(entryText) })
 
 // --- 1. 死类双向比对 -------------------------------------------------------
+// 两侧都取**完整的**类名：`-` 在类名里合法，所以 `\.(dtpl-[\w-]+)` 会把
+// `dtpl-price-history-foot` 截成 `dtpl-price-history`，凭空造出一个没人用的类。
+// 动态拼出来的那一半（样式侧 `.dtpl-quota-tone-ok` / TS 侧 `` `dtpl-quota-tone-${tone}` ``）
+// 只可能以前缀的形式被静态看到，所以两侧各另收一遍「以 `-` 收尾」的前缀。
+const DTPL_NAME = /\b(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)/g
+
 const cssText = fragments.map((f) => f.code).join('\n')
-const cssClasses = new Set([...cssText.matchAll(/\.(dtpl-[a-z0-9-]+)/g)].map((m) => m[1]))
+const cssClasses = new Set([...cssText.matchAll(/\.(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)(?![\w-])/g)].map((m) => m[1]))
+const cssPrefixes = [...cssText.matchAll(/\.(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)-/g)].map((m) => m[1])
 
 const tsFiles = (await collect('src/client'))
   .filter((rel) => /\.tsx?$/.test(rel) && !rel.startsWith('src/client/styles/') && rel !== 'src/client/styles.ts')
 const tsText = (await Promise.all(tsFiles.map((rel) => readFile(join(root, rel), 'utf8')))).join('\n')
-const tsTokens = new Set([...tsText.matchAll(/(dtpl-[a-z0-9-]+)/g)].map((m) => m[1]))
-// `dtpl-quota-tone-${tone}` 这类模板串在 TS 侧只留下前缀，带尾连字符的按前缀处理。
-const tsPrefixes = [...tsTokens].filter((t) => t.endsWith('-'))
+const tsTokens = new Set([...tsText.matchAll(DTPL_NAME)].map((m) => m[1]))
+const tsPrefixes = [...tsText.matchAll(/\b(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)-\$\{/g)].map((m) => m[1])
+
+const deadInCss = [...cssClasses]
+  .filter((c) => !tsTokens.has(c)
+    && !tsPrefixes.some((p) => c.startsWith(`${p}-`))
+    && !cssPrefixes.some((p) => tsTokens.has(p)))
+  .sort()
 // `id="dtpl-tab-ledger"` / `aria-controls="dtpl-usage-panel"` 里的名字是**结构性锚点**，不是类：
-// 它们本来就不需要样式规则，所以自动排除，不靠手工白名单。
+// 它们本来就不需要样式规则，所以自动排除，不靠手工白名单。属性值可能是模板串
+// （`` id={`dtpl-usage-tab-${id}`} ``），所以两侧都取：字面量的完整名，加上模板串里那个**前缀**。
 const anchorNames = new Set(
-  [...tsText.matchAll(/(?:id|aria-controls|aria-labelledby|htmlFor)="([^"]*)"/g)]
-    .flatMap((m) => [...m[1].matchAll(/(dtpl-[a-z0-9-]+)/g)].map((x) => x[1])),
+  [...tsText.matchAll(/(?:id|aria-controls|aria-labelledby|htmlFor)=(?:"([^"]*)"|\{`([^`]*)`\})/g)]
+    .flatMap((m) => [...(m[1] ?? m[2] ?? '').matchAll(DTPL_NAME)].map((x) => x[1])),
 )
+for (const m of tsText.matchAll(/(?:id|aria-controls|aria-labelledby|htmlFor)=\{`[^`]*?(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)-\$\{/g)) {
+  anchorNames.add(m[1])
+}
 
-const deadInCss = [...cssClasses].filter((c) => !tsTokens.has(c) && !tsPrefixes.some((p) => c.startsWith(p))).sort()
-
-// 结构性钩子：**挂着类名**、但本来就不该有样式规则的锚点——
-// `dtpl-price-table` 是 `aria-controls` 指过来的那个面板（真正起作用的是它的 `id`），
-// `dtpl-price-col-more` 是网格补位。真要清干净也行：留空 span / 留 `id` 就够。
-// 这张表必须仍然存在——条目消失了就说明钩子没了，表本身也要跟着删，否则它会遮住真的死类。
-const STRUCTURAL_HOOKS = ['dtpl-price-table', 'dtpl-price-col-more']
-const staleHooks = STRUCTURAL_HOOKS.filter((h) => !tsTokens.has(h))
+// TS 侧的动态拼接（`` `dtpl-quota-tone-${tone}` `` → 只留下前缀 `dtpl-quota-tone`）与样式侧的
+// 静态全名互为镜像：一个 token 只要**是某条样式规则名字的前缀**，它就有人用。
+// （例外表曾在这里，只剩一个「结构性钩子」条目；两个下拉取代模型行网格之后那个钩子也没了，
+// 所以整张表跟着删——留一张空表只会让人觉得还有例外。）
 const unstyledInTs = [...tsTokens]
-  .filter((t) => !t.endsWith('-') && !cssClasses.has(t) && !anchorNames.has(t) && !STRUCTURAL_HOOKS.includes(t))
+  .filter((t) => !cssClasses.has(t)
+    && ![...cssClasses].some((c) => c.startsWith(`${t}-`))
+    && !anchorNames.has(t))
   .sort()
 
 check('样式表里没有无人使用的 dtpl-* 类', deadInCss.length === 0, { deadInCss })
-check('TSX 里的 dtpl-* 类都有样式规则(结构性钩子除外)', unstyledInTs.length === 0, { unstyledInTs })
-check('结构性钩子例外表没有失效条目', staleHooks.length === 0, { staleHooks })
+check('TSX 里的 dtpl-* 类都有样式规则', unstyledInTs.length === 0, { unstyledInTs })
 
 // --- 2. 硬编码色值 ---------------------------------------------------------
 const badHex: string[] = []

@@ -2,18 +2,23 @@
  * 词元账本浮窗的价格表 tab。
  *
  * 没有保存按钮也没有撤销：变更在停止输入一拍后自动写入，字段失焦则立刻写。草稿写不出来的
- * 时候（半输入的数字）不写也不报，等这个字段交代完才说——口径与理由见 D-040。磁盘上的内容是
- * 唯一状态，工具栏只报告它。行内四个数字只读，改价在展开的抽屉里（第一张是托底价）。
+ * 时候（半输入的数字）不写也不报，等这个字段交代完才说。磁盘上的内容是
+ * 唯一状态，状态栏只报告它。
+ *
+ * 一屏只面对**一个模型**：两个下拉选通道与模型，下面是它的调价史（直接铺开，没有折叠）。
+ * 下拉的选项文字自己带路标——多少个模型没价、这一行多少次请求、有没有没落盘的改动——
+ * 使「这张表有没有洞」不必点到才看得见。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PriceVerdict, PricingView } from '../../types.ts'
 import { ROUTE_PRICING } from '../../route-paths.ts'
 import {
-  baselineOfDraft, baselinesOf, composePriceBody, draftFromView, priceUnknown, stagedChanges, rowKey,
+  baselineOfDraft, baselinesOf, composePriceBody, draftFromView, modelDirty, modelOptionLabel,
+  priceUnknown, routeOptionLabel, rowKey, stagedChanges,
   type ModelDraft, type PriceDraft, type RouteDraft,
 } from './draft.ts'
-import { RouteCard } from './editors.tsx'
+import { ModelDetail } from './editors.tsx'
 
 export interface PricingPanelProps {
   /** 保存成功后通知父级刷新总览。 */
@@ -30,7 +35,7 @@ const AUTO_SAVE_DELAY_MS = 600
  *  「离开一个字段 = 一次写」——连改几档就是连着写几次，所以合并窗给得宽；离开面板时把还没发出的那次立刻补上。 */
 const REFRESH_MERGE_MS = 1000
 
-/** 工具栏那条状态文字。 */
+/** 状态栏那条文字。 */
 type SaveState =
   | { kind: 'clean' }
   | { kind: 'pending' }
@@ -48,6 +53,43 @@ interface Staged {
   baseline: { models: Map<string, string>; billing: Map<string, 'metered' | 'subscription'> }
 }
 let staged: Staged | null = null
+
+/** 选中的 (通道, 模型)。`model` 为空串 = 「这条通道里请求最多的那一个」，即换通道时的中间态。 */
+interface Picked {
+  route: string
+  model: string
+}
+
+/**
+ * 选中的那一份存放处。这是**视图偏好**（每台浏览器自己上次看的是哪一行），不是账本数据，
+ * 所以进 localStorage 而不是宿主配置——同一个理由见 `QuotaPanel` 的自动刷新间隔。
+ *
+ * 面板 unmount 就带走的组件状态活不过关浮窗，而这一屏的意图恰恰是「下次打开还是这个选项」。
+ */
+const PICKED_KEY = 'dsh-tokbook.pricing-picked'
+
+/** 读回上次选的那一行。只认形状对的值，坏值一律当作「没选过」——一个记不住的选择回落到
+ *  列表第一个，比让下拉显示一个不存在的选择要好。 */
+function readPicked(): Picked | null {
+  const saved = localStorage.getItem(PICKED_KEY)
+  if (saved === null) return null
+  try {
+    const parsed = JSON.parse(saved) as unknown
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const { route, model } = parsed as Partial<Picked>
+    if (typeof route !== 'string' || route === '' || typeof model !== 'string') return null
+    return { route, model }
+  } catch {
+    return null
+  }
+}
+
+/** 记下当前的选择。`null`（「看全部通道」）抹掉它：那时用户要的正是列表的第一个，不该留一个
+ *  下次回来还会生效的旧选择。 */
+function rememberPicked(pick: Picked | null): void {
+  if (pick === null) localStorage.removeItem(PICKED_KEY)
+  else localStorage.setItem(PICKED_KEY, JSON.stringify(pick))
+}
 
 function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
   return fetch(ROUTE_PRICING, {
@@ -73,31 +115,15 @@ function clockOf(epochMs: number): string {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}:${String(at.getSeconds()).padStart(2, '0')}`
 }
 
-/** 整张表的规模与缺口——**不受筛选影响**，所以它报的永远是这张表本身。 */
-interface PriceStats {
-  routes: number
-  models: number
-  /** 价格未知的模型数（同一个判定见 `priceUnknown`）。 */
-  unknown: number
-  /** 这些模型名下有多少条账本请求计 ¥0。与 `unknown` 用**同一个判定**取，所以补上托底价之后
-   *  两者一起归零，屏幕上不会出现「0 个模型未知、却还有 N 次请求没价」这种自相矛盾的读数。 */
-  unpricedRequests: number
-}
+/** 模型下拉里那个收窄选项的值。它不是一个模型串，而是一个哨兵——模型串非空、且不以 NUL 开头
+ *  （`rowKey` 已经先例把 NUL 当分隔符），所以这个形状不会被真的模型串撞上。 */
+const UNKNOWN_ONLY = '\u0000unknown'
 
-function priceStats(draft: PriceDraft): PriceStats {
-  let models = 0
-  let unknown = 0
-  let unpricedRequests = 0
-  for (const card of draft.values()) {
-    for (const row of card.models.values()) {
-      models += 1
-      if (priceUnknown(row)) {
-        unknown += 1
-        unpricedRequests += row.unpriced ?? 0
-      }
-    }
-  }
-  return { routes: draft.size, models, unknown, unpricedRequests }
+/** 这一刻这一条通道里，模型下拉该列出谁（哨兵选项由调用处另外拼在最前）。 */
+function picksOf(card: RouteDraft, unknownOnly: boolean): ModelDraft[] {
+  const all = [...card.models.values()]
+  if (!unknownOnly) return all
+  return all.filter(priceUnknown)
 }
 
 export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
@@ -106,11 +132,15 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [baseline, setBaseline] = useState<Staged['baseline']>(() => staged?.baseline ?? { models: new Map(), billing: new Map() })
   const [loadError, setLoadError] = useState<string | null>(null)
   const [save, setSave] = useState<SaveState>({ kind: 'clean' })
-  const [query, setQuery] = useState('')
   const [unknownOnly, setUnknownOnly] = useState(false)
-  const [openKey, setOpenKey] = useState<string | null>(null)
-  /** 通道卡的展开态：只记**被手动改过**的通道，其余走默认（第一条展开，见 `openRoutes`）。 */
-  const [folds, setFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map())
+  /** 手动选过的那一份；null = 还没选过，一切走「列表里的第一个」。 */
+  const [picked, setPicked] = useState<Picked | null>(readPicked)
+
+  /** 记下一次选择：组件状态（这一屏立刻跟手）与 localStorage（下次打开还认它）。 */
+  const choosePicked = useCallback((pick: Picked) => {
+    setPicked(pick)
+    rememberPicked(pick)
+  }, [])
 
   const changes = useMemo(() => stagedChanges(draft, baseline), [draft, baseline])
 
@@ -124,7 +154,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const againRef = useRef(false)
   const aliveRef = useRef(true)
   /** 用户是否已经「交代过」某个字段（失焦 / 重新回到面板）。打字途中的失败保持沉默——
-   *  半输入的数字不是错误，只有离开这个字段之后它才是（见 D-040）。 */
+   *  半输入的数字不是错误，只有离开这个字段之后它才是。 */
   const committedRef = useRef(false)
   const refreshRef = useRef<number | null>(null)
 
@@ -172,7 +202,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
    * 写入整个文件。草稿尚无效时拒绝（不写入），使半输入的数字不能阻塞或破坏其余内容；
    * 防抖 effect 在草稿再次变化时重试。保存串行化：在飞的写入期间发生的变更排队一次。
    * **写不进去这件事只在提交点说出来**（字段失焦 / 回到面板）：打字途中它必然是无效的，
-   * 那一刻报错只会把「还没打完」读成「你错了」（见 D-040）。
+   * 那一刻报错只会把「还没打完」读成「你错了」。
    */
   const writeNow = useCallback(async (): Promise<void> => {
     if (stagedChanges(draftRef.current, baselineRef.current) === 0) return
@@ -250,7 +280,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     }
   }, [changes, draft])
 
-  // 从未到达磁盘的草稿留给下次挂载；干净的丢弃，使下次挂载读宿主文件。
+  // 从未到达磁盘的草稿留给下次挂载；干净的丢弃，使下次挂载读宿主文件。（选中的那一行不走这里：
+  // 它在 localStorage 里，与草稿的生死无关。）
   useEffect(() => {
     if (view === null) return
     staged = changes > 0 ? { view, draft, baseline } : null
@@ -299,19 +330,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     })
   }, [])
 
-  /** 打开/关闭一行的调价史（一次只开一个）。 */
-  const toggleRow = useCallback((route: string, model: string) => {
-    setOpenKey(current => (current === rowKey(route, model) ? null : rowKey(route, model)))
-  }, [])
-
-  const toggleCard = useCallback((route: string, open: boolean) => {
-    setFolds((current) => {
-      const next = new Map(current)
-      next.set(route, !open)
-      return next
-    })
-  }, [])
-
   // Ctrl/Cmd+S 立即 flush 待写的保存（文件本来也会自动保存）。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -330,54 +348,29 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [changes, writeNow])
 
-  const stats = useMemo(() => priceStats(draft), [draft])
+  // 通道下拉能选谁：收窄开着时只留**有洞的**通道。什么都没有就是**空**的——退回全集会把
+  // 「这条通道没有价格未知的模型」说成「一条也没有」，正是这个筛选要回答的那个问题。
+  const routeChoices = useMemo(() => {
+    const all = [...draft.values()]
+    return unknownOnly ? all.filter(card => picksOf(card, true).length > 0) : all
+  }, [draft, unknownOnly])
 
-  /** 筛选态：搜索词或「只看价格未知」任一在场。 */
-  const filtering = query.trim() !== '' || unknownOnly
-
-  const cards = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    const out: RouteDraft[] = []
-    for (const card of draft.values()) {
-      const routeHit = needle !== '' && (card.route.toLowerCase().includes(needle) || card.label.toLowerCase().includes(needle))
-      const models = new Map<string, ModelDraft>()
-      for (const [model, row] of card.models) {
-        if (unknownOnly && !priceUnknown(row)) continue
-        // 搜索覆盖行显示的内容：展示名、精确模型串，以及整个 route 匹配时其下所有行。
-        if (needle !== '' && !routeHit
-          && !model.toLowerCase().includes(needle)
-          && !(row.name ?? '').toLowerCase().includes(needle)) continue
-        models.set(model, row)
-      }
-      // 有筛选时卡片显示筛选保留的行，忽略折叠状态：匹配不能藏在折叠后面。
-      if (models.size === 0) continue
-      out.push(needle !== '' || unknownOnly ? { ...card, models } : card)
-    }
-    return out
-  }, [draft, query, unknownOnly])
-
-  /** 这一刻哪些通道是展开的：**默认第一条**（host 正按请求数排序，所以就是第一张）；筛选时全部展开。 */
-  const openRoutes = useMemo(() => {
-    const out = new Set<string>()
-    cards.forEach((card, index) => {
-      if (filtering || (folds.get(card.route) ?? index === 0)) out.add(card.route)
-    })
-    return out
-  }, [cards, filtering, folds])
-
-  /** 卡收起时关闭其抽屉。 */
-  useEffect(() => {
-    if (openKey === null) return
-    const route = openKey.split('\u0000')[0]
-    if (!openRoutes.has(route)) setOpenKey(null)
-  }, [openRoutes, openKey])
-
-  const clearFilter = useCallback(() => {
-    setQuery('')
-    setUnknownOnly(false)
-  }, [])
+  // 选中的是谁：手动选过、且此刻仍在选项里才作数；其余——包括筛选把它筛掉了——一律回落到
+  // 「列表里的第一个」（host 已按请求数排序，所以「第一个」就是最该看的那一个）。
+  // 收窄开着却一条通道都没剩下时，选中项留作下文的空状态。
+  const card = routeChoices.find(item => item.route === picked?.route) ?? routeChoices[0]
+  const models = card === undefined ? [] : picksOf(card, unknownOnly)
+  const row = models.find(item => item.model === picked?.model) ?? models[0]
 
   const stateText = saveStateText(save)
+  // 什么都没选过、也没有任何待写的改动：状态栏没有话要说。常驻一个空盒子会在选择带与
+  // 调价史之间撑出一道什么也不说的空隙。
+  const veiled = picked === null && save.kind === 'clean' && changes === 0
+
+  /** 收窄开关的**唯一**入口：把列表收窄到价格未知的模型或放开，不动选中哪一行。 */
+  const toggleUnknownOnly = useCallback(() => {
+    setUnknownOnly((current) => !current)
+  }, [])
 
   return (
     <section
@@ -385,62 +378,81 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       aria-label="价格表"
       // 任一字段失焦 = 提交点：立刻写一次（不必再等防抖），并让此后写不进去的失败说话。
       // **没有待写的改动就不算一次交代**——否则在这里随便点一下，下一次打字的中途报错就被放行了。
-      onBlur={() => {
+      onBlur={(event) => {
+        // 下拉换人不是一次「交代」：弹层里没有字段可交代，而这一次 blur 会被读成「用户离开了
+        // 某个没写完的字段」，于是切一下下拉就报一句「未保存」。
+        if (event.target instanceof HTMLSelectElement) return
         if (stagedChanges(draftRef.current, baselineRef.current) === 0) return
         committedRef.current = true
         void writeRef.current()
       }}
     >
-      <div className="dtpl-price-bar">
-        <input
-          className="dtpl-price-search"
-          type="search"
-          placeholder="搜索模型串 / 通道路由"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          aria-label="搜索模型串或通道路由"
-        />
-        <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
-          {stateText}
-        </span>
-        {save.kind === 'error' && (
-          <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
-        )}
-        <button
-          type="button"
-          className={`dtpl-price-chip${unknownOnly ? ' is-on' : ''}`}
-          aria-pressed={unknownOnly}
-          title="整行没有价，或账本里有早于最早一段价的记录（那些按 ¥0 计）"
-          onClick={() => setUnknownOnly(value => !value)}
-        >
-          {unknownOnly ? '只看价格未知' : '价格未知'}
-        </button>
-      </div>
+      {/* 路由来自本机 settings.yaml 与正在运行的适配器；一个都没有时不画两个空下拉——
+          没有选项的控件只会把「这里本来没有内容」说成「你选不了」。收窄开着却一条通道都
+          没剩下时同样不画：空下拉加一句空状态标题足以说清这件事。 */}
+      {draft.size > 0 && routeChoices.length > 0 && card !== undefined && (
+        <div className="dtpl-price-pick">
+          <label className="dtpl-price-pick-row">
+            <span className="dtpl-price-pick-k">通道</span>
+            <select
+              className="dtpl-price-select dtpl-price-pick-sel"
+              value={card.route}
+              onChange={(event) => {
+                // 模型先落到空串：换通道时沿用上一条通道的模型名没有意义，下一帧的回落会
+                // 挑出这条通道里请求最多的那一个。
+                choosePicked({ route: event.target.value, model: '' })
+              }}
+            >
+              {routeChoices.map(item => (
+                <option key={item.route} value={item.route}>{routeOptionLabel(item)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="dtpl-price-pick-row">
+            <span className="dtpl-price-pick-k">模型</span>
+            <select
+              className="dtpl-price-select dtpl-price-pick-sel"
+              /* value 必须落在选项集合里：row 是 undefined（这条通道一个模型都没有）时给空串，
+                 它不在任何 option 的 value 上，React 便让浏览器显示第一个选项——这里正好也是哨兵。 */
+              value={row === undefined ? '' : row.model}
+              /* 收窄开关切换即重建：哨兵是**动作**不是值，点完它原生的选中项就停在哨兵上，
+                 而这一次点击不改变“选中哪一行”，`value` 的更新便不一定会把它挪回去。 */
+              key={unknownOnly ? 'narrowed' : 'all'}
+              disabled={models.length === 0}
+              aria-label={`${card.label} 的模型`}
+              onChange={(event) => {
+                const next = event.target.value
+                if (next === UNKNOWN_ONLY) {
+                  toggleUnknownOnly()
+                  return
+                }
+                setUnknownOnly(false)
+                choosePicked({ route: card.route, model: next })
+              }}
+            >
+              {/* 收窄原来是一颗工具栏芯片，现在折进这个下拉的第一个选项：一份控件、一个切换，
+                  不必再让工具栏常驻一个只在这一屏有意义的按钮。它是**动作**不是值——选中它只是
+                  把列表收窄或放开，**不改变选中哪一行**，所以这一项永远只在拉开的下拉里露面，
+                  收起时显示的是真正选中的那一行。 */}
+              <option value={UNKNOWN_ONLY}>{unknownOnly ? '✕ 显示全部模型' : '只看价格未知'}</option>
+              {models.map(item => (
+                <option key={item.model} value={item.model}>
+                  {modelOptionLabel(item, modelDirty(card.route, item, baseline.models))}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
 
-      {(draft.size > 0 || cards.length > 0) && (
-        <div className="dtpl-price-read">
-          {/* 「其中」不能省：这个数**不是**「没有价的模型数」，而是「有账本记录落在价外」的模型数
-              ——它可能已经写着价（写下的生效时间静默截断了它之前的一切），所以它与上面那个总数
-              之间不是「有价 / 无价」的划分。写成并列的两个类别会让读者以为这里面有一批模型压根没价。 */}
-          <span className="dtpl-hero-facts">
-            <span className="dtpl-hero-fact"><b>{String(stats.routes)}</b> 条通道</span>
-            <i aria-hidden="true">·</i>
-            <span className="dtpl-hero-fact"><b>{String(stats.models)}</b> 个模型</span>
-            <i aria-hidden="true">·</i>
-            {stats.unknown === 0
-              ? <span className="dtpl-hero-fact">全部有价</span>
-              : (
-                <span className="dtpl-hero-fact dtpl-price-fact-unknown">
-                  其中 <b>{String(stats.unknown)}</b> 个价格未知
-                  {stats.unpricedRequests > 0 && <>（<b>{String(stats.unpricedRequests)}</b> 次请求按 ¥0 记）</>}
-                </span>
-              )}
+      {/* 状态栏在没话要说时让位（见 `veiled`）：常驻一个空盒子会在选择带与调价史之间撑出空隙。 */}
+      {(draft.size > 0 || loadError !== null) && !veiled && (
+        <div className="dtpl-price-bar">
+          <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
+            {stateText}
           </span>
-          {cards.length > 0 && (
-            <p className="dtpl-price-legend">
-              四个数字是此刻计费所用的价（¥/百万词元），只读；<b>「—」</b>= 这一刻还没有价，
-              暂按 ¥0 计（不是免费）。改价点开这一行，改动自动写进文件。
-            </p>
+          {save.kind === 'error' && (
+            <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
           )}
         </div>
       )}
@@ -458,56 +470,55 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         ? (loadError === null
           ? (
             <div className="dtpl-skeleton" aria-hidden="true">
-              <div className="dtpl-sk dtpl-price-sk-facts" />
+              <div className="dtpl-sk dtpl-price-sk-pick" />
               <div className="dtpl-sk dtpl-price-sk-open" />
-              <div className="dtpl-sk dtpl-price-sk-card" />
             </div>
           )
           : null)
-        : cards.length === 0
+        : draft.size === 0
           ? (
             <div className="dtpl-empty">
-              {filtering && draft.size > 0
-                ? (
-                  <>
-                    <p className="dtpl-empty-title">
-                      {unknownOnly && query.trim() === '' ? '没有价格未知的模型' : '没有匹配的模型'}
-                    </p>
-                    <p className="dtpl-empty-sub">
-                      {`这张表里有 ${String(stats.models)} 个模型${stats.unknown > 0 ? `，其中 ${String(stats.unknown)} 个价格未知` : ''}；当前筛选一个都没留下。`}
-                    </p>
-                    <button type="button" className="dtpl-price-add dtpl-price-empty-act" onClick={clearFilter}>
-                      清除筛选
-                    </button>
-                  </>
-                )
-                : (
-                  <>
-                    <p className="dtpl-empty-title">没有可显示的路由</p>
-                    <p className="dtpl-empty-sub">
-                      卡片来自本机 settings.yaml 的路由与正在运行的适配器；账本或价格表里出现过的路由也会列出来。
-                    </p>
-                  </>
-                )}
+              <p className="dtpl-empty-title">没有可显示的路由</p>
+              <p className="dtpl-empty-sub">
+                路由来自本机 settings.yaml 与正在运行的适配器；账本或价格表里出现过的路由也会列出来。
+              </p>
             </div>
           )
-          : (
-            <div className="dtpl-price-cards">
-              {cards.map(card => (
-                <RouteCard
-                  key={card.route}
-                  card={card}
-                  baseline={baseline.models}
-                  collapsed={!openRoutes.has(card.route)}
-                  openKey={openKey}
-                  onToggleCard={toggleCard}
-                  onToggleRow={toggleRow}
-                  onRowChange={updateModel}
-                  onBilling={updateBilling}
-                />
-              ))}
-            </div>
-          )}
+          : row === undefined
+            ? (
+              <div className="dtpl-empty">
+                <p className="dtpl-empty-title">
+                  {unknownOnly ? '这条通道没有价格未知的模型' : '这条通道没有列出的模型'}
+                </p>
+                <p className="dtpl-empty-sub">
+                  {unknownOnly
+                    ? '它的模型要么都有价，要么账本里从没出现过它们。'
+                    : '它的模型目录与账本里都没有模型；账本记过它时这里就会多出一行。'}
+                </p>
+                <button
+                  type="button"
+                  className="dtpl-price-add dtpl-price-empty-act"
+                  onClick={() => {
+                    toggleUnknownOnly()
+                    setPicked(null)
+                    rememberPicked(null)
+                  }}
+                >
+                  {unknownOnly ? '显示全部模型' : '看全部通道'}
+                </button>
+              </div>
+            )
+            : (
+              <ModelDetail
+                key={rowKey(card.route, row.model)}
+                route={card.route}
+                row={row}
+                billing={card.billing}
+                baseline={baseline.models}
+                onRowChange={updateModel}
+                onBilling={updateBilling}
+              />
+            )}
     </section>
   )
 }

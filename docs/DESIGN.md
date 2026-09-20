@@ -1,6 +1,6 @@
 # dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-19 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-20 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。本文只留**从代码推不出来**的东西：外部
 > 系统的机制与事实、为什么是现在这个形状、每条选择的代价。权威来源只有两个——官方文档站点
@@ -18,13 +18,13 @@
 >   ——旧文字里引用它们的按 git 历史追溯。
 > - 「重构说明」与 §3.1 描述**第二期 = 当前代码形态**（逐请求 JSONL 账本 + 成本计价 + 通道/额度），
 >   **以此段为准**；§1 的「本期不做成本」与 §11 的预判已被二期推翻。成本语义见
->   [`DECISIONS.md`](DECISIONS.md) **D-011**（时间轴 D-013）。
+>   [`CONTRACTS.md`](CONTRACTS.md)。
 > - **第三期（当前）= 价格表破坏性重构**：删掉云端镜像 / 通道覆盖层 / 双维计价，改成本机唯一一份
 >   手工价表（路由 → 模型串 → 价段）。二期关于云端 feed / 覆盖层的长文已删（避免再被当成现状），
->   追溯读 D-003…D-010 与那份归档计划。
+>   旧文字按 git 历史追溯。
 >
-> **精确接口** → [`CONTRACTS.md`](CONTRACTS.md)；**持久决策** → [`DECISIONS.md`](DECISIONS.md)；
-> 实现与操作现状 → [`../README.md`](../README.md)；HMR → [`HMR.md`](HMR.md)。
+> **精确接口** → [`CONTRACTS.md`](CONTRACTS.md)；实现与操作现状 → [`../README.md`](../README.md)；
+> HMR → [`HMR.md`](HMR.md)。
 
 ---
 
@@ -178,8 +178,6 @@ verify-client-packages / bundle-purity gate 强制，外置包拿不到那些门
 4. **UI 槽位**：只填已声明的 `sidebar.footer.action` + `shell.overlay`，**无需改 DSH 仓库**（路线 A，见 §6.0）。
 5. **不要看 `dsh-costbook`**（已废弃 / 有问题的实现），不要照抄它。
 
-逐条的持久决策、理由与取代关系在 [`DECISIONS.md`](DECISIONS.md)，此处不复述。
-
 ## 11. 风险与后续
 
 | 项 | 风险 / 说明 |
@@ -226,7 +224,7 @@ gated only by their credit balance」「requests skip the window check entirely�
 写明订阅额度到期作废，而「Can I subscribe every other month? Yes.」——**隔月订阅是官方用法**，
 「没有订阅」是正当的付费形态。OpenCode Go 只报窗口百分比、不报套餐身份，唯一可用信号是状态码：
 **403 = valid key, no Go subscription**（与 401 鉴权失败是两回事——记成「查询失败」会让用户去查网络）。
-这些是**外部事实**，代码推不出来；规则见 [`CONTRACTS.md`](CONTRACTS.md) 与 **D-014**。
+这些是**外部事实**，代码推不出来；规则见 [`CONTRACTS.md`](CONTRACTS.md)。
 
 ## 附二：社区/生态参考（GitHub，检索实测）
 

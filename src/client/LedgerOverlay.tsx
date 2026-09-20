@@ -51,7 +51,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       .catch(() => null)
   }, [])
 
-  // host 的读路径刻意**不**等后台的权威 walk（D-030），所以一次读到的 `running` 只是
+  // host 的读路径刻意**不**等后台的权威 walk，所以一次读到的 `running` 只是
   // 那一刻的事实：不追它，footer 就会一直停在「正在重新扫描…」。打开浮窗（读路径自己
   // 排了 walk）与按下重新扫描（路由在扫描完成前就返回）都靠它把状态追到落定——否则
   // 不仅状态是假的，walk 补进来的行也不会出现在屏上。

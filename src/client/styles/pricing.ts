@@ -1,76 +1,98 @@
 /** pricing 片段：必须排在 shared 之前（窄屏段覆盖这里的高度）。 */
 export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-sec{display:flex;flex-direction:column;gap:14px;}
-/* 顺序：搜索 | 保存状态 | 重试 | 筛选芯片——芯片必须最后一个，否则它会被状态文字推着横移。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-[data-plugin="dsh-tokbook"] .dtpl-price-search{
-  flex:1;min-width:0;height:28px;padding:0 10px;
-  border:1px solid var(--dtpl-border);background:transparent;color:var(--dtpl-fg);
-  font:inherit;font-size:12px;
-}
-/* placeholder 是这个字段唯一可见的名字，所以墨色取 fg-2（可读文本档）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-search::placeholder{color:var(--dtpl-fg-2);}
-[data-plugin="dsh-tokbook"] .dtpl-price-chip{
-  appearance:none;flex:none;height:28px;padding:0 10px;
-  display:inline-flex;align-items:center;gap:6px;
-  border:1px solid var(--dtpl-border);background:transparent;
-  color:var(--dtpl-fg-2);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-chip:hover{color:var(--dtpl-fg);}
-/* 筛选开着：amber 边框 + warn-ink 文字（裸 warn 作正文对比度不足）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-chip.is-on{
-  color:var(--dtpl-warn-ink);border-color:color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
-  background:color-mix(in srgb,var(--dtpl-warn) 10%,transparent);
-}
-/* 事实带走跨 tab 共用的 .dtpl-hero-facts（见 ledger 片段）。
-   b 必须单独指一次：.dtpl-hero-facts b 的优先级与本条相同，pricing 片段拼在 ledger 之后，所以这里赢。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-read{display:flex;flex-direction:column;gap:6px;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-price-fact-unknown,
-[data-plugin="dsh-tokbook"] .dtpl-price-fact-unknown b{color:var(--dtpl-warn-ink);}
-[data-plugin="dsh-tokbook"] .dtpl-price-legend{
-  margin:0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-legend b{color:var(--dtpl-warn-ink);font-weight:600;}
 
-[data-plugin="dsh-tokbook"] .dtpl-price-cards{display:flex;flex-direction:column;gap:8px;}
-/* 卡面 = 洗色阶梯第 1 档（6% 压窗面，见 .dtpl-price-history）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-card{
+/* 选择带 = 这一屏的**唯一**导航面：两个下拉，一行一个。
+   min-width:0 是必需的——grid 项的自动最小宽度是内容宽度，不给 0 的话长 route key
+   会把整个带子顶宽、把原生下拉的插入符挤出浮窗外。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-pick{
+  display:flex;flex-direction:column;gap:8px;
+  padding:10px;
   border:1px solid var(--dtpl-border);
   background:color-mix(in srgb,var(--dtpl-fg) 6%,var(--dtpl-card));
   box-shadow:var(--dtpl-metal);
-  overflow:hidden;
 }
-/* 卡头 = 阶梯第 2 档（11%）：这一档起 fg-2 压不住 4.5:1，梁上一切走主墨。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-head{
-  display:flex;align-items:flex-start;gap:8px;
-  padding:7px 10px 7px 8px;border-bottom:1px solid var(--dtpl-border);
-  background:color-mix(in srgb,var(--dtpl-fg) 11%,var(--dtpl-card));
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-row{
+  display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:10px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-head .dtpl-hero-facts{color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-price-card[data-collapsed="true"] .dtpl-price-head{border-bottom:0;}
-/* route key 是唯一不可预测的值，只有它截断。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-fold{
-  appearance:none;border:0;background:transparent;text-align:left;
-  flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;
-  padding:3px 4px;
-  font:inherit;color:inherit;cursor:pointer;
+/* 字段名是要读的文本，走 fg-2（fg-3 只承载装饰）；与调价史里同名的格子同一档。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-k{font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
+/* 下拉占满余量：选择带只有这两行，值得把宽度给足。26px 高与体积里的下拉同档，
+   但文字走 12px 而不是 11px——它承载的是整条 route key，不是「工作日」。
+   字体刻意**不**改成等宽：模型串与 route key 是身份不是数字，这两个盒子的宽度由余量决定，
+   不需要数字对齐；原生 select 的字体在这里正合适。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-sel{
+  width:100%;height:26px;font-size:12px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-fold:hover{background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);}
-/* 身份行整体换行而不是压碎名字：名字与 key 都留着，放不下时 key 让位到下一行。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-fold-top{
-  display:flex;align-items:center;gap:8px;flex-wrap:wrap;row-gap:2px;min-width:0;
+
+/* 选中模型的详情面：身份行在最上，下面整块是让位层 .dtpl-price-rail（竖轨与段卡都在那一层里）。
+   data-dirty 是**面板级**的指示：未落盘的改动只挂着这一条墨痕，
+   没有它，改完不离开输入框时屏幕上没有任何东西说「还没写进去」。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-detail{
+  display:flex;flex-direction:column;gap:8px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-caret{flex:none;width:10px;color:var(--dtpl-fg-3);font-size:9px;}
-[data-plugin="dsh-tokbook"] .dtpl-price-label{flex:none;font-size:14px;line-height:20px;font-weight:600;color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-price-key{
+[data-plugin="dsh-tokbook"] .dtpl-price-detail[data-dirty="true"]{
+  box-shadow:inset 2px 0 0 var(--dtpl-fg);
+}
+/* 调价史那一叠段卡：左内缩 30px 让它们落在轨的右边，8px 间距代替段与段之间的发丝线。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-detail-head{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;row-gap:4px;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-detail-id{
+  display:flex;align-items:baseline;gap:8px;flex:1 1 auto;min-width:0;
+}
+/* 身份是这一块唯一长度不可预测的值，所以也是唯一让位的值。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-name{
   flex:0 1 auto;min-width:0;
-  /* 横梁上不能用 fg-2。 */
-  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg);
+  font-size:13px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-/* 计费性质切换走全窗口唯一的「当前项」语言（窗口 tab 条、总览子 tab 同款）；横梁上未选中项也是主墨。 */
+/* 没有名字的行只靠精确串站立，所以不弱化、走等宽。判据是 TSX 上的 data-exact
+   （这一串是不是精确模型串），不是 :only-child——否则命名与否会改变字体。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-name[data-exact="true"]{
+  font-family:var(--dtpl-mono);
+}
+/* 账本的计费键：命名过才印第二遍，走 dim 档、等宽。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-exact{
+  flex:0 1 auto;min-width:0;
+  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-dim);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-reqs{
+  flex:none;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+
+/* 费率格的度量。宽度由费率能是什么决定，不是今天的数字：要装下最长的那种历史价（8 字符），
+   数字必须等宽（比例体让同位数字错开，固定列就失去可比性）。80px = 8 字符价 + 两侧内边距。
+   --dtpl-cell-pad-x 与单元格的标签共享：标签必须和下面的数字结束在同一边缘。
+   整张卡的四处费率带（段卡全天价、每个峰谷时段）共用这一个格宽与同一个左缘，于是四档价在整张卡
+   里落成同一组竖线——峰谷那几行空着的格子报的正是它上面那个数（留空 = 沿用），对齐就是那件事的读法。
+   --dtpl-days-w 只由日档那一列用：时段头是下拉（自身 8px 插入符），全天价那行是锁死的文字——
+   盒子同宽，两行的钟点才落在同一条竖线上。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-sec{
+  --dtpl-cell-pad-x:7px;
+  --dtpl-rate-w:80px;
+  --dtpl-rate-gap:8px;
+  --dtpl-days-w:52px;
+}
+
+/* 硬约束：flex:none + nowrap——折行会撑高一行，截断会丢状态。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-badge{
+  flex:none;
+  display:inline-flex;align-items:center;height:15px;padding:0 5px;
+  border:1px solid var(--dtpl-border);
+  font-size:10px;line-height:13px;font-weight:600;white-space:nowrap;
+  color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-issue{
+  margin:0;padding:2px 10px 6px 10px;
+  font-size:10px;line-height:15px;color:var(--dtpl-err);
+}
+/* 计费性质切换走全窗口唯一的「当前项」语言（窗口 tab 条、总览子 tab 同款）；
+   它是**通道**的属性，摆在选中模型的详情头右轨上（通道名已经进了下拉，它需要这个主语）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-switch{
-  flex:none;display:flex;align-self:center;
+  flex:none;display:flex;
   border-bottom:1px solid var(--dtpl-border);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-switch button{
@@ -89,108 +111,10 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-switch button[aria-pressed="true"]::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-empty{
-  margin:0;padding:10px 11px;font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-rows{display:flex;flex-direction:column;}
 
-/* 费率格的度量。--dtpl-rate-w 由费率能是什么决定，不是今天的数字：它要装下最长的那种历史价（8 字符），
-   数字必须等宽（比例体让同位数字错开，固定列就失去可比性）。
-   --dtpl-cell-pad-x 与列头共享：列头必须和下面的数字结束在同一边缘。
-   抽屉走自己的 --dtpl-seg-rate-w：账带上的数字是主角（14px 等宽），列表那侧是 12px 读数——
-   两处字号不同，列宽就不可能再共用一个值；抽屉内全天价与峰谷价共用这一档，跨段落在同一组竖线上。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-sec{
-  --dtpl-cell-pad-x:7px;
-  --dtpl-rate-w:74px;
-  --dtpl-rate-gap:6px;
-  --dtpl-rates-w:calc(4 * var(--dtpl-rate-w) + 3 * var(--dtpl-rate-gap));
-  --dtpl-seg-rate-w:80px;
-  --dtpl-reqs-w:44px;
-  /* 日档列宽必须由同一个值给出：时段头是下拉（自身 8px 插入符），全天价那行是锁死的文字——
-     盒子同宽，两行的钟点才落在同一条竖线上。 */
-  --dtpl-days-w:52px;
-}
-
-/* 每行网格的轨道与上方列头相同。硬约束：展开槽宽与 .dtpl-price-more 的命中区必须一起改
-   （列宽小于控件会把控件压回去）；第一格 minmax(32px,auto) 是这一行唯一的高度来源。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-cols,
-[data-plugin="dsh-tokbook"] .dtpl-price-row{
-  display:grid;
-  /* 请求数列 minmax(44px,max-content)：44px 是常见位数的下限，位数再多也不截断。 */
-  grid-template-columns:minmax(0,1fr) minmax(var(--dtpl-reqs-w),max-content) var(--dtpl-rates-w) 32px;
-  column-gap:10px;align-items:center;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-cols{
-  padding:6px 10px 4px;
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-col-id{padding-left:0;}
-[data-plugin="dsh-tokbook"] .dtpl-price-col-reqs{text-align:right;}
-[data-plugin="dsh-tokbook"] .dtpl-price-cols .dtpl-price-rates{
-  display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
-  column-gap:var(--dtpl-rate-gap);
-}
-/* 标签与数值共享右边缘：内边距必须与数字格一致。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-col-rate{
-  text-align:right;padding-right:var(--dtpl-cell-pad-x);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-row{
-  grid-template-rows:minmax(32px,auto);
-  min-height:32px;padding:4px 10px;border-top:1px solid var(--dtpl-hairline);
-  scroll-margin-block:56px;
-  cursor:pointer;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-row:first-child{border-top:0;}
-/* 整行是展开热区（行尾 ▸ 是它的键盘可达形态）；行内文字仍可拖选。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-row:hover{background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);}
-/* 未保存那张的侧条取墨色不取强调色：强调色随宿主皮肤变。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-row[data-dirty="true"]{
-  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
-  box-shadow:inset 2px 0 0 var(--dtpl-fg);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-row[data-open="true"]{
-  /* 与抽屉同面（--dtpl-surface），两者之间不画缝。 */
-  background:var(--dtpl-surface);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-row:focus-within{
-  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dtpl-accent) 45%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-row[data-dirty="true"]:focus-within{
-  box-shadow:inset 2px 0 0 var(--dtpl-fg),
-    inset 0 0 0 1px color-mix(in srgb,var(--dtpl-accent) 45%,transparent);
-}
-/* 身份 :: overflow:hidden 让这一格在网格里的自动最小宽度变成 0，省略号才是真的
-   （否则网格项被内容顶宽、把右边的列挤出卡片）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-title{
-  display:block;min-width:0;
-  font-size:12px;line-height:16px;font-weight:500;color:var(--dtpl-fg);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-/* 没有名字的行只靠精确串站立，所以不弱化、走等宽。判据是 TSX 上的 data-exact（这一串是不是精确模型串），
-   不是 :only-child——否则徽章多少会改变名字的字体。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-title[data-exact="true"]{
-  color:var(--dtpl-fg);font-family:var(--dtpl-mono);
-}
-/* 请求数必须永远完整（host 按它降序排表），只占 --dtpl-reqs-w 这一条轨道；等宽数字 + 右对齐。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-reqs{
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
-  font-variant-numeric:tabular-nums;
-  text-align:right;white-space:nowrap;
-}
-/* 硬约束：flex:none + nowrap——折行会撑高一行，截断会丢状态。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-badge{
-  flex:none;
-  display:inline-flex;align-items:center;height:15px;padding:0 5px;
-  border:1px solid var(--dtpl-border);
-  font-size:10px;line-height:13px;font-weight:600;white-space:nowrap;
-  color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-issue{
-  margin:0;padding:2px 10px 6px 10px;
-  font-size:10px;line-height:15px;color:var(--dtpl-err);
-}
-
-/* 四个格子：抽屉输入框与行内只读价共用同一套度量；等宽是列宽的前提。 */
+/* 四个格子：段卡的全天价与峰谷时段共用同一套度量（等宽是列宽的前提）与同一个左缘。
+   四格**紧挨成一簇**，不摊到整行——摊开后相邻两个数之间空出一大段，四档价就不再是一组可比
+   读数，成了四个孤立的数；留白归行尾，不塞进格与格之间。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-rates{
   display:grid;grid-template-columns:repeat(4,var(--dtpl-rate-w));
   column-gap:var(--dtpl-rate-gap);min-width:0;
@@ -200,17 +124,9 @@ export const CSS_PRICING = `
   /* 字段名是要读的文本，走 fg-2（fg-3 只承载装饰）。 */
   display:none;font-size:9px;line-height:12px;letter-spacing:.2em;color:var(--dtpl-fg-2);
 }
-/* 行内价是只读读数，不是控件：不进 Tab 序。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-value{
-  display:flex;align-items:center;justify-content:flex-end;
-  min-height:26px;padding:0 var(--dtpl-cell-pad-x);
-  font-family:var(--dtpl-mono);font-size:12px;line-height:16px;
-  font-variant-numeric:tabular-nums;color:var(--dtpl-fg);
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-value[data-empty="true"]{color:var(--dtpl-fg-dim);}
-/* 不变量：坐刻线的才可触（静止 22% → hover 45% → 聚焦墨线，焦点指示就是这条线，outline 关掉），
-   纯展示文字不坐线且一律 fg-2。四档价四格例外：静止不画线，线归整行所有
-   （见 .dtpl-price-seg-allday / .dtpl-price-slot 的 border-bottom），单格的线只在 hover 与聚焦时现身。 */
+/* 可触物静止就带记：**刻线**给一次性的值、菜单与动作（静止 22% → hover 45% → 聚焦主墨，
+   outline 关掉），**框**给四档价那几格——成阵列重复的填数格，闭合的边让「哪儿能填」静止可见；
+   纯展示文字不带记，一律 fg-2。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-input{
   width:100%;box-sizing:border-box;
   height:28px;padding:0 var(--dtpl-cell-pad-x);
@@ -227,30 +143,22 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-input:focus{
   outline:none;border-bottom-color:var(--dtpl-fg);
 }
-/* 费率格静止无刻线：那道线归整行所有。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-rates .dtpl-price-input{border-bottom-color:transparent;}
-[data-plugin="dsh-tokbook"] .dtpl-price-rates .dtpl-price-input:hover{
-  border-bottom-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
+/* 四档价的格子成框：内边距减掉那 1px 边，数字与格名仍结束在同一边缘。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-rates .dtpl-price-input{
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
+  padding:0 calc(var(--dtpl-cell-pad-x) - 1px);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-rates .dtpl-price-input:focus{border-bottom-color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-rates .dtpl-price-input:hover{
+  border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-rates .dtpl-price-input:focus{border-color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-price-cell[data-state="bad"] .dtpl-price-input{
-  color:var(--dtpl-err);border-bottom-color:var(--dtpl-err);
+  color:var(--dtpl-err);border-color:var(--dtpl-err);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cell-err{
   font-size:10px;line-height:14px;color:var(--dtpl-err);text-align:right;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-/* 命中区桌面 32px、窄屏 44px（见 shared 窄屏段），两档都在 WCAG 2.2 的 24px 之上。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-more{
-  appearance:none;border:0;background:transparent;
-  width:32px;height:32px;padding:0;
-  color:var(--dtpl-fg-2);font:inherit;font-size:14px;cursor:pointer;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-more:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-price-more[aria-expanded="true"]{
-  color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
-}
-
 /* 热区 24px（WCAG 2.2 SC 2.5.8 的下限），与同一行的复制/删除齐平。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-add{
   appearance:none;background:transparent;
@@ -282,22 +190,24 @@ export const CSS_PRICING = `
 
 /* 读面的洗色阶梯（一律以 --dtpl-card 为底，不逐层叠乘）：
      0%   窗面
-     6%   通道卡面
-     11%  卡头横梁 —— 这一档起 fg-2 禁上（浅肤 fg-2 压 11% 面只剩 4.29:1）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-history{
+     6%   选择带 / 段卡面
+     11%   —— 这一档留作「比段卡再高一档」的余量（此前是展开卡的横梁）。 */
+/* 调价史那一叠：竖轨画在这一层上，左内缩 30px 把段卡放在轨的右边。
+   **这一层只为一件事存在**：给轨一个与段卡同宽的坐标原点——把轨画在详情面那一层上
+   会让它落在卡片左缘以内，直接从卡面上穿过去。身份行不在这一层里：它是这一块的头，
+   左缘必须与上面的选择带对齐。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-rail{
   position:relative;
   display:flex;flex-direction:column;gap:8px;
-  padding:10px 10px 14px 30px;
-  /* 与展开行同面，不画缝；抽屉的结束由下一条行的上边线说。 */
-  border-top:0;
-  background:var(--dtpl-surface);
+  padding:0 0 6px 30px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-history::before{
+/* 竖轨：调价史从头贯到尾（首记 → 今天），段卡的钉与孔落在它上面。左端 12px、内缩 30px
+   与轴上的钉（段卡左缘 -21.5px）是同一组几何——改一处就要一起改。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-rail::before{
   content:"";position:absolute;left:12px;top:6px;bottom:6px;width:1px;
   background:color-mix(in srgb,var(--dtpl-fg) 14%,transparent);
 }
-/* 一张价 = 一张卡：面与通道卡同档（6% 洗色），于是段与段的分隔不再要发丝线，由 8px 间隙说。
-   左内边距与抽屉同值：卡内四档价的左缘仍与轴上的钉落在同一组竖线上。 */
+/* 一张价 = 一张卡：面与选择带同档（6% 洗色），于是段与段的分隔不再要发丝线，由 8px 间隙说。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg{
   position:relative;
   display:flex;flex-direction:column;gap:5px;
@@ -329,12 +239,6 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-line{
   display:flex;align-items:center;gap:10px;min-width:0;
 }
-/* 两条带子各自横跨整行。四档价是定宽格子（80px = 8 字符价 + 两侧内边距），宽度不能让，
-   余量摊到格子之间（space-between）——跨行仍落在同一组竖线上。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-history .dtpl-price-rates{
-  grid-template-columns:repeat(4,var(--dtpl-seg-rate-w));
-  justify-content:space-between;
-}
 /* 托底价的戳与生效时刻同档（区块标题档），只是没有时刻。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-floor-k{
   font-size:15px;line-height:20px;font-weight:600;letter-spacing:.22em;color:var(--dtpl-fg);
@@ -352,7 +256,7 @@ export const CSS_PRICING = `
 }
 /* 原生日历按钮是全窗口唯一的浏览器控件，收掉；键入与方向键路径写进字段的 title。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-input-date::-webkit-calendar-picker-indicator{display:none;}
-/* 右轨 = 段自己的复制/删除（常显）；峰谷时段那一对挂在时段头行（.dtpl-price-seg-actions，hover/聚焦现身）。 */
+/* 右轨 = 段自己的复制/删除（常显）；峰谷时段那一对挂在时段头行（.dtpl-price-seg-actions，聚焦时现身）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-tools{
   margin-left:auto;flex:none;
   display:flex;align-items:center;justify-content:flex-end;
@@ -364,23 +268,23 @@ export const CSS_PRICING = `
   display:flex;flex-direction:column;gap:6px;
   padding:2px 0 1px;
 }
-/* 幽灵行与子目同高（81px = 10px 上垫 + 70 内容 + 1px 刻线，与 .dtpl-price-slot 的度量绑死）；
-   margin-top 4px 与详情带 6px gap 合出子目之间的 10px 节奏。 */
+/* 幽灵行不是子目：删掉盘之后它没有可对位的几何，就只做一颗与子目**同左缘、同节奏**的按钮
+   （内边距由 .dtpl-price-add 给），不再假装自己是 81px 高的空子目。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-band{display:flex;min-width:0;margin-top:4px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-add-slot{
-  width:100%;min-height:81px;box-sizing:border-box;
-  display:flex;align-items:center;gap:10px;
-  padding:10px 2px 0;justify-content:flex-start;
+  width:100%;box-sizing:border-box;
+  display:flex;align-items:center;justify-content:flex-start;
+  padding:8px 2px 8px 0;
 }
-/* 名分与真实时段的「日档」落在同一条左缘（盘 40 + 间隙 10）。 */
+/* 名分与子目的「日档」落在同一条左缘（子目已无盘可让位）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-add-slot-k{
   flex:1;display:flex;align-items:center;justify-content:flex-start;gap:4px;
 }
 
 /* 全天价行与峰谷子目同构：满弧盘 + 锁死的时间段头（不给刻线、不给插入符，整行退到 fg-2）+ 四档价。
-   四档价共用数字底下那一条刻线——它同时是行与行之间唯一的分隔。 */
+   行与行之间不再画横线：四档价各自成框，一行到哪儿为止由框说，间距留给子目自己的上内边距。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday{
-  display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--dtpl-hairline);
+  display:flex;align-items:center;gap:10px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday-head{display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
@@ -388,30 +292,68 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday-days{
   box-sizing:border-box;min-width:var(--dtpl-days-w);padding-left:2px;
 }
-/* 峰谷时段是账带条目下的子目：与全天价同面、同起点、同一条刻线（各画在自己数字底下）；
-   不画自己的上边线（会与上一道相距 7px），不缩进。「留空 = 沿用全天价」由占位数字与 title 说。
-   上内边距就是子目之间的全部间距（.dtpl-price-slots 因此不留 gap）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-slots{display:flex;flex-direction:column;margin-top:1px;}
+/* 峰谷时段是账带条目下的子目：与全天价同面、同一套框（每个数字自己成框）。「留空 = 沿用全天价」
+   由占位数字与 title 说。上内边距就是子目之间的全部间距（.dtpl-price-slots 因此不留 gap）。
+   子目比段卡内更松：它自带一行窗口事实，四档价属第二层。
+   竖轨是**一条**、贯穿整组（逐条分段会在每个点上留一处断口，正好像轨被点打断了），
+   两端由同一支颜色渐隐——它要说的是「这条线托着这几个窗口」，不是一根切齐的边。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-slots{
+  --dtpl-rail-ink:color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
+  position:relative;display:flex;flex-direction:column;margin-top:1px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-slots-spine{
+  position:absolute;left:20px;top:0;bottom:0;width:1px;
+  background:linear-gradient(180deg,transparent,var(--dtpl-rail-ink) 16px,
+    var(--dtpl-rail-ink) calc(100% - 16px),transparent);
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-slot{
   display:flex;align-items:center;gap:10px;
-  padding:10px 0 0;
-  border:0;border-bottom:1px solid var(--dtpl-hairline);
+  padding:12px 0 0;
   background:transparent;
+  /* 栅栏是绝对定位的装饰，定位以本槽为参照。 */
+  position:relative;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-slot-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;}
-[data-plugin="dsh-tokbook"] .dtpl-price-slot-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;}
-/* 颜色只活在样式里（组件不写 var() 描边——selfcheck 会把它误读成类）；弧长与起点是几何，留在属性上。 */
+/* 左栅栏：圆点 + 桩线，都绝对定位——点的圆心按算术钉在盘的中线上（槽左缘 + 20），
+   桩线从点的右缘接到首行的左缘（槽左缘 + 50）。不靠 flex 的余量推算，窄屏只改这几个数。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-slot-rail{
+  position:absolute;left:0;top:0;bottom:0;width:50px;pointer-events:none;
+}
+/* 圆点与桩线钉在**首行那条刻线**上（槽顶 + 36px = 12px 上垫 + 24px 的下拉盒底），
+   不是首行的盒中线——栅栏要接的是那条线，不是文字的中心。下拉盒高是定值，所以这里不必量文字。
+   桩线取 35.5px：1px 的线落在半像素上时会被摊成两行，钉在整像素上才是一条实线。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{
+  position:absolute;left:16.5px;top:36px;width:7px;height:7px;
+  transform:translateY(-50%);border-radius:50%;background:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-slot-stub{
+  position:absolute;left:23.5px;top:35.5px;width:26.5px;height:1px;background:var(--dtpl-rail-ink);
+}
+/* 内容整层退到盘 + 间隙之后（40 + 10）：首行与四格便都落在与全天价同一组竖线上，
+   栅栏那条绝对定位的桩线正好接到这个内缩的左缘。行距 8px：窗口事实与它改写的那四档价
+   是两层东西，隔开一点才读得出「这几个数是这一行的」。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-slot-body{
+  flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;
+  padding-left:50px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-slot-head{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;
+}
+/* 全天价那一行的盘。颜色只活在样式里（组件不写 var() 描边——selfcheck 会把它误读成类）；
+   弧长与起点是几何，留在属性上。峰谷子目不再画盘，只剩这一处用这三个类。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring{flex:none;}
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring-track{
   fill:none;stroke:color-mix(in srgb,var(--dtpl-fg) 16%,transparent);stroke-width:1;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring-arc{fill:none;stroke:var(--dtpl-fg);stroke-width:2;}
-/* 幽灵环比淡轨亮一档（40% / 1.5px vs 16% / 1px）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-slot-ring-ghost{
-  fill:none;stroke:color-mix(in srgb,var(--dtpl-fg) 40%,transparent);stroke-width:1.5;
-}
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring-zero{stroke:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);stroke-width:1.5;}
-/* 时段头上的复制/删除：hover 或聚焦现身（始终可达，非仅 hover）。 */
+/* 时长是派生的读数：走 dim 档、钟点右侧留 2px，不参与那一簇发丝线的定位。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-slot-span{
+  margin-left:2px;font-size:11px;line-height:16px;color:var(--dtpl-fg-dim);
+}
+/* 零覆盖的时段与计价无关：整条退到 dim 档，那句「未改写任何档」是它唯一要说的状态。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-slot[data-inert="true"] .dtpl-price-rates{opacity:.75;}
+[data-plugin="dsh-tokbook"] .dtpl-price-slot-inert{font-size:11px;line-height:16px;color:var(--dtpl-fg-dim);}
+/* 时段头上的复制/删除：focus-within 常显（触控没有悬停，可达性不靠 hover）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{
   margin-left:auto;display:inline-flex;align-items:center;gap:2px;
   opacity:0;transition:opacity .12s ease;
@@ -454,10 +396,11 @@ export const CSS_PRICING = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-history-hint{margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
 
-/* 状态文字出现/换文案/消失都不许推动别的东西：右对齐贴着芯片，余量由搜索框让出；
-   max-width 是这条规矩的保险（长句在自己盒子里折行，不把芯片挤到第二行）。 */
+/* 状态文字出现/换文案/消失都不许推动别的东西：它独占一行（选择带下面那条窄带），
+   出现时只把下面的详情推下去一点点；max-width 是长句的保险（在自己盒子里折行）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 [data-plugin="dsh-tokbook"] .dtpl-price-state{
-  max-width:min(100%,420px);text-align:right;
+  max-width:min(100%,420px);
   font-size:11px;line-height:16px;color:var(--dtpl-fg-2);overflow-wrap:anywhere;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-saved{color:var(--dtpl-ok);}
@@ -466,9 +409,8 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-error{color:var(--dtpl-err);font-weight:600;}
 
 /* 骨架屏按这一屏真实的排法分段，高度是实测值：任务是首屏别整体下跳，不是预告行数。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-sk-facts{height:59px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-sk-pick{height:78px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-sk-open{height:214px;}
-[data-plugin="dsh-tokbook"] .dtpl-price-sk-card{height:63px;}
 
 [data-plugin="dsh-tokbook"] .dtpl-price-empty-act{margin-top:12px;}
 `

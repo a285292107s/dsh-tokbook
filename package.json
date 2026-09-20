@@ -34,7 +34,7 @@
     "build": "tsc -b tsconfig.json && node scripts/build-client.mjs",
     "typecheck": "tsc --noEmit",
     "watch": "tsc -b tsconfig.json --watch",
-    "ledger": "node scripts/preview-overlay.mjs --ledger",
+    "ledger": "node --experimental-strip-types scripts/preview-overlay.ts --ledger",
     "smoke": "node --experimental-strip-types scripts/smoke.ts",
     "selfcheck": "node --experimental-strip-types scripts/selfcheck-rebuild.ts",
     "selfcheck:ui": "node --experimental-strip-types scripts/selfcheck-ui.ts",

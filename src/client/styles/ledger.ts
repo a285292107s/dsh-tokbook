@@ -371,7 +371,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-ws-fail{
   font-weight:600;color:var(--dtpl-warn-ink);font-variant-numeric:tabular-nums;
 }
-/* 「未归属」是对账行、不是项目（D-018）：它不参与「最近有操作在前」，所以用一条实线把它从
+/* 「未归属」是对账行、不是项目：它不参与「最近有操作在前」，所以用一条实线把它从
    上面的工作区清单里分出来、标题降一档；行内其余排版不动，它照样有词元、金额与占比条。 */
 [data-plugin="dsh-tokbook"] .dtpl-row.is-unattributed{
   margin-top:22px;padding-top:14px;

@@ -715,3 +715,33 @@ export function stagedChanges(
 export function modelDirty(route: string, row: ModelDraft, baseline: ReadonlyMap<string, string>): boolean {
   return (baseline.get(rowKey(route, row.model)) ?? '') !== modelSignature(row)
 }
+
+// ---------------------------------------------------------------------------
+// 下拉选项的文字
+// ---------------------------------------------------------------------------
+
+/**
+ * 通道下拉里一项写什么。
+ *
+ * 两个下拉取代平铺之后，**选项文字自己就是这一屏唯一的摘要面**——它必须回答「这条通道有没有
+ * 洞」，否则读者只能一条条点开看（那正是这一版要消灭的成本）。全 0 的那一半不复述 0：选项
+ * 列是扫读面，负号（`N 个模型未知`）比 `0 个模型未知` 短一截、也更快认出来。
+ */
+export function routeOptionLabel(card: RouteDraft): string {
+  const models = [...card.models.values()]
+  const unknown = models.filter(priceUnknown).length
+  const parts = [card.route]
+  if (card.records > 0) parts.push(`${String(card.records)} 次`)
+  parts.push(unknown === 0 ? `${String(models.length)} 个模型` : `${String(unknown)} 个模型未知`)
+  return parts.join(' · ')
+}
+
+/** 模型下拉里一项写什么。`dirty` 由调用处按基线算——文字里那句「未保存」是这一屏唯一能说它的地方。 */
+export function modelOptionLabel(row: ModelDraft, dirty: boolean): string {
+  const parts = [row.model]
+  if (row.records > 0) parts.push(`${String(row.records)} 次`)
+  if (priceUnknown(row)) parts.push('价格未知')
+  if (dirty) parts.push('未保存')
+  return parts.join(' · ')
+}
+

@@ -1,6 +1,6 @@
 # 代码注释规范 — dsh-tokbook
 
-> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-09-19 · supersedes: —
+> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-09-20 · supersedes: —
 
 本仓库注释的唯一读者是 AI（单人维护 + AI 辅助）。判据因此不是「写得清不清楚」，而是
 **这条信息 AI 从代码里读不读得出来**——读得出来的不写。全文只一条尺子、四类该写、四类不写。
@@ -19,14 +19,14 @@
 ## 四不写
 
 1. **改动史。** 「此前 / 上一版 / 曾试过三版 / D-0xx 撤掉」不写——git 是流水账的去处，
-   仍然生效的取舍写进 `docs/DECISIONS.md` 一条，代码里不复述。
+   仍然生效的取舍写进 `docs/DESIGN.md` 的推理里，代码里不复述。
 2. **代码已经说了的。** 类型名、CSS 值、一眼能看出的结构、以及 `@module` 这类路径复述。
    `/** 四桶之和。 */` 这种字段复述只在它给出代码里没有的**口径**时才留（如「未知 ≠ 0」）。
 3. **会被下一次调参推翻的数值推导。** 逐项预算加总、实测 px 明细、「这几个数怎么来的」都不写：
    值就在代码里。要留就留**约束**——「这个值由首屏预算导出，改它之前先重量」。
 4. **同一条规则的第二份副本。** 规则只在真源处写一遍，别处引用，不复述整句理由。真源：
    配色 / 字号 / 对比度 → `styles/tokens.ts`；口径与不变量 → `docs/CONTRACTS.md`；
-   取舍理由 → `docs/DECISIONS.md`；界面机制 → `styles/shared.ts` 与各片段。
+   取舍理由 → `docs/DESIGN.md`；界面机制 → `styles/shared.ts` 与各片段。
 
 ## 形态
 

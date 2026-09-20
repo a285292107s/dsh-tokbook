@@ -384,7 +384,7 @@ export interface ProviderUsageView {
  * 按模型 / 按工作区也不在这里：两者是**窗口**的切法，随
  * {@link ProviderUsageView} 走（用量明细 tab，窗口由那一页自己选）。
  * `unpricedModels` 同理不过 wire：概览不再渲染价格未知的模型清单，
- * 该事实在用量明细的通道卡与价格表的筛选里（D-032）。
+ * 该事实在用量明细的通道卡与价格表的筛选里。
  */
 export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour' | 'byModel' | 'unpricedModels'> {
   /** 四桶之和（input + cacheRead + cacheWrite + output）。 */

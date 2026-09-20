@@ -93,48 +93,34 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"] .dtpl-provider-nums{align-items:flex-start;}
   [data-plugin="dsh-tokbook"] .dtpl-provider-cost{align-items:flex-start;}
 
-  /* 价格表：四列费率加模型身份塞不进手机。整行改为堆叠——身份 + 请求数 + 展开钮一行、再 2×2 带标签的
-     格子——并去掉已对不齐的列头。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-cols{display:none;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-row{
-    grid-template-columns:minmax(0,1fr) auto auto;row-gap:6px;
-  }
-  /* 窄屏的列头没了，所以请求数落在身份右边、展开钮左边，仍然读得出「这一行有多少次调用」。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-title{grid-column:1;grid-row:1;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-reqs{grid-column:2;grid-row:1;}
-  /* 展开钮是进入一行调价史的唯一入口，触控 sheet 上给完整 44px 热区。
-     这里只覆盖**几何**、不覆盖字形：字形全窗口一个值——触控与鼠标的差别是热区大小。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-more{
-    grid-column:3;grid-row:1;width:44px;height:44px;
-  }
-  [data-plugin="dsh-tokbook"] .dtpl-price-rates{
-    grid-column:1 / -1;
-    grid-template-columns:repeat(2,minmax(0,1fr));row-gap:6px;
-    margin-top:2px;
-  }
-  [data-plugin="dsh-tokbook"] .dtpl-price-cell-k{display:block;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-value{justify-content:flex-start;}
-  /* 窄屏没有列头，所以把行内那一格只给读屏的列名放出来当小标签——同一份文字，不再写第二遍。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-value-k{
-    position:static;width:auto;height:auto;margin:0;overflow:visible;clip-path:none;
-    font-size:9px;line-height:12px;color:var(--dtpl-fg-3);
-  }
+  /* 价格表：选择带在窄处把标签压窄一点，下拉多留一点宽度给 route key 与模型串。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick{padding:8px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick-row{column-gap:8px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-input{text-align:left;}
-  /* 抽屉的费率列在桌面是 80px 定宽，窄处折成 2×2。必须与 pricing 片段的
-     .dtpl-price-history .dtpl-price-rates 用同一组（或更多）类，否则被它的特异性压住。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-history .dtpl-price-rates{
+  /* 费率列在桌面是四格定宽、紧挨成一簇，窄处折成 2×2：四格并排塞不进窄 sheet 的内容列。
+     这里必须带上 .dtpl-price-seg 这一层，否则压不住 pricing 片段里那条只带 [data-plugin] 的基规则。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-seg .dtpl-price-rates{
     grid-template-columns:repeat(2,minmax(0,1fr));
   }
-  /* 窄处表盘缩到 28px：viewBox 等比缩放，弧随环一起变细，不给四档价添挤压。 */
+  /* 窄处数字改左对齐（上面那条），格名也要跟着左对齐才守在同一条左缘上：桌面那套是
+     「格名与数字结束在同一边缘」，在这里两个都反过来。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates .dtpl-price-cell-k,
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates .dtpl-price-cell-k{
+    text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
+  }
+  /* 窄处表盘缩到 28px：viewBox 等比缩放，弧随环一起变细，不给四档价添挤压。
+     左栅栏与内容内缩跟着缩到 24px（盘 28 + 间隙 10 的四舍五入），子目才不至于被推到折行。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring{width:28px;height:28px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-rail{width:24px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-slots-spine{left:14px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{left:10.5px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-stub{left:17.5px;width:6.5px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-body{padding-left:24px;}
   /* 段行在窄处：费率格折成 2×2 带档位戳（上面那条接管）；时段的复制/删除不再靠悬停（触控没有悬停）。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{opacity:1;}
   /* 段的身份行要折行：右轨现在装着「当前生效」芯片 + 段自己的复制/删除，而左边是序号 +
      最小 150px 的生效时刻——窄 sheet 一行放不下。折行后右轨（margin-left:auto）自己落第二行靠右。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-line{flex-wrap:wrap;row-gap:4px;}
-  /* 价格表的卡头：身份行与事实行之外还有计费性质开关，最窄处让它换到下一行，
-     而不是把通道名与 route key 压成几个字。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-fold{flex:1 1 200px;}
 }
 
 /* 动效（共享 keyframes；尊重 reduced motion） */
