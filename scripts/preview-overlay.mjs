@@ -199,7 +199,7 @@ const emptyOverview = {
  *  route, one row per model, each carrying its price segments (生效时间 +
  *  全天价四档 + 例外时段). The states worth looking at are all here: a priced
  *  row, a 调价史, a 峰谷时段 row, 价格未知 (both kinds: 整行没价 and 有记录早于
- *  最早一段价), 托底价 (present and missing), a 不在配置 string (the config no
+ *  最早一段价), 托底价 (present and missing), a configured:false string (the config no
  *  longer lists it), a 订阅 route, and a route that only exists because the
  *  price file names it.
  *
@@ -218,10 +218,9 @@ const PRICING_FIXTURE = {
           firstAt: Date.UTC(2026, 6, 20), lastAt: Date.UTC(2026, 8, 11), unpriced: 40,
           segments: [
           { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
-          { from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 6, note: '官方调价' },
+          { from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 6 },
           // 带峰谷时段的一段:工作日高峰另定,其余时间按全天价。
           { from: '2026-09-10T12:00', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
-            note: 'V4.1 Flash 上线,峰谷定价',
             slots: [
               { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
               { days: 'weekdays', start: 14, end: 18, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
@@ -284,16 +283,15 @@ const PRICING_FIXTURE = {
     {
       route: 'commandcode', label: 'commandcode', billing: 'subscription', records: 3240,
       models: [
-        // **最长的一个身份串**（命名空间前缀 + 长版本串），而且同时挂两枚徽章（峰谷 + 不在配置）：
-        // 上一版在这种行上会把徽章挤到第二行——实测行高从 48 涨到 60，而且两枚里只有一枚掉下去。
-        // 现在身份行只有名字（整列宽都归它），徽章整组落在出处行的行首。
+        // **最长的一个身份串**（命名空间前缀 + 长版本串）：
+        // 上一版在这种行上会把徽章挤到第二行——实测行高从 48 涨到 60。
+        // 现在身份行只有名字（整列宽都归它）；这行本身已无判定可说（峰谷与不在配置都不再上模型行）。
         // 托底价 + 一段带峰谷的调价：行内四个数字报的是正在生效的那一段。
         { model: 'deepseek/deepseek-v4-flash', configured: false, records: 2964,
           firstAt: Date.UTC(2026, 8, 6, 11, 3), lastAt: Date.UTC(2026, 8, 8, 11, 2), unpriced: 0,
           segments: [
           { from: null, inputPerMillion: 1.5, outputPerMillion: 4.5 },
           { from: '2026-09-10T12:00', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
-            note: '官方空闲价，高峰按 GOAT 页工作日另计',
             slots: [
               { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
             ] },
@@ -325,7 +323,7 @@ const PRICING_FIXTURE = {
         { model: 'mimo-v2.5', configured: true, records: 83,
           firstAt: Date.UTC(2026, 7, 17, 4), lastAt: Date.UTC(2026, 7, 17, 9), unpriced: 83,
           segments: [] },
-        // 配置里已经没有这条串了,只有账本记得它:标「不在配置」,照样可定价。
+        // 配置里已经没有这条串了,只有账本记得它:界面上不再播报这个身份事实,照样可定价。
         { model: 'retired-model', configured: false, records: 41,
           firstAt: Date.UTC(2026, 8, 1, 6), lastAt: Date.UTC(2026, 8, 1, 7, 30), unpriced: 41,
           segments: [] },
@@ -342,7 +340,7 @@ const PRICING_FIXTURE = {
         { model: 'deepseek-v4-flash', configured: false, records: 42,
           firstAt: Date.UTC(2026, 8, 3, 2), lastAt: Date.UTC(2026, 8, 3, 4), unpriced: 0,
           segments: [
-          { from: null, inputPerMillion: 1.2, outputPerMillion: 3.6, note: '自己填的中转价' },
+          { from: null, inputPerMillion: 1.2, outputPerMillion: 3.6 },
         ] },
       ],
     },
@@ -752,6 +750,7 @@ const server = createServer((req, res) => {
   const backdrop = LEDGER
     ? `<h1>dsh-tokbook — 独立查看器</h1>
     <p>直接读本机账本目录（不摄取会话日志）。数据目录见浮窗的「统计口径」tab。</p>
+    <p>浮窗穿着设备皮（无宿主色板，自带明暗双色）：默认浅面，?dark=1 换深面。</p>
     <p>ESC 或点击遮罩关闭浮窗；关闭后点左下角的按钮可重新打开。</p>`
     : `<h1>DSH 宿主应用（预览背景）</h1>
     <p>这是模拟的宿主界面，用于预览 dsh-tokbook 悬浮窗口。弹窗打开时这些内容应被遮罩压暗。</p>
@@ -892,6 +891,20 @@ const server = createServer((req, res) => {
       window.__DSH_REQUIRE_CACHE__['react-dom/client'].createRoot(host)
         .render(window.__DSH_REQUIRE_CACHE__['react'].createElement(component, share));
     }
+    // 独立查看器 = 独立悬浮窗口的真实场景（没有宿主皮肤）：给浮窗根挂设备皮属性
+    // （styles/device.ts + tokens.ts 第八节），主题跟 ?dark。浮窗关掉会重开、元素会换，
+    // 所以挂观察器而不是找一次。
+    if (${LEDGER}) {
+      const deviceTheme = params.has('dark') ? 'dark' : 'light';
+      const tagDevice = () => {
+        const el = document.querySelector('.dtpl-overlay');
+        if (el !== null && el.getAttribute('data-dtpl-device') !== deviceTheme) {
+          el.setAttribute('data-dtpl-device', deviceTheme);
+        }
+      };
+      new MutationObserver(tagDevice).observe(document.body, { childList: true, subtree: true });
+      tagDevice();
+    }
     // React 18 mounts concurrently, so the trigger does not exist yet when this
     // script runs and its listeners attach a beat later: look it up on every
     // attempt, and click it only while the overlay is still absent (the trigger
@@ -922,7 +935,7 @@ const server = createServer((req, res) => {
 const port = Number(process.env.PORT ?? 8931)
 server.listen(port, '127.0.0.1', () => {
   if (LEDGER) {
-    console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}`)
+    console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}（浮窗带设备皮，?dark=1 换深面）`)
     return
   }
   console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|provider|quota|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)

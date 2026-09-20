@@ -4,11 +4,6 @@
  * 没有保存按钮也没有撤销：变更在停止输入一拍后自动写入，字段失焦则立刻写。草稿写不出来的
  * 时候（半输入的数字）不写也不报，等这个字段交代完才说——口径与理由见 D-040。磁盘上的内容是
  * 唯一状态，工具栏只报告它。行内四个数字只读，改价在展开的抽屉里（第一张是托底价）。
- *
- * 页头三样东西各管一件事：**工具栏**（搜索 / 筛选 / 这次写没写进去）、**事实带**（整张表的
- * 规模与缺口，随改动当场跟手）、**图例**（那四个数字是什么、`—` 是什么）。首屏因此不必先展开
- * 任何东西就知道这张表要不要管——而**第一条通道默认展开**，使第一屏至少有一张真实的价目行。
- * 每张卡折叠时也不是一个空头：身份行下面是这条通道自己的读数（见 `RouteCard`）。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -28,15 +23,14 @@ export interface PricingPanelProps {
 }
 
 /** 最后一次按键后 tab 等待多久才写入——**不是唯一的写入时机**：字段失焦会立刻写一次。
- *  足够长以合并一行的四个数字，足够短以感觉即时。 */
+ *  要长到能合并一行的四个数字。 */
 const AUTO_SAVE_DELAY_MS = 600
 
 /** 一次写成功之后隔多久才通知父级刷新。父级收到后会跑一次**全量**概览聚合，而失焦提交让
- *  「离开一个字段 = 一次写」——连改几档就是连着写几次。这一页自己不看概览（概览在别的 tab
- *  上），所以合并窗可以给得宽；离开面板时把还没发出的那次立刻补上。 */
+ *  「离开一个字段 = 一次写」——连改几档就是连着写几次，所以合并窗给得宽；离开面板时把还没发出的那次立刻补上。 */
 const REFRESH_MERGE_MS = 1000
 
-/** 工具栏那条状态文字（不是页脚：浮窗里没有页脚，状态与搜索、筛选同在顶部那一行）。 */
+/** 工具栏那条状态文字。 */
 type SaveState =
   | { kind: 'clean' }
   | { kind: 'pending' }
@@ -151,8 +145,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   }, [])
 
   /** 读一次宿主的价格表视图。**读失败是一个可重试的状态**，不是「这张表是空的」——所以它自己
-   *  带一次重新读取（与用量明细 / 额度两个 tab 同一形状：错误条 + 重试），而错误条在场时下面不再
-   *  补一句「没有可显示的路由」。 */
+   *  带一次重新读取（与用量明细 / 额度两个 tab 同一形状：错误条 + 重试）。 */
   const loadView = useCallback(async (): Promise<void> => {
     setLoadError(null)
     try {
@@ -306,7 +299,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     })
   }, [])
 
-  /** 打开/关闭一行的调价史（一次只开一个：列表不铺开）。 */
+  /** 打开/关闭一行的调价史（一次只开一个）。 */
   const toggleRow = useCallback((route: string, model: string) => {
     setOpenKey(current => (current === rowKey(route, model) ? null : rowKey(route, model)))
   }, [])
@@ -339,7 +332,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
 
   const stats = useMemo(() => priceStats(draft), [draft])
 
-  /** 筛选态：搜索词或「只看价格未知」任一在场。它决定卡片是否忽略折叠（匹配藏在折叠后面会被读成「无结果」）。 */
+  /** 筛选态：搜索词或「只看价格未知」任一在场。 */
   const filtering = query.trim() !== '' || unknownOnly
 
   const cards = useMemo(() => {
@@ -356,15 +349,14 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           && !(row.name ?? '').toLowerCase().includes(needle)) continue
         models.set(model, row)
       }
-      // 有筛选时卡片显示筛选保留的行，忽略折叠状态：把匹配藏在折叠后面会被读成「无结果」。
+      // 有筛选时卡片显示筛选保留的行，忽略折叠状态：匹配不能藏在折叠后面。
       if (models.size === 0) continue
       out.push(needle !== '' || unknownOnly ? { ...card, models } : card)
     }
     return out
   }, [draft, query, unknownOnly])
 
-  /** 这一刻哪些通道是展开的。**默认展开请求数最多的那一条**（host 正按请求数排序，所以就是第一张）：
-   *  价格表 tab 的第一屏至少要看得见一张真实的价目行，账本再大也不会是一堵折叠头。筛选时全部展开。 */
+  /** 这一刻哪些通道是展开的：**默认第一条**（host 正按请求数排序，所以就是第一张）；筛选时全部展开。 */
   const openRoutes = useMemo(() => {
     const out = new Set<string>()
     cards.forEach((card, index) => {
@@ -373,10 +365,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     return out
   }, [cards, filtering, folds])
 
-  /** 卡收起时关闭其抽屉，避免内容藏在收纳后面。 */
+  /** 卡收起时关闭其抽屉。 */
   useEffect(() => {
     if (openKey === null) return
-    const route = openKey.split('\u0000')[0] ?? ''
+    const route = openKey.split('\u0000')[0]
     if (!openRoutes.has(route)) setOpenKey(null)
   }, [openRoutes, openKey])
 
@@ -410,6 +402,12 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           onChange={(event) => setQuery(event.target.value)}
           aria-label="搜索模型串或通道路由"
         />
+        <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
+          {stateText}
+        </span>
+        {save.kind === 'error' && (
+          <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
+        )}
         <button
           type="button"
           className={`dtpl-price-chip${unknownOnly ? ' is-on' : ''}`}
@@ -419,16 +417,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         >
           {unknownOnly ? '只看价格未知' : '价格未知'}
         </button>
-        <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
-          {stateText}
-        </span>
-        {save.kind === 'error' && (
-          <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
-        )}
       </div>
 
-      {/* 事实带 + 图例是一组：带说这张表**现在是什么样**（随改动当场跟手），图例说那四个数字**是什么**。
-          两个都只在真有表时出现——空态自己有话说。 */}
       {(draft.size > 0 || cards.length > 0) && (
         <div className="dtpl-price-read">
           {/* 「其中」不能省：这个数**不是**「没有价的模型数」，而是「有账本记录落在价外」的模型数
@@ -525,7 +515,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   )
 }
 
-/** 那条状态文字的说法：只说**这次写没写进去**。表本身的规模在事实带上，不在这里复述一遍。 */
+/** 状态文字只说**这次写没写进去**。 */
 function saveStateText(save: SaveState): string {
   switch (save.kind) {
     case 'pending': return '待保存…'
@@ -536,5 +526,3 @@ function saveStateText(save: SaveState): string {
     default: return ''
   }
 }
-
-export { rowKey }

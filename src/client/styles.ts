@@ -19,6 +19,7 @@ import { CSS_QUOTA } from './styles/quota.ts'
 import { CSS_PRICING } from './styles/pricing.ts'
 import { CSS_PRICING_TIMELINE } from './styles/pricing-timeline.ts'
 import { CSS_SHARED } from './styles/shared.ts'
+import { CSS_DEVICE } from './styles/device.ts'
 
 /**
  * 资产的写法只在这里出现一次：下面的片段引用 token，不各自重复那串 base64。
@@ -41,6 +42,8 @@ const CSS = [
   CSS_PRICING,
   CSS_PRICING_TIMELINE,
   CSS_SHARED,
+  // 设备皮压轴：只被 `[data-dtpl-device]` 根激活，宿主内整段静默（见 device.ts 文件头）。
+  CSS_DEVICE,
 ].join('')
 
 let active = false

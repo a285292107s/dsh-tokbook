@@ -12,7 +12,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  DAY_SETS, EARLIEST, MAX_MODEL_LENGTH, MAX_NOTE_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
+  DAY_SETS, EARLIEST, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
   instantKey, instantMs, isHourRange, slotCovers, slotsOverlap,
 } from './price-format.ts'
 import type {
@@ -138,14 +138,10 @@ function coerceSegment(raw: unknown): PriceSegment | null {
   const slots = Array.isArray(segment.slots)
     ? normalizeSlots(segment.slots.map(coerceSlot).filter((slot): slot is PriceSlot => slot !== null))
     : []
-  const note = typeof segment.note === 'string' && segment.note.trim() !== ''
-    ? segment.note.trim().slice(0, MAX_NOTE_LENGTH)
-    : undefined
   return {
     from,
     rates,
     ...(slots.length > 0 ? { slots } : {}),
-    ...(note !== undefined ? { note } : {}),
   }
 }
 
@@ -243,7 +239,7 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
     return { ok: false, error: `${where}必须是对象（from? + 四档单价 + slots?）` }
   }
   const raw = value as Record<string, unknown>
-  const known = new Set(['from', 'inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion', 'slots', 'note'])
+  const known = new Set(['from', 'inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion', 'slots'])
   const extra = Object.keys(raw).find(key => !known.has(key))
   if (extra !== undefined) return { ok: false, error: `${where}含未知字段「${extra}」` }
   if (!isRate(raw.inputPerMillion) || !isRate(raw.outputPerMillion)) {
@@ -265,13 +261,6 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
       return { ok: false, error: `${where}的 from 必须是真实存在的 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00：${raw.from}` }
     }
     from = at
-  }
-  if (raw.note !== undefined && typeof raw.note !== 'string') {
-    return { ok: false, error: `${where}的 note 必须是字符串` }
-  }
-  const note = typeof raw.note === 'string' ? raw.note.trim() : ''
-  if (note.length > MAX_NOTE_LENGTH) {
-    return { ok: false, error: `${where}的 note 过长（最多 ${String(MAX_NOTE_LENGTH)} 字）` }
   }
   const slots: PriceSlot[] = []
   if (raw.slots !== undefined) {
@@ -300,7 +289,6 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
         ...(raw.cacheWritePerMillion !== undefined ? { cacheWritePerMillion: raw.cacheWritePerMillion } : {}),
       },
       ...(slots.length > 0 ? { slots: normalizeSlots(slots) } : {}),
-      ...(note !== '' ? { note } : {}),
     },
   }
 }
@@ -409,7 +397,6 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
           ...(segment.rates.cacheWritePerMillion !== undefined
             ? { cacheWritePerMillion: segment.rates.cacheWritePerMillion } : {}),
           ...(slots.length > 0 ? { slots: slots.map(slotBody) } : {}),
-          ...(segment.note !== undefined ? { note: segment.note } : {}),
         }
       })
     }

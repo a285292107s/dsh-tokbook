@@ -40,7 +40,7 @@ src/
   sync.ts             首次启动 + 手动历史回填(幂等)
   sync-state.ts       首次运行标记 + 持久化同步基线
   stats.ts            聚合(totals/byDay/byHour/(provider,model))+ 折叠 + 缓存
-  price-format.ts     价格表时间轴的纯规则(整点生效 / 每日时段 / 星期几 / 冲突)+ 价文件共享词表(保留键 / 备注上限),与 browser 共用
+  price-format.ts     价格表时间轴的纯规则(整点生效 / 每日时段 / 星期几 / 冲突)+ 价文件共享词表(保留键 / 长度上限),与 browser 共用
   pricing.ts          唯一价格表(路由 → 模型串 → 价段)+ 两级取价(priceAt/slotAt/ratesAt/rateKeyAt)+ costOf
   pricing-view.ts     价格表 tab 的卡片装配(路由目录 ∪ 账本 ∪ 价格文件)
   route-catalog.ts    路由目录:本机设置文档(settings)× 运行时适配器注册表(ctx.llm)

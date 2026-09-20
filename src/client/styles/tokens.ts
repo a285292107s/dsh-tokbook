@@ -80,4 +80,74 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
      · --dsw-corner-shape：超椭圆形状关键字（superellipse(1.5)），不是长度；
        喂进 border-radius 会让声明失效、圆角塌成 0。半径一律纯长度。 */
 }
+
+/* ── 八、独立设备皮（独立悬浮窗口）：不走宿主的一整套色板 ──────────────────
+   没有宿主就没有 --dsw-alias-* 可借。前提：根元素带 data-dtpl-device="light|dark"
+   （宿主内没人挂这个属性，下面两块永远匹配不上）。窗口按仪器做：casing 是壳面
+   （页眉「控制头」与页脚「状态条」坐上去），card / surface 是屏幕；墨阶、黄、材质照旧。
+   造型在 styles/device.ts，它只引用这里的名字——硬编码色值除了本文件没有第二处，
+   这条禁令对设备皮同样成立。
+   文件头的前提②对本节按面自证：浅色块只压屏幕与铝壳，深色块只压屏面与炮铜壳，
+   实测值写在数旁。 */
+[data-dtpl-device="light"][data-plugin="dsh-tokbook"]{
+  /* 墨阶（压屏面 #f5f6f8）：fg 14.61 · fg-2 5.65 · fg-3 3.43（只给装饰）· dim 2.32（行内分隔符）。 */
+  --dtpl-fg:#1f2328;
+  --dtpl-fg-2:#59636e;
+  --dtpl-fg-3:#81858c;
+  --dtpl-fg-dim:#a0a4a8;
+  /* surface 在浅皮比 card 亮：输入框是凹进屏面的一口白瓷井（宿主 layer-1 / layer-2 同关系）；
+     不用纯白：#fcfcfd 与壳面才分得开。 */
+  --dtpl-card:#f5f6f8;
+  --dtpl-surface:#fcfcfd;
+  --dtpl-border:rgba(0,0,0,.12);
+  --dtpl-hairline:rgba(0,0,0,.08);
+  /* 状态色（压屏面）：ok 4.70 · err 4.95；warn 4.50 仍只作边框与底，正文走 --dtpl-warn-ink 7.87。 */
+  --dtpl-ok:#1a7f37;
+  --dtpl-warn:#9a6700;
+  --dtpl-err:#cf222e;
+  --dtpl-accent:#1f2328; /* DSH 浅皮的「身份色」本就等于墨色，焦点环压铝壳 9.82 */
+  /* 壳：铝面。casing-ink 9.82 / casing-ink-2 4.80 均为压 #c9ccd2 的实测。 */
+  --dtpl-casing:#c9ccd2;
+  --dtpl-casing-ink:#1f2328;
+  --dtpl-casing-ink-2:#4a545e;
+  --dtpl-casing-hover:rgba(0,0,0,.08);
+  --dtpl-casing-line:rgba(0,0,0,.28);
+  /* 壳与环境：seam 是屏幕压进壳的暗缝，case-edge 是壳外缘一圈，mask 压暗的是桌面。 */
+  --dtpl-seam:rgba(0,0,0,.45);
+  --dtpl-case-edge:#7e838c;
+  --dtpl-case-shadow:rgba(15,17,21,.32);
+  --dtpl-device-mask:rgba(20,22,26,.55);
+  --dtpl-scrollbar:rgba(0,0,0,.24);
+  --dtpl-scrollbar-hover:rgba(0,0,0,.34);
+}
+[data-dtpl-device="dark"][data-plugin="dsh-tokbook"]{
+  /* 墨阶（压屏面 #26272b）：fg 14.28 · fg-2 9.91 · fg-3 6.99（装饰档在深皮读得清，规矩不变）· dim 2.98。 */
+  --dtpl-fg:#f9fafb;
+  --dtpl-fg-2:#cfd3d6;
+  --dtpl-fg-3:#adb2b8;
+  --dtpl-fg-dim:#6b7075;
+  /* 深皮 surface 压暗成井（#1c1d20），fg-2 压它 11.19：输入字在井里仍然达标。 */
+  --dtpl-card:#26272b;
+  --dtpl-surface:#1c1d20;
+  --dtpl-border:rgba(255,255,255,.14);
+  --dtpl-hairline:rgba(255,255,255,.10);
+  /* 状态色（压屏面）：ok 5.87 · err 5.35。宿主深皮那枚 #f85149 压 #26272b 只有 4.45，
+     设备皮没有宿主可遮羞，换亮一档的 #ff6b61。warn 6.95 仍非文本。 */
+  --dtpl-ok:#3fb950;
+  --dtpl-warn:#f59e0b;
+  --dtpl-err:#ff6b61;
+  --dtpl-accent:#f9fafb;
+  /* 壳：炮铜面。casing-ink 13.21 / casing-ink-2 7.22 均为压 #2a2d33 的实测。 */
+  --dtpl-casing:#2a2d33;
+  --dtpl-casing-ink:#f9fafb;
+  --dtpl-casing-ink-2:#b6bcc4;
+  --dtpl-casing-hover:rgba(255,255,255,.10);
+  --dtpl-casing-line:rgba(255,255,255,.22);
+  --dtpl-seam:rgba(0,0,0,.70);
+  --dtpl-case-edge:#101114;
+  --dtpl-case-shadow:rgba(0,0,0,.62);
+  --dtpl-device-mask:rgba(8,9,11,.72);
+  --dtpl-scrollbar:rgba(255,255,255,.26);
+  --dtpl-scrollbar-hover:rgba(255,255,255,.38);
+}
 `

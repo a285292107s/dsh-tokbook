@@ -17,9 +17,6 @@ export const EARLIEST = 0
 /** 价文件唯一的保留顶层键：route → `"metered" | "subscription"`。 */
 export const PRICING_BILLING_KEY = '$billing'
 
-/** 段备注的长度上限（读路径截断，写路径拒绝超长；两半区同一把尺子）。 */
-export const MAX_NOTE_LENGTH = 120
-
 /** 通道路由名与模型串的长度上限（写路径拒绝超长，读路径不设限）。放在共享词表里，
  *  草稿才能在自己这一侧就报出「写不进去」的原因，而不是把整份文件交给 host 拒掉。 */
 export const MAX_ROUTE_LENGTH = 128

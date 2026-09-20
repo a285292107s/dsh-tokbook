@@ -6,10 +6,10 @@
  * 共用 `price-format.ts`。刻意无 React——tab 可测试的那一半。
  */
 
-// 价文件的共享词表（保留键、长度上限、备注上限）从共享内核取——client 不能 import
+// 价文件的共享词表（保留键、长度上限）从共享内核取——client 不能 import
 // `src/pricing.ts`（它拉了 `node:fs`），两条字面量各写一遍就会静默漂移。
 import {
-  DAY_SETS, DAY_SET_LABELS, EARLIEST, MAX_MODEL_LENGTH, MAX_NOTE_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
+  DAY_SETS, DAY_SET_LABELS, EARLIEST, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
   instantKey, instantMs, isHourRange, rangeLabel, slotCovers, slotsOverlap,
 } from '../../price-format.ts'
 import type { BillingNature, DaySet, ModelPricing, PricingSegmentInput, PricingSlotInput, PricingView } from '../../types.ts'
@@ -67,15 +67,12 @@ export interface SegmentDraft extends RateTexts {
   from: string
   /** 叠在全天价上的峰谷时段；空 = 仅全天价。 */
   slots: SlotDraft[]
-  note: string
 }
 /** 一张 route 卡的可编辑模型行。 */
 export interface ModelDraft {
   model: string
   /** settings / 适配器目录给出的展示名；无人命名该串时省略。 */
   name?: string
-  /** settings / 适配器目录是否列出该串。 */
-  configured: boolean
   /** 账本记录了该 (route, model) 的次数。 */
   records: number
   /** 账本首/末计费时刻，以及多少条记录没有价段覆盖（¥0）。wire 上的只读事实，都不参与保存；
@@ -145,9 +142,9 @@ export function isBlankSlot(slot: SlotDraft): boolean {
   return isBlankRates(slot)
 }
 
-/** 一个段是否还没有价（时段和备注也为空）。 */
+/** 一个段是否还没有价（时段也为空）。 */
 export function isBlankSegment(segment: SegmentDraft): boolean {
-  return isBlankRates(segment) && segment.note.trim() === '' && segment.slots.every(isBlankSlot)
+  return isBlankRates(segment) && segment.slots.every(isBlankSlot)
 }
 
 /** 一个段里实际带价的时段。 */
@@ -174,7 +171,6 @@ export function newSegment(seed: Partial<Omit<SegmentDraft, 'id'>> = {}): Segmen
     cacheRead: seed.cacheRead ?? '',
     cacheWrite: seed.cacheWrite ?? '',
     slots: seed.slots ?? [],
-    note: seed.note ?? '',
   }
 }
 
@@ -254,7 +250,6 @@ function segmentDraft(segment: PricingSegmentInput): SegmentDraft {
     cacheRead: rateText(segment.cacheReadPerMillion),
     cacheWrite: rateText(segment.cacheWritePerMillion),
     slots: (segment.slots ?? []).map(slotDraft),
-    note: segment.note ?? '',
   }
 }
 
@@ -269,7 +264,6 @@ export function draftFromView(view: PricingView): PriceDraft {
       models.set(row.model, {
         model: row.model,
         ...(row.name !== undefined ? { name: row.name } : {}),
-        configured: row.configured,
         records: row.records,
         ...(row.firstAt !== undefined ? { firstAt: row.firstAt } : {}),
         ...(row.lastAt !== undefined ? { lastAt: row.lastAt } : {}),
@@ -416,13 +410,10 @@ export function inheritedRates(segment: SegmentDraft): RateTexts {
 
 /** 一份全天价的首个问题，或 null：输入价与输出价必填，cache 桶可选，每个已填单元格须为非负数字。 */
 function rateIssue(holder: RateTexts, prefix: string): string | null {
-  for (const [field, label] of [['input', '输入价'], ['output', '输出价']] as const) {
+  for (const [field, label] of RATE_INPUTS) {
     const state = fieldState(holder, field)
     if (state === 'bad') return `${prefix}${label}「${holder[field].trim()}」不是有效的非负数字`
-    if (state === 'empty') return `${prefix}${label}还空着`
-  }
-  for (const [field, label] of [['cacheRead', '缓存读价'], ['cacheWrite', '缓存写价']] as const) {
-    if (fieldState(holder, field) === 'bad') return `${prefix}${label}「${holder[field].trim()}」不是有效的非负数字`
+    if (state === 'empty' && (field === 'input' || field === 'output')) return `${prefix}${label}还空着`
   }
   return null
 }
@@ -510,7 +501,6 @@ export function rowIssue(model: ModelDraft): string | null {
       const problem = slotIssue(slot, segment.slots, index)
       if (problem !== null) return problem
     }
-    if (segment.note.trim().length > MAX_NOTE_LENGTH) return `备注超过 ${String(MAX_NOTE_LENGTH)} 字`
   }
   return null
 }
@@ -542,7 +532,6 @@ function segmentSignature(segment: SegmentDraft): Record<string, unknown> {
         rates: rates.ok ? rates.rates : null,
       }
     }),
-    note: segment.note.trim(),
   }
 }
 
@@ -675,11 +664,6 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
               || DAY_SETS.indexOf(left.days) - DAY_SETS.indexOf(right.days))
             .map(slotBody)
         }
-        const note = segment.note.trim()
-        if (note.length > MAX_NOTE_LENGTH) {
-          return { ok: false, error: `${where}的备注超过 ${String(MAX_NOTE_LENGTH)} 字` }
-        }
-        if (note !== '') out.note = note
         segments.push(out)
       }
       models[model] = segments

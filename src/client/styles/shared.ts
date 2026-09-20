@@ -120,14 +120,18 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
     font-size:9px;line-height:12px;color:var(--dtpl-fg-3);
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-input{text-align:left;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates{
+  /* 抽屉的费率列在桌面是 80px 定宽，窄处折成 2×2。必须与 pricing 片段的
+     .dtpl-price-history .dtpl-price-rates 用同一组（或更多）类，否则被它的特异性压住。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-history .dtpl-price-rates{
     grid-template-columns:repeat(2,minmax(0,1fr));
   }
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates{
-    grid-template-columns:repeat(2,minmax(0,1fr));
-  }
-  [data-plugin="dsh-tokbook"] .dtpl-price-seg-head{flex-wrap:wrap;}
+  /* 窄处表盘缩到 28px：viewBox 等比缩放，弧随环一起变细，不给四档价添挤压。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring{width:28px;height:28px;}
+  /* 段行在窄处：费率格折成 2×2 带档位戳（上面那条接管）；时段的复制/删除不再靠悬停（触控没有悬停）。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{opacity:1;}
+  /* 段的身份行要折行：右轨现在装着「当前生效」芯片 + 段自己的复制/删除，而左边是序号 +
+     最小 150px 的生效时刻——窄 sheet 一行放不下。折行后右轨（margin-left:auto）自己落第二行靠右。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-seg-line{flex-wrap:wrap;row-gap:4px;}
   /* 价格表的卡头：身份行与事实行之外还有计费性质开关，最窄处让它换到下一行，
      而不是把通道名与 route key 压成几个字。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-fold{flex:1 1 200px;}

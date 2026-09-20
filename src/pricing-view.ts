@@ -87,7 +87,6 @@ function segmentInput(segment: PriceSegment): PricingSegmentInput {
     ...(segment.rates.cacheWritePerMillion !== undefined
       ? { cacheWritePerMillion: segment.rates.cacheWritePerMillion } : {}),
     ...(slots.length > 0 ? { slots } : {}),
-    ...(segment.note !== undefined ? { note: segment.note } : {}),
   }
 }
 

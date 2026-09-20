@@ -106,7 +106,7 @@ console.log('手写价表:日期 / 价段 / 取价')
     [PRICING_BILLING_KEY]: { 'opencode-go': 'subscription' },
     'deepseek-official': {
       'deepseek-v4-flash': [
-        { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15, note: '官方价' },
+        { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
         { from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 6 },
       ],
     },
@@ -166,10 +166,10 @@ console.log('手写价表:日期 / 价段 / 取价')
     await writePriceFile(dir, file.file, quiet)
     const back = await readPriceFile(dir, quiet)
     const text = await readFile(join(dir, PRICING_FILE), 'utf8')
-    check('价格文件是能手改的 JSON,读写往返不丢(含 note 与 $billing)',
+    check('价格文件是能手改的 JSON,读写往返不丢(含可选 cache 档与 $billing)',
       text.includes('"$billing"') && text.includes('"2026-09-01"')
       && back.table['deepseek-official']?.['deepseek-v4-flash']?.length === 2 && billingOf(back.billing, 'opencode-go') === 'subscription'
-      && back.table['deepseek-official']?.['deepseek-v4-flash']?.[0]?.note === '官方价')
+      && back.table['deepseek-official']?.['deepseek-v4-flash']?.[0]?.rates.cacheReadPerMillion === 0.15)
 
     // 价格表 tab 的卡片 = 路由目录 ∪ 账本 ∪ 价格文件。
     const view = await readPricingView(
@@ -228,7 +228,7 @@ console.log('账本透镜:价格表说这一行值多少')
 
 console.log('调价史轴:只在首记与今天之间画,标签不许叠')
 {
-  const segment = (id: number, from: string): SegmentDraft => ({ id, from, input: '1', output: '4', cacheRead: '', cacheWrite: '', slots: [], note: '' })
+  const segment = (id: number, from: string): SegmentDraft => ({ id, from, input: '1', output: '4', cacheRead: '', cacheWrite: '', slots: [] })
   const row = (over: Partial<ModelDraft>): ModelDraft => ({ model: 'm', configured: true, records: 3, firstAt: dayMillis('2026-08-25', 19), segments: [], ...over })
   const now = dayMillis('2026-09-20', 12)
 
@@ -495,7 +495,7 @@ console.log('价格表写路径:草稿写出去的 body 一定被宿主接受')
     const body = composePriceBody(draft)
     return body.ok ? parsePriceInput(body.body) : { ok: false, error: body.error }
   }
-  const floor = newSegment({ from: '', input: '1', output: '4', cacheRead: '0.02', cacheWrite: '0.5', note: ' 闲时 ' })
+  const floor = newSegment({ from: '', input: '1', output: '4', cacheRead: '0.02', cacheWrite: '0.5' })
   const dated = newSegment({
     from: '2026-09-01T13:00', input: '2', output: '8',
     slots: [
@@ -504,7 +504,7 @@ console.log('价格表写路径:草稿写出去的 body 一定被宿主接受')
     ],
   })
   const accepted: [string, PriceDraft][] = [
-    ['托底价 + 整点调价 + 两组时段 + 备注', draftOf('deepseek-official', 'deepseek-chat', [floor, dated])],
+    ['托底价 + 整点调价 + 两组时段', draftOf('deepseek-official', 'deepseek-chat', [floor, dated])],
     ['订阅通道($billing)', draftOf('commandcode', 'deepseek-chat', [floor], 'subscription')],
     ['整行都是空白草稿(不进 body)', draftOf('r', 'm', [newSegment()])],
     ['1970 前的生效时刻', draftOf('r', 'm', [floor, newSegment({ from: '1900-01-01', input: '3', output: '9' })])],

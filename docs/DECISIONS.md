@@ -327,13 +327,13 @@ tab 自带**窗口**选择器——两者并排会让同一页出现两种口径
 **Status: current** · supersedes: — · superseded-by: —
 
 **决策。** 价表 PUT 的**接受规则只有一份真源**,且它被一条测试真的连起来:保留键、route / model
-长度上限、备注上限、时间轴全在 `src/price-format.ts`,host 的 `parsePriceInput` 与 client 的
+长度上限、时间轴全在 `src/price-format.ts`,host 的 `parsePriceInput` 与 client 的
 `composePriceBody` 引用同一批常量;`pnpm test` 把草稿产出的 body **真的喂给** host 解析,断言
 「草稿产出 ⊆ host 接受」。写不出去的档(四档里任一格不是非负数字)也必须让那一行保持脏——包括
 `ratesOf` 看不见的可选 cache 档。
 
 **为什么不显然。** D-013 已经定了「规则只写一遍」的理由是「草稿认为能存、写入被拒」,但只落实到
-时间轴与备注:两个长度上限留在 `pricing.ts` 的私有常量里,草稿**根本引用不到**,于是 route 集合
+时间轴长度:两个长度上限留在 `pricing.ts` 的私有常量里,草稿**根本引用不到**,于是 route 集合
 (catalog ∪ 账本 ∪ 文件)里一条超长键会让每一次自动保存都被整份拒掉,而界面里没有删行的入口——
 「可见的错误」在这里等于「这张表再也改不动」。带位置与原因的本地报错把爆炸半径缩回那一行。
 缓存档那一半是同一件事的另一面:它此前既不写出去也不参与脏签名,于是工具栏会说「已保存」,

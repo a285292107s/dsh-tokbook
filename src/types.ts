@@ -115,7 +115,6 @@ export interface PriceSegment {
    * 拒绝可能同时生效的一对；读路径丢弃较晚的那个），故任一时刻至多一个
    * 时段生效。 */
   slots?: PriceSlot[]
-  note?: string
 }
 
 /** 例外时段的身份：起始小时 + 星期集合。段内唯一——共享两者会在整个公共
@@ -164,7 +163,6 @@ export interface PricingSegmentInput {
   cacheReadPerMillion?: number
   cacheWritePerMillion?: number
   slots?: PricingSlotInput[]
-  note?: string
 }
 
 /** route 上可计费的模型：账本记录的精确串 + 来源给出的展示名
@@ -192,7 +190,7 @@ export interface PricingModelView {
    * 省略（账本记得它，或价表里手写了它）——选择器回落到 `provider/model` 的方式。 */
   name?: string
   /** settings / 适配器目录是否列出该串（即 route 上可调用）。false 有两种来历——
-   * 账本记得、配置已删，或只在价表里手写：界面上都读作「不在配置」（它已调不到）。 */
+   * 账本记得、配置已删，或只在价表里手写。界面不再播报它，只作 route 卡内的排序键。 */
   configured: boolean
   records: number
   firstAt?: number

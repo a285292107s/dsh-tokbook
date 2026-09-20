@@ -1,8 +1,8 @@
 /**
  * 调价史轴（`Timeline.tsx`）的纯规则：哪些时刻成为节点，每个带标签的节点落在轨道上的哪里。
  *
- * 轴括住**一行自己的历史**：左端是首记，右端是今天。位置按时间比例，但相邻标签会被推开直到满足
- * 最小间距——轴被当作调价的**顺序**读取、不是比例尺。纯逻辑：无 React、无 DOM。
+ * 轴括住一行自己的历史：左端是首记，右端是今天。相邻标签会被推开直到满足最小间距。
+ * 纯逻辑：无 React、无 DOM。
  */
 
 import { hourStartMs, instantKey } from '../../price-format.ts'
@@ -66,7 +66,7 @@ export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: numbe
     }
     inside.push(node)
   }
-  // 括号内没有调价就无话可说：两个日期之间一条光秃秃的轨不是时间线，行自身的价与段列表已经说尽了「从未改过价」。
+  // 括号内没有调价 → 无轴可画。
   if (first.segmentId === null && inside.length === 0) return null
   return [first, ...inside, { ratio: 1, label: '今天', segmentId: null, active: false, cap: 'today' }]
 }
@@ -85,7 +85,6 @@ export function placeNodes(
   const count = ratios.length
   if (count === 0) return []
   const clamp = (ratio: number): number => Math.min(Math.max(ratio, 0), 1)
-  // 每个标签的盒子：下面前后两趟推开的就是它。
   const left = ratios.map((ratio, index) => clamp(ratio) * trackWidth - widths[index] / 2)
   left[0] = 0
   left[count - 1] = trackWidth - widths[count - 1]
