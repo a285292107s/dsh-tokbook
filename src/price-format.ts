@@ -9,7 +9,7 @@
  * `node:fs`），而这几条字面量一旦两处各写一遍就会静默漂移。
  */
 
-import type { DaySet } from './types.ts'
+import type { DaySet, HolidayRange } from './types.ts'
 
 /** 旧价文件里「没有生效时刻」那一段的 `from`（自始生效）在此取值，使朴素的
  *  `from <= timeMs` 比较直接可用。**新写入不再产生这个形态**：一段价必须有生效时刻，
@@ -20,6 +20,9 @@ export const EARLIEST = 0
 /** 价文件唯一的保留顶层键：route → `"metered" | "subscription"`。 */
 export const PRICING_BILLING_KEY = '$billing'
 
+/** 价文件另一个保留顶层键：`YYYY` → 放假日区间数组（法定节假日年历）。 */
+export const PRICING_CALENDAR_KEY = '$calendar'
+
 /** 通道路由名与模型串的长度上限（写路径拒绝超长，读路径不设限）。放在共享词表里，
  *  草稿才能在自己这一侧就报出「写不进去」的原因，而不是把整份文件交给 host 拒掉。 */
 export const MAX_ROUTE_LENGTH = 128
@@ -28,12 +31,14 @@ export const MAX_MODEL_LENGTH = 256
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/u
 const HOUR_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:00$/u
 
-/** 时段可携带的全部 day set，展示顺序（也是文件顺序）。 */
-export const DAY_SETS: readonly DaySet[] = ['daily', 'weekdays', 'weekends']
+/** 时段可携带的全部 day set，展示顺序（也是文件顺序）。`weekdays` 排在
+ *  `workdays` 前面：从宽到窄，依次收窄。 */
+export const DAY_SETS: readonly DaySet[] = ['daily', 'weekdays', 'workdays', 'weekends']
 
 export const DAY_SET_LABELS: Record<DaySet, string> = {
   daily: '每天',
-  weekdays: '工作日',
+  weekdays: '周一至周五（含节假日）',
+  workdays: '工作日（不含节假日）',
   weekends: '周末',
 }
 
@@ -118,6 +123,68 @@ export function clockLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`
 }
 
+/** `YYYY-MM-DD` → 自 epoch 起的天数；不是真实日历日时为 null。本地日历运算
+ *  的中间量（只有拿它算加减，才能避免夏令时把「加一天」变成 23 或 25 小时）。 */
+export function dayIndex(date: string): number | null {
+  const at = dayStartMs(date)
+  return at === null ? null : Math.round(at / 86_400_000)
+}
+
+/** 自 epoch 起的天数 → `YYYY-MM-DD`（本地）。 */
+export function dayKeyOfIndex(index: number): string {
+  return dayKeyOf(index * 86_400_000)
+}
+
+/** 一段放假日是否合法：两端都是真实日期，且起不晚于止。 */
+export function isValidHolidayRange(range: HolidayRange): boolean {
+  const start = dayIndex(range.start)
+  const end = dayIndex(range.end)
+  return start !== null && end !== null && start <= end
+}
+
+/**
+ * 一段放假日包含哪些天（本地 `YYYY-MM-DD`）。所有年历都是「一段连续假期」，
+ * 但覆盖判定要按天问，所以这里把区间展开成集合。
+ */
+export function holidayDates(range: HolidayRange): string[] {
+  const start = dayIndex(range.start)
+  const end = dayIndex(range.end)
+  if (start === null || end === null || start > end) return []
+  const dates: string[] = []
+  for (let index = start; index <= end; index += 1) dates.push(dayKeyOfIndex(index))
+  return dates
+}
+
+/**
+ * 年历 → 覆盖判定用的日期集合。畸形区间由调用方在读路径上丢弃；这里遇到
+ * 不合法的区间**跳过**，绝不让它把整个年历变成空集。
+ */
+export function holidaySet(calendar: Readonly<Record<string, readonly HolidayRange[]>>): ReadonlySet<string> {
+  const dates = new Set<string>()
+  for (const ranges of Object.values(calendar)) {
+    for (const range of ranges) {
+      if (!isValidHolidayRange(range)) continue
+      for (const date of holidayDates(range)) dates.add(date)
+    }
+  }
+  return dates
+}
+
+/** `YYYY-MM-DD` 的年份；不是那个形状时为 null。 */
+export function yearOfDate(date: string): string | null {
+  return DATE_RE.test(date) ? date.slice(0, 4) : null
+}
+
+/** 年份 `YYYY` 是否合法（四位数字）。 */
+export function isYearKey(year: string): boolean {
+  return /^\d{4}$/u.test(year)
+}
+
+/** 一段放假日区间的读法：`02-15 ~ 02-23`。 */
+export function holidayRangeLabel(range: HolidayRange): string {
+  return `${range.start.slice(5)} ~ ${range.end.slice(5)}`
+}
+
 /** 时段小时区间在各界面上的打印形式：`09:00–12:00`。 */
 export function rangeLabel(range: HourRange): string {
   return `${clockLabel(range.start)}–${clockLabel(range.end)}`
@@ -134,28 +201,48 @@ export function hourRangesOverlap(left: HourRange, right: HourRange): boolean {
   return left.start < right.end && right.start < left.end
 }
 
-/** 两个 day set 是否有共同星期。 */
-function daySetsIntersect(left: DaySet, right: DaySet): boolean {
-  return left === 'daily' || right === 'daily' || left === right
+/** 周末日（本地星期 0 或 6）。 */
+function isWeekend(weekday: number): boolean {
+  return weekday === 0 || weekday === 6
 }
 
-/** day set 是否覆盖某个本地星期（0 = 周日）。 */
-export function daySetCovers(days: DaySet, weekday: number): boolean {
+/** 两个 day set 是否有共同星期。`workdays` ⊂ `weekdays`，两者与 `daily` 都相交。 */
+function daySetsIntersect(left: DaySet, right: DaySet): boolean {
+  if (left === 'daily' || right === 'daily') return true
+  if (left === right) return true
+  const pair = left === 'workdays' ? right : right === 'workdays' ? left : null
+  return pair === 'weekdays'
+}
+
+/**
+ * day set 是否覆盖某个本地星期 + 日期。`holidays` 只影响 `workdays` / `weekdays`
+ * 两档的差别：`workdays` 要求那天不在年历里。年历里没有那一年时按空集读
+ * （`workdays` 等于 `weekdays`），这是**安全方向**——宁可多按高峰算，不少算。
+ */
+export function daySetCovers(days: DaySet, weekday: number, date: string, holidays: ReadonlySet<string>): boolean {
   if (days === 'daily') return true
-  const weekend = weekday === 0 || weekday === 6
-  return days === 'weekends' ? weekend : !weekend
+  if (isWeekend(weekday)) return days === 'weekends'
+  if (days === 'weekends') return false
+  return days === 'weekdays' || !holidays.has(date)
 }
 
 /** 一个时段是否覆盖某时刻：时刻的本地星期在时段的 day set 内，且本地小时
  *  落在 `[start, end)` 内。 */
-export function slotCovers(slot: SlotScope, ms: number): boolean {
+export function slotCovers(slot: SlotScope, ms: number, holidays: ReadonlySet<string>): boolean {
   const hour = hourOfDay(ms)
-  return hour >= slot.start && hour < slot.end && daySetCovers(slot.days, weekdayOf(ms))
+  return hour >= slot.start && hour < slot.end && daySetCovers(slot.days, weekdayOf(ms), dayKeyOf(ms), holidays)
 }
 
-/** 两个时段是否可能同时生效。写路径拒绝这样的对，因此「某时刻生效的时段」
+/**
+ * 两个时段是否可能同时生效。写路径拒绝这样的对，因此「某时刻生效的时段」
  *  永不歧义；星期集合不相交的一对可以共享同一小时区间（工作日早高峰挨着
- *  周末早高峰）。 */
+ *  周末早高峰）。
+ *
+ *  `workdays` 是周一至周五里去掉法定节假日的那些天，所以它与 `weekdays` 仍共享
+ *  每一个非法定节假日——在同一小时区间上依然重叠；只有与 `weekends` 才不相交。
+ *  年历不参与判定：换一年只会让两者更接近（`workdays` ⊂ `weekdays` 恒成立），
+ *  所以这里的结论对任何年历都成立。
+ */
 export function slotsOverlap(left: SlotScope, right: SlotScope): boolean {
   return hourRangesOverlap(left, right) && daySetsIntersect(left.days, right.days)
 }

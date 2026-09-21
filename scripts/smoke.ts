@@ -16,17 +16,17 @@ import {
 import { pathKey, workspaceRows } from '../src/workspaces.ts'
 import {
   billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, instantKey, instantMs,
-  parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_FILE, rateKeyAt, ratesAt,
+  parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_FILE, rateKeyAt, ratesAt,
   readPriceFile, slotAt, writePriceFile,
 } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import {
   baselinesOf, composePriceBody, draftFromView, duplicateSlot, effectiveSegments, isBlankSlot,
   isUnpriced, modelDirty, newSegment, newSlot, priceUnknown, ratesInForce, rowIssue, slotRange,
-  withSegmentFrom, withSlotEnd, withSlotStart,
-  type ModelDraft, type PriceDraft, type SegmentDraft,
+  withCalendar, withSegmentFrom, withSlotEnd, withSlotStart,
+  type CalendarEntries, type ModelDraft, type PriceDraft, type PriceState, type SegmentDraft,
 } from '../src/client/pricing/draft.ts'
-import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, hourStartMs, slotsOverlap } from '../src/price-format.ts'
+import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, holidaySet, hourStartMs, slotsOverlap } from '../src/price-format.ts'
 import { axisNodes, labelWidth, placeNodes } from '../src/client/pricing/axis.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-catalog.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
@@ -79,13 +79,17 @@ const modelRow = (segments: SegmentDraft[], over: Partial<ModelDraft> = {}): Mod
   ({ model: 'm', configured: true, records: 0, segments, ...over })
 
 /** 把一行装进一份单路由草稿;`ids` 只在要真实路由名 / 模型名 / $billing 时才给。 */
-const draftOfRow = (row: ModelDraft, ids: { route?: string; model?: string; billing?: BillingNature } = {}): PriceDraft => {
+const draftOfRow = (row: ModelDraft, ids: { route?: string; model?: string; billing?: BillingNature } = {}): PriceState => {
   const route = ids.route ?? 'r'
   const model = ids.model ?? row.model
-  return new Map([[route, {
-    route, label: route, billing: ids.billing ?? 'metered', records: row.records,
-    models: new Map([[model, { ...row, model }]]),
-  }]])
+  return {
+    routes: new Map([[route, {
+      route, label: route, billing: ids.billing ?? 'metered', records: row.records,
+      models: new Map([[model, { ...row, model }]]),
+    }]]),
+    calendar: new Map(),
+    holidays: new Set(),
+  }
 }
 
 const bodyOfRow = (row: ModelDraft, ids?: Parameters<typeof draftOfRow>[1]) => composePriceBody(draftOfRow(row, ids))
@@ -380,6 +384,83 @@ if (section('峰谷时段:价段内的第二层取价')) {
     Math.abs(costed.totalCost - 2) < 1e-9 && costed.unpricedModels.length === 0)
 }
 
+if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
+  // 2026 年国庆：10-01(周四) ~ 10-07(周三)。10-01 与 10-02 是工作日里的放假日，
+  // 10-03/10-04 是周末，10-08(周四) 是恢复上班后的第一个工作日。
+  const calendar = { 2026: [{ start: '2026-10-01', end: '2026-10-07' }] }
+  const holidays = holidaySet(calendar)
+  const parsed = parsePriceInput({
+    [PRICING_CALENDAR_KEY]: calendar,
+    r: { m: [{
+      from: '2026-01-01', inputPerMillion: 1, outputPerMillion: 2,
+      slots: [
+        { days: 'workdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 },
+        { days: 'weekdays', start: 14, end: 18, inputPerMillion: 3, outputPerMillion: 6 },
+      ],
+    }] },
+  })
+  if (!parsed.ok) throw new Error(`calendar body rejected: ${parsed.error}`)
+  const table = parsed.file.table
+  check('workdays 只在「周一至周五且不是法定节假日」生效;weekdays 照旧含放假日',
+    ratesAt(table, 'r', 'm', dayMillis('2026-09-30', 10), holidays)?.inputPerMillion === 2
+    && ratesAt(table, 'r', 'm', dayMillis('2026-10-01', 10), holidays)?.inputPerMillion === 1
+    && ratesAt(table, 'r', 'm', dayMillis('2026-10-05', 10), holidays)?.inputPerMillion === 1
+    && ratesAt(table, 'r', 'm', dayMillis('2026-10-08', 10), holidays)?.inputPerMillion === 2
+    && ratesAt(table, 'r', 'm', dayMillis('2026-09-30', 15), holidays)?.inputPerMillion === 3
+    && ratesAt(table, 'r', 'm', dayMillis('2026-10-01', 15), holidays)?.inputPerMillion === 3)
+
+  // 年历缺那一年的读法：空集 = 那一年未知，weekdays 与 workdays 收成同一档
+  // （法定节假日被按高峰多算，不少算）。
+  check('年历查不到那一年时 workdays 退化成周一至周五(安全方向:多算不少算)',
+    ratesAt(table, 'r', 'm', dayMillis('2026-10-01', 10), new Set())?.inputPerMillion === 2
+    && ratesAt(table, 'r', 'm', dayMillis('2027-10-01', 10), holidays)?.inputPerMillion === 2)
+
+  const calRefuses: [string, boolean][] = [
+    ['畸形区间被拒', parsePriceInput({ [PRICING_CALENDAR_KEY]: { 2026: [{ start: '2026-10-07', end: '2026-10-01' }] } }).ok === false],
+    ['不是日期的区间被拒', parsePriceInput({ [PRICING_CALENDAR_KEY]: { 2026: [{ start: '2026-02-30', end: '2026-03-01' }] } }).ok === false],
+    ['年份键不是四位数字被拒', parsePriceInput({ [PRICING_CALENDAR_KEY]: { '26': [{ start: '2026-01-01', end: '2026-01-03' }] } }).ok === false],
+    ['跨年的区间被拒', parsePriceInput({ [PRICING_CALENDAR_KEY]: { 2026: [{ start: '2026-12-30', end: '2027-01-02' }] } }).ok === false],
+    ['相邻两段会被合并(不算畸形)', parsePriceInput({ [PRICING_CALENDAR_KEY]: { 2026: [{ start: '2026-01-01', end: '2026-01-02' }, { start: '2026-01-03', end: '2026-01-03' }] } }).ok === true],
+  ]
+  check('年历的写路径:畸形区间、假日期、跨年都拒;相邻段允许', calRefuses.every(([, ok]) => ok), calRefuses.filter(([, ok]) => !ok).map(([label]) => label))
+
+  const coerced = coercePriceFile({ [PRICING_CALENDAR_KEY]: { 2026: [{ start: '2026-02-01', end: '2026-02-02' }, { start: '2026-02-02', end: '2026-02-03' }, { start: 'nope', end: 'x' }] } }, quiet)
+  check('年历的读路径:重叠段合并、畸形段丢弃,绝不因为一段坏数据把整年读空',
+    coerced.calendar['2026']?.length === 1 && coerced.calendar['2026']?.[0]?.start === '2026-02-01' && coerced.calendar['2026']?.[0]?.end === '2026-02-03')
+
+  const calDir = await mkdtemp(join(tmpdir(), 'tokbook-cal-'))
+  try {
+    await writePriceFile(calDir, parsed.file, quiet)
+    const back = await readPriceFile(calDir, quiet)
+    check('年历与价表写进同一份文件,读回来年历原样、总段数不变',
+      back.calendar['2026']?.[0]?.end === '2026-10-07'
+      && ratesAt(back.table, 'r', 'm', dayMillis('2026-10-01', 10), holidaySet(back.calendar))?.inputPerMillion === 1
+      && ratesAt(back.table, 'r', 'm', dayMillis('2026-09-30', 10), holidaySet(back.calendar))?.inputPerMillion === 2)
+  } finally {
+    await rm(calDir, { recursive: true, force: true })
+  }
+
+  // 草稿侧同一条规则:年历改一个字,行内「此刻的价」当场跟着走;草稿产出的
+  // 年历也必须被宿主接受(client ⊆ host)。
+  const entry: CalendarEntries = new Map([['2026', { year: '2026', text: '2026-10-01 ~ 2026-10-07' }]])
+  const withYear = withCalendar(draftOfRow(modelRow([
+    { ...newSegment({ from: '2026-01-01', input: '1', output: '2' }), slots: [newSlot({ days: 'workdays', start: '9', end: '12', input: '2' })] },
+  ])), entry)
+  const nationalDay = dayMillis('2026-10-01', 10)
+  check('草稿里的年历参与此刻取价:放假日按基准价,平日按高峰价',
+    ratesInForce(withYear.routes.get('r')!.models.get('m')!, withYear.holidays, nationalDay)?.slot === null
+    && ratesInForce(withYear.routes.get('r')!.models.get('m')!, withYear.holidays, dayMillis('2026-09-30', 10))?.values.input === '2')
+  const calBody = composePriceBody(withYear)
+  const accepted = calBody.ok ? parsePriceInput(calBody.body) : { ok: false as const, error: calBody.ok ? '' : calBody.error }
+  check('草稿写出的年历被宿主接受,且落成同一份年历',
+    accepted.ok && accepted.file.calendar['2026']?.[0]?.start === '2026-10-01'
+    && new Set(Object.keys(accepted.file.calendar)).size === 1)
+  check('年历文本里的畸形写法在草稿这一侧就报出位置',
+    composePriceBody(withCalendar(withYear, new Map([['2026', { year: '2026', text: '10月1日' }]]))).ok === false
+    && composePriceBody(withCalendar(withYear, new Map([['2026', { year: '2026', text: '2027-10-01' }]]))).ok === false)
+}
+
+
 if (section('时段身份:改费率就地重算,改时段 / 删时段 = 价格未知')) {
   const route = 'deepseek-official'
   const model = 'deepseek-v4-flash'
@@ -424,14 +505,14 @@ if (section('价格表草稿:没写完的不算、不脏、不写')) {
     routes: [{ route: 'r', label: 'r', billing: 'metered', records: 0, models: [
       { model: 'm', configured: true, records: 0, segments: [{ from: '2026-08-01', inputPerMillion: 1, outputPerMillion: 4 }] },
     ] }],
-    dataDir: 'x', updatedAt: 0,
+    calendar: {}, calendarMissing: [], dataDir: 'x', updatedAt: 0,
   }
   const baseline = baselinesOf(view)
   const seeded = draftFromView(view)
-  const real = seeded.get('r')!.models.get('m')!.segments
-  const withDraft = { ...seeded.get('r')!.models.get('m')!, segments: [...real, newSegment()] }
+  const real = seeded.routes.get('r')!.models.get('m')!.segments
+  const withDraft = { ...seeded.routes.get('r')!.models.get('m')!, segments: [...real, newSegment()] }
   check('刚种下的行是干净的;＋ 加一段价既不改脏标记也不改请求体',
-    modelDirty('r', seeded.get('r')!.models.get('m')!, baseline.models) === false
+    modelDirty('r', seeded.routes.get('r')!.models.get('m')!, baseline.models) === false
     && modelDirty('r', withDraft, baseline.models) === false
     && JSON.stringify(bodyOf(withDraft.segments)) === JSON.stringify(bodyOf(real)))
 
@@ -462,8 +543,8 @@ if (section('价格表草稿:没写完的不算、不脏、不写')) {
     ...newSegment({ from: '2026-09-01', input: '1', output: '4', cacheRead: '0.2', cacheWrite: '' }),
     slots: [newSlot({ days: 'weekdays', start: '9', end: '12', input: '2' })],
   }])
-  const peak = ratesInForce(peakRow, dayMillis('2026-09-14', 10))     // 周一 10:00,落在 09:00–12:00 里
-  const offPeak = ratesInForce(peakRow, dayMillis('2026-09-14', 13))
+  const peak = ratesInForce(peakRow, new Set(), dayMillis('2026-09-14', 10))     // 周一 10:00,落在 09:00–12:00 里
+  const offPeak = ratesInForce(peakRow, new Set(), dayMillis('2026-09-14', 13))
   check('此刻价 = 生效段的基准价叠上此刻生效的峰谷时段(留空的档沿用基准价),没生效时段时就是基准价',
     peak?.slot?.start === '9' && peak.values.input === '2' && peak.values.output === '4'
     && peak.values.cacheRead === '0.2' && peak.values.cacheWrite === ''
@@ -480,7 +561,7 @@ if (section('没有价段覆盖的日期:按 ¥0 计,播种不补卡')) {
     routes: [{ route: 'r', label: 'r', billing: 'metered', records: 4, models: [
       { model: 'm', configured: true, records: 4, ...(firstAt !== undefined ? { firstAt } : {}), segments },
     ] }],
-    dataDir: 'x', updatedAt: 0,
+    calendar: {}, calendarMissing: [], dataDir: 'x', updatedAt: 0,
   })
   const firstAt = dayMillis('2026-08-15', 18) + 47 * 60_000
   const rowOf = modelRow
@@ -488,8 +569,8 @@ if (section('没有价段覆盖的日期:按 ¥0 计,播种不补卡')) {
 
   // 播种**不补任何卡**:文件里有几段就是几段,一段都没有就是一段都没有。
   const datedOnly: PricingSegmentInput[] = [{ from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 8 }]
-  const seeded = draftFromView(rowView(firstAt, datedOnly)).get('r')!.models.get('m')!
-  const bare = draftFromView(rowView(firstAt, [])).get('r')!.models.get('m')!
+  const seeded = draftFromView(rowView(firstAt, datedOnly)).routes.get('r')!.models.get('m')!
+  const bare = draftFromView(rowView(firstAt, [])).routes.get('r')!.models.get('m')!
   check('播种不补卡:有日期的段照旧,没有价的行走径就是空(要价得自己加一段)',
     seeded.segments.length === 1 && seeded.segments[0]!.from === '2026-09-01'
     && bare.segments.length === 0
@@ -506,9 +587,9 @@ if (section('没有价段覆盖的日期:按 ¥0 计,播种不补卡')) {
     { ...newSegment({ from: '2026-09-01', input: '2', output: '8' }) },
   ], { records: 9, firstAt })
   check('此刻价取最后一段已生效的;一段都没生效时没有价可报(行内显示「—」,不是 ¥0)',
-    ratesInForce(both, dayMillis('2026-08-20', 9))?.values.input === '1'
-    && ratesInForce(both, dayMillis('2026-09-02', 9))?.values.input === '2'
-    && ratesInForce(rowOf([{ ...newSegment({ from: '2026-12-01', input: '1', output: '4' }) }]), dayMillis('2026-09-02', 9)) === null)
+    ratesInForce(both, new Set(), dayMillis('2026-08-20', 9))?.values.input === '1'
+    && ratesInForce(both, new Set(), dayMillis('2026-09-02', 9))?.values.input === '2'
+    && ratesInForce(rowOf([{ ...newSegment({ from: '2026-12-01', input: '1', output: '4' }) }]), new Set(), dayMillis('2026-09-02', 9)) === null)
 
   // 价格未知 = 整行没有价（空白草稿不算价）,或有账本记录早于最早的一段有价段。
   check('价格未知只由「没有价」与「有记录早于最早一段价」两条触发',
@@ -522,9 +603,9 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
   // 不变量:**client 产出 ⊆ host 接受**(`docs/CONTRACTS.md` §2)。规则在两侧各写一份的
   // 代价正是「草稿认为能存、写入被拒」,所以这里不重列规则,而是把
   // 「草稿 → body → host 解析」真的跑一遍——两侧各写各的检查时,只有往返能发现缺口。
-  const draftOf = (route: string, model: string, segments: SegmentDraft[], billing: BillingNature = 'metered'): PriceDraft =>
+  const draftOf = (route: string, model: string, segments: SegmentDraft[], billing: BillingNature = 'metered'): PriceState =>
     draftOfRow(modelRow(segments, { model }), { route, model, billing })
-  const roundTrip = (draft: PriceDraft): ReturnType<typeof parsePriceInput> => {
+  const roundTrip = (draft: PriceState): ReturnType<typeof parsePriceInput> => {
     const body = composePriceBody(draft)
     return body.ok ? parsePriceInput(body.body) : { ok: false, error: body.error }
   }
@@ -536,7 +617,7 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
       newSlot({ days: 'weekends', start: '9', end: '12', output: '16' }),
     ],
   })
-  const accepted: [string, PriceDraft][] = [
+  const accepted: [string, PriceState][] = [
     ['两段价 + 整点调价 + 两组时段', draftOf('deepseek-official', 'deepseek-chat', [floor, dated])],
     ['订阅通道($billing)', draftOf('commandcode', 'deepseek-chat', [floor], 'subscription')],
     ['整行都是空白草稿(不进 body)', draftOf('r', 'm', [newSegment()])],
@@ -559,7 +640,7 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
   // `price-format.ts`,所以草稿这一侧就报得出位置与原因,而不是整份文件被拒。
   const longRoute = 'r'.repeat(MAX_ROUTE_LENGTH + 1)
   const longModel = 'm'.repeat(MAX_MODEL_LENGTH + 1)
-  const keyRefusals: [string, PriceDraft, string][] = [
+  const keyRefusals: [string, PriceState, string][] = [
     ['空通道路由名', draftOf('', 'm', [floor]), '空通道路由名'],
     ['保留键前缀', draftOf('$weird', 'm', [floor]), '「$」'],
     ['过长的通道路由名', draftOf(longRoute, 'm', [floor]), '通道路由名超过'],

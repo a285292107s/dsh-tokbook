@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  BillingMap, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
+  BillingMap, HolidayCalendar, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
 } from './types.ts'
 import { totalsTokens } from './types.ts'
 import { coercePlansConfig, validateConfig } from './config.ts'
@@ -32,6 +32,7 @@ import {
   parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
   type PriceParse,
 } from './pricing.ts'
+import { holidaySet } from './price-format.ts'
 import { ledgerUsageOf, readPricingView, type LedgerUsage } from './pricing-view.ts'
 import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'
 import { modelRowsOf, providerCards } from './by-provider.ts'
@@ -458,14 +459,23 @@ export class TokenUsageBook extends Service {
     return this.hostCtx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
   }
 
-  /** 读价文件，并造出解到该表上的 rate 解析器——概览 / 用量 / 价格表共用这一读法。 */
-  private async rateContext(): Promise<{ table: PricingTable; billing: BillingMap; revision: string; resolve: RateResolver }> {
-    const { table, billing, revision } = await readPriceFile(this.dir, this.logger)
+  /** 读价文件，并造出解到该表上的 rate 解析器——概览 / 用量 / 价格表共用这一读法。
+   *  年历一并解成日期集合：`workdays` 时段靠它把法定节假日排除在高峰之外。 */
+  private async rateContext(): Promise<{
+    table: PricingTable
+    billing: BillingMap
+    calendar: HolidayCalendar
+    revision: string
+    resolve: RateResolver
+  }> {
+    const { table, billing, calendar, revision } = await readPriceFile(this.dir, this.logger)
+    const holidays = holidaySet(calendar)
     return {
       table,
       billing,
+      calendar,
       revision,
-      resolve: (record) => rateKeyAt(table, record.provider, record.model, record.time),
+      resolve: (record) => rateKeyAt(table, record.provider, record.model, record.time, holidays),
     }
   }
 
@@ -588,8 +598,8 @@ export class TokenUsageBook extends Service {
     try {
       // 账本透镜要的是记录数不是价格：读已预热的记录缓存，而不是折叠 rollup。
       const records = await readCachedRecords(this.dir, this.logger)
-      const { table } = await this.rateContext()
-      ledger = ledgerUsageOf(records, table)
+      const { table, calendar } = await this.rateContext()
+      ledger = ledgerUsageOf(records, table, holidaySet(calendar))
     } catch (error) {
       // 读失败不得阻塞 tab：没有账本用量透镜，价表仍可编辑。
       this.logger.warn?.('[tokbook] cannot read ledger usage for pricing view:', error)

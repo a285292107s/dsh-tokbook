@@ -10,10 +10,13 @@
 // 价文件的共享词表（保留键、长度上限）从共享内核取——client 不能 import
 // `src/pricing.ts`（它拉了 `node:fs`），两条字面量各写一遍就会静默漂移。
 import {
-  DAY_SETS, DAY_SET_LABELS, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
-  instantKey, instantMs, isHourRange, rangeLabel, slotCovers, slotsOverlap,
+  DAY_SETS, DAY_SET_LABELS, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
+  holidayRangeLabel, holidaySet, instantKey, instantMs, isHourRange, isYearKey, rangeLabel, slotCovers, slotsOverlap,
 } from '../../price-format.ts'
-import type { BillingNature, DaySet, ModelPricing, PricingSegmentInput, PricingSlotInput, PricingView } from '../../types.ts'
+import type {
+  BillingNature, DaySet, HolidayCalendar, HolidayRange, ModelPricing, PricingCalendarInput,
+  PricingSegmentInput, PricingSlotInput, PricingView,
+} from '../../types.ts'
 
 /** 一份价格的四个 ¥/M 桶，数字形式，键与草稿字段一致（未填写时桶缺席）。 */
 export interface DraftRates {
@@ -96,6 +99,30 @@ export interface RouteDraft {
 /** 整份草稿，按 route key 键控。 */
 export type PriceDraft = Map<string, RouteDraft>
 
+/** 一份可编辑的法定节假日年历。 */
+export interface CalendarDraft {
+  /** 年份，四位数字。 */
+  year: string
+  /** 放假日区间，每项形如 `2026-02-15 ~ 2026-02-23`；一行一项（逗号/换行/顿号分隔）。 */
+  text: string
+}
+
+/** 年历草稿：年份 → 该年的原始文本。 */
+export type CalendarEntries = Map<string, CalendarDraft>
+
+/**
+ * 整份价表草稿：route 卡 + 年历。
+ *
+ * `holidays` 是年历草稿当前解析出的放假日集合——`workdays` 时段的生效判定要用它，
+ * 所以它跟着文本走（改一个字，行内「此刻的价」当场跟着变）。它只在写入成功后更换，
+ * 那一次写入的正是同一份年历。
+ */
+export interface PriceState {
+  routes: PriceDraft
+  calendar: CalendarEntries
+  holidays: ReadonlySet<string>
+}
+
 let nextId = 1
 
 function takeId(): number {
@@ -114,6 +141,94 @@ export function todayKey(now: Date = new Date()): string {
 /** 草稿 `from` 所指的有效时刻；空或不是真实时刻 = null（一段价必须有生效时刻）。 */
 function instantOf(from: string): number | null {
   return instantMs(from.trim())
+}
+
+// ---------------------------------------------------------------------------
+// 法定节假日年历
+// ---------------------------------------------------------------------------
+
+/** 一行 / 逗号 / 顿号分隔的区间文本。 */
+const RANGE_SEPARATORS_RE = /[\n,，、;；]/u
+
+/** 一个区间项的文本形态：`2026-02-15 ~ 2026-02-23`（单独一天写成 `起 ~ 止` 同值）。 */
+export function holidayRangeText(range: HolidayRange): string {
+  return `${range.start} ~ ${range.end}`
+}
+
+/**
+ * 一年区间文本 → 区间数组，或首个问题。
+ *
+ * 只接受**完整日期**的区间对（`起 ~ 止`，单个日期也算），分隔符是换行 / 逗号 /
+ * 顿号 / 分号。刻意不接受「省略年份」这类简写：漏写一年就会静默把假期记到错的
+ * 年份上，而这份数据的代价正是「写错一年 = 整年错价」。
+ */
+export function parseCalendarText(text: string, year: string): { ok: true; ranges: HolidayRange[] } | { ok: false; error: string } {
+  const ranges: HolidayRange[] = []
+  for (const raw of text.split(RANGE_SEPARATORS_RE)) {
+    const item = raw.trim()
+    if (item === '') continue
+    const parts = item.split('~')
+    if (parts.length > 2) return { ok: false, error: `「${item}」不是日期或区间（写成 2026-01-01 或 2026-01-01 ~ 2026-01-03）` }
+    const start = (parts[0] ?? '').trim()
+    const end = (parts.length === 2 ? parts[1] ?? '' : start).trim()
+    const at = instantMs(start)
+    const to = instantMs(end)
+    if (at === null || to === null) {
+      return { ok: false, error: `「${item}」不是有效日期（要 YYYY-MM-DD，且是真实存在的一天）` }
+    }
+    if (at > to) return { ok: false, error: `「${item}」的开始晚于结束` }
+    if (start.slice(0, 4) !== year || end.slice(0, 4) !== year) {
+      return { ok: false, error: `「${item}」跨出了 ${year} 年：一段假期必须落在它所属的那一年里` }
+    }
+    ranges.push({ start, end })
+  }
+  if (ranges.length === 0) return { ok: false, error: `${year} 年还没有写任何放假日` }
+  return { ok: true, ranges }
+}
+
+/** 年历草稿 → 送宿主 / 写文件的那份年历；有问题的年份即拒绝（连同位置）。 */
+export function composeCalendar(entries: CalendarEntries): { ok: true; calendar: PricingCalendarInput } | { ok: false; error: string } {
+  const calendar: PricingCalendarInput = {}
+  for (const [year, entry] of entries) {
+    if (!isYearKey(year)) return { ok: false, error: `年历的年份「${year}」必须是四位数字` }
+    const parsed = parseCalendarText(entry.text, year)
+    if (!parsed.ok) return { ok: false, error: `年历 ${year}：${parsed.error}` }
+    calendar[year] = parsed.ranges
+  }
+  return { ok: true, calendar }
+}
+
+/** 年历草稿当前的放假日集合（服务行内「此刻的价」与时段重叠判定）。含问题的
+ *  年份在这一刻不参与判定——它自己也写不出去。 */
+export function holidaysOf(entries: CalendarEntries): ReadonlySet<string> {
+  const calendar: PricingCalendarInput = {}
+  for (const [year, entry] of entries) {
+    const parsed = parseCalendarText(entry.text, year)
+    if (parsed.ok) calendar[year] = parsed.ranges
+  }
+  return holidaySet(calendar)
+}
+
+/** 一份年历草稿的签名：加入的年份按 `年: 文本` 排序（顺序不该算作改动）。 */
+function calendarSignature(entries: CalendarEntries): string {
+  return JSON.stringify([...entries].map(([year, entry]) => [year, entry.text]).sort((left, right) => left[0]!.localeCompare(right[0]!)))
+}
+
+/**
+ * 换一份年历草稿，并把它的放假日集合一起换掉。
+ *
+ * `holidays` 与 `calendar` 必须同步换：`holidays` 错一代，就会让「年历刚写错、
+ * 时段却还按旧年历生效」这种状态混进行内显示。删掉最后一年时保留上一份集合——
+ * 冻结旧读法是**安全方向**（`workdays` 收窄，只会多算高峰），比空集更保守。
+ */
+export function withCalendar(state: PriceState, calendar: CalendarEntries): PriceState {
+  return { ...state, calendar, holidays: holidaysOf(calendar) }
+}
+
+/** 年历的一个年份条目：该年的区间读法（写不出来时为空串，调用处显示问题）。 */
+export function calendarEntryLabel(entry: CalendarDraft): string {
+  const parsed = parseCalendarText(entry.text, entry.year)
+  return parsed.ok ? parsed.ranges.map(holidayRangeLabel).join('、') : ''
 }
 
 /** 小时输入的数字；非整点文本时为 NaN。 */
@@ -247,9 +362,9 @@ function segmentDraft(segment: PricingSegmentInput): SegmentDraft {
   }
 }
 
-/** 从一份 wire 视图播种可编辑草稿。**不补任何段**：没有价就是没有价——
+/** 从一份 wire 视图播种可编辑状态。**不补任何段**：没有价就是没有价——
  *  没有价段覆盖的日期按 ¥0 计（并列为价格未知），要给它价就自己加一段。 */
-export function draftFromView(view: PricingView): PriceDraft {
+export function draftFromView(view: PricingView): PriceState {
   const draft: PriceDraft = new Map()
   for (const card of view.routes) {
     const models = new Map<string, ModelDraft>()
@@ -272,7 +387,13 @@ export function draftFromView(view: PricingView): PriceDraft {
       models,
     })
   }
-  return draft
+  const calendar: CalendarEntries = new Map()
+  // 视图里的年历是合并过的区间（host 写的），所以这里的文本与文件逐字一致——
+  // 刚播种的草稿不会因为「两段相邻的假期该不该并」而看起来像被编辑过。
+  for (const [year, ranges] of Object.entries(view.calendar ?? {})) {
+    calendar.set(year, { year, text: ranges.map(holidayRangeText).join('\n') })
+  }
+  return { routes: draft, calendar, holidays: holidaysOf(calendar) }
 }
 
 // ---------------------------------------------------------------------------
@@ -338,21 +459,26 @@ export interface InForceRates {
   values: RateTexts
 }
 
-/** 段里此刻生效的峰谷时段（按时刻自身的本地星期与小时）；null = 基准价。 */
-function activeSlot(segment: SegmentDraft, nowMs: number): SlotDraft | null {
+/** 段里此刻生效的峰谷时段（按时刻自身的本地星期、日期与小时）；null = 基准价。
+ *  `holidays` 决定 `workdays` 时段在法定节假日那天不生效。 */
+function activeSlot(segment: SegmentDraft, nowMs: number, holidays: ReadonlySet<string>): SlotDraft | null {
   for (const slot of effectiveSlots(segment)) {
     const { start, end } = slotRange(slot)
-    if (isHourRange({ start, end }) && slotCovers({ days: slot.days, start, end }, nowMs)) return slot
+    if (isHourRange({ start, end }) && slotCovers({ days: slot.days, start, end }, nowMs, holidays)) return slot
   }
   return null
 }
 
 /** 行内四个数字读的东西：此刻计费所用的价——宿主 `ratesOfSegment` 的同一条规则。
  *  没有一段在生效时为 null = 这一刻价格未知。 */
-export function ratesInForce(model: ModelDraft, nowMs: number = Date.now()): InForceRates | null {
+export function ratesInForce(
+  model: ModelDraft,
+  holidays: ReadonlySet<string>,
+  nowMs: number = Date.now(),
+): InForceRates | null {
   const segment = segmentInForce(model, nowMs)
   if (segment === null) return null
-  const slot = activeSlot(segment, nowMs)
+  const slot = activeSlot(segment, nowMs, holidays)
   if (slot === null) return { segment, slot: null, values: inheritedRates(segment) }
   const inherit = (field: RateField): string => {
     const own = slot[field].trim()
@@ -623,10 +749,10 @@ function modelIssue(model: string): string | null {
 }
 
 /** 一次保存发送的 body：**完整的**目标文件。拒绝时给出首个问题的确切位置，与宿主自身解析的报错方式一致。 */
-export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<string, unknown> } | { ok: false; error: string } {
+export function composePriceBody(state: PriceState): { ok: true; body: Record<string, unknown> } | { ok: false; error: string } {
   const body: Record<string, unknown> = {}
   const billing: Record<string, BillingNature> = {}
-  for (const [route, card] of draft) {
+  for (const [route, card] of state.routes) {
     if (card.billing !== 'metered') billing[route] = card.billing
     const models: Record<string, unknown[]> = {}
     for (const [model, row] of card.models) {
@@ -684,40 +810,55 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
     }
   }
   if (Object.keys(billing).length > 0) body[PRICING_BILLING_KEY] = billing
+  // 年历与计费性质同处保留键前缀之下，写在 route 之前（与宿主 writer 同一顺序）。
+  const calendar = composeCalendar(state.calendar)
+  if (!calendar.ok) return { ok: false, error: calendar.error }
+  if (Object.keys(calendar.calendar).length > 0) body[PRICING_CALENDAR_KEY] = calendar.calendar
   return { ok: true, body }
 }
 
-/** 一份视图的行级与 route 级基线：行签名变了即 dirty。取自视图播种的同一草稿，故首记锚定等规则绝不会让刚播种的行看起来像被编辑过。 */
-export function baselinesOf(view: PricingView): { models: Map<string, string>; billing: Map<string, BillingNature> } {
+/** 一次性写入的基线：每个 route 的计费性质、每一行的签名，以及年历签名。 */
+export interface PriceBaseline {
+  models: Map<string, string>
+  billing: Map<string, BillingNature>
+  calendar: string
+}
+
+/** 一份视图的基线：行签名变了即 dirty。取自视图播种的同一草稿，故首记锚定等规则绝不会让刚播种的行看起来像被编辑过。 */
+export function baselinesOf(view: PricingView): PriceBaseline {
   return baselineOfDraft(draftFromView(view))
 }
 
 /** 一次成功保存为草稿建立的基线：就是它自己的签名，本地草稿保持为唯一真源，tab 不必重新播种（那会 remount 正在输入的输入框）。 */
-export function baselineOfDraft(draft: PriceDraft): { models: Map<string, string>; billing: Map<string, BillingNature> } {
+export function baselineOfDraft(state: PriceState): PriceBaseline {
   const models = new Map<string, string>()
   const billing = new Map<string, BillingNature>()
-  for (const [route, card] of draft) {
+  for (const [route, card] of state.routes) {
     billing.set(route, card.billing)
     for (const [model, row] of card.models) {
       models.set(rowKey(route, model), modelSignature(row))
     }
   }
-  return { models, billing }
+  return { models, billing, calendar: calendarSignature(state.calendar) }
 }
 
-/** 与基线不同的行数（以及 route 计费开关数）。 */
-export function stagedChanges(
-  draft: PriceDraft,
-  baseline: { models: ReadonlyMap<string, string>; billing: ReadonlyMap<string, BillingNature> },
-): number {
+/** 与基线不同的行数（以及 route 计费开关数、年历一处）。 */
+export function stagedChanges(state: PriceState, baseline: PriceBaseline): number {
   let count = 0
-  for (const [route, card] of draft) {
+  for (const [route, card] of state.routes) {
     if ((baseline.billing.get(route) ?? 'metered') !== card.billing) count += 1
     for (const [model, row] of card.models) {
       if (modelDirty(route, row, baseline.models)) count += 1
     }
   }
+  // 年历整体算一处：它是一份数据，不是逐行编辑。
+  if (calendarSignature(state.calendar) !== baseline.calendar) count += 1
   return count
+}
+
+/** 年历是否与磁盘不同（面板据此给它自己的状态标记）。 */
+export function calendarDirty(state: PriceState, baseline: PriceBaseline): boolean {
+  return calendarSignature(state.calendar) !== baseline.calendar
 }
 
 /** 一个模型行是否与基线不同。 */

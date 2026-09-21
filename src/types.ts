@@ -92,7 +92,32 @@ export interface ModelPricing {
  * 省略 = metered。 */
 export type BillingNature = 'metered' | 'subscription'
 
-export type DaySet = 'daily' | 'weekdays' | 'weekends'
+/**
+ * 例外时段的适用日集合。四档的语义是**逐字**的，其中两档只差在法定节假日的处理上：
+ * - `daily` — 每天；
+ * - `workdays` — 周一至周五**且**不在法定节假日年历里（官方峰谷价说的「工作日」就是这一档）；
+ * - `weekdays` — 周一至周五，含法定节假日；
+ * - `weekends` — 周六、周日。
+ *
+ * 周一至周五以外的调休上班日（把周末调成上班）**不进任何集合**：调休只把周末变成上班，
+ * 而周末无论上不上班都是闲时价，所以年历只需收放假日，不必收调休上班日。
+ */
+export type DaySet = 'daily' | 'workdays' | 'weekdays' | 'weekends'
+
+/**
+ * 法定节假日年历：`YYYY` → 该年的放假日区间（`[起, 止]` 闭区间，`YYYY-MM-DD`）。
+ * 国家每年底公布一次，因此按年收录；文件里查不到那一年就是**未知**（空集），
+ * 而不是「那年没有节假日」——`workdays` 因此退化为按周一至周五全额高峰。
+ */
+export type HolidayCalendar = Record<string, HolidayRange[]>
+
+/** 一段连续放假日，闭区间。 */
+export interface HolidayRange {
+  /** 首日（含）。 */
+  start: string
+  /** 末日（含）。 */
+  end: string
+}
 
 /** 价格段的例外时段：本地日的小时区间（`[start, end)`，`24` 关日），按星期
  * 集合生效，自带四档 ¥/M。生效时叠在段的基准价之上——省略的档沿用基准价。 */
@@ -133,6 +158,9 @@ export type PricingTable = Record<string, Record<string, PriceSegment[]>>
 
 /** route → 计费性质。价表保留键 `$billing`。 */
 export type BillingMap = Record<string, BillingNature>
+
+/** 价文件里的法定节假日年历形态（保留键 `$calendar`）。 */
+export type PricingCalendarInput = Record<string, HolidayRange[]>
 
 /** 记录计价所依据的身份：生效段的起始时刻 + 段内生效的例外时段
  * （null/缺 = 该段基准价）。只存身份、不存数字，改价后下次读即重算历史。 */
@@ -222,6 +250,11 @@ export interface PricingView {
   /** 每个 provider route 一卡：有账本用量的在前（用量多的优先），其余按
    * route key。 */
   routes: PricingRouteView[]
+  /** 法定节假日年历（价文件 `$calendar` 原样）。`workdays` 时段靠它把节假日
+   * 排除在高峰之外；缺一年就是那一年未知。 */
+  calendar: PricingCalendarInput
+  /** 账本覆盖到、但年历里没有的年份——`workdays` 在那几年会多算高峰。空 = 不用补。 */
+  calendarMissing: string[]
   dataDir: string
   updatedAt: number
 }

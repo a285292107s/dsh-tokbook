@@ -12,28 +12,34 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  DAY_SETS, EARLIEST, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
-  instantKey, instantMs, isHourRange, slotCovers, slotsOverlap,
+  DAY_SETS, EARLIEST, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
+  dayIndex, dayKeyOfIndex, holidayDates, instantKey, instantMs, isHourRange, isValidHolidayRange, isYearKey,
+  slotCovers, slotsOverlap, yearOfDate,
 } from './price-format.ts'
 import type {
-  BillingMap, BillingNature, ModelPricing, PriceSegment, PriceSlot, PricingSegmentInput, PricingSlotInput,
-  PricingTable, RateKey, SlotRef, UsageTotals,
+  BillingMap, BillingNature, HolidayCalendar, HolidayRange, ModelPricing, PriceSegment, PriceSlot,
+  PricingSegmentInput, PricingSlotInput, PricingTable, RateKey, SlotRef, UsageTotals,
 } from './types.ts'
 import { UNPRICED_KEY } from './types.ts'
 
 export const PRICING_FILE = 'pricing.json'
 
-export { DAY_SETS, EARLIEST, PRICING_BILLING_KEY, dayKeyOf, dayStartMs, instantKey, instantMs } from './price-format.ts'
+export {
+  DAY_SETS, EARLIEST, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
+  dayKeyOf, dayStartMs, instantKey, instantMs,
+} from './price-format.ts'
 
 interface Logger {
   error(...args: unknown[]): void
 }
 
-/** 整个价文件：(route, model) 时间轴 + billing 映射。`revision` 是内容签名——
- *  派生 rollup 记下其 rate 行所折叠的 revision，不同则重建。 */
+/** 整个价文件：(route, model) 时间轴 + billing 映射 + 法定节假日年历。`revision`
+ *  是内容签名——派生 rollup 记下其 rate 行所折叠的 revision，不同则重建。 */
 export interface PriceFile {
   table: PricingTable
   billing: BillingMap
+  /** 法定节假日年历（`$calendar`）；空 = 未收录任何一年。 */
+  calendar: HolidayCalendar
   revision: string
 }
 
@@ -158,16 +164,56 @@ function normalizeSegments(segments: readonly PriceSegment[]): PriceSegment[] {
   return out
 }
 
+/** 一年里的一段放假日：两端都是真实日期且起不晚于止。 */
+function coerceHolidayRange(raw: unknown): HolidayRange | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const range = raw as Record<string, unknown>
+  if (typeof range.start !== 'string' || typeof range.end !== 'string') return null
+  const parsed: HolidayRange = { start: range.start, end: range.end }
+  return isValidHolidayRange(parsed) ? parsed : null
+}
+
+/** 读路径的年历：畸形的年 / 区间丢弃（不致命），合法区间合并成不重叠的区间表。 */
+function coerceCalendar(raw: unknown): HolidayCalendar {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  const calendar: HolidayCalendar = {}
+  for (const [year, ranges] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isYearKey(year) || !Array.isArray(ranges)) continue
+    const kept = mergeHolidayDates(
+      ranges.map(coerceHolidayRange).filter((range): range is HolidayRange => range !== null).flatMap(holidayDates),
+    )
+    if (kept.length > 0) calendar[year] = kept
+  }
+  return calendar
+}
+
+/** 一组本地日 → 升序、合并相邻/重叠的闭区间。年历在文件里按区间写，
+ *  所以读（可能来自手写文件）与写都要经过它，两种形态才收敛到同一份。 */
+function mergeHolidayDates(dates: readonly string[]): HolidayRange[] {
+  const indexes = [...new Set(dates)].map(dayIndex).filter((index): index is number => index !== null)
+  indexes.sort((left, right) => left - right)
+  const ranges: HolidayRange[] = []
+  for (const index of indexes) {
+    const last = ranges[ranges.length - 1]
+    // 与上一段紧邻（相差一天）就并进去，否则另起一段。按「天数索引」算，
+    // 所以夏令时那两天既不会把一段假期断开，也不会把相邻两天错并成一天。
+    if (last !== undefined && index - (dayIndex(last.end) ?? index) === 1) last.end = dayKeyOfIndex(index)
+    else ranges.push({ start: dayKeyOfIndex(index), end: dayKeyOfIndex(index) })
+  }
+  return ranges
+}
+
 /** 宽松解析整个文件：畸形 route / model / 段丢弃（不致命），与账本读自身分日
  *  文件一致。 */
 export function coercePriceFile(value: unknown, logger: Logger = console): PriceFile {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     logger.error(`[tokbook] ${PRICING_FILE} is not a JSON object; treating it as empty`)
-    return { table: {}, billing: {}, revision: '' }
+    return { table: {}, billing: {}, calendar: {}, revision: '' }
   }
   const raw = value as Record<string, unknown>
   const table: PricingTable = {}
   const billing: BillingMap = {}
+  const calendar = coerceCalendar(raw[PRICING_CALENDAR_KEY])
   const rawBilling = raw[PRICING_BILLING_KEY]
   if (typeof rawBilling === 'object' && rawBilling !== null && !Array.isArray(rawBilling)) {
     for (const [route, nature] of Object.entries(rawBilling as Record<string, unknown>)) {
@@ -188,16 +234,16 @@ export function coercePriceFile(value: unknown, logger: Logger = console): Price
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
-  return { table, billing, revision: '' }
+  return { table, billing, calendar, revision: '' }
 }
 
 /** 读一个数据目录的价文件。缺失 / 畸形读作空表（无人定价）。revision 是文件
  *  **文本**的签名——包括本进程未做的编辑在内，任何改动对派生 rollup 都可见。 */
 export async function readPriceFile(dir: string, logger: Logger = console): Promise<PriceFile> {
   const text = await readTextFile(dir, PRICING_FILE, logger)
-  if (text === null) return { table: {}, billing: {}, revision: '' }
+  if (text === null) return { table: {}, billing: {}, calendar: {}, revision: '' }
   const raw = parseJson(text, PRICING_FILE, logger)
-  if (raw === null) return { table: {}, billing: {}, revision: revisionOf(text) }
+  if (raw === null) return { table: {}, billing: {}, calendar: {}, revision: revisionOf(text) }
   return { ...coercePriceFile(raw, logger), revision: revisionOf(text) }
 }
 
@@ -295,6 +341,46 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
 /** 一次 PUT body 的判定。 */
 export type PriceParse = { ok: true; file: PriceFile } | { ok: false; error: string }
 
+/** 严格解析 `$calendar`：`YYYY` → 放假日区间数组。年不合法、区间不是对象、
+ *  两端不是真实日期、起晚于止，都以出错位置拒绝。区间之间允许相邻或重叠
+ *  （会被合并），所以手写时不必自己收拾边界。 */
+function parseCalendar(value: unknown): { ok: true; calendar: HolidayCalendar } | { ok: false; error: string } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: `${PRICING_CALENDAR_KEY} 必须是对象（年份 → 放假日区间数组）` }
+  }
+  const calendar: HolidayCalendar = {}
+  for (const [year, ranges] of Object.entries(value as Record<string, unknown>)) {
+    if (!isYearKey(year)) return { ok: false, error: `${PRICING_CALENDAR_KEY} 的年份键必须是四位数字：${year}` }
+    if (!Array.isArray(ranges)) {
+      return { ok: false, error: `${PRICING_CALENDAR_KEY} 的「${year}」必须是区间数组（每项 { start, end }）` }
+    }
+    const dates: string[] = []
+    for (let index = 0; index < ranges.length; index += 1) {
+      const where = `${PRICING_CALENDAR_KEY} 的「${year}」第 ${String(index + 1)} 段`
+      const raw = ranges[index]
+      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+        return { ok: false, error: `${where}必须是对象（start + end）` }
+      }
+      const range = raw as Record<string, unknown>
+      const extra = Object.keys(range).find(key => key !== 'start' && key !== 'end')
+      if (extra !== undefined) return { ok: false, error: `${where}含未知字段「${extra}」` }
+      if (typeof range.start !== 'string' || typeof range.end !== 'string') {
+        return { ok: false, error: `${where}的 start / end 必须是 YYYY-MM-DD` }
+      }
+      if (!isValidHolidayRange({ start: range.start, end: range.end })) {
+        return { ok: false, error: `${where}的日期不合法（两端都要是真实日期，且 start ≤ end）：${range.start} ~ ${range.end}` }
+      }
+      if (yearOfDate(range.start) !== year || yearOfDate(range.end) !== year) {
+        return { ok: false, error: `${where}跨出了 ${year} 年：一段假期必须落在它所属的那一年里` }
+      }
+      dates.push(...holidayDates({ start: range.start, end: range.end }))
+    }
+    const merged = mergeHolidayDates(dates)
+    if (merged.length > 0) calendar[year] = merged
+  }
+  return { ok: true, calendar }
+}
+
 /** 严格解析完整目标文件：任何偏差都以出错位置拒绝，坏 body 绝不半落地。 */
 export function parsePriceInput(value: unknown): PriceParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -303,10 +389,17 @@ export function parsePriceInput(value: unknown): PriceParse {
   const raw = value as Record<string, unknown>
   const table: PricingTable = {}
   const billing: BillingMap = {}
+  let calendar: HolidayCalendar = {}
   for (const [route, models] of Object.entries(raw)) {
     if (route.startsWith('$')) {
+      if (route === PRICING_CALENDAR_KEY) {
+        const parsed = parseCalendar(models)
+        if (!parsed.ok) return { ok: false, error: parsed.error }
+        calendar = parsed.calendar
+        continue
+      }
       if (route !== PRICING_BILLING_KEY) {
-        return { ok: false, error: `未知保留键「${route}」（只支持 ${PRICING_BILLING_KEY}）` }
+        return { ok: false, error: `未知保留键「${route}」（只支持 ${PRICING_BILLING_KEY} / ${PRICING_CALENDAR_KEY}）` }
       }
       if (typeof models !== 'object' || models === null || Array.isArray(models)) {
         return { ok: false, error: `${PRICING_BILLING_KEY} 必须是对象（路由 → "metered" | "subscription"）` }
@@ -347,7 +440,7 @@ export function parsePriceInput(value: unknown): PriceParse {
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
-  return { ok: true, file: { table, billing, revision: '' } }
+  return { ok: true, file: { table, billing, calendar, revision: '' } }
 }
 
 /** 一段价的一个例外时段在文件中的形态。 */
@@ -365,8 +458,8 @@ function slotBody(slot: PriceSlot): Record<string, unknown> {
   }
 }
 
-/** 价文件的文件体：route 与 model 排序，`$billing` 段在前，段按生效时刻升序，
- *  段内例外时段按 start 小时升序。 */
+/** 价文件的文件体：保留键（`$billing`、`$calendar`）在前，接着 route 与 model
+ *  排序，段按生效时刻升序，段内例外时段按 start 小时升序。 */
 function priceFileBody(file: PriceFile): Record<string, unknown> {
   const body: Record<string, unknown> = {}
   const billingRoutes = Object.keys(file.billing).sort((left, right) => left.localeCompare(right))
@@ -374,6 +467,16 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
     const billing: Record<string, BillingNature> = {}
     for (const route of billingRoutes) billing[route] = file.billing[route]!
     body[PRICING_BILLING_KEY] = billing
+  }
+  const calendarYears = Object.keys(file.calendar).sort((left, right) => left.localeCompare(right))
+  if (calendarYears.length > 0) {
+    const calendar: Record<string, HolidayRange[]> = {}
+    for (const year of calendarYears) {
+      // 写出去的永远是合并过的区间（与读路径同一个 merge），所以手写的
+      // 相邻两段在第一次保存后收敛成一段，文件与界面从此读同一份。
+      calendar[year] = mergeHolidayDates((file.calendar[year] ?? []).flatMap(range => holidayDates(range)))
+    }
+    body[PRICING_CALENDAR_KEY] = calendar
   }
   for (const route of Object.keys(file.table).sort((left, right) => left.localeCompare(right))) {
     const models = file.table[route]!
@@ -443,25 +546,38 @@ export function priceAt(
   return hit
 }
 
-/** 该段在 `timeMs` 生效的例外时段（按时刻自身的本地星期与小时），或 null =
- *  段的基准价。任一时刻至多一个时段：写路径拒绝重叠对，读路径丢弃较晚的那个。 */
-export function slotAt(segment: PriceSegment, timeMs: number): PriceSlot | null {
+/** 未提供年历时的读法：**空集** = 那一年未知，于是 `workdays` 退化成
+ *  「周一至周五」，只会把法定节假日按高峰多算，绝不会少算。 */
+const NO_HOLIDAYS: ReadonlySet<string> = new Set()
+
+/** 该段在 `timeMs` 生效的例外时段（按时刻自身的本地星期、日期与小时），或
+ *  null = 段的基准价。任一时刻至多一个时段：写路径拒绝重叠对，读路径丢弃较晚的
+ *  那个。`holidays` 只影响 `workdays` 时段——法定节假日那天它不生效。 */
+export function slotAt(
+  segment: PriceSegment,
+  timeMs: number,
+  holidays: ReadonlySet<string> = NO_HOLIDAYS,
+): PriceSlot | null {
   for (const slot of segment.slots ?? []) {
-    if (slotCovers(slot, timeMs)) return slot
+    if (slotCovers(slot, timeMs, holidays)) return slot
   }
   return null
 }
 
 /** `timeMs` 生效时段的身份，或 null = 基准价。 */
-function slotRefAt(segment: PriceSegment, timeMs: number): SlotRef | null {
-  const slot = slotAt(segment, timeMs)
+function slotRefAt(segment: PriceSegment, timeMs: number, holidays: ReadonlySet<string>): SlotRef | null {
+  const slot = slotAt(segment, timeMs, holidays)
   return slot === null ? null : { start: slot.start, days: slot.days }
 }
 
 /** 该段在 `timeMs` 的 ¥/M：基准价叠上当时生效的例外时段。时段省略的档沿用
  *  基准价，因此峰值时段只需重述真正变化的部分。 */
-export function ratesOfSegment(segment: PriceSegment, timeMs: number): ModelPricing {
-  const slot = slotAt(segment, timeMs)
+export function ratesOfSegment(
+  segment: PriceSegment,
+  timeMs: number,
+  holidays: ReadonlySet<string> = NO_HOLIDAYS,
+): ModelPricing {
+  const slot = slotAt(segment, timeMs, holidays)
   return slot === null ? segment.rates : { ...segment.rates, ...slot.rates }
 }
 
@@ -472,22 +588,24 @@ export function ratesAt(
   route: string | undefined,
   model: string,
   timeMs: number,
+  holidays: ReadonlySet<string> = NO_HOLIDAYS,
 ): ModelPricing | null {
   const segment = priceAt(table, route, model, timeMs)
-  return segment === null ? null : ratesOfSegment(segment, timeMs)
+  return segment === null ? null : ratesOfSegment(segment, timeMs, holidays)
 }
 
 /** (route, model) 在 `timeMs` 的 rate 身份——当时生效段的生效时刻 + 段内生效
  *  的例外时段，或 {@link UNPRICED_KEY}。只存身份、不存数字，改价后下次读即
- *  重算历史。 */
+ *  重算历史（年历改了同理：时段身份不变，但重算会按新节假日取价）。 */
 export function rateKeyAt(
   table: PricingTable,
   route: string | undefined,
   model: string,
   timeMs: number,
+  holidays: ReadonlySet<string> = NO_HOLIDAYS,
 ): RateKey {
   const hit = priceAt(table, route, model, timeMs)
-  return hit === null ? UNPRICED_KEY : { from: hit.from, slot: slotRefAt(hit, timeMs) }
+  return hit === null ? UNPRICED_KEY : { from: hit.from, slot: slotRefAt(hit, timeMs, holidays) }
 }
 
 /** 一个 rate 身份的价格：在当前表里回查该段的生效时刻，再找它命名的时段

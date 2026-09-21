@@ -10,8 +10,8 @@
 import { hourStartMs, instantKey, EARLIEST } from './price-format.ts'
 import { billingOf, rateKeyAt, readPriceFile } from './pricing.ts'
 import type {
-  ModelEntry, PriceSegment, PriceSlot, PricingModelView, PricingRouteView, PricingSegmentInput, PricingSlotInput,
-  PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
+  HolidayCalendar, ModelEntry, PriceSegment, PriceSlot, PricingModelView, PricingRouteView,
+  PricingSegmentInput, PricingSlotInput, PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
 } from './types.ts'
 interface Logger {
   error(...args: unknown[]): void
@@ -38,7 +38,11 @@ export interface LedgerUsage {
 /** 把账本行折成价格视图的用量透镜。失败尝试命名 route 但没有计费调用，故
  *  不进——价格表卡片上的「N 次请求」与通道用量 tab 的请求计数同义。未归属行无法定价，
  *  不进价格表卡片。 */
-export function ledgerUsageOf(records: readonly UsageRecord[], table: PricingTable): LedgerUsage {
+export function ledgerUsageOf(
+  records: readonly UsageRecord[],
+  table: PricingTable,
+  holidays: ReadonlySet<string>,
+): LedgerUsage {
   const byRouteModel = new Map<string, Map<string, LedgerModelUsage>>()
   const byRoute = new Map<string, number>()
   for (const record of records) {
@@ -55,11 +59,39 @@ export function ledgerUsageOf(records: readonly UsageRecord[], table: PricingTab
     row.records += 1
     if (record.time < row.firstAt) row.firstAt = record.time
     if (record.time > row.lastAt) row.lastAt = record.time
-    if (rateKeyAt(table, route, record.model, record.time).from < 0) row.unpriced += 1
+    if (rateKeyAt(table, route, record.model, record.time, holidays).from < 0) row.unpriced += 1
     models.set(record.model, row)
     byRoute.set(route, (byRoute.get(route) ?? 0) + 1)
   }
   return { byRouteModel, byRoute }
+}
+
+/** 账本透镜里最早的一条记录时刻（无记录为 null）。 */
+function earliestRecordAt(ledger: LedgerUsage): number | null {
+  let earliest: number | null = null
+  for (const models of ledger.byRouteModel.values()) {
+    for (const usage of models.values()) {
+      if (earliest === null || usage.firstAt < earliest) earliest = usage.firstAt
+    }
+  }
+  return earliest
+}
+
+/**
+ * 账本覆盖到、而年历里没有的年份——从那一年起到今年。这些年的 `workdays` 会
+ * 退化成「周一至周五全额高峰」（法定节假日多算），所以价格表 tab 把它显式报出来：
+ * 这是这套设计里唯一要人记得做的事（国家每年底公布一次安排），必须自己喊。
+ */
+function missingCalendarYears(ledger: LedgerUsage, calendar: HolidayCalendar, now: number): string[] {
+  const earliest = earliestRecordAt(ledger)
+  if (earliest === null) return []
+  const taken = new Set(Object.keys(calendar))
+  const missing: string[] = []
+  for (let year = new Date(earliest).getFullYear(); year <= new Date(now).getFullYear(); year += 1) {
+    const key = String(year)
+    if (!taken.has(key)) missing.push(key)
+  }
+  return missing
 }
 
 function slotInput(slot: PriceSlot): PricingSlotInput {
@@ -200,5 +232,11 @@ export async function readPricingView(
     })
   }
   cards.sort((left, right) => right.records - left.records || left.route.localeCompare(right.route))
-  return { routes: cards, dataDir: dir, updatedAt: now }
+  return {
+    routes: cards,
+    calendar: file.calendar,
+    calendarMissing: missingCalendarYears(ledger, file.calendar, now),
+    dataDir: dir,
+    updatedAt: now,
+  }
 }

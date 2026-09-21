@@ -108,11 +108,10 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates .dtpl-price-cell-k{
     text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
   }
-  /* 窄处表盘缩到 28px：viewBox 等比缩放，弧随环一起变细，不给四档价添挤压。
-     卡片缩进（--dtpl-slot-indent，时段卡与那条幽灵行共用）收到 29px：卡的内容盒（卡左缘 + 1px 边框 + 8px 内边距）要与基准价的四档价同一条
-     ——窄处是 93（这一层内容左缘 + 38），所以卡左缘落在 84。栅栏因此只剩卡片左边那 6.5px。
+  /* 卡片缩进（--dtpl-slot-indent，时段卡与那条幽灵行共用）收到 29px：桌面那一列是 41px 时，
+     卡的内容盒正好落在基准价四档价的左缘上；窄处四档价折成 2×2 撑满整宽，这条对齐不再成立，
+     让位只剩它的另一个用途——给栅栏（轨 + 圆点）那一列留位置，所以收到能容下栅栏的 29px。
      窄处轨与 7px 实心点已经贴在一起，挖洞只会把轨咬掉一截、露出卡边的亮缝，所以窄屏不用那条挖洞渐变。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring{width:28px;height:28px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-sec{--dtpl-slot-indent:29px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-rail{width:6.5px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-slots-spine{
@@ -164,6 +163,7 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
   [data-plugin="dsh-tokbook"] .dtpl-spin,
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions,
+  [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost,
   [data-plugin="dsh-tokbook"] .dtpl-model-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill,

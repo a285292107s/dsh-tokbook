@@ -6,14 +6,14 @@
  * 所以本文件不持有选择状态——只通过小回调下发改动。
  */
 
-import { memo, useEffect, useState } from 'react'
-import { DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange } from '../../price-format.ts'
+import { memo, useEffect, useRef, useState } from 'react'
+import { DAY_SET_LABELS, DAY_SETS, clockLabel, holidayRangeLabel, isHourRange, type HourRange } from '../../price-format.ts'
 import type { BillingNature, DaySet } from '../../types.ts'
 import {
   duplicateSlot, effectiveSlots, fieldState, fromFieldValue, inheritedCell, isBlankSlot,
-  dayLabel, modelDirty, newSegment, newSlot, rowIssue, segmentInForce, slotRange,
+  dayLabel, modelDirty, newSegment, newSlot, parseCalendarText, ratesInForce, rowIssue, slotRange,
   sortedSegments, withSegmentFrom, withSlotEnd, withSlotStart,
-  type ModelDraft, type RateField, type SegmentDraft, type SlotDraft,
+  type CalendarDraft, type CalendarEntries, type ModelDraft, type RateField, type SegmentDraft, type SlotDraft,
 } from './draft.ts'
 import { PriceTimeline } from './Timeline.tsx'
 
@@ -28,6 +28,139 @@ const CELLS: ReadonlyArray<{ field: RateField; label: string }> = [
 /** 时段可选的全部开始小时与结束小时（结束不含，`24:00` 关日）。 */
 const START_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
 const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour + 1)
+
+/**
+ * 法定节假日年历：价表里唯一**全局**的一份数据（不属于任何 route / model）。
+ *
+ * 它只服务一件事——把 `workdays` 时段里的法定节假日摘出去。国家每年底公布一次安排，
+ * 所以这份数据是按年收录的；账本覆盖到、而这里没有的年份会自己报出来（那年会按
+ * 周一至周五全额算高峰，节假日被多算）。放假日的**调休上班日**不必收录：调休只把
+ * 周末变成上班，而周末无论上不上班都是闲时。
+ *
+ * 一年一条：年份 + 该年的区间文本，一行一段（`2026-02-15 ~ 2026-02-23`）。
+ */
+export function CalendarEditor({ entries, missingYears, dirty, onChange }: {
+  entries: CalendarEntries
+  /** 账本覆盖到、而这里没有的年份（host 算好的）。 */
+  missingYears: readonly string[]
+  /** 年历是否还没落盘。 */
+  dirty: boolean
+  /** 改一年；`null` = 删掉那一年。 */
+  onChange: (year: string, next: CalendarDraft | null) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [adding, setAdding] = useState('')
+  const years = [...entries.keys()].sort((left, right) => left.localeCompare(right))
+  const issues = years
+    .map(year => ({ year, problem: parseCalendarProblem(entries.get(year)!) }))
+    .filter((item): item is { year: string; problem: string } => item.problem !== null)
+
+  const addYear = (): void => {
+    const year = adding.trim()
+    if (!/^\d{4}$/u.test(year) || entries.has(year)) return
+    onChange(year, { year, text: '' })
+    setAdding('')
+  }
+
+  return (
+    <section className="dtpl-price-cal" data-dirty={dirty} aria-label="法定节假日年历">
+      <div className="dtpl-price-cal-head">
+        <button
+          type="button"
+          className="dtpl-price-cal-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(current => !current)}
+        >
+          <span className="dtpl-price-cal-caret" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+          法定节假日年历
+        </button>
+        <span className="dtpl-price-cal-sum">{summarizeCalendar(years)}</span>
+        {issues.length > 0 && (
+          <span className="dtpl-price-cal-warn" role="alert">有年份写不出来（见下）</span>
+        )}
+      </div>
+      {missingYears.length > 0 && (
+        <p className="dtpl-price-cal-miss" role="status">
+          年历缺 {missingYears.join('、')} 年：这些年的「工作日（不含节假日）」会按周一至周五全额计，
+          落在法定节假日的工作日会被多算高峰价。补上国家公布的放假安排即可。
+        </p>
+      )}
+      {expanded && (
+        <div className="dtpl-price-cal-body">
+          <p className="dtpl-price-cal-note">
+            每年一行一个放假日区间（`2026-02-15 ~ 2026-02-23`，单日可只写一个日期，多个用逗号或换行分隔）。
+            只收录**放假日**：调休上班日落在周末，而周末本来就是闲时，不必写。
+          </p>
+          {years.map((year) => {
+            const entry = entries.get(year)!
+            const problem = parseCalendarProblem(entry)
+            const parsed = parseCalendarText(entry.text, year)
+            return (
+              <div key={year} className="dtpl-price-cal-row" data-bad={problem !== null}>
+                <label className="dtpl-price-cal-year" htmlFor={`cal-${year}`}>{year}</label>
+                <textarea
+                  id={`cal-${year}`}
+                  className="dtpl-price-cal-text"
+                  rows={2}
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder="2026-02-15 ~ 2026-02-23"
+                  value={entry.text}
+                  aria-label={`${year} 年的法定节假日`}
+                  aria-invalid={problem !== null || undefined}
+                  onChange={(event) => onChange(year, { year, text: event.target.value })}
+                />
+                <span className="dtpl-price-cal-read" aria-hidden="true">
+                  {parsed.ok ? parsed.ranges.map(holidayRangeLabel).join('、') : ''}
+                </span>
+                <button
+                  type="button"
+                  className="dtpl-price-ghost dtpl-price-ghost-danger"
+                  title={`删掉 ${year} 年：那一年会退回按周一至周五全额算高峰`}
+                  onClick={() => onChange(year, null)}
+                >
+                  删除
+                </button>
+                {problem !== null && <span className="dtpl-price-cell-err" role="alert">{problem}</span>}
+              </div>
+            )
+          })}
+          <div className="dtpl-price-cal-add">
+            <input
+              className="dtpl-price-input dtpl-price-cal-newyear"
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder={String(new Date().getFullYear() + 1)}
+              value={adding}
+              aria-label="要加入的年份"
+              onChange={(event) => setAdding(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') addYear()
+              }}
+            />
+            <button type="button" className="dtpl-price-add-ghost" onClick={addYear}>
+              <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>年
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** 一年年历的首个问题，或 null。空文本不算问题：那一年还没写，写出去也只是空年。 */
+function parseCalendarProblem(entry: CalendarDraft): string | null {
+  if (entry.text.trim() === '') return null
+  const parsed = parseCalendarText(entry.text, entry.year)
+  return parsed.ok ? null : parsed.error
+}
+
+/** 收起时那行摘要：收录了哪几年、各几天。 */
+function summarizeCalendar(years: readonly string[]): string {
+  if (years.length === 0) return '未收录：工作日按周一至周五全额算'
+  return `${years.join('、')} 已收录`
+}
 
 /** 抽屉里的一个数字单元格，原地编辑。 */
 function RateCell({ id, label, hint, value, state, context, placeholder, note, onEdit }: {
@@ -75,43 +208,90 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   )
 }
 
-/** 24 小时表盘：基准价与峰谷时段共用（全天是满弧，峰谷是它身上被改写的那一段）。
- *  时间不成段（草稿态）时只剩淡环与刻钉，不画半截弧。 */
-function ClockRing({ start, end, label }: {
-  start: number
-  end: number
-  /** 读屏与悬停说的覆盖范围；不成段时组件自己换文案。 */
+/** 表盘的几何，单位是 viewBox 单位（1 单位 = 1.8px）。**像素尺度固定**：圈多了盘就长大，
+ *  而不是把每圈压小——基准价那一圈因此在所有段卡里一样大，段与段的差别只在外面多了几圈。
+ *  DIAL_MAX_R 是外圈的顶：时段多到撑满它之后间距自己收窄（圈多到这个地步本来也只剩「有几圈」
+ *  这一件事可看），盘不会长到把整张卡顶宽。 */
+const DIAL_BASE_R = 16
+const DIAL_STEP = 4.5
+const DIAL_MAX_R = 30
+const DIAL_PX_PER_UNIT = 1.8
+/** 弧与零点刻钉之外还要留的边距（弧最粗 2 单位，刻钉还要探到外圈之外，取 3.5）。 */
+const DIAL_MARGIN = 3.5
+
+/** 盘上的一圈：半径 + 它覆盖的小时（`null` = 时刻还没成段，只剩淡轨）。 */
+interface DialRing {
+  r: number
+  hours: HourRange | null
+  /** 这一圈是谁——进 aria-label，也挂在它自己的 title 上。 */
   label: string
-}) {
-  const valid = isHourRange({ start, end })
-  const r = 16
-  const c = 2 * Math.PI * r
+}
+
+/** 24 小时表盘：最里面一圈是**基准价**（满弧——它管每天全天），每个峰谷时段在它外面各占一圈，
+ *  弧就是那个窗口覆盖的小时；星期进不了盘（它只说小时），所以每圈的 title 把「工作日 09:00–12:00」
+ *  这样的整句带上，盘与下面的时段卡因此对得上号（由内向外 = 时段卡的先后）。
+ *  圈数随时段数长：没有时段时它就是一枚标准圆环。 */
+function DayDial({ slots }: { slots: readonly SlotDraft[] }) {
+  const step = Math.min(DIAL_STEP, (DIAL_MAX_R - DIAL_BASE_R) / Math.max(1, slots.length))
+  const rings: DialRing[] = [
+    { r: DIAL_BASE_R, hours: { start: 0, end: 24 }, label: '基准价 每天 全天' },
+    ...slots.map((slot, index) => {
+      const { start, end } = slotRange(slot)
+      const place = `第 ${String(index + 1)} 个峰谷时段`
+      return {
+        r: DIAL_BASE_R + step * (index + 1),
+        hours: isHourRange({ start, end }) ? { start, end } : null,
+        label: `${place} ${dayLabel(slot)}`,
+      }
+    }),
+  ]
+  const outer = DIAL_BASE_R + step * slots.length
+  const half = outer + DIAL_MARGIN
+  const size = Math.round(half * 2 * DIAL_PX_PER_UNIT)
   return (
     <svg
       className="dtpl-price-slot-ring"
-      viewBox="0 0 40 40" width="40" height="40"
+      viewBox={`${String(-half)} ${String(-half)} ${String(half * 2)} ${String(half * 2)}`}
+      width={size} height={size}
       role="img"
-      aria-label={valid ? `覆盖 ${label}` : '时间未成段'}
+      aria-label={rings.map(ring => ring.label).join('；')}
     >
-      {valid && <title>{`覆盖 ${label}（${String(end - start)} 小时）`}</title>}
-      <circle className="dtpl-price-slot-ring-track" cx="20" cy="20" r={r} />
-      {valid && (
-        <circle
-          className="dtpl-price-slot-ring-arc"
-          cx="20" cy="20" r={r}
-          strokeDasharray={`${(c * (end - start)) / 24} ${c}`}
-          strokeDashoffset={-(c * start) / 24}
-          transform="rotate(-90 20 20)"
-        />
-      )}
-      <line className="dtpl-price-slot-ring-zero" x1="20" y1="2" x2="20" y2="6.5" />
+      {rings.map((ring, index) => {
+        const c = 2 * Math.PI * ring.r
+        // 满弧就是一整圈：走整圆而不是一段 dash——一整天没有起点，dash 会在 12 点钟留一道接缝。
+        const full = ring.hours !== null && ring.hours.end - ring.hours.start >= 24
+        return (
+          <g key={ring.r}>
+            <title>{ring.label}</title>
+            <circle className="dtpl-price-slot-ring-track" r={ring.r} />
+            {ring.hours !== null && (full
+              ? <circle className="dtpl-price-slot-ring-arc" r={ring.r} />
+              : (
+                <circle
+                  className="dtpl-price-slot-ring-arc"
+                  r={ring.r}
+                  strokeDasharray={`${String((c * (ring.hours.end - ring.hours.start)) / 24)} ${String(c)}`}
+                  strokeDashoffset={-(c * ring.hours.start) / 24}
+                  transform="rotate(-90)"
+                />
+              ))}
+            {/* 零点刻钉跟着**内圈**画：它压在基准价那一圈上（同色，那里本来看不见），从内圈一直
+                探到外圈之外——它是「几点钟」这一个读法的索引，所有圈共用它。它排在其余各圈之前，
+                所以任何一段跨过零点的弧都照样完整。 */}
+            {index === 0 && (
+              <line className="dtpl-price-slot-ring-zero" y1={-(DIAL_BASE_R - 2.5)} y2={-(outer + 2)} />
+            )}
+          </g>
+        )
+      })}
     </svg>
   )
 }
 
 /** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方基准价行相同——留空的桶显示它沿用的那个数
  *  （基准价，缓存两档在基准价也空时继续落到输入价）。
- *  **不画盘**：星期进不了盘，而盘要说的两件事（覆盖哪几个小时、共几小时）三个下拉与一行时长已经说完。
+ *  **不画盘**：这一条的窗口由上方那圈表盘上说过了（星期除外，它进不了盘），盘要说的另一件事
+ *  （共几小时）由头行那行时长说完。
  *  零覆盖的时段与计价无关（`isBlankSlot`），所以整条降级并直说这一点——空着不写文件是设计，不是待办。 */
 function SlotEditor({ slot, index, canRemove, segment, onChange, onRemove, onDuplicate }: {
   slot: SlotDraft
@@ -298,21 +478,12 @@ function SegmentEditor({ segment, where, serial, active, onChange, onRemove, onD
           </button>
         </span>
       </div>
-      {/* 基准价行与峰谷子目同构：满弧盘 + 一枚「基准价」戳 + 一句说明 + 四个带戳的读数。
-          这一行不摆范围：满弧盘与悬停里的那句已经说了它覆盖每天全天，屏幕上要说的是
-          **它管哪儿**——非峰谷时段全部按它。 */}
+      {/* 基准价行：表盘居中打头（里面那圈是基准价，外面每圈是一个峰谷时段），四档价落在盘下方，
+          **不带标签也不带说明**——它是什么由下面那条分界行交代，这一行自己只摆读数。
+          范围也不摆：表盘与它每一圈的悬停已经把窗口说完了。 */}
       <div className="dtpl-price-seg-allday">
-        <ClockRing start={0} end={24} label="每天 全天" />
+        <DayDial slots={segment.slots} />
         <div className="dtpl-price-seg-allday-body">
-          <div className="dtpl-price-seg-allday-head">
-            <span
-              className="dtpl-price-base-k"
-              title="基准价：覆盖每天 00:00–24:00、不随星期变化；峰谷时段里留空的档也沿用它"
-            >
-              基准价
-            </span>
-            <span className="dtpl-price-base-note">所有非峰谷时段，全部采用这个价格</span>
-          </div>
           <div className="dtpl-price-rates dtpl-price-seg-rates">
             {CELLS.map(({ field, label }) => {
               const cell = inheritedCell(segment, null, field)
@@ -332,6 +503,14 @@ function SegmentEditor({ segment, where, serial, active, onChange, onRemove, onD
             })}
           </div>
         </div>
+      </div>
+      {/* 分界行：一句话说清上下是两样东西（上面那四档是基准价，下面是被它兜住的例外时段），
+          同时它就是那两组之间的那道线——那句话居中，两侧的发丝线等长，所以不再另画一条横线。
+          两侧的 ↑ 指着上方那四档价这一行。 */}
+      <div className="dtpl-price-seg-split">
+        <span className="dtpl-price-seg-split-note">
+          ↑↑↑未被「峰谷时段」改写的小时都按基准价计费↑↑↑
+        </span>
       </div>
       <div className="dtpl-price-seg-detail">
         {slotCount > 0 && (
@@ -359,7 +538,7 @@ function SegmentEditor({ segment, where, serial, active, onChange, onRemove, onD
             aria-label="添加峰谷时段"
             onClick={addSlot}
           >
-            <span aria-hidden="true">＋</span>峰谷时段
+            <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>峰谷时段
           </button>
         </div>
       </div>
@@ -371,19 +550,21 @@ function SegmentEditor({ segment, where, serial, active, onChange, onRemove, onD
  *  它是这一屏的**主体**（两个下拉在上面选谁），所以不再有折叠：段卡、时段、加段的按钮常驻。
  *  身份行是这一块唯一一行摘要——精确模型串（账本的计费键）与账本记录数都在这里；四档价在读面上
  *  有且只有一处（段卡的输入框），详情里不再复述一遍只读副本。 */
-export const ModelDetail = memo(function ModelDetail({ route, row, billing, baseline, onRowChange, onBilling }: {
+export const ModelDetail = memo(function ModelDetail({ route, row, billing, baseline, holidays, onRowChange, onBilling }: {
   route: string
   row: ModelDraft
   billing: BillingNature
   /** 上次写入时的行签名：据此推导「还没落盘」（整块的左侧墨条）。 */
   baseline: ReadonlyMap<string, string>
+  /** 年历当前的放假日集合：`workdays` 时段在节假日那天不生效，行内「当前价」据此现算。 */
+  holidays: ReadonlySet<string>
   onRowChange: (route: string, model: string, next: ModelDraft) => void
   onBilling: (route: string, billing: BillingNature) => void
 }) {
   const dirty = modelDirty(route, row, baseline)
   const issue = rowIssue(row)
   // 此刻生效的那一段叠上此刻生效的峰谷时段——null = 这一刻没有一段在生效，轴上的「当前生效」钉就没有落点。
-  const live = segmentInForce(row)
+  const live = ratesInForce(row, holidays)
   const ordered = sortedSegments(row)
   // 有人命名该串时显示展示名，精确串跟在后面（它仍是账本的计费键，必须可达）；没人命名时它就是精确串。
   // 这个判断必须落到 DOM（data-exact），不能让样式去猜（见 styles/pricing 的 [data-exact]）。
@@ -432,7 +613,7 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
       {/* 调价史 + 段卡 + 页脚共用一条左让位层：竖轨画在它上面，段卡的钉正好坐上去。
           身份行**不在**里面——它是这一块的头，左缘必须和上面的选择带对齐。 */}
       <div className="dtpl-price-rail">
-        <PriceTimeline row={row} activeId={live === null ? null : live.id} />
+        <PriceTimeline row={row} activeId={live === null ? null : live.segment.id} />
       {ordered.map((segment, index) => {
         const place = index + 1
         return (
@@ -441,7 +622,7 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
             segment={segment}
             where={`第 ${String(place)} 段价`}
             serial={String(place).padStart(2, '0')}
-            active={live !== null && segment.id === live.id}
+            active={live !== null && segment.id === live.segment.id}
             onChange={(next) => onRowChange(route, row.model, {
               ...row,
               segments: row.segments.map(item => (item.id === segment.id ? next : item)),
@@ -470,7 +651,7 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
           aria-label="添加一段价"
           onClick={addSegment}
         >
-          <span aria-hidden="true">＋</span>加一段价
+          <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>加一段价
         </button>
         <span className="dtpl-price-history-hint">
           {ordered.length === 0

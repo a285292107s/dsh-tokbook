@@ -14,11 +14,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PriceVerdict, PricingView } from '../../types.ts'
 import { ROUTE_PRICING } from '../../route-paths.ts'
 import {
-  baselineOfDraft, baselinesOf, composePriceBody, draftFromView, modelDirty, modelOptionLabel,
-  priceUnknown, routeOptionLabel, rowKey, stagedChanges,
-  type ModelDraft, type PriceDraft, type RouteDraft,
+  baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, modelDirty, modelOptionLabel,
+  routeOptionLabel, rowKey, stagedChanges, withCalendar,
+  type CalendarDraft, type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
-import { ModelDetail } from './editors.tsx'
+import { CalendarEditor, ModelDetail } from './editors.tsx'
 
 export interface PricingPanelProps {
   /** 保存成功后通知父级刷新总览。 */
@@ -49,10 +49,14 @@ type SaveState =
 /** 尚未到达磁盘的草稿在面板 unmount 后存活（切 tab、关浮窗），使尚未触发的自动保存——或被宿主拒绝的保存——绝不被悄悄丢弃。 */
 interface Staged {
   view: PricingView
-  draft: PriceDraft
-  baseline: { models: Map<string, string>; billing: Map<string, 'metered' | 'subscription'> }
+  state: PriceState
+  baseline: PriceBaseline
 }
 let staged: Staged | null = null
+
+/** 还没读到宿主视图之前的空状态。 */
+const EMPTY_STATE: PriceState = { routes: new Map(), calendar: new Map(), holidays: new Set() }
+const EMPTY_BASELINE: PriceBaseline = { models: new Map(), billing: new Map(), calendar: '[]' }
 
 /** 选中的 (通道, 模型)。`model` 为空串 = 「这条通道里请求最多的那一个」，即换通道时的中间态。 */
 interface Picked {
@@ -84,7 +88,7 @@ function readPicked(): Picked | null {
   }
 }
 
-/** 记下当前的选择。`null`（「看全部通道」）抹掉它：那时用户要的正是列表的第一个，不该留一个
+/** 记下当前的选择。`null`（「看第一条通道」）抹掉它：那时用户要的正是列表的第一个，不该留一个
  *  下次回来还会生效的旧选择。 */
 function rememberPicked(pick: Picked | null): void {
   if (pick === null) localStorage.removeItem(PICKED_KEY)
@@ -115,24 +119,12 @@ function clockOf(epochMs: number): string {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}:${String(at.getSeconds()).padStart(2, '0')}`
 }
 
-/** 模型下拉里那个收窄选项的值。它不是一个模型串，而是一个哨兵——模型串非空、且不以 NUL 开头
- *  （`rowKey` 已经先例把 NUL 当分隔符），所以这个形状不会被真的模型串撞上。 */
-const UNKNOWN_ONLY = '\u0000unknown'
-
-/** 这一刻这一条通道里，模型下拉该列出谁（哨兵选项由调用处另外拼在最前）。 */
-function picksOf(card: RouteDraft, unknownOnly: boolean): ModelDraft[] {
-  const all = [...card.models.values()]
-  if (!unknownOnly) return all
-  return all.filter(priceUnknown)
-}
-
 export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [view, setView] = useState<PricingView | null>(() => staged?.view ?? null)
-  const [draft, setDraft] = useState<PriceDraft>(() => staged?.draft ?? new Map())
-  const [baseline, setBaseline] = useState<Staged['baseline']>(() => staged?.baseline ?? { models: new Map(), billing: new Map() })
+  const [state, setState] = useState<PriceState>(() => staged?.state ?? EMPTY_STATE)
+  const [baseline, setBaseline] = useState<PriceBaseline>(() => staged?.baseline ?? EMPTY_BASELINE)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [save, setSave] = useState<SaveState>({ kind: 'clean' })
-  const [unknownOnly, setUnknownOnly] = useState(false)
   /** 手动选过的那一份；null = 还没选过，一切走「列表里的第一个」。 */
   const [picked, setPicked] = useState<Picked | null>(readPicked)
 
@@ -142,11 +134,11 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     rememberPicked(pick)
   }, [])
 
-  const changes = useMemo(() => stagedChanges(draft, baseline), [draft, baseline])
+  const changes = useMemo(() => stagedChanges(state, baseline), [state, baseline])
 
   // 防抖写入器读的 ref，保存绝不捕获过期草稿。
-  const draftRef = useRef(draft)
-  draftRef.current = draft
+  const stateRef = useRef(state)
+  stateRef.current = state
   const baselineRef = useRef(baseline)
   baselineRef.current = baseline
   const timerRef = useRef<number | null>(null)
@@ -170,7 +162,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   /** 把新视图同时采纳为渲染源和基线。 */
   const seed = useCallback((next: PricingView) => {
     setView(next)
-    setDraft(draftFromView(next))
+    setState(draftFromView(next))
     setBaseline(baselinesOf(next))
   }, [])
 
@@ -205,13 +197,13 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
    * 那一刻报错只会把「还没打完」读成「你错了」。
    */
   const writeNow = useCallback(async (): Promise<void> => {
-    if (stagedChanges(draftRef.current, baselineRef.current) === 0) return
+    if (stagedChanges(stateRef.current, baselineRef.current) === 0) return
     if (writingRef.current) {
       againRef.current = true
       return
     }
     // 冻结本次 PUT 写入的草稿。响应落地时 live ref 可能已持有更晚的按键。
-    const snapshot = draftRef.current
+    const snapshot = stateRef.current
     const composed = composePriceBody(snapshot)
     if (!composed.ok) {
       if (committedRef.current && aliveRef.current) setSave({ kind: 'invalid', message: composed.error })
@@ -231,7 +223,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     // 写成功了：下一次编辑重新从「安静」开始，直到它自己被交代出去。
     committedRef.current = false
     if (staged !== null) {
-      staged = stagedChanges(staged.draft, nextBaseline) > 0
+      staged = stagedChanges(staged.state, nextBaseline) > 0
         ? { ...staged, baseline: nextBaseline }
         : null
     }
@@ -240,7 +232,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     againRef.current = false
     if (!aliveRef.current) {
       // 卸载后的补写：状态栏已经不在了，但 tab 圆点与父级屏上的金额都还活着——两样都得同步。
-      onDirtyChange?.(stagedChanges(draftRef.current, baselineRef.current) > 0)
+      onDirtyChange?.(stagedChanges(stateRef.current, baselineRef.current) > 0)
       notifyChanged()
       if (queued) void writeNow()
       return
@@ -278,14 +270,14 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         timerRef.current = null
       }
     }
-  }, [changes, draft])
+  }, [changes, state])
 
   // 从未到达磁盘的草稿留给下次挂载；干净的丢弃，使下次挂载读宿主文件。（选中的那一行不走这里：
   // 它在 localStorage 里，与草稿的生死无关。）
   useEffect(() => {
     if (view === null) return
-    staged = changes > 0 ? { view, draft, baseline } : null
-  }, [view, draft, baseline, changes])
+    staged = changes > 0 ? { view, state, baseline } : null
+  }, [view, state, baseline, changes])
 
   useEffect(() => { onDirtyChange?.(changes > 0) }, [changes, onDirtyChange])
 
@@ -304,29 +296,39 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         refreshRef.current = null
         onChanged()
       }
-      if (stagedChanges(draftRef.current, baselineRef.current) > 0) void writeNow()
+      if (stagedChanges(stateRef.current, baselineRef.current) > 0) void writeNow()
     }
   }, [writeNow, onChanged])
 
   const updateModel = useCallback((route: string, model: string, next: ModelDraft) => {
-    setDraft((current) => {
-      const card = current.get(route)
+    setState((current) => {
+      const card = current.routes.get(route)
       if (card === undefined) return current
       const models = new Map(card.models)
       models.set(model, next)
-      const copy = new Map(current)
-      copy.set(route, { ...card, models })
-      return copy
+      const routes = new Map(current.routes)
+      routes.set(route, { ...card, models })
+      return { ...current, routes }
     })
   }, [])
 
   const updateBilling = useCallback((route: string, billing: 'metered' | 'subscription') => {
-    setDraft((current) => {
-      const card = current.get(route)
+    setState((current) => {
+      const card = current.routes.get(route)
       if (card === undefined) return current
-      const copy = new Map(current)
-      copy.set(route, { ...card, billing })
-      return copy
+      const routes = new Map(current.routes)
+      routes.set(route, { ...card, billing })
+      return { ...current, routes }
+    })
+  }, [])
+
+  /** 改 / 加 / 删一年年历。放假日集合跟着一起换（见 `withCalendar`）。 */
+  const updateCalendar = useCallback((year: string, next: CalendarDraft | null) => {
+    setState((current) => {
+      const calendar: CalendarEntries = new Map(current.calendar)
+      if (next === null) calendar.delete(year)
+      else calendar.set(year, next)
+      return withCalendar(current, calendar)
     })
   }, [])
 
@@ -348,29 +350,20 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [changes, writeNow])
 
-  // 通道下拉能选谁：收窄开着时只留**有洞的**通道。什么都没有就是**空**的——退回全集会把
-  // 「这条通道没有价格未知的模型」说成「一条也没有」，正是这个筛选要回答的那个问题。
-  const routeChoices = useMemo(() => {
-    const all = [...draft.values()]
-    return unknownOnly ? all.filter(card => picksOf(card, true).length > 0) : all
-  }, [draft, unknownOnly])
+  // 两个下拉的候选就是宿主给的全部通道与全部模型；「这张表有没有洞」由选项文字自己说（见
+  // `routeOptionLabel` / `modelOptionLabel`），不另设筛选。
+  const routeChoices = useMemo(() => [...state.routes.values()], [state.routes])
 
-  // 选中的是谁：手动选过、且此刻仍在选项里才作数；其余——包括筛选把它筛掉了——一律回落到
-  // 「列表里的第一个」（host 已按请求数排序，所以「第一个」就是最该看的那一个）。
-  // 收窄开着却一条通道都没剩下时，选中项留作下文的空状态。
+  // 选中的是谁：手动选过、且此刻仍在选项里才作数；其余一律回落到「列表里的第一个」（host 已按
+  // 请求数排序，所以「第一个」就是最该看的那一个）。
   const card = routeChoices.find(item => item.route === picked?.route) ?? routeChoices[0]
-  const models = card === undefined ? [] : picksOf(card, unknownOnly)
+  const models = card === undefined ? [] : [...card.models.values()]
   const row = models.find(item => item.model === picked?.model) ?? models[0]
 
   const stateText = saveStateText(save)
   // 什么都没选过、也没有任何待写的改动：状态栏没有话要说。常驻一个空盒子会在选择带与
   // 调价史之间撑出一道什么也不说的空隙。
   const veiled = picked === null && save.kind === 'clean' && changes === 0
-
-  /** 收窄开关的**唯一**入口：把列表收窄到价格未知的模型或放开，不动选中哪一行。 */
-  const toggleUnknownOnly = useCallback(() => {
-    setUnknownOnly((current) => !current)
-  }, [])
 
   return (
     <section
@@ -382,15 +375,24 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         // 下拉换人不是一次「交代」：弹层里没有字段可交代，而这一次 blur 会被读成「用户离开了
         // 某个没写完的字段」，于是切一下下拉就报一句「未保存」。
         if (event.target instanceof HTMLSelectElement) return
-        if (stagedChanges(draftRef.current, baselineRef.current) === 0) return
+        if (stagedChanges(stateRef.current, baselineRef.current) === 0) return
         committedRef.current = true
         void writeRef.current()
       }}
     >
+      {/* 年历是**全局**的一份数据（不属于任何一行），所以它挂在选择带之上、跟着这一屏常驻：
+          `workdays` 时段的生效判定靠它，缺一年就会把法定节假日按高峰多算——它自己会报出来。 */}
+      {view !== null && (
+        <CalendarEditor
+          entries={state.calendar}
+          missingYears={view.calendarMissing}
+          dirty={calendarDirty(state, baseline)}
+          onChange={updateCalendar}
+        />
+      )}
       {/* 路由来自本机 settings.yaml 与正在运行的适配器；一个都没有时不画两个空下拉——
-          没有选项的控件只会把「这里本来没有内容」说成「你选不了」。收窄开着却一条通道都
-          没剩下时同样不画：空下拉加一句空状态标题足以说清这件事。 */}
-      {draft.size > 0 && routeChoices.length > 0 && card !== undefined && (
+          没有选项的控件只会把「这里本来没有内容」说成「你选不了」。 */}
+      {state.routes.size > 0 && card !== undefined && (
         <div className="dtpl-price-pick">
           <label className="dtpl-price-pick-row">
             <span className="dtpl-price-pick-k">通道</span>
@@ -413,28 +415,14 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
             <select
               className="dtpl-price-select dtpl-price-pick-sel"
               /* value 必须落在选项集合里：row 是 undefined（这条通道一个模型都没有）时给空串，
-                 它不在任何 option 的 value 上，React 便让浏览器显示第一个选项——这里正好也是哨兵。 */
+                 它不在任何 option 的 value 上，React 便让浏览器显示第一个选项。 */
               value={row === undefined ? '' : row.model}
-              /* 收窄开关切换即重建：哨兵是**动作**不是值，点完它原生的选中项就停在哨兵上，
-                 而这一次点击不改变“选中哪一行”，`value` 的更新便不一定会把它挪回去。 */
-              key={unknownOnly ? 'narrowed' : 'all'}
               disabled={models.length === 0}
               aria-label={`${card.label} 的模型`}
               onChange={(event) => {
-                const next = event.target.value
-                if (next === UNKNOWN_ONLY) {
-                  toggleUnknownOnly()
-                  return
-                }
-                setUnknownOnly(false)
-                choosePicked({ route: card.route, model: next })
+                choosePicked({ route: card.route, model: event.target.value })
               }}
             >
-              {/* 收窄原来是一颗工具栏芯片，现在折进这个下拉的第一个选项：一份控件、一个切换，
-                  不必再让工具栏常驻一个只在这一屏有意义的按钮。它是**动作**不是值——选中它只是
-                  把列表收窄或放开，**不改变选中哪一行**，所以这一项永远只在拉开的下拉里露面，
-                  收起时显示的是真正选中的那一行。 */}
-              <option value={UNKNOWN_ONLY}>{unknownOnly ? '✕ 显示全部模型' : '只看价格未知'}</option>
               {models.map(item => (
                 <option key={item.model} value={item.model}>
                   {modelOptionLabel(item, modelDirty(card.route, item, baseline.models))}
@@ -446,7 +434,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       )}
 
       {/* 状态栏在没话要说时让位（见 `veiled`）：常驻一个空盒子会在选择带与调价史之间撑出空隙。 */}
-      {(draft.size > 0 || loadError !== null) && !veiled && (
+      {(state.routes.size > 0 || loadError !== null) && !veiled && (
         <div className="dtpl-price-bar">
           <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
             {stateText}
@@ -475,7 +463,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
             </div>
           )
           : null)
-        : draft.size === 0
+        : state.routes.size === 0
           ? (
             <div className="dtpl-empty">
               <p className="dtpl-empty-title">没有可显示的路由</p>
@@ -487,24 +475,19 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           : row === undefined
             ? (
               <div className="dtpl-empty">
-                <p className="dtpl-empty-title">
-                  {unknownOnly ? '这条通道没有价格未知的模型' : '这条通道没有列出的模型'}
-                </p>
+                <p className="dtpl-empty-title">这条通道没有列出的模型</p>
                 <p className="dtpl-empty-sub">
-                  {unknownOnly
-                    ? '它的模型要么都有价，要么账本里从没出现过它们。'
-                    : '它的模型目录与账本里都没有模型；账本记过它时这里就会多出一行。'}
+                  它的模型目录与账本里都没有模型；账本记过它时这里就会多出一行。
                 </p>
                 <button
                   type="button"
                   className="dtpl-price-add dtpl-price-empty-act"
                   onClick={() => {
-                    toggleUnknownOnly()
                     setPicked(null)
                     rememberPicked(null)
                   }}
                 >
-                  {unknownOnly ? '显示全部模型' : '看全部通道'}
+                  看第一条通道
                 </button>
               </div>
             )
@@ -515,6 +498,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 row={row}
                 billing={card.billing}
                 baseline={baseline.models}
+                holidays={state.holidays}
                 onRowChange={updateModel}
                 onBilling={updateBilling}
               />
