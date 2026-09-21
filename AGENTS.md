@@ -49,5 +49,3 @@ refile 这类读代码读不出结论的路径)——这套工具就是为它存
   README(Dev / HMR)与 `docs/HMR.md`。
 - 「别养巨型单文件」:单一职责文件 ~400 行就该审视拆不拆(600+ 行且混多类关注点必须拆),但
   **拆分是独立一轮**——碰到大文件先修眼前的问题。
-- browser bundle 的 external 清单、client 入口**不能加 `default` 导出**(`docs/DESIGN.md`
-  §7.4)——改到那里再读。
