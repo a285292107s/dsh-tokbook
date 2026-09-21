@@ -7,7 +7,7 @@
  * 与拥有价**文件**本身（读、写、解析）的 `./pricing.ts` 分开。
  */
 
-import { instantKey, EARLIEST } from './price-format.ts'
+import { hourStartMs, instantKey, EARLIEST } from './price-format.ts'
 import { billingOf, rateKeyAt, readPriceFile } from './pricing.ts'
 import type {
   ModelEntry, PriceSegment, PriceSlot, PricingModelView, PricingRouteView, PricingSegmentInput, PricingSlotInput,
@@ -76,10 +76,12 @@ function slotInput(slot: PriceSlot): PricingSlotInput {
   }
 }
 
-function segmentInput(segment: PriceSegment): PricingSegmentInput {
+/** 一个价段在 wire 上的形态。旧文件里「没有生效时刻」的那一段（`from === EARLIEST`）
+ *  由调用方给出迁入日期：界面与写入形态都不再有「自始生效」这个概念。 */
+function segmentInput(segment: PriceSegment, inheritedFrom: number): PricingSegmentInput {
   const slots = (segment.slots ?? []).map(slotInput)
   return {
-    from: segment.from > EARLIEST ? instantKey(segment.from) : null,
+    from: instantKey(segment.from === EARLIEST ? inheritedFrom : segment.from),
     inputPerMillion: segment.rates.inputPerMillion,
     outputPerMillion: segment.rates.outputPerMillion,
     ...(segment.rates.cacheReadPerMillion !== undefined
@@ -170,6 +172,10 @@ export async function readPricingView(
     const models: PricingModelView[] = []
     for (const [model, acc] of entry.models) {
       const segments = file.table[route]?.[model]
+      // 旧形态（无生效时刻的那一段，自始生效）在**读**里活最后一次：它被落成真实日期——
+      // 该模型的首记整点（没有记录就用今天）。金额因此一分不变（首记之前本来没有任何记录），
+      // 而界面与写入形态从此只剩「有生效时刻的段」；下一次保存就把文件写成新形态。
+      const inheritedFrom = hourStartMs(acc.firstAt ?? now)
       models.push({
         model,
         ...(acc.name !== undefined ? { name: acc.name } : {}),
@@ -178,7 +184,7 @@ export async function readPricingView(
         ...(acc.firstAt !== undefined ? { firstAt: acc.firstAt } : {}),
         ...(acc.lastAt !== undefined ? { lastAt: acc.lastAt } : {}),
         ...(acc.unpriced !== undefined ? { unpriced: acc.unpriced } : {}),
-        segments: (segments ?? []).map(segmentInput),
+        segments: (segments ?? []).map(segment => segmentInput(segment, inheritedFrom)),
       })
     }
     models.sort((left, right) =>

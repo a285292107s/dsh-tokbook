@@ -109,15 +109,21 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
     text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
   }
   /* 窄处表盘缩到 28px：viewBox 等比缩放，弧随环一起变细，不给四档价添挤压。
-     左栅栏与内容内缩跟着缩到 24px（盘 28 + 间隙 10 的四舍五入），子目才不至于被推到折行。 */
+     卡片缩进（--dtpl-slot-indent，时段卡与那条幽灵行共用）收到 29px：卡的内容盒（卡左缘 + 1px 边框 + 8px 内边距）要与基准价的四档价同一条
+     ——窄处是 93（这一层内容左缘 + 38），所以卡左缘落在 84。栅栏因此只剩卡片左边那 6.5px。
+     窄处轨与 7px 实心点已经贴在一起，挖洞只会把轨咬掉一截、露出卡边的亮缝，所以窄屏不用那条挖洞渐变。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring{width:28px;height:28px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-rail{width:24px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-slots-spine{left:14px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{left:10.5px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-stub{left:17.5px;width:6.5px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-body{padding-left:24px;}
-  /* 段行在窄处：费率格折成 2×2 带档位戳（上面那条接管）；时段的复制/删除不再靠悬停（触控没有悬停）。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions{opacity:1;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-sec{--dtpl-slot-indent:29px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-rail{width:6.5px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-slots-spine{
+    left:6.5px;
+    background:linear-gradient(180deg,transparent,var(--dtpl-rail-ink) 16px,
+      var(--dtpl-rail-ink) calc(100% - 20px),transparent);
+  }
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{left:4.5px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-stub{left:11.5px;width:0;}
+  /* 时段卡上的复制/删除不再靠悬停（触控没有悬停）。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions{opacity:1;}
   /* 段的身份行要折行：右轨现在装着「当前生效」芯片 + 段自己的复制/删除，而左边是序号 +
      最小 150px 的生效时刻——窄 sheet 一行放不下。折行后右轨（margin-left:auto）自己落第二行靠右。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-line{flex-wrap:wrap;row-gap:4px;}
@@ -157,7 +163,7 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
   [data-plugin="dsh-tokbook"] .dtpl-spin,
-  [data-plugin="dsh-tokbook"] .dtpl-price-seg-actions,
+  [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions,
   [data-plugin="dsh-tokbook"] .dtpl-model-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill,

@@ -9,6 +9,11 @@ export const CSS_PRICING_TIMELINE = `
   position:absolute;left:0;right:0;top:17px;height:3px;
   border-radius:0;background:var(--dtpl-fg-3);
 }
+/* 空轴（这一段还没有调价史）：轨道照旧占位——轴是这一屏的固定构件，不该因为还没价就消失——
+   但整条退到最暗一档，且不画任何节点与标签（没有时刻可说）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tl[data-dim="true"] .dtpl-tl-rail{
+  background:color-mix(in srgb,var(--dtpl-fg-3) 42%,transparent);
+}
 /* 盒子占满轨道高度：5px 的点的热区靠它。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl-node{
   position:absolute;top:0;left:0;height:100%;

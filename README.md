@@ -1,12 +1,13 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-20 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-09-21 · supersedes: —
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区从**侧边栏
-footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含五个 tab:
-**用量总览**(今日 + 词元构成 + 近 14 天趋势)、**用量明细**(窗口 × 按模型 / 按工作区 /
-按通道)、**价格表**、**订阅额度**、**统计口径**。
+footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含五个 tab(按界面
+从左到右):**用量总览**(今日 + 词元构成 + 近 14 天趋势)、**订阅额度**(用你的 key 向通道查
+账户级官方用量)、**用量明细**(窗口 × 按模型 / 按工作区 / 按通道)、**价格表**(选一个通道 +
+模型,编辑它的调价史)、**统计口径**(不估算的口径、漏项与对账)。
 
 两条贯穿全插件的原则:
 
@@ -61,7 +62,7 @@ src/
     styles/           CSS 分片(拼接顺序以 styles.ts 的 import 为准——级联是契约,不要重排)
     assets.d.ts       hero 插画的模块声明(构建期内联为 data URI)
     assets/           构建期内联的静态资源(hero-yanagi.jpg)
-    FooterButton.tsx  sidebar.footer.action 触发器
+    FooterButton.tsx  sidebar.footer.action 触发器(额度告急时多一个点)
     LedgerOverlay.tsx shell.overlay 浮窗外壳(五 tab + 焦点/快捷键)
     LedgerView.tsx    用量总览 tab
     ProviderPanel.tsx 用量明细 tab 外壳(窗口 + 三种切法)
@@ -69,7 +70,7 @@ src/
     MethodDoc.tsx     统计口径 tab
     pricing/
       axis.ts         调价史轴纯几何:节点落位 / 估宽 / 最小间距(无 React,进 smoke)
-      Timeline.tsx    调价史抽屉里的那条轴
+      Timeline.tsx    详情面里那条调价史轴(首记 ↔ 今天)
       draft.ts        价格表纯逻辑:草稿↔wire 转换、校验、签名(未保存标记)
       editors.tsx     行原语:四档价输入、价段编辑器、选中模型的详情面
       PricingPanel.tsx 价格表 tab 外壳:通道/模型两个下拉 + 保存状态 + 选中模型的调价史
@@ -82,7 +83,7 @@ scripts/
   preview-overlay.ts       浮窗预览台(fixture 数据)与独立查看器(--ledger,读真账本)
   smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试(一条不变量一个断言)
   selfcheck-rebuild.ts     账本不变量:折叠无损重建 / refile / 跨实例去重 / 价格签名 / 重启基线
-  selfcheck-ui.ts          界面禁令静态检查:死类双向 / 色值 / 虚线 / 圆角 / 焦点与动效分支 / ARIA 引用
+  selfcheck-ui.ts          界面禁令静态检查:死类双向 / 色值 / 虚线 / 圆角 / 宿主变量白名单 / 动效·焦点·窄屏分支 / ARIA 引用
 ```
 
 ## 构建
@@ -90,8 +91,9 @@ scripts/
 ```sh
 pnpm install      # 安装 @deepseek-ai/cordis、react、esbuild、typescript
 pnpm build        # tsc 产出 lib/types/*.d.ts,再由 esbuild 打包 host + client
+pnpm typecheck    # 只查 src/ 的类型(不构建)——`pnpm build` 里已含 `tsc -b`,这是轻量替代
 pnpm selfcheck    # 账本不变量:折叠重建 / refile / 跨实例去重 / 价格签名 / 重启基线
-pnpm selfcheck:ui # 界面禁令的死类双向 / 硬编码色值 / 虚线 / 圆角 / 宿主变量白名单 / 三段分支存在性
+pnpm selfcheck:ui # 界面禁令的死类双向 / 硬编码色值 / 虚线 / 圆角 / 宿主变量白名单 / 动效·焦点·窄屏分支 / ARIA 引用
 pnpm smoke        # 纯逻辑冒烟(聚合 + 计价 + 额度);加 `--only <节名子串>` 只跑命中的那几节
 pnpm test         # smoke(聚合 + 计价 + 额度)+ selfcheck + selfcheck:ui
 ```
@@ -119,12 +121,16 @@ browser 刷新页面拾取,链没活着时硬刷新永远是兜底。
 
 `pnpm watch` 只产出 `lib/types/*.d.ts`(`tsc --watch`);要 `lib/index.js` / `lib/client.js` 请跑 `pnpm build`。
 
-不启 DSH 也能看账本——**独立查看器**:同一个页面壳与同一份 client bundle,`/tokbook/*` 由真的 host 插件作答,只读本机账本目录:
+不启 DSH 也能看账本——**独立查看器**:同一个页面壳与同一份 client bundle,`/tokbook/*` 由真的 host 插件作答,只读本机账本目录。它不提供 `sessionPersistence`,所以只看**已入账的历史**:补录新会话的「重新扫描」在这里回报 skipped。
 
 ```sh
 pnpm ledger                                                 # 默认账本目录($DSH_HOME/tokbook)
 node --experimental-strip-types scripts/preview-overlay.ts --ledger D:/data/tokbook     # 或指定别的目录
 ```
+
+页面壳自己供一套 DSH 的 `--dsw-alias-*` 色板(按宿主真实取值,浅 / 深两套),浮窗还额外穿一层
+**设备皮**(`styles/device.ts` + `tokens.ts` 第八节,只在根元素带 `data-dtpl-device="light|dark"`
+时生效)——所以不装宿主也能按真实皮肤看。
 
 不带 `--ledger` 时同一个脚本退化成 **fixture 预览台**,用来看 UI 的各个状态与空态:
 `?dark=1` / `?tab=` / `?quota=<模式>` 换皮肤、tab 与额度场景,整台的形状(四路皆空 / 四路皆 500 /
@@ -140,6 +146,8 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
   **仍写一行、仍计入请求次数**,但四个 token 桶一个都不加,也不按 0 词元冒充。
 - **新鲜度不靠读路径等。** 打开浮窗那次读只做**廉价探测**(列会话 + 比对变更签名);要折叠时才把
   **权威 walk 排到后台**并按 15 s 节流——账本最多晚一个节流窗口,要立刻全量走一遍用**重新扫描**。
+  walk 在跑时浮窗靠只读探针 `/tokbook/sync` 把状态追到落定(页脚那句「正在重新扫描…」/「上次重新
+  扫描失败:…」),落定后再拉一次概览。
 
 ### 一个数据目录,一个写入进程
 
@@ -150,9 +158,9 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 ## 成本与价格表
 
 每条记录按**它自己的时间戳**计价,分**两级**:先取该 (通道路由, 精确模型串)「最后一段 `from ≤ 该时刻`」
-的价,再在该段内按记录**本地时间**取生效的**峰谷时段**(没被时段覆盖的时间按该段**全天价**)。于是
-**一次改价会重算全部历史金额**;一条 (路由, 模型) 没有价段、或记录落在所有价段之外 → **价格未知**(¥0)
-——**托底价**(没有生效时刻的那一段)填上之后,这条模型的全部历史就都有了价。
+的价,再在该段内按记录**本地时间**取生效的**峰谷时段**(没被时段覆盖的时间按该段**基准价**)。于是
+**一次改价会重算全部历史金额**;一条 (路由, 模型) 没有价段、或记录落在最早一段价**之前** → **价格未知**
+(按 ¥0 计)——**每一段价都必须有生效时刻**,没有「兜底价」那种形态。
 
 金额拆成两个桶,浮窗分开显示、绝不混为单一「支出」:**实际支出**(`spend`)= `metered` 路由的
 真金白银;**订阅价值**(`subscriptionValue`)= `subscription` 路由按你写的价折算的「省了多少」,
@@ -161,23 +169,37 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 价格**全部由你自己写**,只有一份文件 `pricing.json`(默认 `$DSH_HOME/tokbook/`):路由 → 精确模型串 → **价段
 数组**(`from` 生效时刻 + 四档 ¥/M 价 + 可选 `slots` 峰谷时段)。字段与校验的真源是 `src/types.ts`
 与 `src/pricing.ts` 的 `parsePriceInput`(写入 handler 只做传输);畸形文件只把受影响的 (路由, 模型) 降级为价格未知(¥0)。
+旧版文件里「省略 `from`」的兜底段仍读得进来:它在**读**路径上被迁移成真实日期——该模型首记那一刻
+(没有记录就用今天),金额因此不变,下一次保存文件就写成新形态;新写入不再接受这种段。
 
-**价格表 tab** 里先用两个下拉选「通道」与「模型」（选项文字自带「N 次」「价格未知」这类摘要，
-另有「只看价格未知」一档收窄两张表）；下面是选中模型的价格:第一张固定是**托底价**(没有生效时间,
-没被调价史覆盖的时间都按它算),往下的每一段从某个时刻起生效,一张卡里四档价紧挨成一簇（与
-段内每个**峰谷时段**的四格落在同一组竖线上,空着的那格就是「沿用全天价」）。规则见
-[`docs/CONTRACTS.md`](docs/CONTRACTS.md) §2,其余交互(自动保存 / 徽章语义)见
+**价格表 tab** 一屏只面对**一个模型**:先用两个下拉选「通道」与「模型」(选项文字自带「N 次」
+「N 个模型未知」「价格未知 / 未保存」这类摘要;模型下拉的第一项是「只看价格未知」——它是**动作**,
+选中即把两个下拉的候选收窄到还有洞的那些,不改选中哪一行)。下面是这个模型的全部价:每张卡是
+**一段从某个时刻起生效的价**(`from` 必填、按序号排开),一张卡里四档价紧挨成一簇——**段卡各写各的
+四档、互不沿用**,只有卡里的**峰谷时段**才留空沿用(缓存读 / 写没有单独定价时按输入价计,格子里报的
+就是那个数)。上面那条**调价史轴**从左端「最早一段价」画到今天,还没价的行走径就是一条暗淡的空轨。
+按量 / 订阅的开关在详情头上——它改的是**通道**的计费性质。规则见
+[`docs/CONTRACTS.md`](docs/CONTRACTS.md) §2,其余交互(自动保存 / 未保存圆点)见
 `src/client/pricing/`——真源是代码。
 
 ## 配置
 
+插件配置挂在 profile 那条挂载行的 `config:` 上(patch 文件是**顶层数组**的 loader patch 条目,
+不是键值映射):
+
 ```yml
-plugins:
-  tokbook:                                   # 逐键类型与校验见 src/types.ts(TokBookConfig)
-    path: D:/data/tokbook                    # 默认: $DSH_HOME/tokbook(或 ~/.dsh/tokbook)
-    recordCompaction: true                   # 默认 true——把压缩 summarize 调用也记成一行
-    plans: { opencode-go: { enabled: false } }   # 按通道路由键控的额度计划(见下节)
+# $DSH_HOME/profiles/web/cordis.patch.yml
+- insert:
+    - id: tokbook
+      name: 'dsh-tokbook'
+      config:                                # 逐键类型与校验见 src/types.ts(TokBookConfig)
+        path: D:/data/tokbook                # 默认: $DSH_HOME/tokbook(或 ~/.dsh/tokbook)
+        recordCompaction: true               # 默认 true——把压缩 summarize 调用也记成一行
+        plans: { opencode-go: { enabled: false } }   # 按通道路由键控的额度计划:opencode-go / commandcode(见下节)
 ```
+
+给已挂载的那一行改配置,也可以另写一条按 `id: tokbook` 定位的 patch——它**整体替换**该行的
+`config`,不与旧值合并,所以覆盖时要把想留的键写全。
 
 ### 官方账户用量(订阅额度 tab)
 
@@ -186,6 +208,11 @@ plugins:
 
 - **无 key → `unconfigured` 卡;拉取失败 → `error` 卡**,两者都**绝不回退到本地估算**;**browser 从不持有
   key**。逐通道端点与取数策略见 `src/quota-official.ts`、套餐失效判定见 `src/quota.ts`。
+- **有 key 但没有生效订阅不是错误**:按 provider 自己报的东西分成 `balance`(只有余额约束用量)与
+  `none`(只报窗口百分比,如 OpenCode Go 的 403「有效 key,无 Go 订阅」)两档状态卡;门只从**真的
+  答复了**的端点推导,网络故障绝不写成「没订阅」。
+- 侧栏按钮上那一点 = **最近一次成功快照**里有窗口接近或超过上限;它由 `GET /tokbook/quota` 的磁盘
+  读推出,打开浮窗与后台轮询都**不打** provider API。
 
 ## 状态
 

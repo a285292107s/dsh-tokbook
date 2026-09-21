@@ -95,7 +95,7 @@ export type BillingNature = 'metered' | 'subscription'
 export type DaySet = 'daily' | 'weekdays' | 'weekends'
 
 /** 价格段的例外时段：本地日的小时区间（`[start, end)`，`24` 关日），按星期
- * 集合生效，自带四档 ¥/M。生效时叠在段的全天价之上——省略的档沿用全天价。 */
+ * 集合生效，自带四档 ¥/M。生效时叠在段的基准价之上——省略的档沿用基准价。 */
 export interface PriceSlot {
   days: DaySet
   /** 覆盖的首小时，0–23。 */
@@ -105,13 +105,14 @@ export interface PriceSlot {
   rates: ModelPricing
 }
 
-/** 单个 (route, model) 的一段价格：从 `from`（epoch ms；0 = 最早一段）到
- * 同 (route, model) 下一段开始。列表按 `from` 升序，因此「T 时刻的价」=
- * 最后一个 `from ≤ T` 的段。 */
+/** 单个 (route, model) 的一段价格：从 `from`（epoch ms；整点）到同 (route, model)
+ * 下一段开始。列表按 `from` 升序，因此「T 时刻的价」= 最后一个 `from ≤ T` 的段；
+ * 没有任何段覆盖的时刻 → 价格未知（金额按 ¥0 计）。`from` 取 {@link EARLIEST}
+ * 只出现在读旧文件时，视图层会把它迁移成真实日期。 */
 export interface PriceSegment {
   from: number
   rates: ModelPricing
-  /** 例外时段，按开始小时升序；空/缺 = 仅全天价。两时段永不重叠（写路径
+  /** 例外时段，按开始小时升序；空/缺 = 仅基准价。两时段永不重叠（写路径
    * 拒绝可能同时生效的一对；读路径丢弃较晚的那个），故任一时刻至多一个
    * 时段生效。 */
   slots?: PriceSlot[]
@@ -134,7 +135,7 @@ export type PricingTable = Record<string, Record<string, PriceSegment[]>>
 export type BillingMap = Record<string, BillingNature>
 
 /** 记录计价所依据的身份：生效段的起始时刻 + 段内生效的例外时段
- * （null/缺 = 该段全天价）。只存身份、不存数字，改价后下次读即重算历史。 */
+ * （null/缺 = 该段基准价）。只存身份、不存数字，改价后下次读即重算历史。 */
 export interface RateKey {
   from: number
   slot?: SlotRef | null
@@ -153,11 +154,12 @@ export interface PricingSlotInput {
   cacheWritePerMillion?: number
 }
 
-/** 价格段在 wire / `pricing.json` 里的形态：`from` 是本地日
- * （`YYYY-MM-DD`）或本地日+整点（`YYYY-MM-DDTHH:00`），null = 最早一段。
- * 刻意扁平——文件手写，段直接带四档全天价（及覆盖它们的例外时段）。 */
+/** 价格段在 wire / `pricing.json` 里的形态：`from` 是本地日（`YYYY-MM-DD`）
+ * 或本地日+整点（`YYYY-MM-DDTHH:00`），**必有**——一段价从某一刻起生效，
+ * 没有生效时刻的形态只在旧文件里存在，读路径会把它迁移掉。
+ * 刻意扁平——文件手写，段直接带四档基准价（及覆盖它们的例外时段）。 */
 export interface PricingSegmentInput {
-  from: string | null
+  from: string
   inputPerMillion: number
   outputPerMillion: number
   cacheReadPerMillion?: number

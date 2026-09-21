@@ -1,8 +1,10 @@
 /**
  * 调价史轴（`Timeline.tsx`）的纯规则：哪些时刻成为节点，每个带标签的节点落在轨道上的哪里。
  *
- * 轴括住一行自己的历史：左端是首记，右端是今天。相邻标签会被推开直到满足最小间距。
- * 纯逻辑：无 React、无 DOM。
+ * 轴括住一行的**价**：左端是它最早的调价时刻，右端是今天。价定在未来时两端对调，
+ * 今天于是成为轴内的一个节点。**没有任何调价史时返回空数组**——那时没有可说的时刻，
+ * 由组件画一条暗淡的空轨，而不是把轴藏起来。
+ * 相邻标签会被推开直到满足最小间距。纯逻辑：无 React、无 DOM。
  */
 
 import { hourStartMs, instantKey } from '../../price-format.ts'
@@ -10,15 +12,15 @@ import { isBlankSegment, segmentInstant, sortedSegments, type ModelDraft } from 
 
 /** 轴上一个带标签的点。 */
 export interface AxisNode {
-  /** 在括号内的位置，0 = 首记 … 1 = 今天（间距修正前）。 */
+  /** 在括号内的位置，0 = 左端 … 1 = 右端（间距修正前）。 */
   ratio: number
   /** 节点下方打印的文字。 */
   label: string
-  /** 点击跳转的目标段；端帽上无调价时为 null。 */
+  /** 点击跳转的目标段；「今天」这个节点上为 null。 */
   segmentId: number | null
-  /** 今天生效的价格从这里开始。 */
+  /** 此刻生效的那一段：它这个节点带「当前生效」的分量。 */
   active: boolean
-  /** 本节点是括号两端之一。 */
+  /** 本节点是括号的一端（`start` = 左端，`today` = 右端），由样式表钉在边缘。 */
   cap: 'start' | 'today' | null
 }
 
@@ -35,40 +37,47 @@ export function labelWidth(label: string): number {
   return em * LABEL_PX
 }
 
+/** 一个段的标签：它的生效时刻（本地日，或日 + 整点）。 */
+function segLabel(at: number): string {
+  return instantKey(at).replace('T', ' ')
+}
+
 /**
- * 一行的轴：首记、括号内生效的每一次调价，以及今天——无轴可画时返回 null。
+ * 一行的轴：每一段价一个节点，两端是「最早那一段价」与「今天」。今天不落在任何一端时
+ * （价定在未来）它自己也是一个节点，标出此刻在价的时间里落在哪儿。
  */
-export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: number): AxisNode[] | null {
-  if (row.records <= 0 || row.firstAt === undefined) return null
-  const start = hourStartMs(row.firstAt)
-  const span = nowMs - start
-  // 正好落在首记时刻的调价**就是**左端：一个时刻、一个标签——端帽的。
-  let first: AxisNode = {
-    ratio: 0, label: `首记 ${instantKey(start).replace('T', ' ')}`,
-    segmentId: null, active: false, cap: 'start',
+export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: number): AxisNode[] {
+  const changes = sortedSegments(row)
+    .filter(segment => !isBlankSegment(segment))
+    .map(segment => ({ id: segment.id, at: segmentInstant(segment) }))
+    .filter((item): item is { id: number; at: number } => item.at !== null)
+  if (changes.length === 0) return []
+
+  const today = hourStartMs(nowMs)
+  // 两端：最早的一段价与今天，谁前谁后不定——价可能定在未来。
+  const start = Math.min(changes[0]!.at, today)
+  const end = Math.max(changes[changes.length - 1]!.at, today)
+  const span = end - start
+  const ratio = (at: number): number => (span <= 0 ? 0 : (at - start) / span)
+
+  const nodes: AxisNode[] = changes.map(change => ({
+    ratio: ratio(change.at),
+    label: segLabel(change.at),
+    segmentId: change.id,
+    active: change.id === activeId,
+    cap: null,
+  }))
+  // 今天始终在轴上：它落在价的时间里时是中间一个节点（标出「此刻」在哪儿），
+  // 落在某一段价上时那一段自己就是它，不必再画一个重复的节点。
+  if (!changes.some(change => change.at === today)) {
+    nodes.push({ ratio: ratio(today), label: '今天', segmentId: null, active: false, cap: null })
   }
-  const inside: AxisNode[] = []
-  for (const segment of sortedSegments(row)) {
-    if (isBlankSegment(segment)) continue
-    const at = segmentInstant(segment)
-    // 不可放置的边界：无起点（在历史之前）或半输入的日期；早于首记、或仍在未来，也不属于这段历史。
-    if (at === null || at < start || at > nowMs) continue
-    const node: AxisNode = {
-      ratio: span <= 0 ? 0 : (at - start) / span,
-      label: instantKey(at).replace('T', ' '),
-      segmentId: segment.id,
-      active: segment.id === activeId,
-      cap: null,
-    }
-    if (at === start && first.segmentId === null) {
-      first = { ...first, segmentId: node.segmentId, active: node.active }
-      continue
-    }
-    inside.push(node)
-  }
-  // 括号内没有调价 → 无轴可画。
-  if (first.segmentId === null && inside.length === 0) return null
-  return [first, ...inside, { ratio: 1, label: '今天', segmentId: null, active: false, cap: 'today' }]
+  nodes.sort((left, right) => left.ratio - right.ratio)
+  // 端帽按**位置**给：左端那个当左端帽、右端那个当右端帽（它们只决定标签贴哪边）。
+  // 只有一个节点时（一行的价恰好就是今天）它当左端帽。
+  nodes[0]!.cap = 'start'
+  if (nodes.length > 1) nodes[nodes.length - 1]!.cap = 'today'
+  return nodes
 }
 
 /**

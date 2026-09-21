@@ -11,7 +11,7 @@
  *  4. **重启后的同步基线**:载入 `sync-progress.json` 后未变的会话不该被重走,漂移 / 新增的才走;
  *     缺失或残缺的基线读作 null(调用方退回全量走一遍并重写一份)。
  *  5. **派生态自证有效**:往日被补写之后,折叠(逐文件版本)与解析缓存(逐文件版本)都自己作废,
- *     没有调用方需要「记得」;1970 前的 `from` 写进文件后仍是它自己那一段,不塌成托底价。
+ *     没有调用方需要「记得」;1970 前的 `from` 写进文件后仍是它自己那一段(每段价都带日期)。
  *
  * Run: node --experimental-strip-types scripts/selfcheck-rebuild.ts
  *
@@ -28,7 +28,7 @@ import {
   staleSessionIds, summarizeRecords, type PersistenceSnapshotLike, type RateResolver,
 } from '../src/stats.ts'
 import { readSyncProgress, writeSyncProgress } from '../src/sync-state.ts'
-import { EARLIEST, rateKeyAt, readPriceFile, writePriceFile } from '../src/pricing.ts'
+import { rateKeyAt, readPriceFile, writePriceFile, PRICING_FILE } from '../src/pricing.ts'
 import type { PricingTable, UsageRecord } from '../src/types.ts'
 import { UNPRICED_KEY } from '../src/types.ts'
 
@@ -212,7 +212,7 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
     const prices = (slotStart: number, inputPerMillion: number): PricingTable => ({
       'deepseek-official': {
         'deepseek-chat': [{
-          from: EARLIEST,
+          from: dayMs('2000-01-01', 0),
           rates: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
           slots: [{ days: 'weekdays', start: slotStart, end: 12, rates: { inputPerMillion: inputPerMillion * 2, outputPerMillion: inputPerMillion * 8 } }],
         }],
@@ -311,24 +311,27 @@ console.log('fold: 往日被追加后自动重折 + 缓存不再把冻结日当�
 }
 
 // ---------------------------------------------------------------------------
-// 7. 1970 前的生效时刻:写路径必须留成一个**有日期**的身份
+// 7. 1970 前的生效时刻:写路径必须把每一段都留成一个**有日期**的身份
 // ---------------------------------------------------------------------------
-console.log('price: 1970 前的日期段不塌成托底段')
+console.log('price: 1970 前的生效时刻照样写成一个日期身份')
 {
   const dir = await cleanDir()
   try {
     const ancient = dayMs('1900-01-01', 0)
+    const epoch = dayMs('1970-01-01', 0)
     const table: PricingTable = {
       r: { m: [
-        { from: EARLIEST, rates: { inputPerMillion: 1, outputPerMillion: 4 } },
+        { from: epoch, rates: { inputPerMillion: 1, outputPerMillion: 4 } },
         { from: ancient, rates: { inputPerMillion: 2, outputPerMillion: 8 } },
       ] },
     }
     await writePriceFile(dir, { table, billing: {}, revision: '' }, quiet)
+    const text = await readFile(join(dir, PRICING_FILE), 'utf8')
     const back = await readPriceFile(dir, quiet)
     const segments = back.table.r?.m ?? []
-    check('两段价在盘上是两个身份,读回来还是两段(identity = 「无起点」只有 from 0 一个)',
-      ancient < 0 && segments.length === 2 && segments[0]!.from < 0 && segments[1]!.from === EARLIEST)
+    check('两段价各自带日期落在盘上、读回来还是两段(那三个早期时刻不塌成同一个身份)',
+      ancient < 0 && epoch < 0 && text.includes('"1900-01-01"') && text.includes('"1970-01-01"')
+      && segments.length === 2 && segments[0]!.from === ancient && segments[1]!.from === epoch)
   } finally {
     await rm(dir, { recursive: true, force: true })
     clearRecordCache(dir)

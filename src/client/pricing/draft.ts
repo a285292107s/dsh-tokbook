@@ -2,14 +2,15 @@
  * 价格表 tab 的纯逻辑：草稿、脏标记签名、保存 wire body。
  *
  * 三条规则让探索不被惩罚：空白段/时段是草稿不写出去；峰谷时段可只重写任意子集，
- * 空着的档继承全天价；**托底价**（没有生效时刻的那一段）永远在场。时间轴规则与宿主
- * 共用 `price-format.ts`。刻意无 React——tab 可测试的那一半。
+ * 空着的档继承基准价；**每一段价都必须有生效时刻**，没有被任何段覆盖的日期按 ¥0 计
+ * （列为价格未知，不是免费）。时间轴规则与宿主共用 `price-format.ts`。
+ * 刻意无 React——tab 可测试的那一半。
  */
 
 // 价文件的共享词表（保留键、长度上限）从共享内核取——client 不能 import
 // `src/pricing.ts`（它拉了 `node:fs`），两条字面量各写一遍就会静默漂移。
 import {
-  DAY_SETS, DAY_SET_LABELS, EARLIEST, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
+  DAY_SETS, DAY_SET_LABELS, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY,
   instantKey, instantMs, isHourRange, rangeLabel, slotCovers, slotsOverlap,
 } from '../../price-format.ts'
 import type { BillingNature, DaySet, ModelPricing, PricingSegmentInput, PricingSlotInput, PricingView } from '../../types.ts'
@@ -22,7 +23,7 @@ export interface DraftRates {
   cacheWrite?: number
 }
 
-/** 峰谷时段的四个桶，各自可选：时段留空的桶沿用段的全天价。 */
+/** 峰谷时段的四个桶，各自可选：时段留空的桶沿用段的基准价。 */
 export type SlotRates = Partial<DraftRates>
 
 /** 草稿 rate 字段 → 写成 wire/文件的字段名。 */
@@ -33,7 +34,7 @@ export const RATE_FIELD_NAMES: ReadonlyArray<readonly [keyof DraftRates, keyof M
   ['cacheWrite', 'cacheWritePerMillion'],
 ]
 
-/** 一份可编辑价格的四个 ¥/M 输入——段的全天价或其中一个峰谷时段。字符串使半输入的数字存活。 */
+/** 一份可编辑价格的四个 ¥/M 输入——段的基准价或其中一个峰谷时段。字符串使半输入的数字存活。 */
 export interface RateTexts {
   input: string
   output: string
@@ -65,7 +66,7 @@ export interface SegmentDraft extends RateTexts {
   /** 本地 React key；编辑间稳定，输入框不丢焦点。 */
   id: number
   from: string
-  /** 叠在全天价上的峰谷时段；空 = 仅全天价。 */
+  /** 叠在基准价上的峰谷时段；空 = 仅基准价。 */
   slots: SlotDraft[]
 }
 /** 一张 route 卡的可编辑模型行。 */
@@ -110,11 +111,9 @@ export function todayKey(now: Date = new Date()): string {
   return `${String(now.getFullYear())}-${month}-${day}`
 }
 
-/** 草稿 `from` 所指的有效时刻：`''` = 最早一段（0），非真实时刻的文本 = null。 */
+/** 草稿 `from` 所指的有效时刻；空或不是真实时刻 = null（一段价必须有生效时刻）。 */
 function instantOf(from: string): number | null {
-  const text = from.trim()
-  if (text === '') return EARLIEST
-  return instantMs(text)
+  return instantMs(from.trim())
 }
 
 /** 小时输入的数字；非整点文本时为 NaN。 */
@@ -174,7 +173,7 @@ export function newSegment(seed: Partial<Omit<SegmentDraft, 'id'>> = {}): Segmen
   }
 }
 
-/** 一个新的峰谷时段：09:00–12:00 每天（峰谷窗口的起始形状），尚无费率——留空的桶继承全天价。 */
+/** 一个新的峰谷时段：09:00–12:00 每天（峰谷窗口的起始形状），尚无费率——留空的桶继承基准价。 */
 export function newSlot(seed: Partial<Omit<SlotDraft, 'id'>> = {}): SlotDraft {
   return {
     id: takeId(),
@@ -219,11 +218,6 @@ export function withSlotEnd(slot: SlotDraft, endText: string): SlotDraft {
   return { ...slot, start: String(nextStart), end: String(end) }
 }
 
-/** 托底价那一张：没有生效时刻的一段（文件里省略 `from`，即自始生效）。它不是一次调价。 */
-export function isFloorSegment(segment: SegmentDraft): boolean {
-  return segment.from.trim() === ''
-}
-
 function rateText(value: number | undefined): string {
   return value === undefined ? '' : String(value)
 }
@@ -253,14 +247,13 @@ function segmentDraft(segment: PricingSegmentInput): SegmentDraft {
   }
 }
 
-/** 从一份 wire 视图播种可编辑草稿。托底价那一张**永远在场**：文件里没有无日期段时补一张空卡，
- *  使每一行都有「其它时间按它算」的那一张；空卡在被填之前不进签名、不进请求体。 */
+/** 从一份 wire 视图播种可编辑草稿。**不补任何段**：没有价就是没有价——
+ *  没有价段覆盖的日期按 ¥0 计（并列为价格未知），要给它价就自己加一段。 */
 export function draftFromView(view: PricingView): PriceDraft {
   const draft: PriceDraft = new Map()
   for (const card of view.routes) {
     const models = new Map<string, ModelDraft>()
     for (const row of card.models) {
-      const segments = row.segments.map(segmentDraft)
       models.set(row.model, {
         model: row.model,
         ...(row.name !== undefined ? { name: row.name } : {}),
@@ -268,7 +261,7 @@ export function draftFromView(view: PricingView): PriceDraft {
         ...(row.firstAt !== undefined ? { firstAt: row.firstAt } : {}),
         ...(row.lastAt !== undefined ? { lastAt: row.lastAt } : {}),
         ...(row.unpriced !== undefined ? { unpriced: row.unpriced } : {}),
-        segments: segments.some(isFloorSegment) ? segments : [newSegment({ from: '' }), ...segments],
+        segments: row.segments.map(segmentDraft),
       })
     }
     draft.set(card.route, {
@@ -324,7 +317,6 @@ export function isUnpriced(model: ModelDraft): boolean {
 }
 
 /** 「价格未知」的判定：整行没有价，或有账本记录早于最早的一段有价段——那些记录按 ¥0 计。
- *  托底价在场即覆盖自始至今，所以等价于「没有托底价，且第一段调价晚于首记」。
  *  账本透镜另有一份权威计数（host 的 `unpriced`）；这里按草稿算，改价后当场跟手。 */
 export function priceUnknown(model: ModelDraft): boolean {
   const first = pricedSegments(model)[0]
@@ -336,17 +328,17 @@ export function priceUnknown(model: ModelDraft): boolean {
 /** 一个段的四个 ¥/M 桶，作为行的固定列。 */
 export type RateField = keyof RateTexts
 
-/** 此刻在计费的价：生效段的全天价，叠上此刻生效的峰谷时段。 */
+/** 此刻在计费的价：生效段的基准价，叠上此刻生效的峰谷时段。 */
 export interface InForceRates {
   /** 此刻在生效的那一段——行内四个数字与抽屉里的「当前生效」都指它。 */
   segment: SegmentDraft
-  /** 该段里此刻生效的峰谷时段；null = 按全天价。 */
+  /** 该段里此刻生效的峰谷时段；null = 按基准价。 */
   slot: SlotDraft | null
-  /** 四档的展示值：时段重述过的档用它自己的，留空的档沿用全天价。 */
+  /** 四档的展示值：时段重述过的档用它自己的，留空的档沿用基准价。 */
   values: RateTexts
 }
 
-/** 段里此刻生效的峰谷时段（按时刻自身的本地星期与小时）；null = 全天价。 */
+/** 段里此刻生效的峰谷时段（按时刻自身的本地星期与小时）；null = 基准价。 */
 function activeSlot(segment: SegmentDraft, nowMs: number): SlotDraft | null {
   for (const slot of effectiveSlots(segment)) {
     const { start, end } = slotRange(slot)
@@ -378,7 +370,7 @@ export function ratesInForce(model: ModelDraft, nowMs: number = Date.now()): InF
   }
 }
 
-/** 段的有效时刻（epoch ms；`0` = 无起点），日期不是真实时刻时为 null。轴用它把边界放在左端**上**或**外**。 */
+/** 段的有效时刻（epoch ms），日期不是真实时刻时为 null。轴用它放这一段的节点。 */
 export function segmentInstant(segment: SegmentDraft): number | null {
   return instantOf(segment.from)
 }
@@ -394,7 +386,7 @@ export function fieldState(holder: RateTexts | null, field: RateField): FieldSta
   return parseRate(raw) === null ? 'bad' : 'ok'
 }
 
-/** 一个段的全天价，作为峰谷时段显示的继承 placeholder。 */
+/** 一个段的基准价，作为峰谷时段显示的继承 placeholder。 */
 export function inheritedRates(segment: SegmentDraft): RateTexts {
   return {
     input: segment.input,
@@ -404,11 +396,38 @@ export function inheritedRates(segment: SegmentDraft): RateTexts {
   }
 }
 
+/** 一个空单元格显示的鬼影与它的解释；`value` 缺省即这一档确实没有可沿用的数（`—` = 还没填）。 */
+export interface InheritedCell {
+  value?: string
+  note?: string
+}
+
+/** 一个空单元格显示的那个数，以及悬停时对它的解释。
+ *
+ *  全表只有一条规则：**格子里出现数字 = 留空沿用它；`—` = 还没填**。于是
+ *  - 峰谷时段的每一档留空 → 沿用基准价；
+ *  - 缓存读 / 缓存写没有单独定价时按**输入价**计（宿主 `costOf` 的同一条规则），所以
+ *    这两档的终点是生效的输入价——基准价那一行的这两格因此也报得出一个数，而不是「没有值」；
+ *  - 输入 / 输出必填，基准价那一行的这两格空着只是还没填（`—`），行本来就写不出去。 */
+export function inheritedCell(segment: SegmentDraft, slot: SlotDraft | null, field: RateField): InheritedCell {
+  // 更宽作用域里这一档自己的值。基准价那一行没有更宽的作用域，所以恒为空。
+  const wider = slot === null ? '' : segment[field].trim()
+  if (wider !== '') return { value: wider, note: `留空 = 沿用基准价 ${wider}` }
+  if (field === 'input' || field === 'output') {
+    return slot === null ? {} : { note: '留空 = 沿用基准价（基准价这档也是空的）' }
+  }
+  // 终点是**生效的**输入价：时段自己重述过就用它自己的。
+  const own = slot === null ? '' : slot.input.trim()
+  const input = own !== '' ? own : segment.input.trim()
+  if (input === '') return { note: '留空 = 按输入价计（输入价还没填）' }
+  return { value: input, note: `留空 = 按输入价计 ${input}：这一档没有单独定价` }
+}
+
 // ---------------------------------------------------------------------------
 // 有效性
 // ---------------------------------------------------------------------------
 
-/** 一份全天价的首个问题，或 null：输入价与输出价必填，cache 桶可选，每个已填单元格须为非负数字。 */
+/** 一份基准价的首个问题，或 null：输入价与输出价必填，cache 桶可选，每个已填单元格须为非负数字。 */
 function rateIssue(holder: RateTexts, prefix: string): string | null {
   for (const [field, label] of RATE_INPUTS) {
     const state = fieldState(holder, field)
@@ -418,7 +437,7 @@ function rateIssue(holder: RateTexts, prefix: string): string | null {
   return null
 }
 
-/** 一份草稿价格的 ¥/M 数字（段的全天价），必填字段尚非非负数字时为 null（cache 桶可选）。 */
+/** 一份草稿价格的 ¥/M 数字（段的基准价），必填字段尚非非负数字时为 null（cache 桶可选）。 */
 export function ratesOf(holder: RateTexts): DraftRates | null {
   const input = parseRate(holder.input)
   const output = parseRate(holder.output)
@@ -443,7 +462,7 @@ function badRateField(holder: RateTexts): string | null {
   return null
 }
 
-/** 一个峰谷时段重写的桶，或首个非数字值。可以只重写任意子集：留空的桶继承段的全天价。 */
+/** 一个峰谷时段重写的桶，或首个非数字值。可以只重写任意子集：留空的桶继承段的基准价。 */
 export function slotRates(slot: SlotDraft): { ok: true; rates: SlotRates } | { ok: false; error: string } {
   const rates: SlotRates = {}
   for (const [field, label] of RATE_INPUTS) {
@@ -488,9 +507,9 @@ export function rowIssue(model: ModelDraft): string | null {
   for (const segment of pricedSegments(model)) {
     const text = segment.from.trim()
     const at = instantOf(text)
-    if (at === null) return `生效时间「${text}」不是 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00`
+    if (at === null) return `生效时间「${text}」不是 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00（一段价必须有生效时刻）`
     if (seen.has(at)) {
-      return at === EARLIEST ? '有两段价都填了「无起点」' : `有两段价都从 ${instantKey(at)} 起生效`
+      return `有两段价都从 ${instantKey(at)} 起生效`
     }
     seen.add(at)
     const rates = rateIssue(segment, '')
@@ -521,7 +540,9 @@ function parseRate(value: string): number | null {
 function segmentSignature(segment: SegmentDraft): Record<string, unknown> {
   const rates = ratesOf(segment)
   return {
-    from: segment.from.trim() === '' ? null : segment.from.trim(),
+    // 生效时刻空着时这一行本来就写不出去（`composePriceBody` 会拒），签名照实记空串，
+    // 于是它一定与磁盘上的基线不同——那一行保持脏。
+    from: segment.from.trim(),
     rates: rates === null || badRateField(segment) !== null ? null : rates,
     slots: effectiveSlots(segment).map((slot) => {
       const rates = slotRates(slot)
@@ -545,18 +566,6 @@ export function rowKey(route: string, model: string): string {
   return `${route}\u0000${model}`
 }
 
-/** `from` 所指的可读时刻，最早一段为 null——省略了生效时刻的段，即对每个时刻都生效过的段。 */
-function instantLabel(from: string): string | null {
-  const text = from.trim()
-  return text === '' ? null : text.replace('T', ' ')
-}
-
-/** 段的有效时刻在调价史抽屉中的读法。无日期的段不是「列表里最早的那个」——它有开放的左端，无起点是说出这一点最短的方式。 */
-export function fmtFrom(from: string): string {
-  const at = instantLabel(from)
-  return at === null ? '无起点' : `${at} 起`
-}
-
 /** 段的 `from` 作为 `datetime-local` 输入值：零点打印为 `00:00`，因为纯日期就是这个意思。 */
 export function fromFieldValue(from: string): string {
   const text = from.trim()
@@ -573,14 +582,14 @@ function fromFieldInput(value: string): string {
   return hour === '00' ? day : `${day}T${hour}:00`
 }
 
-/** 改一段的生效时刻。清空输入不落地：一次调价必须有生效时刻，而「无起点」那一张是托底价——
- *  它不是「把日期删掉」能变成的东西（否则一行会拿到两张托底价，写出去必被拒绝）。 */
+/** 改一段的生效时刻。清空输入不落地：**一段价必须有生效时刻**，日期空着的段写不出去
+ *  （也没有「无起点」那张卡可以退回去）。 */
 export function withSegmentFrom(segment: SegmentDraft, value: string): SegmentDraft {
   const next = fromFieldInput(value)
   return next === '' ? segment : { ...segment, from: next }
 }
 
-/** 一个峰谷时段保存时写入的内容：它重写的桶，其余省略使全天价继续生效。 */
+/** 一个峰谷时段保存时写入的内容：它重写的桶，其余省略使基准价继续生效。 */
 function slotBody(slot: SlotDraft): Record<string, unknown> {
   const body: Record<string, unknown> = {
     days: slot.days,
@@ -635,7 +644,7 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
           return { ok: false, error: `${where}的生效时间必须是 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00（当前「${segment.from.trim()}」）` }
         }
         if (seen.has(at)) {
-          return { ok: false, error: `${where}有两段价填了同一个生效时间（${at === EARLIEST ? '无起点' : instantKey(at)}）` }
+          return { ok: false, error: `${where}有两段价填了同一个生效时间（${instantKey(at)}）` }
         }
         seen.add(at)
         const rates = ratesOf(segment)
@@ -645,7 +654,7 @@ export function composePriceBody(draft: PriceDraft): { ok: true; body: Record<st
         const badRate = badRateField(segment)
         if (badRate !== null) return { ok: false, error: `${where}的${badRate}` }
         const out: Record<string, unknown> = {}
-        if (at !== EARLIEST) out.from = instantKey(at)
+        out.from = instantKey(at)
         for (const [draftKey, wireKey] of RATE_FIELD_NAMES) {
           const value = rates[draftKey]
           if (value !== undefined) out[wireKey] = value

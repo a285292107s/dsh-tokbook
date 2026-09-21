@@ -6,7 +6,7 @@
 //
 // Run: node --experimental-strip-types scripts/smoke.ts
 //      加 `--only <节名子串>` 只跑命中的那几节(改一处计价规则不必跑全 26 节)。
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import {
@@ -15,18 +15,18 @@ import {
 } from '../src/stats.ts'
 import { pathKey, workspaceRows } from '../src/workspaces.ts'
 import {
-  billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, EARLIEST, instantKey, instantMs,
+  billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, instantKey, instantMs,
   parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_FILE, rateKeyAt, ratesAt,
   readPriceFile, slotAt, writePriceFile,
 } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import {
-  baselinesOf, composePriceBody, draftFromView, duplicateSlot, effectiveSegments, isBlankSegment, isBlankSlot,
-  isFloorSegment, isUnpriced, modelDirty, newSegment, newSlot, priceUnknown, ratesInForce, rowIssue, slotRange,
+  baselinesOf, composePriceBody, draftFromView, duplicateSlot, effectiveSegments, isBlankSlot,
+  isUnpriced, modelDirty, newSegment, newSlot, priceUnknown, ratesInForce, rowIssue, slotRange,
   withSegmentFrom, withSlotEnd, withSlotStart,
   type ModelDraft, type PriceDraft, type SegmentDraft,
 } from '../src/client/pricing/draft.ts'
-import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, slotsOverlap } from '../src/price-format.ts'
+import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, hourStartMs, slotsOverlap } from '../src/price-format.ts'
 import { axisNodes, labelWidth, placeNodes } from '../src/client/pricing/axis.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-catalog.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
@@ -73,7 +73,7 @@ function section(name: string): boolean {
   return true
 }
 
-// 「价格表草稿 / 托底价 / 价格表写路径」三节说的是同一件事:一条路由、一个模型、几段价。
+// 「价格表草稿 / 没有价段覆盖的日期 / 价格表写路径」三节说的是同一件事:一条路由、一个模型、几段价。
 // 形状只在这里写一遍——三份副本不会各自报错,只会各自**漂**,而漂掉的那一份是静默的。
 const modelRow = (segments: SegmentDraft[], over: Partial<ModelDraft> = {}): ModelDraft =>
   ({ model: 'm', configured: true, records: 0, segments, ...over })
@@ -178,9 +178,9 @@ if (section('手写价表:日期 / 价段 / 取价')) {
   const refuses: [string, unknown, string][] = [
     ['非 YYYY-MM-DD 的生效日期', { r: { m: [{ from: '2026-2-1', inputPerMillion: 1, outputPerMillion: 2 }] } }, 'YYYY-MM-DD'],
     ['同一生效时刻写两段', { r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2 }, { from: '2026-09-01', inputPerMillion: 3, outputPerMillion: 4 }] } }, '生效时间相同'],
-    ['价段里的未知字段', { r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, billing: 'metered' }] } }, '未知字段'],
-    ['两个都会生效的时段', { r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'daily', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }, { days: 'weekdays', start: 11, end: 13, inputPerMillion: 2, outputPerMillion: 4 }] }] } }, '重叠'],
-    ['未知的星期几', { r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'mondays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }] }] } }, 'days'],
+    ['价段里的未知字段', { r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, billing: 'metered' }] } }, '未知字段'],
+    ['两个都会生效的时段', { r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'daily', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }, { days: 'weekdays', start: 11, end: 13, inputPerMillion: 2, outputPerMillion: 4 }] }] } }, '重叠'],
+    ['未知的星期几', { r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'mondays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }] }] } }, 'days'],
     ['非整点的生效时刻(轴是整点的)', { r: { m: [{ from: '2026-09-10T12:30', inputPerMillion: 1, outputPerMillion: 2 }] } }, '整点'],
   ]
   const accepted = refuses.filter(([, body, expected]) => {
@@ -227,6 +227,29 @@ if (section('手写价表:日期 / 价段 / 取价')) {
       && pro?.name === undefined && pro.segments.length === 0 && pro.firstAt === undefined)
     check('价格文件里留着一条已被配置删掉的路由(卡片是并集,不是目录)',
       (await readPricingView(dir, [], { byRouteModel: new Map(), byRoute: new Map() }, quiet)).routes.some(c => c.route === 'deepseek-official'))
+
+    // 旧形态(没有生效时刻的那一段,自始生效)在视图层被迁移成真实日期:该模型的首记整点。
+    // 金额因此不变(首记之前本来没有任何记录),而界面与写入形态从此只剩有生效时刻的段;
+    // 文件要等下一次保存才变。
+    await writeFile(join(dir, PRICING_FILE), JSON.stringify({
+      'deepseek-official': { 'deepseek-v4-flash': [
+        { inputPerMillion: 5, outputPerMillion: 20 },
+        { from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 4 },
+      ] },
+    }), 'utf8')
+    const legacyFirst = dayMillis('2026-08-15', 19) + 31 * 60_000
+    const migrated = await readPricingView(dir, [], {
+      byRouteModel: new Map([['deepseek-official', new Map([['deepseek-v4-flash', {
+        records: 3, firstAt: legacyFirst, lastAt: dayMillis('2026-09-02', 9), unpriced: 0,
+      }]])]]),
+      byRoute: new Map([['deepseek-official', 3]]),
+    }, quiet)
+    const migratedRow = migrated.routes.find(c => c.route === 'deepseek-official')?.models.find(m => m.model === 'deepseek-v4-flash')
+    check('旧文件里没有生效时刻的那一段,视图层把它迁移成该模型的首记整点(金额不变)',
+      migratedRow?.segments.length === 2
+      && migratedRow.segments[0]!.from === instantKey(hourStartMs(legacyFirst))
+      && migratedRow.segments[0]!.inputPerMillion === 5
+      && migratedRow.segments[1]!.from === '2026-09-01')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -250,30 +273,33 @@ if (section('账本透镜:价格表说这一行值多少')) {
     row?.records === 3 && row.firstAt === dayMillis('2026-08-15', 12) && row.lastAt === dayMillis('2026-09-02', 12) && row.unpriced === 2
     && lens.byRoute.get('deepseek-official') === 3)
   const open = ledgerUsageOf([billed('f', '2026-08-15')], {
-    'deepseek-official': { 'deepseek-v4-flash': [{ from: EARLIEST, rates: { inputPerMillion: 1, outputPerMillion: 4 } }] },
+    'deepseek-official': { 'deepseek-v4-flash': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 1, outputPerMillion: 4 } }] },
   })
-  check('无起点的价段覆盖全部历史 → 一条都不算价格未知',
+  check('一段早于任何记录的价覆盖全部历史 → 一条都不算价格未知',
     open.byRouteModel.get('deepseek-official')?.get('deepseek-v4-flash')?.unpriced === 0)
 }
 
-if (section('调价史轴:只在首记与今天之间画,标签不许叠')) {
+if (section('调价史轴:左端是最早一段价,无调价史时是空轴')) {
   const segment = (id: number, from: string): SegmentDraft => ({ id, from, input: '1', output: '4', cacheRead: '', cacheWrite: '', slots: [] })
   const row = (over: Partial<ModelDraft>): ModelDraft => ({ model: 'm', configured: true, records: 3, firstAt: dayMillis('2026-08-25', 19), segments: [], ...over })
   const now = dayMillis('2026-09-20', 12)
 
-  // 括号里没有调价 = 没有可画的东西:轴不画,而不是画一条空轴。
-  const undrawn = axisNodes(row({ segments: [segment(1, ''), segment(2, '2026-08-01'), segment(3, '2026-09-25')] }), null, now) === null
-    && axisNodes(row({ records: 0, firstAt: undefined }), null, now) === null
+  // 没有调价史 = 空数组:组件据此画一条暗淡的空轨(轴不隐藏)。
+  const empty = axisNodes(row({ segments: [segment(1, '')] }), null, now).length === 0
+    && axisNodes(row({ records: 0, firstAt: undefined }), null, now).length === 0
+  // 一段价:左端就是它自己(不再是首记),右端仍是今天。
   const one = axisNodes(row({ segments: [segment(1, '2026-08-25T19:00')] }), 1, now)
-  const three = axisNodes(row({ segments: [segment(1, '2026-08-01'), segment(2, '2026-09-05'), segment(3, '2026-09-10T12:00'), segment(4, '2026-09-25')] }), 3, now)
-  check('轴的两端是首记与今天,只有落在括号内的调价成为节点,且只有当前生效的那个标 active',
-    undrawn
-    && one?.length === 2 && one[0]!.label === '首记 2026-08-25 19:00' && one[0]!.segmentId === 1 && one[0]!.active === true
-    && one[1]!.label === '今天' && one[1]!.cap === 'today' && one[1]!.ratio === 1
-    && three?.map(node => node.label).join(' | ') === '首记 2026-08-25 19:00 | 2026-09-05 | 2026-09-10 12:00 | 今天'
-    && three[2]!.segmentId === 3 && three[2]!.active === true && three[1]!.active === false)
+  // 价定在未来:两端对调,今天成为轴内的一个节点。
+  const three = axisNodes(row({ segments: [segment(1, '2026-08-01'), segment(2, '2026-09-05'), segment(3, '2026-09-25')] }), 2, now)
+  check('轴的左端是最早一段价、右端是今天;价落在未来时今天退成中间节点,只有当前生效那段标 active',
+    empty
+    && one.length === 2 && one[0]!.label === '2026-08-25 19:00' && one[0]!.segmentId === 1 && one[0]!.active === true
+    && one[0]!.cap === 'start' && one[1]!.label === '今天' && one[1]!.cap === 'today' && one[1]!.ratio === 1
+    && three.map(node => node.label).join(' | ') === '2026-08-01 | 2026-09-05 | 今天 | 2026-09-25'
+    && three[1]!.segmentId === 2 && three[1]!.active === true
+    && three[2]!.segmentId === null && three[3]!.cap === 'today')
 
-  const labels = ['首记 2026-08-25 19:00', '2026-08-26', '2026-08-28', '今天']
+  const labels = ['2026-08-25 19:00', '2026-08-26', '2026-08-28', '今天']
   const widths = labels.map(labelWidth)
   const spots = placeNodes([0, 0.02, 0.05, 1], widths, 600)
   const boxes = spots.map((x, index): [number, number] => index === 0
@@ -307,7 +333,7 @@ if (section('峰谷时段:价段内的第二层取价')) {
   const mondayTrough = dayMillis('2026-09-14', 20)
   const sunday = dayMillis('2026-09-20', 10)
 
-  check('整点生效:12:00 的段在 11:00 还没生效;段内按本地星期几 + 小时取时段,end 不含,空隙走全天价,时段没写的档继承',
+  check('整点生效:12:00 的段在 11:00 还没生效;段内按本地星期几 + 小时取时段,end 不含,空隙走基准价,时段没写的档继承',
     instantKey(instantMs('2026-09-10T12:00')!) === '2026-09-10T12:00' && instantKey(instantMs('2026-09-10')!) === '2026-09-10'
     && ratesAt(table, route, model, dayMillis('2026-09-10', 11)) === null
     && ratesAt(table, route, model, mondayPeak)?.inputPerMillion === 2
@@ -317,10 +343,10 @@ if (section('峰谷时段:价段内的第二层取价')) {
     && ratesAt(table, route, model, sunday)?.cacheReadPerMillion === 0.02)
 
   const slotRefuses: [string, boolean][] = [
-    ['会重叠的一组时段被拒', parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'daily', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }, { days: 'weekdays', start: 11, end: 13, inputPerMillion: 2, outputPerMillion: 4 }] }] } }).ok === false],
-    ['倒序的小时被拒', parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'daily', start: 18, end: 9, inputPerMillion: 2, outputPerMillion: 4 }] }] } }).ok === false],
-    ['星期几分家的两组可以共用同一段小时', parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'weekdays', start: 9, end: 18, inputPerMillion: 2, outputPerMillion: 4 }, { days: 'weekends', start: 9, end: 18, inputPerMillion: 2, outputPerMillion: 4 }] }] } }).ok === true],
-    ['不写 days 读作每天', parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 2, slots: [{ start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }] }] } }).file?.table.r?.m?.[0]?.slots?.[0]?.days === 'daily'],
+    ['会重叠的一组时段被拒', parsePriceInput({ r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'daily', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }, { days: 'weekdays', start: 11, end: 13, inputPerMillion: 2, outputPerMillion: 4 }] }] } }).ok === false],
+    ['倒序的小时被拒', parsePriceInput({ r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'daily', start: 18, end: 9, inputPerMillion: 2, outputPerMillion: 4 }] }] } }).ok === false],
+    ['星期几分家的两组可以共用同一段小时', parsePriceInput({ r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'weekdays', start: 9, end: 18, inputPerMillion: 2, outputPerMillion: 4 }, { days: 'weekends', start: 9, end: 18, inputPerMillion: 2, outputPerMillion: 4 }] }] } }).ok === true],
+    ['不写 days 读作每天', parsePriceInput({ r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, slots: [{ start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }] }] } }).file?.table.r?.m?.[0]?.slots?.[0]?.days === 'daily'],
   ]
   check('时段的写路径:该拒的拒、可共存的放行、缺省写全', slotRefuses.every(([, ok]) => ok), slotRefuses.filter(([, ok]) => !ok).map(([label]) => label))
   const kept = coercePriceFile({ r: { m: [{
@@ -346,11 +372,11 @@ if (section('峰谷时段:价段内的第二层取价')) {
     await rm(slotDir, { recursive: true, force: true })
   }
 
-  // 按这一段的价计出来的金额走的是时段价,不是全天价。
+  // 按这一段的价计出来的金额走的是时段价,不是基准价。
   const records: UsageRecord[] = [{ requestId: 'peak-1', time: mondayPeak, sessionId: 's1', provider: route, model, usage: { inputTokens: 1_000_000, outputTokens: 0 } }]
   const resolveRate = (record: UsageRecord) => rateKeyAt(table, record.provider, record.model, record.time)
   const costed = attachCosts({ ...summarizeRecords(records, resolveRate), dataDir: 'x' }, table)
-  check('按高峰时段计费的记录按高峰价计入(不是全天价)',
+  check('按高峰时段计费的记录按高峰价计入(不是基准价)',
     Math.abs(costed.totalCost - 2) < 1e-9 && costed.unpricedModels.length === 0)
 }
 
@@ -362,13 +388,13 @@ if (section('时段身份:改费率就地重算,改时段 / 删时段 = 价格�
     days, start, end: 12, rates: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
   })
   const table = (slots: ReturnType<typeof slot>[]): PricingTable => ({
-    [route]: { [model]: [{ from: EARLIEST, rates: { inputPerMillion: 1, outputPerMillion: 4 }, ...(slots.length > 0 ? { slots } : {}) }] },
+    [route]: { [model]: [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 1, outputPerMillion: 4 }, ...(slots.length > 0 ? { slots } : {}) }] },
   })
 
   const key = rateKeyAt(table([slot(9, 2)]), route, model, inside)
   const segment = priceAt(table([slot(9, 2)]), route, model, inside)
   check('身份 = 价段 from + 那一刻生效的时段(start + days)',
-    segment !== null && slotAt(segment, inside)?.start === 9 && key.from === EARLIEST && key.slot?.start === 9 && key.slot.days === 'weekdays')
+    segment !== null && slotAt(segment, inside)?.start === 9 && key.from === dayStartMs('2020-01-01') && key.slot?.start === 9 && key.slot.days === 'weekdays')
   check('改费率 → 身份不变、就地重算;改 start / 改 days / 删时段 → 那一刻另有一个身份在生效,旧身份回查不到 = 价格未知',
     JSON.stringify(rateKeyAt(table([slot(9, 3)]), route, model, inside)) === JSON.stringify(key)
     && priceOfKey(table([slot(9, 3)]), route, model, key)?.inputPerMillion === 3
@@ -391,12 +417,12 @@ if (section('价格表草稿:没写完的不算、不脏、不写')) {
 
   const blank = newSegment()
   check('空白价段是草稿:不报错、不脏、不写进请求体,行读作价格未知',
-    isBlankSegment(blank) === true && effectiveSegments(model([blank])).length === 0 && isUnpriced(model([blank])) === true
+    effectiveSegments(model([blank])).length === 0 && isUnpriced(model([blank])) === true
     && rowIssue(model([blank])) === null && JSON.stringify(bodyOf([blank])) === JSON.stringify({ ok: true, body: {} }))
 
   const view: PricingView = {
     routes: [{ route: 'r', label: 'r', billing: 'metered', records: 0, models: [
-      { model: 'm', configured: true, records: 0, segments: [{ from: null, inputPerMillion: 1, outputPerMillion: 4 }] },
+      { model: 'm', configured: true, records: 0, segments: [{ from: '2026-08-01', inputPerMillion: 1, outputPerMillion: 4 }] },
     ] }],
     dataDir: 'x', updatedAt: 0,
   }
@@ -409,7 +435,7 @@ if (section('价格表草稿:没写完的不算、不脏、不写')) {
     && modelDirty('r', withDraft, baseline.models) === false
     && JSON.stringify(bodyOf(withDraft.segments)) === JSON.stringify(bodyOf(real)))
 
-  const seg = newSegment({ from: '', input: '1', output: '4', cacheRead: '0.02' })
+  const seg = newSegment({ from: '2026-09-01', input: '1', output: '4', cacheRead: '0.02' })
   const partial = newSlot({ start: '9', end: '12', input: '2' })
   const partialBody = bodyOf([{ ...seg, slots: [partial] }])
   const written = partialBody.ok ? (partialBody.body.r as Record<string, Record<string, { slots: Record<string, unknown>[] }[]>>).m![0]!.slots[0]! : {}
@@ -433,23 +459,23 @@ if (section('价格表草稿:没写完的不算、不脏、不写')) {
 
   // 行内的四个数字只读,读的是**此刻计费所用的价**:生效段叠上此刻生效的峰谷时段。
   const peakRow = model([{
-    ...newSegment({ from: '', input: '1', output: '4', cacheRead: '0.2', cacheWrite: '' }),
+    ...newSegment({ from: '2026-09-01', input: '1', output: '4', cacheRead: '0.2', cacheWrite: '' }),
     slots: [newSlot({ days: 'weekdays', start: '9', end: '12', input: '2' })],
   }])
   const peak = ratesInForce(peakRow, dayMillis('2026-09-14', 10))     // 周一 10:00,落在 09:00–12:00 里
   const offPeak = ratesInForce(peakRow, dayMillis('2026-09-14', 13))
-  check('此刻价 = 生效段的全天价叠上此刻生效的峰谷时段(留空的档沿用全天价),没生效时段时就是全天价',
+  check('此刻价 = 生效段的基准价叠上此刻生效的峰谷时段(留空的档沿用基准价),没生效时段时就是基准价',
     peak?.slot?.start === '9' && peak.values.input === '2' && peak.values.output === '4'
     && peak.values.cacheRead === '0.2' && peak.values.cacheWrite === ''
     && offPeak?.slot === null && offPeak.values.input === '1' && offPeak.values.cacheRead === '0.2')
 
-  // 一次调价必须有生效时刻:清空日期不落地(「无起点」那一张是托底价,不是删日期变出来的)。
+  // 一段价必须有生效时刻:清空日期不落地(没有「无起点」那张卡可以退回去)。
   const dated = newSegment({ from: '2026-09-20', input: '1', output: '4' })
-  check('清空调价段的生效时间不落地;改日期则就地改到那一段上',
+  check('清空一段价的生效时间不落地;改日期则就地改到那一段上',
     withSegmentFrom(dated, '') === dated && withSegmentFrom(dated, '2026-09-21T13:00').from === '2026-09-21T13:00')
 }
 
-if (section('托底价:没有生效时刻的那一张永远在场')) {
+if (section('没有价段覆盖的日期:按 ¥0 计,播种不补卡')) {
   const rowView = (firstAt: number | undefined, segments: PricingSegmentInput[]): PricingView => ({
     routes: [{ route: 'r', label: 'r', billing: 'metered', records: 4, models: [
       { model: 'm', configured: true, records: 4, ...(firstAt !== undefined ? { firstAt } : {}), segments },
@@ -459,28 +485,24 @@ if (section('托底价:没有生效时刻的那一张永远在场')) {
   const firstAt = dayMillis('2026-08-15', 18) + 47 * 60_000
   const rowOf = modelRow
   const bodyOf = bodyOfRow
-  const wroteSegments = (body: ReturnType<typeof composePriceBody>): { from?: string; inputPerMillion?: number }[] =>
-    body.ok ? ((body.body.r as Record<string, Record<string, { from?: string; inputPerMillion?: number }[]>>).m ?? []) : []
 
-  // 文件里的段可以全是有日期的:播种时给它补一张空的托底价卡(排在最前),空卡写不出去。
+  // 播种**不补任何卡**:文件里有几段就是几段,一段都没有就是一段都没有。
   const datedOnly: PricingSegmentInput[] = [{ from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 8 }]
   const seeded = draftFromView(rowView(firstAt, datedOnly)).get('r')!.models.get('m')!
-  const floor = seeded.segments[0]!
-  check('全是带日期的段的行,播种补出一张空的托底价卡;空着时不进请求体,也不弄脏这一行',
-    isFloorSegment(floor) === true && isBlankSegment(floor) === true && seeded.segments.length === 2
-    && JSON.stringify(bodyOf(seeded)) === JSON.stringify(bodyOf({ ...seeded, segments: seeded.segments.slice(1) }))
+  const bare = draftFromView(rowView(firstAt, [])).get('r')!.models.get('m')!
+  check('播种不补卡:有日期的段照旧,没有价的行走径就是空(要价得自己加一段)',
+    seeded.segments.length === 1 && seeded.segments[0]!.from === '2026-09-01'
+    && bare.segments.length === 0
     && modelDirty('r', seeded, baselinesOf(rowView(firstAt, datedOnly)).models) === false)
 
-  // 托底价写出去就是那一段**没有 from**:自始生效,不是某一刻起的调价。
-  const filled = { ...seeded, segments: [{ ...floor, input: '1', output: '4' }, ...seeded.segments.slice(1)] }
-  const written = wroteSegments(bodyOf(filled))
-  check('填好的托底价写成「无 from」的那一段(自始生效),排在其它段前面',
-    written.length === 2 && written[0]!.from === undefined && written[0]!.inputPerMillion === 1
-    && written[1]!.from === '2026-09-01')
+  // 一段价必须有生效时刻:日期空着的那张卡写不出去(整行报问题,body 被拒)。
+  const undated = { ...seeded, segments: [{ ...seeded.segments[0]!, from: '' }] }
+  check('日期空着的一段价写不出去:行报问题,compose 也被拒',
+    rowIssue(undated)?.includes('生效时间') === true && bodyOf(undated).ok === false)
 
-  // 行内报的是**此刻**生效的那一段:调价段开始前是托底价,开始后是那一段。
+  // 一次调价只影响它之后的时刻:之前的时间没有任何段覆盖 → 价格未知(金额按 ¥0 计)。
   const both = rowOf([
-    { ...newSegment({ from: '', input: '1', output: '4' }) },
+    { ...newSegment({ from: '2026-08-01', input: '1', output: '4' }) },
     { ...newSegment({ from: '2026-09-01', input: '2', output: '8' }) },
   ], { records: 9, firstAt })
   check('此刻价取最后一段已生效的;一段都没生效时没有价可报(行内显示「—」,不是 ¥0)',
@@ -488,12 +510,12 @@ if (section('托底价:没有生效时刻的那一张永远在场')) {
     && ratesInForce(both, dayMillis('2026-09-02', 9))?.values.input === '2'
     && ratesInForce(rowOf([{ ...newSegment({ from: '2026-12-01', input: '1', output: '4' }) }]), dayMillis('2026-09-02', 9)) === null)
 
-  // 价格未知 = 整行没有价,或有账本记录早于最早的一段有价段(托底价在场时它覆盖自始,故不会有)。
+  // 价格未知 = 整行没有价（空白草稿不算价）,或有账本记录早于最早的一段有价段。
   check('价格未知只由「没有价」与「有记录早于最早一段价」两条触发',
-    priceUnknown(rowOf([newSegment({ from: '' })])) === true
-    && priceUnknown(rowOf([{ ...newSegment({ from: '', input: '1', output: '4' }) }], { records: 9, firstAt })) === false
-    && priceUnknown(rowOf([{ ...newSegment({ from: '2026-09-01', input: '1', output: '4' }) }], { records: 9, firstAt })) === true
-    && priceUnknown(rowOf([{ ...newSegment({ from: '2026-08-01', input: '1', output: '4' }) }], { records: 9, firstAt })) === false)
+    priceUnknown(rowOf([])) === true
+    && priceUnknown(rowOf([newSegment({ from: '2026-08-01' })])) === true
+    && priceUnknown(rowOf([{ ...newSegment({ from: '2026-08-01', input: '1', output: '4' }) }], { records: 9, firstAt })) === false
+    && priceUnknown(rowOf([{ ...newSegment({ from: '2026-09-01', input: '1', output: '4' }) }], { records: 9, firstAt })) === true)
 }
 
 if (section('价格表写路径:草稿写出去的 body 一定被宿主接受')) {
@@ -506,7 +528,7 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
     const body = composePriceBody(draft)
     return body.ok ? parsePriceInput(body.body) : { ok: false, error: body.error }
   }
-  const floor = newSegment({ from: '', input: '1', output: '4', cacheRead: '0.02', cacheWrite: '0.5' })
+  const floor = newSegment({ from: '2026-08-01', input: '1', output: '4', cacheRead: '0.02', cacheWrite: '0.5' })
   const dated = newSegment({
     from: '2026-09-01T13:00', input: '2', output: '8',
     slots: [
@@ -515,7 +537,7 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
     ],
   })
   const accepted: [string, PriceDraft][] = [
-    ['托底价 + 整点调价 + 两组时段', draftOf('deepseek-official', 'deepseek-chat', [floor, dated])],
+    ['两段价 + 整点调价 + 两组时段', draftOf('deepseek-official', 'deepseek-chat', [floor, dated])],
     ['订阅通道($billing)', draftOf('commandcode', 'deepseek-chat', [floor], 'subscription')],
     ['整行都是空白草稿(不进 body)', draftOf('r', 'm', [newSegment()])],
     ['1970 前的生效时刻', draftOf('r', 'm', [floor, newSegment({ from: '1900-01-01', input: '3', output: '9' })])],
@@ -523,6 +545,15 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
   const refused = accepted.filter(([, draft]) => !roundTrip(draft).ok)
   check('每一份草稿产出的 body 都被宿主接受',
     refused.length === 0, refused.map(([label, draft]) => [label, composePriceBody(draft)]))
+
+  // 新写入不再接受「没有生效时刻」的段:`from` 是必填,写路径与宿主一致(草稿那侧由
+  // 空日期拒掉,手写的 body 由宿主拒掉)。
+  const undated = parsePriceInput({ r: { m: [{ inputPerMillion: 1, outputPerMillion: 4 }] } })
+  const emptyFrom = parsePriceInput({ r: { m: [{ from: '', inputPerMillion: 1, outputPerMillion: 4 }] } })
+  check('无生效时刻的段写不进去:宿主拒收,草稿那侧同样拒(日期空着 = 行有问题)',
+    undated.ok === false && undated.error.includes('缺少 from')
+    && emptyFrom.ok === false
+    && composePriceBody(draftOf('r', 'm', [{ ...newSegment({ from: '' }), input: '1', output: '4' }])).ok === false)
 
   // 反向:宿主拒绝的键规则不能是「草稿以为能存」的那种。长度上限与保留键前缀同源于
   // `price-format.ts`,所以草稿这一侧就报得出位置与原因,而不是整份文件被拒。
@@ -545,12 +576,12 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
   const cacheBaseline = baselinesOf({
     routes: [{
       route: 'r', label: 'r', billing: 'metered', records: 0,
-      models: [{ model: 'm', configured: true, records: 0, segments: [{ from: null, inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 1 }] }],
+      models: [{ model: 'm', configured: true, records: 0, segments: [{ from: '2026-08-01', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 1 }] }],
     }],
     dataDir: 'x', updatedAt: 0,
   })
   const rowWith = (cacheRead: string): ModelDraft =>
-    modelRow([{ ...newSegment({ from: '', input: '1', output: '4' }), cacheRead }])
+    modelRow([{ ...newSegment({ from: '2026-08-01', input: '1', output: '4' }), cacheRead }])
   check('填了却写不出去的缓存档让这一行保持脏(合法的值则与基线一致)',
     modelDirty('r', rowWith('abc'), cacheBaseline.models) === true
     && modelDirty('r', rowWith('1'), cacheBaseline.models) === false
@@ -619,8 +650,8 @@ if (section('路由目录:本机设置 ∪ 运行时注册表')) {
 
 if (section('工作区:按目录累计用量')) {
   const pricing = {
-    'deepseek-official': { 'deepseek-chat': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
-    'opencode-go': { 'deepseek-chat': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
+    'deepseek-official': { 'deepseek-chat': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
+    'opencode-go': { 'deepseek-chat': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
   }
   const billing = { 'opencode-go': 'subscription' as const }
   const resolveRate = (r: UsageRecord) => rateKeyAt(pricing, r.provider, r.model, r.time)
@@ -688,8 +719,8 @@ if (section('端到端:真形状的 DSH 事件 → JSONL 账本 → 聚合 → �
     check('事件流折成 7 行落进按日 JSONL(去重后)', recorded === 7, `got ${recorded}`)
 
     const table: PricingTable = { deepseek: {
-      'deepseek-chat': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5, cacheWritePerMillion: 1 } }],
-      'deepseek-reasoner': [{ from: EARLIEST, rates: { inputPerMillion: 4, outputPerMillion: 16, cacheReadPerMillion: 1, cacheWritePerMillion: 2 } }],
+      'deepseek-chat': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5, cacheWritePerMillion: 1 } }],
+      'deepseek-reasoner': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 4, outputPerMillion: 16, cacheReadPerMillion: 1, cacheWritePerMillion: 2 } }],
     } }
     const summary = await buildSummary(dir, () => new Date('2026-02-02T00:00:00Z'), (r) => rateKeyAt(table, r.provider, r.model, r.time), quiet)
     const costed = attachCosts(summary, table)
@@ -799,10 +830,10 @@ if (section('通道卡片与按模型切法')) {
     { requestId: 'r4', time: dayMillis('2026-03-01', 10), sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-v4-flash', kind: 'failure', failureCode: 'QUOTA' },
   ]
   const pricing: PricingTable = {
-    'deepseek-official': { 'deepseek-v4-flash': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
+    'deepseek-official': { 'deepseek-v4-flash': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
     'opencode-go': {
-      'deepseek-v4-flash': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }],
-      'glm-5.3-flash': [{ from: EARLIEST, rates: { inputPerMillion: 3, outputPerMillion: 10, cacheReadPerMillion: 1 } }],
+      'deepseek-v4-flash': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 2, outputPerMillion: 8 } }],
+      'glm-5.3-flash': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 3, outputPerMillion: 10, cacheReadPerMillion: 1 } }],
     },
   }
   const cards = providerCards(records, pricing, (r) => rateKeyAt(pricing, r.provider, r.model, r.time))
@@ -1047,9 +1078,9 @@ if (section('双桶金额:spend vs subscriptionValue')) {
   try {
     // 同一个模型串经三条通道:分桶由价格文件的 $billing 决定,什么也没声明的通道按 metered。
     const pricing: PricingTable = {
-      'deepseek-official': { 'deepseek-v4-flash': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
-      'opencode-go': { 'deepseek-v4-flash': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
-      commandcode: { 'deepseek/deepseek-v4-flash': [{ from: EARLIEST, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
+      'deepseek-official': { 'deepseek-v4-flash': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
+      'opencode-go': { 'deepseek-v4-flash': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
+      commandcode: { 'deepseek/deepseek-v4-flash': [{ from: dayStartMs('2020-01-01')!, rates: { inputPerMillion: 2, outputPerMillion: 8 } }] },
     }
     const billing = { 'opencode-go': 'subscription' as const, commandcode: 'subscription' as const }
     const resolve = (r: UsageRecord) => rateKeyAt(pricing, r.provider, r.model, r.time)

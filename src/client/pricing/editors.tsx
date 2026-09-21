@@ -1,18 +1,19 @@
 /**
  * 价格表 tab 的行原语：价格段编辑器与选中模型的详情面。
  *
- * 改价一律走段卡里的输入框；第一张是**托底价**（没有生效时刻），往下的每张从某个时刻起生效。
- * 谁被选中由面板决定（两个下拉），所以本文件不持有选择状态——只通过小回调下发改动。
+ * 改价一律走段卡里的输入框：每一张都是一段从某个时刻起生效的价，段与段互不沿用，
+ * 没有被任何段覆盖的日期按 ¥0 计。谁被选中由面板决定（两个下拉），
+ * 所以本文件不持有选择状态——只通过小回调下发改动。
  */
 
 import { memo, useEffect, useState } from 'react'
 import { DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange } from '../../price-format.ts'
 import type { BillingNature, DaySet } from '../../types.ts'
 import {
-  duplicateSlot, effectiveSlots, fieldState, fromFieldValue, inheritedRates, isBlankSlot,
-  dayLabel, isFloorSegment, modelDirty, newSegment, newSlot, rowIssue, segmentInForce, slotRange,
+  duplicateSlot, effectiveSlots, fieldState, fromFieldValue, inheritedCell, isBlankSlot,
+  dayLabel, modelDirty, newSegment, newSlot, rowIssue, segmentInForce, slotRange,
   sortedSegments, withSegmentFrom, withSlotEnd, withSlotStart,
-  type ModelDraft, type RateField, type RateTexts, type SegmentDraft, type SlotDraft,
+  type ModelDraft, type RateField, type SegmentDraft, type SlotDraft,
 } from './draft.ts'
 import { PriceTimeline } from './Timeline.tsx'
 
@@ -28,7 +29,7 @@ const CELLS: ReadonlyArray<{ field: RateField; label: string }> = [
 const START_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
 const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour + 1)
 
-/** 抽屉里的一个数字单元格，原地编辑。行内那个只读的对应物是 {@link RateValue}。 */
+/** 抽屉里的一个数字单元格，原地编辑。 */
 function RateCell({ id, label, hint, value, state, context, placeholder, note, onEdit }: {
   id: string
   label: string
@@ -37,7 +38,7 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   value: string
   state: 'ok' | 'empty' | 'bad'
   context: string
-  /** 单元格为空时显示。峰谷时段把全天价传到这里，「空 = 继承」可见。 */
+  /** 单元格为空时显示的那个数（沿用来的鬼影）；缺省 = `—`，即这一档还没填。 */
   placeholder?: string
   /** 悬停时解释此上下文中空单元格的含义。 */
   note?: string
@@ -74,7 +75,7 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   )
 }
 
-/** 24 小时表盘：全天价与峰谷时段共用（全天是满弧，峰谷是它身上被改写的那一段）。
+/** 24 小时表盘：基准价与峰谷时段共用（全天是满弧，峰谷是它身上被改写的那一段）。
  *  时间不成段（草稿态）时只剩淡环与刻钉，不画半截弧。 */
 function ClockRing({ start, end, label }: {
   start: number
@@ -108,16 +109,17 @@ function ClockRing({ start, end, label }: {
   )
 }
 
-/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方全天价行相同——留空的桶显示它沿用的全天价。
+/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方基准价行相同——留空的桶显示它沿用的那个数
+ *  （基准价，缓存两档在基准价也空时继续落到输入价）。
  *  **不画盘**：星期进不了盘，而盘要说的两件事（覆盖哪几个小时、共几小时）三个下拉与一行时长已经说完。
  *  零覆盖的时段与计价无关（`isBlankSlot`），所以整条降级并直说这一点——空着不写文件是设计，不是待办。 */
-function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onDuplicate }: {
+function SlotEditor({ slot, index, canRemove, segment, onChange, onRemove, onDuplicate }: {
   slot: SlotDraft
   index: number
   /** 是否可删除（未完成的草稿永远可以；最后一个有价时段不行，否则会悄悄丢掉那个窗口）。 */
   canRemove: boolean
-  /** 段的全天价，作为空单元格的 placeholder。 */
-  inherited: RateTexts
+  /** 这一个时段所在的那一段：留空的档从它（缓存两档再往下落到它的输入价）沿用。 */
+  segment: SegmentDraft
   onChange: (next: SlotDraft) => void
   onRemove: () => void
   onDuplicate: () => void
@@ -129,19 +131,15 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
   // 删除要两下：它改的是历史金额，账本没有撤销。聚焦离开即取消。
   const [confirming, setConfirming] = useState(false)
   const inert = isBlankSlot(slot)
-  const inherit = (field: RateField): string | undefined => {
-    const value = inherited[field].trim()
-    return value === '' ? undefined : value
-  }
   return (
     <div className="dtpl-price-slot" data-inert={inert}>
-      {/* 左栅栏：圆点与上面的盘同轴，横线把这条子目接回盘上。两者都不带信息，
-          只回答「这条窗口挂在哪儿」——所以是空的 span，竖轨由整组子目共用一条（见 SegmentEditor）。 */}
+      {/* 栅栏：圆点 + 桩线，都相对**本槽**定位（本盒的 padding-left 就是卡片与栅栏的让位）。
+          圆点的圆心钉在竖轨上（槽左缘 + 20，与卡片那一列差 42px），桩线把点接到卡片的左边框。 */}
       <span className="dtpl-price-slot-rail" aria-hidden="true">
         <span className="dtpl-price-slot-dot" />
         <span className="dtpl-price-slot-stub" />
       </span>
-      <div className="dtpl-price-slot-body">
+      <div className="dtpl-price-slot-card">
         <div className="dtpl-price-slot-head">
           <select
             className="dtpl-price-select dtpl-price-select-days"
@@ -175,7 +173,7 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
             <span className="dtpl-price-slot-span" aria-hidden="true">{`· ${String(hours)} 小时`}</span>
           )}
           {inert && <span className="dtpl-price-slot-inert">未改写任何档：不影响计价</span>}
-          <span className="dtpl-price-seg-actions">
+          <span className="dtpl-price-slot-actions">
             <button type="button" className="dtpl-price-ghost" onClick={onDuplicate}>复制</button>
             <button
               type="button"
@@ -192,9 +190,9 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
               onBlur={() => setConfirming(false)}
               disabled={!canRemove}
               title={!canRemove
-                ? '删掉最后一个有价的时段，这段覆盖的时间回到全天价'
+                ? '删掉最后一个有价的时段，这段覆盖的时间回到基准价'
                 : confirming
-                  ? '再点一次：这个时段会被删掉，它覆盖的小时回到全天价'
+                  ? '再点一次：这个时段会被删掉，它覆盖的小时回到基准价'
                   : '删除这个峰谷时段（需再点一次确认）'}
             >
               {confirming ? '确认删除' : '删除'}
@@ -202,37 +200,38 @@ function SlotEditor({ slot, index, canRemove, inherited, onChange, onRemove, onD
           </span>
         </div>
         <div className="dtpl-price-rates dtpl-price-slot-rates">
-          {/* 读名只有桶名：四格与上方的全天价落在同一组竖线上，谁覆盖了谁一望即知；
+          {/* 读名只有桶名：四格与上方的基准价落在同一组竖线上，谁覆盖了谁一望即知；
               序号进可见读名会把格子撑宽，四格就散开了——「第 N 个峰谷时段」在 aria-label
               （context）里已经说全。 */}
-          {CELLS.map(({ field, label }) => (
-            <RateCell
-              key={field}
-              id={`slot-${String(slot.id)}-${field}`}
-              label={label}
-              value={slot[field]}
-              state={fieldState(slot, field)}
-              context={context}
-              placeholder={inherit(field)}
-              note={inherit(field) === undefined ? '留空 = 沿用全天价（全天价这档也是空的）' : `留空 = 沿用全天价 ${inherit(field)!}`}
-              onEdit={(next) => onChange({ ...slot, [field]: next })}
-            />
-          ))}
+          {CELLS.map(({ field, label }) => {
+            const cell = inheritedCell(segment, slot, field)
+            return (
+              <RateCell
+                key={field}
+                id={`slot-${String(slot.id)}-${field}`}
+                label={label}
+                value={slot[field]}
+                state={fieldState(slot, field)}
+                context={context}
+                placeholder={cell.value}
+                note={cell.note}
+                onEdit={(next) => onChange({ ...slot, [field]: next })}
+              />
+            )
+          })}
         </div>
       </div>
     </div>
   )
 }
 
-/** 抽屉里的一张价：托底价（没有生效时刻、不可删）或一段调价（生效时刻、可删）。 */
-function SegmentEditor({ segment, where, serial, floor, active, onChange, onRemove, onDuplicate }: {
+/** 抽屉里的一张价：一段从某个时刻起生效的价，可改可删。 */
+function SegmentEditor({ segment, where, serial, active, onChange, onRemove, onDuplicate }: {
   segment: SegmentDraft
-  /** 这一张的名分：「托底价」或「第 N 段调价」——出现在每个单元格的无障碍名称里。 */
+  /** 这一张的名分：「第 N 段价」——出现在每个单元格的无障碍名称里。 */
   where: string
-  /** 台账序号（托底价是 00）——纯视觉的扫读列。 */
+  /** 段序（01、02…）——纯视觉的扫读列。 */
   serial: string
-  /** 是不是托底价那一张（无生效时刻，且不提供删除）。 */
-  floor: boolean
   active: boolean
   onChange: (next: SegmentDraft) => void
   onRemove: () => void
@@ -260,70 +259,77 @@ function SegmentEditor({ segment, where, serial, floor, active, onChange, onRemo
       <div className="dtpl-price-seg-line">
         <span className="dtpl-price-seg-id">
           <span className="dtpl-price-seg-serial" aria-hidden="true">{serial}</span>
-          {floor
-            ? <span className="dtpl-price-seg-floor-k">托底价</span>
-            : (
-              <label className="dtpl-price-seg-date" htmlFor={`${base}-from`}>
-                <input
-                  id={`${base}-from`}
-                  className="dtpl-price-input dtpl-price-input-date"
-                  type="datetime-local"
-                  step={3600}
-                  value={fromFieldValue(segment.from)}
-                  aria-label={`${where}的生效时间`}
-                  title="生效时间精确到整点，分钟向下取到整点；点进日期或时间数字段可直接键入，方向键逐步增减；清空不生效——想要一段管全部时间，改的是第一张托底价"
-                  onChange={(event) => onChange(withSegmentFrom(segment, event.target.value))}
-                />
-              </label>
-            )}
+          {/* 每段价的第一件事是「从哪一刻起生效」——它就是这张卡的身份。 */}
+          <label className="dtpl-price-seg-date" htmlFor={`${base}-from`}>
+            <input
+              id={`${base}-from`}
+              className="dtpl-price-input dtpl-price-input-date"
+              type="datetime-local"
+              step={3600}
+              value={fromFieldValue(segment.from)}
+              aria-label={`${where}的生效时间`}
+              title="生效时间精确到整点，分钟向下取到整点；点进日期或时间数字段可直接键入，方向键逐步增减；清空不生效——一段价必须有生效时刻"
+              onChange={(event) => onChange(withSegmentFrom(segment, event.target.value))}
+            />
+          </label>
           {active && <span className="dtpl-price-badge dtpl-price-badge-live">当前生效</span>}
         </span>
         {/* 段的复制/删除挂在身份行的右轨上，常显（不只在悬停时存在）。 */}
         <span className="dtpl-price-seg-tools">
           <button type="button" className="dtpl-price-ghost" onClick={onDuplicate}>复制</button>
-          {!floor && (
-            <button
-              type="button"
-              className="dtpl-price-ghost dtpl-price-ghost-danger"
-              data-confirm={confirming}
-              onClick={() => {
-                if (!confirming) {
-                  setConfirming(true)
-                  return
-                }
-                setConfirming(false)
-                onRemove()
-              }}
-              onBlur={() => setConfirming(false)}
-              title={confirming
-                ? '再点一次：这一段调价会被删掉，它覆盖的时间回到上一段（或托底价）'
-                : '删除这一段调价（需再点一次确认）'}
-            >
-              {confirming ? '确认删除' : '删除'}
-            </button>
-          )}
+          <button
+            type="button"
+            className="dtpl-price-ghost dtpl-price-ghost-danger"
+            data-confirm={confirming}
+            onClick={() => {
+              if (!confirming) {
+                setConfirming(true)
+                return
+              }
+              setConfirming(false)
+              onRemove()
+            }}
+            onBlur={() => setConfirming(false)}
+            title={confirming
+              ? '再点一次：这一段价会被删掉，它覆盖的时间回到上一段（没有上一段就是价格未知）'
+              : '删除这一段价（需再点一次确认）'}
+          >
+            {confirming ? '确认删除' : '删除'}
+          </button>
         </span>
       </div>
-      {/* 全天价行与峰谷子目同构：满弧盘 + 锁死的时间段头 + 四个带戳的读数。 */}
+      {/* 基准价行与峰谷子目同构：满弧盘 + 一枚「基准价」戳 + 一句说明 + 四个带戳的读数。
+          这一行不摆范围：满弧盘与悬停里的那句已经说了它覆盖每天全天，屏幕上要说的是
+          **它管哪儿**——非峰谷时段全部按它。 */}
       <div className="dtpl-price-seg-allday">
-        <ClockRing start={0} end={24} label="每天 00:00–24:00" />
+        <ClockRing start={0} end={24} label="每天 全天" />
         <div className="dtpl-price-seg-allday-body">
           <div className="dtpl-price-seg-allday-head">
-            <span className="dtpl-price-seg-allday-days">每天</span>
-            <span className="dtpl-price-slot-clock">00:00 – 24:00</span>
+            <span
+              className="dtpl-price-base-k"
+              title="基准价：覆盖每天 00:00–24:00、不随星期变化；峰谷时段里留空的档也沿用它"
+            >
+              基准价
+            </span>
+            <span className="dtpl-price-base-note">所有非峰谷时段，全部采用这个价格</span>
           </div>
           <div className="dtpl-price-rates dtpl-price-seg-rates">
-            {CELLS.map(({ field, label }) => (
-              <RateCell
-                key={field}
-                id={`${base}-${field}`}
-                label={label}
-                value={segment[field]}
-                state={fieldState(segment, field)}
-                context={`${where}的全天价`}
-                onEdit={(next) => onChange({ ...segment, [field]: next })}
-              />
-            ))}
+            {CELLS.map(({ field, label }) => {
+              const cell = inheritedCell(segment, null, field)
+              return (
+                <RateCell
+                  key={field}
+                  id={`${base}-${field}`}
+                  label={label}
+                  value={segment[field]}
+                  state={fieldState(segment, field)}
+                  context={`${where}的基准价`}
+                  placeholder={cell.value}
+                  note={cell.note}
+                  onEdit={(next) => onChange({ ...segment, [field]: next })}
+                />
+              )
+            })}
           </div>
         </div>
       </div>
@@ -338,7 +344,7 @@ function SegmentEditor({ segment, where, serial, floor, active, onChange, onRemo
                 slot={slot}
                 index={slotIndex}
                 canRemove={isBlankSlot(slot) || effectiveSlots(segment).length > 1}
-                inherited={inheritedRates(segment)}
+                segment={segment}
                 onChange={(next) => onChange({ ...segment, slots: segment.slots.map(item => (item.id === slot.id ? next : item)) })}
                 onRemove={() => onChange({ ...segment, slots: segment.slots.filter(item => item.id !== slot.id) })}
                 onDuplicate={() => onChange({ ...segment, slots: [...segment.slots, duplicateSlot(slot)] })}
@@ -349,12 +355,11 @@ function SegmentEditor({ segment, where, serial, floor, active, onChange, onRemo
         <div className="dtpl-price-seg-band">
           <button
             type="button"
-            className="dtpl-price-add dtpl-price-add-slot"
+            className="dtpl-price-add-ghost dtpl-price-add-slot"
             aria-label="添加峰谷时段"
             onClick={addSlot}
           >
-            {/* 没有幽灵盘可对位了（盘已从子目删掉），所以这里只用与「＋ 加一段调价」同一枚字形。 */}
-            <span className="dtpl-price-add-slot-k"><span aria-hidden="true">＋</span> 峰谷时段</span>
+            <span aria-hidden="true">＋</span>峰谷时段
           </button>
         </div>
       </div>
@@ -380,8 +385,6 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
   // 此刻生效的那一段叠上此刻生效的峰谷时段——null = 这一刻没有一段在生效，轴上的「当前生效」钉就没有落点。
   const live = segmentInForce(row)
   const ordered = sortedSegments(row)
-  // 托底价不是一次调价，所以调价史的编号只数有生效时刻的那些张。
-  const changes = ordered.filter(segment => !isFloorSegment(segment))
   // 有人命名该串时显示展示名，精确串跟在后面（它仍是账本的计费键，必须可达）；没人命名时它就是精确串。
   // 这个判断必须落到 DOM（data-exact），不能让样式去猜（见 styles/pricing 的 [data-exact]）。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
@@ -430,16 +433,14 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
           身份行**不在**里面——它是这一块的头，左缘必须和上面的选择带对齐。 */}
       <div className="dtpl-price-rail">
         <PriceTimeline row={row} activeId={live === null ? null : live.id} />
-      {ordered.map(segment => {
-        const floor = isFloorSegment(segment)
-        const place = changes.indexOf(segment) + 1
+      {ordered.map((segment, index) => {
+        const place = index + 1
         return (
           <SegmentEditor
             key={segment.id}
             segment={segment}
-            where={floor ? '托底价' : `第 ${String(place)} 段调价`}
-            serial={floor ? '00' : String(place).padStart(2, '0')}
-            floor={floor}
+            where={`第 ${String(place)} 段价`}
+            serial={String(place).padStart(2, '0')}
             active={live !== null && segment.id === live.id}
             onChange={(next) => onRowChange(route, row.model, {
               ...row,
@@ -465,16 +466,16 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
       <div className="dtpl-price-history-foot">
         <button
           type="button"
-          className="dtpl-price-add"
-          aria-label="添加一段调价"
+          className="dtpl-price-add-ghost"
+          aria-label="添加一段价"
           onClick={addSegment}
         >
-          <span aria-hidden="true">＋</span> 加一段调价
+          <span aria-hidden="true">＋</span>加一段价
         </button>
         <span className="dtpl-price-history-hint">
-          {changes.length === 0
-            ? '托底价这一张就是全部价：四个数字是这一天 0–24 点的全天价（¥/百万词元）。'
-            : '每段管到下一段开始为止，其余时间按托底价；每行的四个数字是这一天 0–24 点的全天价，峰谷时段只改被它覆盖的小时。'}
+          {ordered.length === 0
+            ? '还没有价：没有被任何一段价覆盖的日期按 ¥0 计（并列为价格未知）。加一段就有价了。'
+            : '每段从它那一刻起生效、管到下一段开始；没有价段覆盖的日期按 ¥0 计。段卡各写各的四档（互不沿用），卡里没被峰谷时段覆盖的小时按基准价，峰谷时段只写变化的那几档。'}
         </span>
       </div>
       </div>

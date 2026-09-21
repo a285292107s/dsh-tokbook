@@ -457,7 +457,7 @@ function modelMapKey(provider: string | undefined, model: string): string {
   return `${providerKey(provider)}\n${model}`
 }
 
-/** 一行 rate 行的聚合身份：段时刻 + 段内生效的例外时段（`-` = 段的全天价）。 */
+/** 一行 rate 行的聚合身份：段时刻 + 段内生效的例外时段（`-` = 段的基准价）。 */
 function rateRowKey(day: string, model: string, provider: string | undefined, rate: RateKey): string {
   const slot = rate.slot === undefined || rate.slot === null ? '-' : `${String(rate.slot.start)}:${rate.slot.days}`
   return `${day}\n${model}\n${providerKey(provider)}\n${String(rate.from)}\n${slot}`

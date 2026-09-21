@@ -2,7 +2,7 @@
  * 手工价表：provider route key → 精确 model 串 → 该 pair 的价格时间轴。
  *
  * 记录按「已到达的最新生效时刻」的段计价，再按该段在记录本地时间生效的时段计
- * （无时段 = 全天价），因此改价 / 改时段只重算历史，从不重建聚合。唯一保留键
+ * （无时段 = 基准价），因此改价 / 改时段只重算历史，从不重建聚合。唯一保留键
  * `$billing`：route → 计费性质（metered = 真实消费，subscription = 订阅价值）。
  *
  * 读宽松（畸形段/时段丢弃，不致命）；写严格且整文件替换，坏 PUT 不会半落地。
@@ -83,7 +83,7 @@ function coerceRates(raw: Record<string, unknown>): ModelPricing | null {
   }
 }
 
-/** 峰谷时段重述的费率：四档的任意非空子集。省略的档沿用段的全天价。 */
+/** 峰谷时段重述的费率：四档的任意非空子集。省略的档沿用段的基准价。 */
 function coerceSlotRates(raw: Record<string, unknown>): ModelPricing | null {
   const rates: ModelPricing = {
     ...(isRate(raw.inputPerMillion) ? { inputPerMillion: raw.inputPerMillion } : {}),
@@ -128,6 +128,8 @@ function coerceSegment(raw: unknown): PriceSegment | null {
   const segment = raw as Record<string, unknown>
   const rates = coerceRates(segment)
   if (rates === null) return null
+  // 旧形态（省略 / null / 空串 from = 自始生效）仍读得进来：它要被**迁移**成真实日期，
+  // 且在被迁移（或下一次保存）之前，成本层必须照旧按它计价。新写入不接受这个形态。
   let from = EARLIEST
   if (segment.from !== undefined && segment.from !== null && segment.from !== '') {
     if (typeof segment.from !== 'string') return null
@@ -204,7 +206,7 @@ const SLOT_FIELDS = new Set([
 ])
 
 /** 严格解析一个峰谷时段：小时落在一个本地日内、day set 已知、四档费率的任意
- *  非空子集——省略的档沿用段的全天价。 */
+ *  非空子集——省略的档沿用段的基准价。 */
 function parseSlot(value: unknown, where: string): { ok: true; slot: PriceSlot } | { ok: false; error: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: `${where}必须是对象（start + end + 要覆盖的档位单价）` }
@@ -224,19 +226,19 @@ function parseSlot(value: unknown, where: string): { ok: true; slot: PriceSlot }
   }
   for (const key of ['inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion'] as const) {
     if (raw[key] !== undefined && !isRate(raw[key])) {
-      return { ok: false, error: `${where}的 ${key} 必须是非负数字（要沿用全天价就别写它）` }
+      return { ok: false, error: `${where}的 ${key} 必须是非负数字（要沿用基准价就别写它）` }
     }
   }
   const rates = coerceSlotRates(raw)
   if (rates === null) {
-    return { ok: false, error: `${where}至少要写一档价（输入 / 输出 / 缓存读 / 缓存写），否则整条时段等于全天价` }
+    return { ok: false, error: `${where}至少要写一档价（输入 / 输出 / 缓存读 / 缓存写），否则整条时段等于基准价` }
   }
   return { ok: true, slot: { days, start: raw.start, end: raw.end, rates } }
 }
 
 function parseSegment(value: unknown, where: string): { ok: true; segment: PriceSegment } | { ok: false; error: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { ok: false, error: `${where}必须是对象（from? + 四档单价 + slots?）` }
+    return { ok: false, error: `${where}必须是对象（from + 四档单价 + slots?）` }
   }
   const raw = value as Record<string, unknown>
   const known = new Set(['from', 'inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion', 'slots'])
@@ -251,16 +253,13 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
   if (raw.cacheWritePerMillion !== undefined && !isRate(raw.cacheWritePerMillion)) {
     return { ok: false, error: `${where}的 cacheWritePerMillion 必须是非负数字` }
   }
-  let from = EARLIEST
-  if (raw.from !== undefined && raw.from !== null && raw.from !== '') {
-    if (typeof raw.from !== 'string') {
-      return { ok: false, error: `${where}的 from 必须是 YYYY-MM-DD 或 YYYY-MM-DDTHH:00（省略 = 无起点，自始生效）` }
-    }
-    const at = instantMs(raw.from)
-    if (at === null) {
-      return { ok: false, error: `${where}的 from 必须是真实存在的 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00：${raw.from}` }
-    }
-    from = at
+  // 写路径不再有「无起点」那一段：一段价必须有生效时刻（自始生效的形态只被读来迁移）。
+  if (typeof raw.from !== 'string') {
+    return { ok: false, error: `${where}缺少 from（生效时间）：一段价必须有生效时刻，写 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00` }
+  }
+  const from = instantMs(raw.from)
+  if (from === null) {
+    return { ok: false, error: `${where}的 from 必须是真实存在的 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00：${raw.from}` }
   }
   const slots: PriceSlot[] = []
   if (raw.slots !== undefined) {
@@ -339,8 +338,7 @@ export function parsePriceInput(value: unknown): PriceParse {
         const parsed = parseSegment(list[index], `${where}第 ${String(index + 1)} 段`)
         if (!parsed.ok) return { ok: false, error: parsed.error }
         if (seen.has(parsed.segment.from)) {
-          const label = parsed.segment.from === EARLIEST ? '无起点' : instantKey(parsed.segment.from)
-          return { ok: false, error: `${where}有两段的生效时间相同（${label}）：同一时刻只能有一段价` }
+          return { ok: false, error: `${where}有两段的生效时间相同（${instantKey(parsed.segment.from)}）：同一时刻只能有一段价` }
         }
         seen.add(parsed.segment.from)
         segments.push(parsed.segment)
@@ -386,10 +384,9 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
       priced[model] = segments.map((segment) => {
         const slots = segment.slots ?? []
         return {
-          // `from === EARLIEST`（0）才是「无起点」那一段。更早的时刻（1970 前）是
-          // 一个真实的身份，必须原样写出去：省掉它会让两段在盘上撞成同一条身份，
-          // 下次读 `normalizeSegments` 就丢掉其中一段。
-          ...(segment.from !== EARLIEST ? { from: instantKey(segment.from) } : {}),
+          // 每段都有生效时刻：`from` 一律写出来（1970 前那种更早的时刻也是真实身份，
+          // 必须原样写出去，省掉它会让两段在盘上撞成同一条身份）。
+          from: instantKey(segment.from),
           inputPerMillion: segment.rates.inputPerMillion,
           outputPerMillion: segment.rates.outputPerMillion,
           ...(segment.rates.cacheReadPerMillion !== undefined
@@ -447,7 +444,7 @@ export function priceAt(
 }
 
 /** 该段在 `timeMs` 生效的例外时段（按时刻自身的本地星期与小时），或 null =
- *  段的全天价。任一时刻至多一个时段：写路径拒绝重叠对，读路径丢弃较晚的那个。 */
+ *  段的基准价。任一时刻至多一个时段：写路径拒绝重叠对，读路径丢弃较晚的那个。 */
 export function slotAt(segment: PriceSegment, timeMs: number): PriceSlot | null {
   for (const slot of segment.slots ?? []) {
     if (slotCovers(slot, timeMs)) return slot
@@ -455,14 +452,14 @@ export function slotAt(segment: PriceSegment, timeMs: number): PriceSlot | null 
   return null
 }
 
-/** `timeMs` 生效时段的身份，或 null = 全天价。 */
+/** `timeMs` 生效时段的身份，或 null = 基准价。 */
 function slotRefAt(segment: PriceSegment, timeMs: number): SlotRef | null {
   const slot = slotAt(segment, timeMs)
   return slot === null ? null : { start: slot.start, days: slot.days }
 }
 
-/** 该段在 `timeMs` 的 ¥/M：全天价叠上当时生效的例外时段。时段省略的档沿用
- *  全天价，因此峰值时段只需重述真正变化的部分。 */
+/** 该段在 `timeMs` 的 ¥/M：基准价叠上当时生效的例外时段。时段省略的档沿用
+ *  基准价，因此峰值时段只需重述真正变化的部分。 */
 export function ratesOfSegment(segment: PriceSegment, timeMs: number): ModelPricing {
   const slot = slotAt(segment, timeMs)
   return slot === null ? segment.rates : { ...segment.rates, ...slot.rates }
@@ -519,7 +516,7 @@ export function billingOf(billing: BillingMap, route: string | undefined): Billi
 }
 
 /** 在已解析价格下一行 totals 的计费金额：各桶按自身 ¥/M，cache 桶回落到普通
- *  input 价。 */
+ *  input 价（价格表里缓存两档留空时报的就是这个数）。 */
 export function costOf(totals: UsageTotals, prices: ModelPricing): number {
   const M = 1_000_000
   const cacheRead = prices.cacheReadPerMillion ?? prices.inputPerMillion

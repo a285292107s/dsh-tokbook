@@ -218,11 +218,11 @@ const syncErrOverview = { ...overview, syncStatus: 'error', syncError: syncError
 /* ── pricing-tab fixtures ── */
 /** Pricing-tab fixture: the route cards the 价格表 tab renders. One card per
  *  route, one row per model, each carrying its price segments (生效时间 +
- *  全天价四档 + 例外时段). The states worth looking at are all here: a priced
- *  row, a 调价史, a 峰谷时段 row, 价格未知 (both kinds: 整行没价 and 有记录早于
- *  最早一段价), 托底价 (present and missing), a configured:false string (the config no
- *  longer lists it), a 订阅 route, and a route that only exists because the
- *  price file names it.
+ *  基准价四档 + 例外时段). The states worth looking at are all here: priced
+ *  rows with a 调价史, a 峰谷时段 row, 价格未知 (both kinds: 整行没价 and 有记录早于
+ *  最早一段价), 「还没有价」的行（轴退成暗淡空轨）, 一段未来价（轴两端对调）,
+ *  a configured:false string (the config no longer lists it), a 订阅 route,
+ *  and a route that only exists because the price file names it.
  *
  *  每张卡的 `records` 必须**等于该卡各行之和**：host 用同一次折叠同时算出这两个
  *  数（`ledgerUsageOf`），单独编一个总量会端出 host 产不出的形状——卡片头上写着
@@ -234,13 +234,13 @@ const PRICING_FIXTURE = {
       models: [
         { model: 'deepseek-v4-flash', configured: true, records: 322,
           // 有账本时间跨度,但最早的价从 08-01 起而首记在 07-20:那 40 次没被任何价覆盖
-          // (计 ¥0),所以这一行带「价格未知」徽标,展开后第一张托底价是空着的。
-          // 轴上只有区间内的调价节点(首记 → 今天 + 三个节点)。
+          // (计 ¥0),所以这一行带「价格未知」徽标。
+          // 轴从最早那段价(08-01)画到今天,节点就是这几段价。
           firstAt: Date.UTC(2026, 6, 20), lastAt: Date.UTC(2026, 8, 11), unpriced: 40,
           segments: [
           { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
           { from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 6 },
-          // 带峰谷时段的一段:工作日高峰另定,其余时间按全天价。
+          // 带峰谷时段的一段:工作日高峰另定,其余时间按基准价。
           { from: '2026-09-10T12:00', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
             slots: [
               { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
@@ -273,9 +273,8 @@ const PRICING_FIXTURE = {
           { from: '2026-09-08', inputPerMillion: 2.5, outputPerMillion: 7 },
           { from: '2026-09-10', inputPerMillion: 3, outputPerMillion: 8 },
         ] },
-        // 首记在生效时间之后:那个边界在区间之外、区间里没有别的调价,所以整条轴都不画
-        // (只有首记与今天时,空轨道说不了行内四档价没说过的事)。这一段从 09-01 起、
-        // 覆盖了全部账本,所以行上没有「价格未知」——只是托底价那一张还空着。
+        // 首记在生效时间之后:轴只从那段价画到今天(账本的首记不再进轴)。这一段从 09-01 起、
+        // 覆盖了全部账本,所以行上没有「价格未知」。
         // 目录给了展示名:身份行随之走比例体(精确串才走等宽),而且它**没有徽章**——
         // 正是「有没有名字」与「有没有徽章」必须分开判的那一格(见 styles/pricing 的 [data-exact])。
         { model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', configured: true, records: 2745,
@@ -283,19 +282,17 @@ const PRICING_FIXTURE = {
           segments: [
           { from: '2026-09-01', inputPerMillion: 4.5, outputPerMillion: 13.5, cacheWritePerMillion: 0.15 },
         ] },
-        // 账本没记过这条串(还没调用过):没有首记,轴画不出来;而这一段没有生效时刻,
-        // 展开后它就是那张托底价卡。
+        // 账本没记过这条串(还没调用过):轴照样画——它只看价,不看账本的首记。
         { model: 'deepseek-flash', configured: true, records: 0, segments: [
-          { from: null, inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 },
+          { from: '2026-08-01', inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 },
         ] },
-        // 有价、但账本没记过:同样没有首记,所以同样不画轴——价段自己的日期只在下方
-        // 列表里出现。
+        // 有价、但账本没记过:轴从左端那段价画到今天。
         { model: 'deepseek-v4-flash-vision', configured: true, records: 0, segments: [
           { from: '2026-08-18', inputPerMillion: 1.5, outputPerMillion: 4.5 },
         ] },
-        // 只写了**未来**的价、托底价还空着,而且账本没记过:这一刻没有任何一段在生效
-        // → 行内四格是「—」,徽标是「未生效」(不是「价格未知」——没有记录按 ¥0 计)。
-        // 日期刻意写远:写近了,过几天这一行自己就生效了,这个状态就看不见了。
+        // 只写了**未来**的价,而且账本没记过:这一刻没有任何一段在生效 → 行内四格是「—」,
+        // 徽标是「未生效」(不是「价格未知」——没有记录按 ¥0 计);轴的两端这时候对调,
+        // 今天退成中间那个节点。日期刻意写远:写近了,过几天这一行自己就生效了,这个状态就看不见了。
         { model: 'deepseek-v4.2-flash-preview', configured: true, records: 0, segments: [
           { from: '2027-01-01', inputPerMillion: 2, outputPerMillion: 8 },
         ] },
@@ -307,11 +304,11 @@ const PRICING_FIXTURE = {
         // **最长的一个身份串**（命名空间前缀 + 长版本串）：
         // 上一版在这种行上会把徽章挤到第二行——实测行高从 48 涨到 60。
         // 现在身份行只有名字（整列宽都归它）；这行本身已无判定可说（峰谷与不在配置都不再上模型行）。
-        // 托底价 + 一段带峰谷的调价：行内四个数字报的是正在生效的那一段。
+        // 两段价 + 一段带峰谷的调价：行内四个数字报的是正在生效的那一段。
         { model: 'deepseek/deepseek-v4-flash', configured: false, records: 2964,
           firstAt: Date.UTC(2026, 8, 6, 11, 3), lastAt: Date.UTC(2026, 8, 8, 11, 2), unpriced: 0,
           segments: [
-          { from: null, inputPerMillion: 1.5, outputPerMillion: 4.5 },
+          { from: '2026-09-01', inputPerMillion: 1.5, outputPerMillion: 4.5 },
           { from: '2026-09-10T12:00', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
             slots: [
               { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
@@ -323,11 +320,11 @@ const PRICING_FIXTURE = {
     {
       route: 'dots-ai', label: '小红书', billing: 'metered', records: 644,
       models: [
-        // 托底价 + 完整覆盖:与上一张同理——它没有生效时刻,所以不是一次调价,轴不画。
+        // 一段价覆盖全程(0 价):轴于是只有左端那一个节点 + 今天。
         { model: 'dots3-note-prev', configured: true, records: 644,
           firstAt: Date.UTC(2026, 7, 19, 3), lastAt: Date.UTC(2026, 7, 27, 9), unpriced: 0,
           segments: [
-          { from: null, inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
+          { from: '2026-08-01', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
         ] },
       ],
     },
@@ -337,9 +334,9 @@ const PRICING_FIXTURE = {
         { model: 'glm-5.3-flash', configured: true, records: 243,
           firstAt: Date.UTC(2026, 8, 5, 8, 5), lastAt: Date.UTC(2026, 8, 6, 0, 54), unpriced: 0,
           segments: [
-          { from: null, inputPerMillion: 0.8, outputPerMillion: 2.8 },
+          { from: '2026-09-01', inputPerMillion: 0.8, outputPerMillion: 2.8 },
         ] },
-        // 没有价、但有账:整行没有价,轴上没有可画的调价,所以不画轴——「全部计 ¥0」
+        // 没有价、但有账:整行没有价,轴退成一条暗淡的空轨(不隐藏)——「全部计 ¥0」
         // 是「价格未知」徽标的事,抽屉里也不该动用警示色。
         { model: 'mimo-v2.5', configured: true, records: 83,
           firstAt: Date.UTC(2026, 7, 17, 4), lastAt: Date.UTC(2026, 7, 17, 9), unpriced: 83,
@@ -361,7 +358,7 @@ const PRICING_FIXTURE = {
         { model: 'deepseek-v4-flash', configured: false, records: 42,
           firstAt: Date.UTC(2026, 8, 3, 2), lastAt: Date.UTC(2026, 8, 3, 4), unpriced: 0,
           segments: [
-          { from: null, inputPerMillion: 1.2, outputPerMillion: 3.6 },
+          { from: '2026-09-01', inputPerMillion: 1.2, outputPerMillion: 3.6 },
         ] },
       ],
     },
