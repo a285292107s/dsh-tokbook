@@ -14,12 +14,13 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   DAY_SETS, EARLIEST, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
-  PRICING_FX_KEY,
+  PRICING_CURRENCY_KEY, PRICING_FX_KEY,
   dayIndex, dayKeyOfIndex, holidayDates, instantKey, instantMs, isHourRange, isValidHolidayRange, isYearKey,
   slotCovers, slotsOverlap, yearOfDate,
 } from './price-format.ts'
 import type {
-  BillingMap, BillingNature, FxSetting, HolidayCalendar, HolidayRange, ModelPricing, PriceSegment, PriceSlot,
+  BillingMap, BillingNature, CurrencyMap, FxSetting, HolidayCalendar, HolidayRange, ModelPricing, PriceCurrency,
+  PriceSegment, PriceSlot,
   PricingSegmentInput, PricingSlotInput, PricingTable, RateKey, SlotRef, UsageTotals,
 } from './types.ts'
 import { UNPRICED_KEY } from './types.ts'
@@ -27,7 +28,7 @@ import { UNPRICED_KEY } from './types.ts'
 export const PRICING_FILE = 'pricing.json'
 
 export {
-  DAY_SETS, EARLIEST, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_FX_KEY,
+  DAY_SETS, EARLIEST, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY, PRICING_FX_KEY,
   dayKeyOf, dayStartMs, instantKey, instantMs,
 } from './price-format.ts'
 
@@ -35,14 +36,16 @@ interface Logger {
   error(...args: unknown[]): void
 }
 
-/** 整个价文件：(route, model) 时间轴 + billing 映射 + 法定节假日年历 + 汇率。`revision`
+/** 整个价文件：(route, model) 时间轴 + billing 映射 + 报价币种 + 法定节假日年历 + 汇率。`revision`
  *  是内容签名——派生 rollup 记下其 rate 行所折叠的 revision，不同则重建。 */
 export interface PriceFile {
   table: PricingTable
   billing: BillingMap
+  /** 报价币种（`$currency`）：只记美元那几条，缺席 = 人民币。段里的数就是用这种货币记的。 */
+  currency: CurrencyMap
   /** 法定节假日年历（`$calendar`）；空 = 未收录任何一年。 */
   calendar: HolidayCalendar
-  /** 价格表读写面的汇率（`$fx`）；缺席 = 未设汇率。计价路径从不读它。 */
+  /** 唯一的换算率（`$fx`）；缺席 = 未设汇率，美元报价的通道算不出人民币（按价格未知报出）。 */
   fx?: FxSetting
   revision: string
 }
@@ -219,17 +222,28 @@ function coerceFx(raw: unknown): FxSetting | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? { cnyPerUsd: value } : undefined
 }
 
+/** 读路径的报价币种：只收 `'USD'`（`'CNY'` 与其余值都当人民币——那是默认，不必写出来）。 */
+function coerceCurrency(raw: unknown): CurrencyMap {
+  const currency: CurrencyMap = {}
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return currency
+  for (const [route, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (route !== '' && value === 'USD') currency[route] = 'USD'
+  }
+  return currency
+}
+
 /** 宽松解析整个文件：畸形 route / model / 段丢弃（不致命），与账本读自身分日
  *  文件一致。 */
 export function coercePriceFile(value: unknown, logger: Logger = console): PriceFile {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     logger.error(`[tokbook] ${PRICING_FILE} is not a JSON object; treating it as empty`)
-    return { table: {}, billing: {}, calendar: {}, revision: '' }
+    return { table: {}, billing: {}, currency: {}, calendar: {}, revision: '' }
   }
   const raw = value as Record<string, unknown>
   const table: PricingTable = {}
   const billing: BillingMap = {}
   const calendar = coerceCalendar(raw[PRICING_CALENDAR_KEY])
+  const currency = coerceCurrency(raw[PRICING_CURRENCY_KEY])
   const fx = coerceFx(raw[PRICING_FX_KEY])
   const rawBilling = raw[PRICING_BILLING_KEY]
   if (typeof rawBilling === 'object' && rawBilling !== null && !Array.isArray(rawBilling)) {
@@ -251,16 +265,16 @@ export function coercePriceFile(value: unknown, logger: Logger = console): Price
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
-  return { table, billing, calendar, ...(fx !== undefined ? { fx } : {}), revision: '' }
+  return { table, billing, currency, calendar, ...(fx !== undefined ? { fx } : {}), revision: '' }
 }
 
 /** 读一个数据目录的价文件。缺失 / 畸形读作空表（无人定价）。revision 是文件
  *  **文本**的签名——包括本进程未做的编辑在内，任何改动对派生 rollup 都可见。 */
 export async function readPriceFile(dir: string, logger: Logger = console): Promise<PriceFile> {
   const text = await readTextFile(dir, PRICING_FILE, logger)
-  if (text === null) return { table: {}, billing: {}, calendar: {}, revision: '' }
+  if (text === null) return { table: {}, billing: {}, currency: {}, calendar: {}, revision: '' }
   const raw = parseJson(text, PRICING_FILE, logger)
-  if (raw === null) return { table: {}, billing: {}, calendar: {}, revision: revisionOf(text) }
+  if (raw === null) return { table: {}, billing: {}, currency: {}, calendar: {}, revision: revisionOf(text) }
   return { ...coercePriceFile(raw, logger), revision: revisionOf(text) }
 }
 
@@ -414,6 +428,27 @@ function parseFx(value: unknown): { ok: true; fx?: FxSetting } | { ok: false; er
   return { ok: true, fx: { cnyPerUsd: raw.cnyPerUsd } }
 }
 
+/** 严格解析 `$currency`：route → `"CNY" | "USD"`。**人民币可以不写**（缺席即默认），
+ *  但写出来也接受——手写文件时不必先知道哪几条该省。`USD` 必须有可用汇率，
+ *  这件事由 {@link parsePriceInput} 在两侧都读完后再判（这里看不到 `$fx`）。 */
+function parseCurrency(value: unknown): { ok: true; currency: CurrencyMap } | { ok: false; error: string } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: `${PRICING_CURRENCY_KEY} 必须是对象（路由 → "CNY" | "USD"）` }
+  }
+  const currency: CurrencyMap = {}
+  for (const [route, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (route === '') return { ok: false, error: `${PRICING_CURRENCY_KEY} 下存在空路由名` }
+    if (route.startsWith('$')) {
+      return { ok: false, error: `${PRICING_CURRENCY_KEY} 下的键必须是通道路由名，不能以「$」开头：${route}` }
+    }
+    if (raw !== 'CNY' && raw !== 'USD') {
+      return { ok: false, error: `「${route}」的报价币种必须是 "CNY" 或 "USD"` }
+    }
+    if (raw === 'USD') currency[route] = 'USD'
+  }
+  return { ok: true, currency }
+}
+
 /** 严格解析完整目标文件：任何偏差都以出错位置拒绝，坏 body 绝不半落地。 */
 export function parsePriceInput(value: unknown): PriceParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -422,6 +457,7 @@ export function parsePriceInput(value: unknown): PriceParse {
   const raw = value as Record<string, unknown>
   const table: PricingTable = {}
   const billing: BillingMap = {}
+  const currency: CurrencyMap = {}
   let calendar: HolidayCalendar = {}
   let fx: FxSetting | undefined
   for (const [route, models] of Object.entries(raw)) {
@@ -438,10 +474,16 @@ export function parsePriceInput(value: unknown): PriceParse {
         fx = parsed.fx
         continue
       }
+      if (route === PRICING_CURRENCY_KEY) {
+        const parsed = parseCurrency(models)
+        if (!parsed.ok) return { ok: false, error: parsed.error }
+        for (const [key, value] of Object.entries(parsed.currency)) currency[key] = value
+        continue
+      }
       if (route !== PRICING_BILLING_KEY) {
         return {
           ok: false,
-          error: `未知保留键「${route}」（只支持 ${PRICING_BILLING_KEY} / ${PRICING_CALENDAR_KEY} / ${PRICING_FX_KEY}）`,
+          error: `未知保留键「${route}」（只支持 ${PRICING_BILLING_KEY} / ${PRICING_CALENDAR_KEY} / ${PRICING_CURRENCY_KEY} / ${PRICING_FX_KEY}）`,
         }
       }
       if (typeof models !== 'object' || models === null || Array.isArray(models)) {
@@ -483,7 +525,17 @@ export function parsePriceInput(value: unknown): PriceParse {
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
-  return { ok: true, file: { table, billing, calendar, ...(fx !== undefined ? { fx } : {}), revision: '' } }
+  // 美元报价**必须有汇率**：没有它那些价就算不成人民币，金额会整条读作价格未知。
+  // 挡住这一笔比默默写进去好——client 也挡（它给出的那句话更贴近用户看到的控件）。
+  for (const route of Object.keys(currency)) {
+    if (fx === undefined) {
+      return {
+        ok: false,
+        error: `「${route}」按美元报价（${PRICING_CURRENCY_KEY}），但文件里没有可用的 ${PRICING_FX_KEY} 汇率：美元价换算不成人民币`,
+      }
+    }
+  }
+  return { ok: true, file: { table, billing, currency, calendar, ...(fx !== undefined ? { fx } : {}), revision: '' } }
 }
 
 /** 一段价的一个例外时段在文件中的形态。 */
@@ -520,6 +572,13 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
       calendar[year] = mergeHolidayDates((file.calendar[year] ?? []).flatMap(range => holidayDates(range)))
     }
     body[PRICING_CALENDAR_KEY] = calendar
+  }
+  // 报价币种只写美元那几条（人民币是默认，写出来是噪音），与 client 的 writer 同一个形状。
+  const usdRoutes = Object.keys(file.currency).filter(route => file.currency[route] === 'USD').sort((left, right) => left.localeCompare(right))
+  if (usdRoutes.length > 0) {
+    const currency: CurrencyMap = {}
+    for (const route of usdRoutes) currency[route] = 'USD'
+    body[PRICING_CURRENCY_KEY] = currency
   }
   // 汇率与年历、计费性质同处保留键前缀之下，写在 route 之前（与 client 的 writer 同一顺序）。
   // 它就是那一个数：文件被改回未设汇率时这个键整个消失。
@@ -643,8 +702,7 @@ export function ratesAt(
 /** (route, model) 在 `timeMs` 的 rate 身份——当时生效段的生效时刻 + 段内生效
  *  的例外时段，或 {@link UNPRICED_KEY}。只存身份、不存数字，改价后下次读即
  *  重算历史（年历改了同理：时段身份不变，但重算会按新节假日取价）。 */
-export function rateKeyAt(
-  table: PricingTable,
+export function rateKeyAt(  table: PricingTable,
   route: string | undefined,
   model: string,
   timeMs: number,
@@ -689,4 +747,54 @@ export function costOf(totals: UsageTotals, prices: ModelPricing): number {
     + totals.outputTokens * prices.outputPerMillion
     + totals.cacheReadTokens * cacheRead
     + totals.cacheWriteTokens * cacheWrite) / M
+}
+
+/** 四档价整体乘一个率；**缺席的档保持缺席**（省略 ≠ 0：缓存两档省略时回落输入价）。 */
+function scaledRates(rates: ModelPricing, rate: number): ModelPricing {
+  return {
+    inputPerMillion: rates.inputPerMillion * rate,
+    outputPerMillion: rates.outputPerMillion * rate,
+    ...(rates.cacheReadPerMillion !== undefined ? { cacheReadPerMillion: rates.cacheReadPerMillion * rate } : {}),
+    ...(rates.cacheWritePerMillion !== undefined ? { cacheWritePerMillion: rates.cacheWritePerMillion * rate } : {}),
+  }
+}
+
+/**
+ * **计价用的表**：把按美元报价的通道按汇率折成人民币，其余原样。
+ *
+ * 价文件里存的是**报价币种**的数（`$currency`），而账本、金额、别名一律人民币——
+ * 换算因此发生在这一个缝上：`rateContext` 拿它交给成本层，之后 `costOf` / `stats.ts`
+ * 的折叠 / 工作区视图全都不认识币种。改汇率于是会重算美元通道的历史金额：
+ * 那些价是美元记的，人民币数字本来就是汇率的函数。
+ *
+ * **没有汇率时丢掉那些通道的价**（读作价格未知），绝不把美元数当人民币数用——
+ * 那会差一个数量级，而且账本会把它当成真金白银。
+ *
+ * 段身份（`from` + 时段）原样保留，所以 `rateKeyAt` 认的身份不受换算影响。
+ */
+export function cnyTable(table: PricingTable, currency: CurrencyMap, fx: FxSetting | undefined): PricingTable {
+  const usdRoutes = Object.keys(currency).filter(route => currency[route] === 'USD')
+  if (usdRoutes.length === 0) return table
+  const rate = fx === undefined ? 0 : fx.cnyPerUsd
+  const out: PricingTable = { ...table }
+  for (const route of usdRoutes) {
+    const models = table[route]
+    if (models === undefined) continue
+    if (!(rate > 0)) {
+      delete out[route]
+      continue
+    }
+    const scaled: Record<string, PriceSegment[]> = {}
+    for (const [model, segments] of Object.entries(models)) {
+      scaled[model] = segments.map(segment => ({
+        from: segment.from,
+        rates: scaledRates(segment.rates, rate),
+        ...(segment.slots !== undefined
+          ? { slots: segment.slots.map(slot => ({ ...slot, rates: scaledRates(slot.rates, rate) })) }
+          : {}),
+      }))
+    }
+    out[route] = scaled
+  }
+  return out
 }

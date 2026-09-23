@@ -6,22 +6,25 @@
  * （列为价格未知，不是免费）。时间轴规则与宿主共用 `price-format.ts`。
  * 刻意无 React——tab 可测试的那一半。
  *
- * **草稿里的价一律是人民币文本**：美元只是这一屏的读写面（换算见 `./currency.ts`），
- * 所以行签名与保存 body 与币种无关——切币种不会弄脏任何一行，也不会重写任何价。
+ * **草稿里的价用它所属通道的报价币种记**（`RouteDraft.currency`）：文件里是什么数、
+ * 这一屏就显示什么数、你敲进去就存什么数——没有透镜，也没有「敲美元落人民币」那一步。
+ * 想换一种货币记，是切换那条通道的报价币种（一次真正的改价，见 `./currency.ts` 的
+ * `convertText`），而不是换一屏的读法。
  */
 
 // 价文件的共享词表（保留键、长度上限）从共享内核取——client 不能 import
 // `src/pricing.ts`（它拉了 `node:fs`），两条字面量各写一遍就会静默漂移。
 import {
   DAY_SETS, DAY_SET_LABELS, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
-  PRICING_FX_KEY,
+  PRICING_CURRENCY_KEY, PRICING_FX_KEY,
   dayIndex, holidaySet, instantKey, instantMs, isHourRange, isYearKey, rangeLabel, slotCovers, slotsOverlap,
 } from '../../price-format.ts'
 import type {
-  BillingNature, DaySet, HolidayCalendar, HolidayRange, ModelPricing, PricingCalendarInput,
+  BillingNature, CurrencyMap, DaySet, HolidayCalendar, HolidayRange, ModelPricing, PriceCurrency,
+  PricingCalendarInput,
   PricingSegmentInput, PricingSlotInput, PricingView,
 } from '../../types.ts'
-import { parseAmount } from './currency.ts'
+import { convertText, parseAmount, type MoneyView } from './currency.ts'
 
 /** 一份价格的四个 ¥/M 桶，数字形式，键与草稿字段一致（未填写时桶缺席）。 */
 export interface DraftRates {
@@ -42,7 +45,8 @@ export const RATE_FIELD_NAMES: ReadonlyArray<readonly [keyof DraftRates, keyof M
   ['cacheWrite', 'cacheWritePerMillion'],
 ]
 
-/** 一份可编辑价格的四个 ¥/M 输入——段的基准价或其中一个峰谷时段。字符串使半输入的数字存活。 */
+/** 一份可编辑价格的四个价输入——段的基准价或其中一个峰谷时段。字符串使半输入的数字存活。
+ *  单位是**这条通道的报价币种**（段自己不带币种，币种是 route 级事实）。 */
 export interface RateTexts {
   input: string
   output: string
@@ -97,6 +101,8 @@ export interface RouteDraft {
   route: string
   label: string
   billing: BillingNature
+  /** 这条通道的价用哪种货币记（`$currency`；缺席读作人民币）。段里的文本就是它。 */
+  currency: PriceCurrency
   records: number
   models: Map<string, ModelDraft>
 }
@@ -323,15 +329,15 @@ export function withCalendar(state: PriceState, calendar: CalendarEntries): Pric
 // ---------------------------------------------------------------------------
 
 /**
- * 汇率文本 → 正数；空、非法、0、负数 → null。null 就是「美元面不可用」——没有汇率
- * 换算不了，这不是「按 1 算」（按 1 算会静默把美元当人民币）。
+ * 汇率文本 → 正数；空、非法、0、负数 → null。null 就是「换不出来」——没有汇率换算不了，
+ * 这不是「按 1 算」（按 1 算会静默把美元价当人民币价）。
  */
 export function fxValue(text: string): number | null {
   const parsed = parseAmount(text)
   return parsed === null || parsed === 0 ? null : parsed
 }
 
-/** 汇率文本的问题，或 null。空不是问题——那是「不用美元面」。只在提交点报出来。 */
+/** 汇率文本的问题，或 null。空不是问题——那是「不用汇率」（只要没有美元通道）。只在提交点报出来。 */
 export function fxIssue(text: string): string | null {
   const raw = text.trim()
   if (raw === '' || fxValue(raw) !== null) return null
@@ -353,10 +359,54 @@ export function fxSetting(text: string): { cnyPerUsd: number } | null {
   return rate === null ? null : { cnyPerUsd: rate }
 }
 
-/** 换汇率文本。没有派生值要跟着换（换算只发生在渲染时），留个函数只为让
- *  「这又是一份全表共用的数据」在 API 上看得见，与 `withCalendar` 同一形状。 */
+/** 换汇率文本。它是**唯一的**换算率，而换算只发生在两处：渲染时的悬停读数，与切换
+ *  通道报价币种那一次。所以改这个文本本身不动任何一行——它只在计价与切换时被读。 */
 export function withFx(state: PriceState, fx: string): PriceState {
   return { ...state, fx }
+}
+
+/** 一个 rate 组（段或时段）的四个字段整体换一种货币记；换算不出来的原文原样留着。 */
+function convertedRates(view: MoneyView, holder: RateTexts, to: PriceCurrency): RateTexts {
+  const next: RateTexts = { ...holder }
+  for (const [field] of RATE_INPUTS) {
+    const converted = convertText(view, holder[field], to)
+    if (converted !== null) next[field] = converted
+  }
+  return next
+}
+
+/**
+ * 把一条通道的报价币种换成 `to`：它每一个模型、每一段、每一个时段里可解析的价都按汇率重记。
+ *
+ * 这是一次**真正的改价**（脏、自动保存）：文件里那些数字的含义变了，人民币金额在 6 位
+ * 小数内不变。切不过去时（没有汇率）原样返回——那个状态由 `composePriceBody` 与控件一起挡。
+ */
+export function withRouteCurrency(
+  state: PriceState,
+  route: string,
+  to: PriceCurrency,
+  cnyPerUsd: number | null,
+): PriceState {
+  const card = state.routes.get(route)
+  if (card === undefined || card.currency === to) return state
+  // 换算不出来（没有汇率）时**什么都不动**：只把标签换个字、数字原样留着，等于把同一串数
+  // 当成另一种货币读——那是 7 倍级的错。控件在没汇率时也点不动，这一条是最后一道闸。
+  if (cnyPerUsd === null || !(cnyPerUsd > 0)) return state
+  const view: MoneyView = { route: card.currency, cnyPerUsd }
+  const models = new Map<string, ModelDraft>()
+  for (const [model, row] of card.models) {
+    models.set(model, {
+      ...row,
+      segments: row.segments.map(segment => ({
+        ...segment,
+        ...convertedRates(view, segment, to),
+        slots: segment.slots.map(slot => ({ ...slot, ...convertedRates(view, slot, to) })),
+      })),
+    })
+  }
+  const routes = new Map(state.routes)
+  routes.set(route, { ...card, models, currency: to })
+  return { ...state, routes }
 }
 
 /** 小时输入的数字；非整点文本时为 NaN。 */
@@ -511,6 +561,8 @@ export function draftFromView(view: PricingView): PriceState {
       route: card.route,
       label: card.label,
       billing: card.billing,
+      // wire 上必有；手搭的视图（预览台 / 测试）可能没有，缺了就是人民币。
+      currency: card.currency ?? 'CNY',
       records: card.records,
       models,
     })
@@ -951,23 +1003,36 @@ export function composePriceBody(state: PriceState): { ok: true; body: Record<st
     }
   }
   if (Object.keys(billing).length > 0) body[PRICING_BILLING_KEY] = billing
-  // 年历、汇率与计费性质同处保留键前缀之下，写在 route 之前（与宿主 writer 同一顺序）。
+  // 年历、报价币种、汇率与计费性质同处保留键前缀之下，写在 route 之前（与宿主 writer 同一顺序）。
   const calendar = composeCalendar(state.calendar)
   if (!calendar.ok) return { ok: false, error: calendar.error }
   if (Object.keys(calendar.calendar).length > 0) body[PRICING_CALENDAR_KEY] = calendar.calendar
   // 填了却写不出去的汇率必须挡住这一笔：让它过去就是把用户敲的数**悄悄丢掉**，而状态栏
-  // 还会说「已保存」（与四档价里那一格红着是同一条尺子）。空着不是问题——那是不用美元面。
+  // 还会说「已保存」（与四档价里那一格红着是同一条尺子）。空着不是错误——那是「不用汇率」。
   const fxProblem = fxIssue(state.fx)
   if (fxProblem !== null) return { ok: false, error: fxProblem }
   const fx = fxSetting(state.fx)
+  // 美元报价的通道**必须先有汇率**：没有它那些价换算不成人民币，金额会整条读作价格未知。
+  // 宿主也挡这一笔（同一个判据），但这里说的是用户眼前那两样东西（通道 + 汇率格）。
+  const currency: CurrencyMap = {}
+  for (const [route, card] of state.routes) {
+    if (card.currency !== 'USD') continue
+    if (fx === null) {
+      return { ok: false, error: `「${route}」按美元报价，但还没有汇率：先在汇率格里填 1 美元等于多少元` }
+    }
+    currency[route] = 'USD'
+  }
+  if (Object.keys(currency).length > 0) body[PRICING_CURRENCY_KEY] = currency
   if (fx !== null) body[PRICING_FX_KEY] = fx
   return { ok: true, body }
 }
 
-/** 一次性写入的基线：每个 route 的计费性质、每一行的签名、年历签名，以及汇率签名。 */
+/** 一次性写入的基线：每个 route 的计费性质与报价币种、每一行的签名、年历签名，以及汇率签名。 */
 export interface PriceBaseline {
   models: Map<string, string>
   billing: Map<string, BillingNature>
+  /** route → 报价币种（只记美元那几条；缺席 = 人民币）。 */
+  currency: Map<string, PriceCurrency>
   calendar: string
   /** 汇率（`$fx`）的签名；见 `fxSignature`。 */
   fx: string
@@ -982,20 +1047,27 @@ export function baselinesOf(view: PricingView): PriceBaseline {
 export function baselineOfDraft(state: PriceState): PriceBaseline {
   const models = new Map<string, string>()
   const billing = new Map<string, BillingNature>()
+  const currency = new Map<string, PriceCurrency>()
   for (const [route, card] of state.routes) {
     billing.set(route, card.billing)
+    currency.set(route, card.currency)
     for (const [model, row] of card.models) {
       models.set(rowKey(route, model), modelSignature(row))
     }
   }
-  return { models, billing, calendar: calendarSignature(state.calendar), fx: fxSignature(state.fx) }
+  return {
+    models, billing, currency,
+    calendar: calendarSignature(state.calendar),
+    fx: fxSignature(state.fx),
+  }
 }
 
-/** 与基线不同的行数（以及 route 计费开关数、年历一处、汇率一处）。 */
+/** 与基线不同的行数（以及 route 计费开关数、报价币种数、年历一处、汇率一处）。 */
 export function stagedChanges(state: PriceState, baseline: PriceBaseline): number {
   let count = 0
   for (const [route, card] of state.routes) {
     if ((baseline.billing.get(route) ?? 'metered') !== card.billing) count += 1
+    if ((baseline.currency.get(route) ?? 'CNY') !== card.currency) count += 1
     for (const [model, row] of card.models) {
       if (modelDirty(route, row, baseline.models)) count += 1
     }

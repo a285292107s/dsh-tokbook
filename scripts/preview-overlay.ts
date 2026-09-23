@@ -299,7 +299,9 @@ const PRICING_FIXTURE = {
       ],
     },
     {
-      route: 'commandcode', label: 'commandcode', billing: 'subscription', records: 3240,
+      // **按美元报价的通道**（`$currency`）：段里的数就是厂商给的美元价，人民币金额由 `$fx`
+      // 折出来。这一条让「美元报价 + 人民币计价」两件事同时可看、可点。
+      route: 'commandcode', label: 'commandcode', billing: 'subscription', currency: 'USD', records: 3240,
       models: [
         // **最长的一个身份串**（命名空间前缀 + 长版本串）：
         // 上一版在这种行上会把徽章挤到第二行——实测行高从 48 涨到 60。
@@ -308,10 +310,10 @@ const PRICING_FIXTURE = {
         { model: 'deepseek/deepseek-v4-flash', configured: false, records: 2964,
           firstAt: Date.UTC(2026, 8, 6, 11, 3), lastAt: Date.UTC(2026, 8, 8, 11, 2), unpriced: 0,
           segments: [
-          { from: '2026-09-01', inputPerMillion: 1.5, outputPerMillion: 4.5 },
-          { from: '2026-09-10T12:00', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
+          { from: '2026-09-01', inputPerMillion: 0.21, outputPerMillion: 0.63 },
+          { from: '2026-09-10T12:00', inputPerMillion: 0.14, outputPerMillion: 0.56, cacheReadPerMillion: 0.0028,
             slots: [
-              { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
+              { days: 'weekdays', start: 9, end: 12, inputPerMillion: 0.28, outputPerMillion: 1.12, cacheReadPerMillion: 0.0056 },
             ] },
         ] },
         { model: 'z-ai/glm-5.3-flash', configured: true, records: 276, unpriced: 276, segments: [] },
@@ -390,14 +392,16 @@ const pricingState = {
   routes: PRICING_FIXTURE.routes,
   calendar: PRICING_FIXTURE.calendar,
   // 汇率与年历同档：PUT 整体替换它（清空 → `$fx` 被省掉 → 这里成为 undefined，正是
-  // 「未设汇率」在 wire 上的样子，价格表的美元开关随之停用）。
+  // 「未设汇率」在 wire 上的样子）。
   fx: PRICING_FIXTURE.fx,
 }
 
 function pricingView() {
   return {
     ...PRICING_FIXTURE,
-    routes: pricingState.routes,
+    // 报价币种在 host 的 wire 上逐卡必有（缺席 = 人民币）；fixture 里只给美元那条标出来，
+    // 其余的在这里补默认，端出的形状与 host 一致。
+    routes: pricingState.routes.map((card) => ({ currency: 'CNY', ...card })),
     calendar: pricingState.calendar,
     fx: pricingState.fx,
     // 年历写进来的年份就不再是缺的（host 那条「账本覆盖到而年历没有」的规则，这里按同一形状答）。
@@ -409,6 +413,8 @@ function pricingView() {
 /** Merge a `PUT /tokbook/pricing` body (the WHOLE price file). */
 function withPricingWrite(body) {
   const billing = body.$billing ?? {}
+  const currency = body.$currency ?? {}
+  const usd = (route) => (currency[route] === 'USD' ? 'USD' : 'CNY')
   const routes = []
   const seen = new Set()
   for (const card of pricingState.routes) {
@@ -416,7 +422,7 @@ function withPricingWrite(body) {
       const segments = body[card.route]?.[row.model]
       return { ...row, segments: segments === undefined ? [] : segments }
     })
-    routes.push({ ...card, billing: billing[card.route] ?? 'metered', models })
+    routes.push({ ...card, billing: billing[card.route] ?? 'metered', currency: usd(card.route), models })
     seen.add(card.route)
   }
   // A route the catalog does not carry but the body prices: it becomes a card
@@ -427,6 +433,7 @@ function withPricingWrite(body) {
       route,
       label: route,
       billing: billing[route] ?? 'metered',
+      currency: usd(route),
       records: 0,
       models: Object.entries(models).map(([model, segments]) => ({ model, configured: false, records: 0, segments })),
     })

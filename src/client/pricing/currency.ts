@@ -1,41 +1,61 @@
 /**
- * 价格表读写面的币种换算——纯逻辑、无 React，进 smoke。
+ * 价格表读写面的币种——纯逻辑、无 React，进 smoke。
  *
- * 文件里的价**永远是人民币/百万词元**；美元只是一个**透镜**：显示时 `¥ / 汇率`，
- * 录入时 `$ × 汇率`。所以草稿、行签名、保存 body 全部与币种无关——切币种的唯一
- * 后果是这一屏的读数字符变了个样，任何一行都不会因此变脏或被重写。
+ * **价文件里每条通道的价用它自己的报价币种记**（`$currency`，缺席 = 人民币）。
+ * 所以这一屏的四个格子显示什么、你敲进去的存什么，**都是那个数本身**：没有透镜，
+ * 没有「敲美元、落人民币」这一步。换算只发生在两处，都是单向的读：
  *
- * 汇率来自价文件保留键 `$fx`（手填、不联网）。缺席 = 美元面不可用：没有汇率就
- * 换算不了，这不是「按 1 算」，所以 `isUsd` 为假、开关停用（见 `PricingPanel`）。
+ * ① **悬停读数**：把这一格折成另一种货币给你看（`counterpartOf`）；
+ * ② **切换报价币种**：把这条通道已有的数整体换一种货币记（`convertText`）——
+ *    那是一次真正的改价（脏、自动保存），因为文件里那些数字的含义变了。
+ *
+ * 汇率来自价文件保留键 `$fx`（手填、不联网）。缺席 = 换算不出来：美元通道算不出人民币
+ * （计价按价格未知报出），也切不过去——这不是「按 1 算」。
  */
 
-/** 价格表读写面的两种货币。目前只有这两种。 */
-export type Currency = 'CNY' | 'USD'
+import type { PriceCurrency } from '../../types.ts'
 
-/** 一份价在读写面上所用的货币。`cnyPerUsd` 为 null = 汇率未设（只能读人民币）。 */
+/** 价格表读写面的两种货币。目前只有这两种。 */
+export type Currency = PriceCurrency
+
+/** 一条通道报价币种的读法。`cnyPerUsd` 为 null = 汇率未设（换算不出来）。 */
 export interface MoneyView {
-  currency: Currency
+  /** 这条通道的价用什么货币记——四档价格子里的数就是这个单位。 */
+  route: PriceCurrency
   cnyPerUsd: number | null
 }
 
-/** 人民币面：恒等换算，也是默认。 */
-export const CNY_VIEW: MoneyView = { currency: 'CNY', cnyPerUsd: null }
+/** 人民币报价、未设汇率：这一屏的默认读法。 */
+export const CNY_VIEW: MoneyView = { route: 'CNY', cnyPerUsd: null }
 
 /**
- * 换算精度：显示与落盘共用 6 位小数（1e-6 元/百万词元，远小于计价需要的分辨率）。
- * 落盘那一步必须取整，否则浮点噪声会写进文件（0.28 × 7.15 = 2.0020000000000002）。
+ * 换算精度：显示与换算共用 6 位小数（1e-6 元/百万词元，远小于计价需要的分辨率）。
+ * 换算那一步必须取整，否则浮点噪声会写进文件（0.15 × 6.7 = 1.0050000000000001）。
  */
 const DECIMALS = 6
 
 /** 6 位小数把**非零**的极小价压成 0 时再放开几位——显示成 0 会是个谎（缓存档那种价）。 */
 const TINY_DECIMALS = 10
 
+/**
+ * 价的写法：十进制，可带小数与指数（`String(1e-7)` 就是 `1e-7`，草稿会原样拿它当文本）。
+ * 空串 = 这一档未填（不是 0），由调用方判。**十六进制 / 二进制 / 八进制不收**：
+ * `Number('0x10')` 是 16，一个「必须是数字」的格子不该把 `0x10` 读成 16。
+ */
+const AMOUNT_RE = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u
+
 /** 非负有限数的读法，四档价与汇率共用（币种无关）。空 / 非法 / 负数 → null。 */
 export function parseAmount(text: string): number | null {
   const raw = text.trim()
-  if (raw === '') return null
+  if (raw === '' || !AMOUNT_RE.test(raw)) return null
   const parsed = Number(raw)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+/** 可用的汇率（正数）或 null。0 / 负数 / 非数都算「没有」。 */
+export function rateOf(view: MoneyView): number | null {
+  const rate = view.cnyPerUsd
+  return rate !== null && Number.isFinite(rate) && rate > 0 ? rate : null
 }
 
 /** 定点显示：去尾零、**不用指数记法**（`1.4e-8` 那种字面量塞进 80px 的格子里既读不出也写不回）。 */
@@ -44,55 +64,54 @@ function fixed(value: number, decimals: number): string {
   return text.includes('.') ? text.replace(/0+$/u, '').replace(/\.$/u, '') : text
 }
 
-/** 美元面显示：小数位由「看起来是不是 0」定，而不是由数字大小定。 */
-function usdText(usd: number): string {
-  const six = fixed(usd, DECIMALS)
-  return six === '0' && usd !== 0 ? fixed(usd, TINY_DECIMALS) : six
+/** 一个换算出来的数写回文本：6 位小数，被压成 0 而原值非零时放开到 10 位。 */
+function amountText(value: number): string {
+  const six = fixed(value, DECIMALS)
+  return six === '0' && value !== 0 ? fixed(value, TINY_DECIMALS) : six
 }
 
-/** 这一屏是不是按美元读写价：选了美元**且**有可用汇率。 */
-export function isUsd(view: MoneyView): boolean {
-  return view.currency === 'USD' && view.cnyPerUsd !== null && view.cnyPerUsd > 0
+/** 这一档在提示里报的单位。 */
+export function unitOf(view: MoneyView): string {
+  return view.route === 'USD' ? '$/百万词元' : '¥/百万词元'
 }
 
-/** 人民币文本 → 当前货币的显示文本。人民币面恒等；不可解析的原文原样返回（它本来就红着）。 */
-export function textOf(view: MoneyView, cnyText: string): string {
-  if (!isUsd(view)) return cnyText
-  const cny = parseAmount(cnyText)
-  if (cny === null) return cnyText
-  return usdText(cny / (view.cnyPerUsd as number))
+/**
+ * 同一格折成**另一种**货币的读数，或 null（原文不是数 / 没设汇率）。
+ *
+ * 美元通道折成人民币是**计入金额的那个数**（`= ¥…`）；人民币通道折成美元只是给你读
+ * （`≈ $…`）。留空 = 「换算不出来」，绝不按 1 报一个数。
+ */
+export function counterpartOf(view: MoneyView, text: string): string | null {
+  const amount = parseAmount(text)
+  if (amount === null) return null
+  const rate = rateOf(view)
+  if (rate === null) return null
+  return view.route === 'USD'
+    ? `= ¥${amountText(amount * rate)}/百万词元`
+    : `≈ $${amountText(amount / rate)}/百万词元`
 }
 
-/** 用户在这一货币下敲的文本 → 落盘的人民币文本；不可解析时 null（调用方保留原文并报错）。
- *  人民币面恒等——含空串与非法文本，与今天的行为逐字一致。空串 = 这一档未填（不是 0）。 */
-export function storedText(view: MoneyView, typed: string): string | null {
-  if (!isUsd(view)) return typed
-  const raw = typed.trim()
+/**
+ * 把这一格按**另一种货币**重记：切换一条通道的报价币种时，整条通道的价都走这一步。
+ *
+ * 人民币 → 美元是除以汇率、美元 → 人民币是乘汇率；不可解析的原文原样返回
+ * （它本来就红着，换算不了也不该被悄悄抹掉）。换过去的人民币金额不变（6 位小数内），
+ * 变的是这条通道以后**按美元报价**——报价是厂商给的那个数，从此不再被汇率改动。
+ */
+export function convertText(view: MoneyView, text: string, to: PriceCurrency): string | null {
+  if (to === view.route) return text
+  const raw = text.trim()
   if (raw === '') return ''
   const amount = parseAmount(raw)
   if (amount === null) return null
-  const cny = amount * (view.cnyPerUsd as number)
-  // 与显示同一处保底：正的美元价绝不能被落成 ¥0（¥0 是「免费」，一个已知价）。
-  const six = fixed(cny, DECIMALS)
-  return six === '0' && cny !== 0 ? fixed(cny, TINY_DECIMALS) : six
-}
-
-/** 这一档在 tooltip 里报的单位。 */
-export function unitOf(view: MoneyView): string {
-  return isUsd(view) ? '$/百万词元' : '¥/百万词元'
-}
-
-/** 美元面：把「这个数换算自哪个人人民币数」附进提示——显示是透镜这件事随手可核，
- *  也顺手解决「极小价被舍成 0」的可信问题。人民币面（或原文不是数）没有可附的。 */
-export function originOf(view: MoneyView, cnyText: string): string | null {
-  if (!isUsd(view)) return null
-  const cny = parseAmount(cnyText)
-  return cny === null ? null : `= ¥${cnyText.trim()}/百万词元`
+  const rate = rateOf(view)
+  if (rate === null) return null
+  // 往美元记：除以汇率；往人民币记：乘汇率。6 位小数内金额不变。
+  return amountText(to === 'USD' ? amount / rate : amount * rate)
 }
 
 /** 汇率行右边那句反向读数：`¥1 ≈ $0.14`。汇率未设时无可说。 */
-export function inverseHint(view: MoneyView): string | null {
-  const rate = view.cnyPerUsd
-  if (rate === null || !(rate > 0)) return null
-  return `¥1 ≈ $${fixed(1 / rate, 4)}`
+export function inverseHint(cnyPerUsd: number | null): string | null {
+  if (cnyPerUsd === null || !(cnyPerUsd > 0)) return null
+  return `¥1 ≈ $${fixed(1 / cnyPerUsd, 4)}`
 }

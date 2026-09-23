@@ -227,6 +227,7 @@ export async function readPricingView(
       route,
       label: entry.label,
       billing: billingOf(file.billing, route),
+      currency: file.currency[route] ?? 'CNY',
       records: ledger.byRoute.get(route) ?? 0,
       models,
     })

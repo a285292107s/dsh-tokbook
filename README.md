@@ -7,7 +7,7 @@ DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把�
 footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含五个 tab(按界面
 从左到右):**用量总览**(今日 + 词元构成 + 近 14 天趋势)、**订阅额度**(用你的 key 向通道查
 账户级官方用量)、**用量明细**(窗口 × 按模型 / 按工作区 / 按通道)、**价格表**(选一个通道 +
-模型,编辑它的调价史)、**统计口径**(不估算的口径、漏项与对账)。
+模型,编辑它的调价史;汇率与节假日年历也在这里)、**统计口径**(不估算的口径、漏项与对账)。
 
 两条贯穿全插件的原则:
 
@@ -41,9 +41,9 @@ src/
   sync.ts             首次启动 + 手动历史回填(幂等)
   sync-state.ts       首次运行标记 + 持久化同步基线
   stats.ts            聚合(totals/byDay/byHour/(provider,model))+ 折叠 + 缓存
-  price-format.ts     价格表时间轴的纯规则(整点生效 / 每日时段 / 星期几 / 冲突)+ 价文件共享词表(保留键 / 长度上限),与 browser 共用
-  pricing.ts          唯一价格表(路由 → 模型串 → 价段)+ 两级取价(priceAt/slotAt/ratesAt/rateKeyAt)+ costOf
-  pricing-view.ts     价格表 tab 的卡片装配(路由目录 ∪ 账本 ∪ 价格文件)
+  price-format.ts     两半区共享的价文件内核:词表(保留键 / 长度上限)+ 时间轴规则(生效时刻 / 日内时段 / 星期集合 / 法定节假日年历)
+  pricing.ts          价文件唯一真源(路由 → 模型串 → 价段 + $billing/$calendar/$currency/$fx)+ 两级取价 + costOf + 折出人民币计价表(cnyTable)
+  pricing-view.ts     价格表 tab 的数据装配(路由目录 ∪ 账本 ∪ 价文件;卡带报价币种,视图带 $fx 与年历)
   route-catalog.ts    路由目录:本机设置文档(settings)× 运行时适配器注册表(ctx.llm)
   by-provider.ts      纯通道卡片聚合 + 按模型切法(用量明细 tab:摊平卡的模型行)
   workspaces.ts       纯按工作区聚合(会话 cwd ↔ 工作区注册表的读时连接 + 未归属兜底)
@@ -58,8 +58,19 @@ src/
     store.ts          按钮 ↔ 浮窗共享视图 store
     format.ts         纯展示 helper(日键、token/金额/时间格式化)
     icons.tsx         内联 SVG 图标(承 currentColor,跟随当前墨色)
-    styles.ts         注入样式表入口(按 surface 拼接 styles/*.ts)
-    styles/           CSS 分片(拼接顺序以 styles.ts 的 import 为准——级联是契约,不要重排)
+    styles.ts         注入样式表入口(按 styles/*.ts 的顺序拼接——级联是契约)
+    styles/           CSS 分片,按拼接顺序列出(重排即改级联):
+      tokens.ts       全插件唯一的取值登记处(宿主变量 + 兜底 + 自有常量)
+      footer.ts       侧边栏入口按钮
+      overlay.ts      浮窗外壳(遮罩 / 卡片 / tab 条)
+      ledger.ts       用量总览
+      method.ts       统计口径
+      provider.ts     用量明细
+      quota.ts        订阅额度
+      pricing.ts      价格表(选择带 / 段卡 / 输入)
+      pricing-timeline.ts 调价史轴(轨与点按像素定位)
+      shared.ts       跨面共用原语(面板材质 / 只读文本 / 选中态)
+      device.ts       设备皮(独立查看器的仪器外壳;只在 data-dtpl-device 下生效)
     assets.d.ts       hero 插画的模块声明(构建期内联为 data URI)
     assets/           构建期内联的静态资源(hero-yanagi.jpg)
     FooterButton.tsx  sidebar.footer.action 触发器(额度告急时多一个点)
@@ -70,20 +81,25 @@ src/
     MethodDoc.tsx     统计口径 tab
     pricing/
       axis.ts         调价史轴纯几何:节点落位 / 估宽 / 最小间距(无 React,进 smoke)
-      Timeline.tsx    详情面里那条调价史轴(首记 ↔ 今天)
-      draft.ts        价格表纯逻辑:草稿↔wire 转换、校验、签名(未保存标记)
-      editors.tsx     行原语:四档价输入、价段编辑器、选中模型的详情面
-      PricingPanel.tsx 价格表 tab 外壳:通道/模型两个下拉 + 保存状态 + 选中模型的调价史
+      Timeline.tsx    详情面里那条调价史轴(最早一段价 ↔ 今天)
+      currency.ts     报价币种纯逻辑:悬停的折算读数 / 切换币种时整条通道的换算(无 React,进 smoke)
+      draft.ts        价格表纯逻辑:草稿 ↔ wire body、校验、脏签名(年历 / 汇率 / 报价币种)
+      editors.tsx     行原语:四档价输入、价段编辑器、法定节假日年历编辑器、选中模型的详情面
+      PricingPanel.tsx 价格表 tab 外壳:通道/模型两个下拉 + 年历 + 汇率行 + 自动保存状态
     quota/
       metrics.ts      订阅额度纯规则:占比/语气/口径/文案(无 React)
       QuotaCard.tsx   订阅额度卡:卡壳 + ok 主体 + 余额/无订阅面板 + gauge/骨架
       QuotaPanel.tsx  订阅额度 tab 外壳:取数 + 刷新策略 + 卡片排序
 scripts/
-  build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS)
+  build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS),并校验 bundle 接线契约
   preview-overlay.ts       浮窗预览台(fixture 数据)与独立查看器(--ledger,读真账本)
-  smoke.ts                 聚合 + 计价 + 额度的纯逻辑冒烟测试(一条不变量一个断言)
-  selfcheck-rebuild.ts     账本不变量:折叠无损重建 / refile / 跨实例去重 / 价格签名 / 重启基线
+  smoke.ts                 纯逻辑冒烟:投影 / 聚合 / 取价(时段 / 年历 / 币种)/ 草稿与写路径 / 路由·工作区 / 额度(一条不变量一个断言)
+  selfcheck-rebuild.ts     账本不变量:折叠无损重建 / refile / 跨实例去重 / 价格签名 / 重启基线 / 派生态自证 / seeded 会话同步
   selfcheck-ui.ts          界面禁令静态检查:死类双向 / 色值 / 虚线 / 圆角 / 宿主变量白名单 / 动效·焦点·窄屏分支 / ARIA 引用
+
+docs/                      文档树(地图:docs/INDEX.md):CONTRACTS 契约 / DESIGN 推理 / HMR / LESSONS / COMMENTS
+cordis.patch.example.yml   profile 挂载行的示例(见「装进 DSH web profile」)
+lib/                       构建产物(gitignore):lib/index.js + lib/client.js + lib/types/**/*.d.ts
 ```
 
 ## 构建
@@ -92,10 +108,10 @@ scripts/
 pnpm install      # 安装 @deepseek-ai/cordis、react、esbuild、typescript
 pnpm build        # tsc 产出 lib/types/*.d.ts,再由 esbuild 打包 host + client
 pnpm typecheck    # 只查 src/ 的类型(不构建)——`pnpm build` 里已含 `tsc -b`,这是轻量替代
-pnpm selfcheck    # 账本不变量:折叠重建 / refile / 跨实例去重 / 价格签名 / 重启基线
+pnpm selfcheck    # 账本不变量:折叠重建 / refile / 跨实例去重 / 价格签名 / 重启基线 / 派生态自证 / seeded 会话同步
 pnpm selfcheck:ui # 界面禁令的死类双向 / 硬编码色值 / 虚线 / 圆角 / 宿主变量白名单 / 动效·焦点·窄屏分支 / ARIA 引用
-pnpm smoke        # 纯逻辑冒烟(聚合 + 计价 + 额度);加 `--only <节名子串>` 只跑命中的那几节
-pnpm test         # smoke(聚合 + 计价 + 额度)+ selfcheck + selfcheck:ui
+pnpm smoke        # 纯逻辑冒烟(投影 + 聚合 + 取价 + 草稿 + 额度);加 `--only <节名子串>` 只跑命中的那几节
+pnpm test         # smoke(投影 + 聚合 + 取价 + 草稿 + 额度)+ selfcheck + selfcheck:ui
 ```
 
 产物:`lib/index.js`(host)、`lib/client.js`(browser)、`lib/types/**/*.d.ts`(声明);external 清单见 `scripts/build-client.mjs`。
@@ -162,35 +178,42 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 **一次改价会重算全部历史金额**;一条 (路由, 模型) 没有价段、或记录落在最早一段价**之前** → **价格未知**
 (按 ¥0 计)——**每一段价都必须有生效时刻**,没有「兜底价」那种形态。
 
+**峰谷时段自带星期集合**(每天 / 周一至周五 / 工作日 / 周末四档)与小时区间。其中「工作日」与
+「周一至周五」的差别就落在节假日上,靠保留键 `$calendar` 的**法定节假日年历**(`YYYY` → 放假日闭
+区间,按年收录)判定:年历里查不到那一年就是**未知**,「工作日」此时退化成「周一至周五」——
+**安全方向**,宁可多按高峰算;调休上班日不用收(周末上不上班都是闲时价),所以这份年历只收放假日。
+
 金额拆成两个桶,浮窗分开显示、绝不混为单一「支出」:**实际支出**(`spend`)= `metered` 路由的
 真金白银;**订阅价值**(`subscriptionValue`)= `subscription` 路由按你写的价折算的「省了多少」,
 **不是现金**。计费性质是**通道路由**属性(价表 `$billing` 的一条),省略按 `metered`。
 
 价格**全部由你自己写**,只有一份文件 `pricing.json`(默认 `$DSH_HOME/tokbook/`):路由 → 精确模型串 → **价段
-数组**(`from` 生效时刻 + 四档 ¥/M 价 + 可选 `slots` 峰谷时段)。字段与校验的真源是 `src/types.ts`
+数组**(`from` 生效时刻 + 四档价 + 可选 `slots` 峰谷时段)。**四档价用这条通道自己的报价币种记**
+(第三个保留键 `$currency`,省略 = 人民币/百万词元)——厂商按美元报价的通道就把美元价原样写进去。
+字段与校验的真源是 `src/types.ts`
 与 `src/pricing.ts` 的 `parsePriceInput`(写入 handler 只做传输);畸形文件只把受影响的 (路由, 模型) 降级为价格未知(¥0)。
 旧版文件里「省略 `from`」的兜底段仍读得进来:它在**读**路径上被迁移成真实日期——该模型首记那一刻
 (没有记录就用今天),金额因此不变,下一次保存文件就写成新形态;新写入不再接受这种段。
 
-**两种货币只活在读写面上。** 价文件里的数**永远**是人民币/百万词元,第三个保留键 `$fx`
-(`{ cnyPerUsd: 7.15 }`)只是价格表这一屏的汇率:切到美元时四档价按它换算着显示,你在美元面敲进去的
-数按它换算回人民币落盘。所以 host 的计价路径从不读 `$fx`,切币种不改动也不弄脏任何一行,改汇率只改
-换算读数、不动已写的价,其余 tab 的金额一分不变。汇率手填(不联网)、可以不填——没填就没有美元面
-(那是「换算不出来」,不是「按 1 算」)。
+**`$fx` 是唯一的换算率**(手填、不联网):把按美元报价的通道折成人民币——计价真的读它,所以
+**改汇率会重算那些通道的历史金额**;人民币通道一分不动,已写的价也一个数字都不改。没填汇率就
+换算不出来:美元通道算不出人民币(读作价格未知,绝不按 1 算),也切不过去(切报价币种的前提是有汇率)。
 
 **价格表 tab** 一屏只面对**一个模型**:先用两个下拉选「通道」与「模型」(选项文字自带「N 次」
 「N 个模型未知」「价格未知 / 未保存」这类摘要——「这张表有没有洞」不必点到才看得见)。下面是这个模型的全部价:每张卡是
 **一段从某个时刻起生效的价**(`from` 必填、按序号排开),一张卡里四档价紧挨成一簇——**段卡各写各的
 四档、互不沿用**,只有卡里的**峰谷时段**才留空沿用(缓存读 / 写没有单独定价时按输入价计,格子里报的
 就是那个数)。上面那条**调价史轴**从左端「最早一段价」画到今天,还没价的行走径就是一条暗淡的空轨。
-按量 / 订阅的开关在详情头上——它改的是**通道**的计费性质。规则见
+这一屏里还有两样**不属于任何一行**的东西:跟着这一屏常驻的**法定节假日年历**(按年收放假日,就是
+上面那档「工作日」时段的判据),与**汇率行**(`$fx`,全表唯一的换算率)。按量 / 订阅的开关在详情头上——
+它改的是**通道**的计费性质。规则见
 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) §2,其余交互(自动保存 / 未保存圆点)见
 `src/client/pricing/`——真源是代码。
 
-**汇率换算**也在这条选择带上(选完模型之后那第三行):填「1 美元 = N 元」,详情头上的**货币开关**
-(`¥` / `$`)就切四档价的读写单位。美元面下你直接输厂商报的美元价,落盘的是换算后的人民币;每格的
-悬停提示附上它换算自的人民币原值,所以「显示的是透镜」这件事随手可核。汇率本身也是价文件内容
-(保留键 `$fx`),自动保存、未保存圆点、状态栏与别的字段同一套。
+**报价币种**在详情头上(`¥` / `$`,与按量 / 订阅同排):它决定这条通道的价用哪种货币记,格子
+显示什么就存什么——没有「敲美元、落人民币」那一层。切过去会把**已有的**价按汇率换算成另一种货币
+(人民币金额不变,这是一次真正的改价、会弄脏那一行);每格的悬停提示里报另一种货币的读数(美元通道
+报 `= ¥…` 那个计入金额的数,人民币通道报 `≈ $…` 供你核对)。没有汇率时 `$` 是停用的。
 
 ## 配置
 

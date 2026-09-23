@@ -23,10 +23,12 @@ export const PRICING_BILLING_KEY = '$billing'
 /** 价文件另一个保留顶层键：`YYYY` → 放假日区间数组（法定节假日年历）。 */
 export const PRICING_CALENDAR_KEY = '$calendar'
 
-/** 价文件的第三个保留顶层键：`{ cnyPerUsd }`——1 美元值多少元。**它只服务价格表的
- *  读写面**：文件里的价永远是人民币/百万词元，host 的计价路径（`pricing.ts` 的
- *  `priceAt` / `costOf`、`stats.ts` 的折叠）从不读它，所以改汇率不动任何历史金额。
- *  手填（不联网）、缺席 = 未设汇率（美元面不可用）。 */
+/** 价文件的第三个保留顶层键：route → 报价币种（`"USD"`）。省略 = 人民币。 */
+export const PRICING_CURRENCY_KEY = '$currency'
+
+/** 价文件的第四个保留顶层键：`{ cnyPerUsd }`——1 美元值多少元。**唯一的换算率**：
+ *  把 `$currency` 标成美元的通道折成人民币（计价 + 悬停读数），以及切换报价币种时换算已有的数。
+ *  手填（不联网）、缺席 = 未设汇率（美元通道算不出人民币，绝不按 1 算）。 */
 export const PRICING_FX_KEY = '$fx'
 
 /** 通道路由名与模型串的长度上限（写路径拒绝超长，读路径不设限）。放在共享词表里，

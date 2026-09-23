@@ -13,11 +13,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PriceVerdict, PricingView } from '../../types.ts'
 import { ROUTE_PRICING } from '../../route-paths.ts'
-import { inverseHint, type Currency } from './currency.ts'
+import { inverseHint } from './currency.ts'
 import {
   baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxSignature, fxValue, modelDirty,
   modelOptionLabel,
-  routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx,
+  routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency,
   type CalendarDraft, type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
 import { CalendarEditor, ModelDetail } from './editors.tsx'
@@ -58,7 +58,7 @@ let staged: Staged | null = null
 
 /**
  * 把一份尚未落盘的草稿合并到刚读回来的宿主视图上：只有**真正 dirty** 的那几处胜出——
- * 逐 (通道, 模型) 行、通道的计费性质、年历、汇率各按自己的签名判。基线同步换成磁盘的，
+ * 逐 (通道, 模型) 行、通道的计费性质与报价币种、年历、汇率各按自己的签名判。基线同步换成磁盘的，
  * 所以被保留的那几处仍显示「未保存」；其余内容（新增的 route / 模型、账本计数、缺年告警）
  * 一律用磁盘上的新值。视图里没有的通道整个丢弃——**「有哪些通道」由宿主说了算**，
  * 留着一份陈旧整卡只会在下一次写回里把它重新写进文件。
@@ -71,9 +71,14 @@ function mergeStaged(fresh: PricingView, saved: Staged): { state: PriceState; ba
     if (freshCard === undefined) continue
     const models = new Map(freshCard.models)
     let billing = freshCard.billing
+    let currency = freshCard.currency
     if ((saved.baseline.billing.get(route) ?? 'metered') !== card.billing) {
       billing = card.billing
       baseline.billing.set(route, saved.baseline.billing.get(route) ?? 'metered')
+    }
+    if ((saved.baseline.currency.get(route) ?? 'CNY') !== card.currency) {
+      currency = card.currency
+      baseline.currency.set(route, saved.baseline.currency.get(route) ?? 'CNY')
     }
     for (const [model, row] of card.models) {
       if (!modelDirty(route, row, saved.baseline.models)) continue
@@ -81,7 +86,7 @@ function mergeStaged(fresh: PricingView, saved: Staged): { state: PriceState; ba
       const key = rowKey(route, model)
       baseline.models.set(key, saved.baseline.models.get(key) ?? '')
     }
-    state.routes.set(route, { ...freshCard, models, billing })
+    state.routes.set(route, { ...freshCard, models, billing, currency })
   }
   if (calendarDirty(saved.state, saved.baseline)) {
     state = withCalendar(state, saved.state.calendar)
@@ -96,7 +101,7 @@ function mergeStaged(fresh: PricingView, saved: Staged): { state: PriceState; ba
 
 /** 还没读到宿主视图之前的空状态。 */
 const EMPTY_STATE: PriceState = { routes: new Map(), calendar: new Map(), holidays: new Set(), fx: '' }
-const EMPTY_BASELINE: PriceBaseline = { models: new Map(), billing: new Map(), calendar: '[]', fx: '' }
+const EMPTY_BASELINE: PriceBaseline = { models: new Map(), billing: new Map(), currency: new Map(), calendar: '[]', fx: '' }
 
 /** 选中的 (通道, 模型)。`model` 为空串 = 「这条通道里请求最多的那一个」，即换通道时的中间态。 */
 interface Picked {
@@ -136,19 +141,10 @@ function rememberPicked(pick: Picked | null): void {
 }
 
 /**
- * 四档价按哪种货币读写。与「选了哪一行」同一类：**视图偏好**（每台浏览器自己的记账习惯），
- * 不是账本数据，所以进 localStorage 而不是价文件——价文件里只存汇率这一个事实。
+ * 四档价按哪种货币**记**，是**通道**的属性（`$currency`，住在价文件里，与计费性质同一档），
+ * 不是这一屏的显示偏好：一条通道的价用什么货币记，决定文件里那些数字是什么。所以它没有
+ * 「每台浏览器各自记一份」这回事——localStorage 里只留「上次看的是哪一行」。
  */
-const CURRENCY_KEY = 'dsh-tokbook.pricing-currency'
-
-/** 读回上次选的货币。只认这两个值，其余一律当人民币。 */
-function readCurrency(): Currency {
-  return localStorage.getItem(CURRENCY_KEY) === 'USD' ? 'USD' : 'CNY'
-}
-
-function rememberCurrency(currency: Currency): void {
-  localStorage.setItem(CURRENCY_KEY, currency)
-}
 
 function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
   return fetch(ROUTE_PRICING, {
@@ -182,18 +178,11 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [save, setSave] = useState<SaveState>({ kind: 'clean' })
   /** 手动选过的那一份；null = 还没选过，一切走「列表里的第一个」。 */
   const [picked, setPicked] = useState<Picked | null>(readPicked)
-  /** 四档价按哪种货币读写（视图偏好，见 `CURRENCY_KEY`）。 */
-  const [currency, setCurrency] = useState<Currency>(readCurrency)
 
   /** 记下一次选择：组件状态（这一屏立刻跟手）与 localStorage（下次打开还认它）。 */
   const choosePicked = useCallback((pick: Picked) => {
     setPicked(pick)
     rememberPicked(pick)
-  }, [])
-
-  const chooseCurrency = useCallback((next: Currency) => {
-    setCurrency(next)
-    rememberCurrency(next)
   }, [])
 
   const changes = useMemo(() => stagedChanges(state, baseline), [state, baseline])
@@ -402,9 +391,16 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     })
   }, [])
 
-  /** 改汇率。它是全表共用的一份数据（不属于任何一行），写不写得出去由 `composePriceBody` 说。 */
+  /** 改汇率。它是**唯一的**换算率：只在切换通道报价币种、以及 host 把美元通道折成人民币时被读。
+   *  写不写得出去由 `composePriceBody` 说。 */
   const updateFx = useCallback((text: string) => {
     setState(current => withFx(current, text))
+  }, [])
+
+  /** 换一条通道的报价币种：按当前汇率把它的价整体重记（一次真正的改价，自动保存）。
+   *  没有汇率时原样不动——切过去只会在保存口被 `composePriceBody` 挡住。 */
+  const changeCurrency = useCallback((route: string, next: 'CNY' | 'USD') => {
+    setState(current => withRouteCurrency(current, route, next, fxValue(current.fx)))
   }, [])
 
   // Ctrl/Cmd+S 立即 flush 待写的保存（文件本来也会自动保存）。
@@ -436,12 +432,9 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const row = models.find(item => item.model === picked?.model) ?? models[0]
 
   const stateText = saveStateText(save)
-  // 汇率：`rate` 是换算能力（null = 未设，美元面不可用），`fxProblem` 是这一格的问题。
-  // **存了美元偏好而文件里没有汇率**（换机器、文件被改回）时回落到人民币：一个记不住的偏好
-  // 不该让这一屏停在一个换算不出来的状态上。
+  // 汇率：`rate` 是换算能力（null = 未设，美元报价的通道算不出人民币），`fxProblem` 是这一格的问题。
   const rate = fxValue(state.fx)
   const fxProblem = fxIssue(state.fx)
-  const shownCurrency: Currency = currency === 'USD' && rate === null ? 'CNY' : currency
   // 什么都没选过、也没有任何待写的改动：状态栏没有话要说。常驻一个空盒子会在选择带与
   // 调价史之间撑出一道什么也不说的空隙。
   const veiled = picked === null && save.kind === 'clean' && changes === 0
@@ -511,9 +504,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
               ))}
             </select>
           </label>
-          {/* 汇率是选择带里唯一**不属于任何一行**的输入：它是全表共用的一份事实，决定下面
-              四档价在美元面上读写时怎么换算。它旁边那句反向读数就是「汇率换算」本身。
-              它是价文件的一部分（保留键 `$fx`），所以自动保存、状态栏、未保存圆点全套照旧。 */}
+          {/* 汇率是选择带里唯一**不属于任何一行**的输入：它是全表唯一的换算率——把按美元报价的
+              通道折成人民币（计价与悬停读数）、以及切换报价币种时换算已有的数。它旁边那句反向
+              读数就是「汇率换算」本身。它是价文件的一部分（保留键 `$fx`），所以自动保存、
+              状态栏、未保存圆点全套照旧。 */}
           <label className="dtpl-price-pick-row">
             <span className="dtpl-price-pick-k">汇率</span>
             <span className="dtpl-price-fx">
@@ -528,7 +522,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 placeholder="—"
                 aria-label="汇率：1 美元等于多少元"
                 aria-invalid={fxProblem !== null || undefined}
-                title="1 美元等于多少元。它只服务这一屏的美元读写面：改它只改换算读数，不动已写的价，也不动任何金额（文件里的价永远是人民币）。"
+                title="1 美元等于多少元。它不动价文件里已写的数，但会重算按美元报价的通道的金额——那些价是美元记的，人民币数字本来就是汇率的函数。人民币通道一分不动。"
                 onChange={(event) => updateFx(event.target.value)}
                 onKeyDown={(event) => {
                   // Enter 离开这一格（值已暂存）。
@@ -537,7 +531,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
               />
               <span className="dtpl-price-fx-unit">元</span>
               <span className="dtpl-price-fx-note">
-                {inverseHint({ currency: 'USD', cnyPerUsd: rate }) ?? '填了才能按美元读写价'}
+                {inverseHint(rate) ?? '填了才能按美元报价'}
               </span>
             </span>
           </label>
@@ -611,9 +605,9 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 billing={card.billing}
                 baseline={baseline.models}
                 holidays={state.holidays}
-                currency={shownCurrency}
+                currency={card.currency}
                 rate={rate}
-                onCurrency={chooseCurrency}
+                onCurrency={(next) => changeCurrency(card.route, next)}
                 onRowChange={updateModel}
                 onBilling={updateBilling}
               />

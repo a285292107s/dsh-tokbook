@@ -226,7 +226,7 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
       (JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8')) as { pricingRevision: string }).pricingRevision
     const daySpend = (costed: ReturnType<typeof attachCosts>): number[] => costed.byDay.map(row => row.spend ?? 0)
 
-    await writePriceFile(dir, { table: prices(9, 2), billing: {}, calendar: {}, revision: '' }, quiet)
+    await writePriceFile(dir, { table: prices(9, 2), billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
     const before = await readPriceFile(dir, quiet)
     const firstFold = await buildSummary(dir, never, resolverOf(before.table), quiet, { pricingRevision: before.revision })
     const beforeCost = attachCosts(firstFold, before.table)
@@ -236,7 +236,7 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
 
     // 价格文件变了:时段 start 挪位(费率行身份跟着变)且费率下降。按旧签名折出来的行指着一个
     // 新表里不再存在的时段,所以整份折叠必须作废。
-    await writePriceFile(dir, { table: prices(8, 1), billing: {}, calendar: {}, revision: '' }, quiet)
+    await writePriceFile(dir, { table: prices(8, 1), billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
     const after = await readPriceFile(dir, quiet)
     const secondFold = await buildSummary(dir, never, resolverOf(after.table), quiet, { pricingRevision: after.revision })
     const afterCost = attachCosts(secondFold, after.table)
@@ -328,7 +328,7 @@ console.log('price: 1970 前的生效时刻照样写成一个日期身份')
         { from: ancient, rates: { inputPerMillion: 2, outputPerMillion: 8 } },
       ] },
     }
-    await writePriceFile(dir, { table, billing: {}, calendar: {}, revision: '' }, quiet)
+    await writePriceFile(dir, { table, billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
     const text = await readFile(join(dir, PRICING_FILE), 'utf8')
     const back = await readPriceFile(dir, quiet)
     const segments = back.table.r?.m ?? []

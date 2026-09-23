@@ -80,8 +80,8 @@ export interface UsageModelRow {
   totals: UsageTotals
 }
 
-/** 单个价格段的每百万 token 价格（人民币）。cache 桶省略时回落到 input 价。
- *  文件里的数**永远**是人民币：美元只是价格表读写面的换算（见 {@link FxSetting}）。 */
+/** 单个价格段的每百万 token 价格，用**它所属通道的报价币种**记
+ *  （见 {@link PriceCurrency}）。cache 桶省略时回落到 input 价。 */
 export interface ModelPricing {
   inputPerMillion: number
   outputPerMillion: number
@@ -89,9 +89,17 @@ export interface ModelPricing {
   cacheWritePerMillion?: number
 }
 
-/** 价文件的汇率（保留键 `$fx`）：1 美元值多少元，手填。**只服务价格表的读写面**——
- *  它把人民币价换算成美元显示 / 把美元输入换算回人民币落盘，host 的计价路径不读它，
- *  所以改汇率不动任何历史金额。缺席 = 未设汇率（美元面不可用）。 */
+/** 一条通道的**报价币种**：价文件里这条 route 的价用哪种货币记。缺席 = 人民币。
+ *  它是 route 级事实（与 `$billing` 同形），因为一个账户用什么货币报价不随型号变。 */
+export type PriceCurrency = 'CNY' | 'USD'
+
+/** route → 报价币种（保留键 `$currency`）。**只记美元那几条**，人民币不写出来。 */
+export type CurrencyMap = Record<string, PriceCurrency>
+
+/** 价文件的汇率（保留键 `$fx`）：1 美元值多少元，手填。它是**唯一的**换算率，干两件事：
+ *  ① 把 `$currency` 标成美元的通道折成人民币（计价与悬停读数）；② 切换一条通道的报价币种时
+ *  换算它已有的数。所以**改汇率会重算美元通道的金额**——那些价是美元记的，人民币数字本来就是
+ *  汇率的函数；人民币通道一分不动。缺席 = 未设汇率（换算不出来，绝不按 1 算）。 */
 export interface FxSetting {
   /** 每 1 美元的人民币数；必须是正的有限数。 */
   cnyPerUsd: number
@@ -249,6 +257,9 @@ export interface PricingRouteView {
   label: string
   /** 计费性质（`$billing`；默认 metered）。 */
   billing: BillingNature
+  /** 报价币种（`$currency`；默认人民币）。段里的数就用它记——client 原样显示，
+   *  换算成另一种货币只发生在悬停读数与切换报价币种时。 */
+  currency: PriceCurrency
   /** 整条 route 的账本记录数（驱动卡片排序）。 */
   records: number
   models: PricingModelView[]
@@ -264,8 +275,8 @@ export interface PricingView {
   calendar: PricingCalendarInput
   /** 账本覆盖到、但年历里没有的年份——`workdays` 在那几年会多算高峰。空 = 不用补。 */
   calendarMissing: string[]
-  /** 价文件的汇率（`$fx` 原样）。缺席 = 未设汇率，价格表只能按人民币读写（美元面停用）。
-   *  它**不参与**任何计价：文件里的价已一律是人民币。 */
+  /** 价文件的汇率（`$fx` 原样）。缺席 = 未设汇率：美元报价的通道算不出人民币（那些行按价格
+   *  未知报出），也切不过去。它**参与**计价——美元通道的价按它折成人民币。 */
   fx?: FxSetting
   dataDir: string
   updatedAt: number

@@ -5,13 +5,14 @@
  * 没有被任何段覆盖的日期按 ¥0 计。谁被选中由面板决定（两个下拉），
  * 所以本文件不持有选择状态——只通过小回调下发改动。
  *
- * 四档价的**真源永远是人民币文本**；货币开关只改这一屏的读写面（见 `./currency.ts`）。
+ * 四档价的真源是**这条通道报价币种下的文本**（`$currency`，缺席 = 人民币）：格子显示什么、
+ * 你敲进去就存什么；另一种货币的读数只挂在悬停提示里（见 `./currency.ts`）。
  */
 
 import { memo, useEffect, useRef, useState } from 'react'
 import { DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange, type HourRange } from '../../price-format.ts'
-import type { BillingNature, DaySet } from '../../types.ts'
-import { isUsd, originOf, storedText, textOf, unitOf, type Currency, type MoneyView } from './currency.ts'
+import type { BillingNature, DaySet, PriceCurrency } from '../../types.ts'
+import { counterpartOf, unitOf, type MoneyView } from './currency.ts'
 import {
   calendarYearTally, defaultCalendarYear, duplicateSlot, effectiveSlots, fieldState, fromFieldValue,
   inheritedCell, isBlankSlot, dayLabel, modelDirty, newHoliday, newSegment, newSlot, ratesInForce,
@@ -22,7 +23,7 @@ import {
 import { PriceTimeline } from './Timeline.tsx'
 
 /** 行的四个价单元格，按所有 surface 的书写顺序（列头 / 行内只读价 / 抽屉里的输入框）。
- *  单位随货币开关：¥/百万词元 或 $/百万词元（数字本身一律以人民币存）。 */
+ *  单位随通道报价币种：¥/百万词元 或 $/百万词元——格子里的数就是文件里的数。 */
 const CELLS: ReadonlyArray<{ field: RateField; label: string }> = [
   { field: 'input', label: '输入' },
   { field: 'output', label: '输出' },
@@ -378,48 +379,37 @@ function summarizeCalendar(years: readonly string[]): string {
 /**
  * 抽屉里的一个数字单元格，原地编辑。
  *
- * `value` 是**人民币文本**（草稿里唯一的真源），`view` 决定它这一屏显示成 ¥ 还是 $。
- * 美元面下这个格子自己持一个**输入缓冲**：受控值若逐键换算就会被规范化（敲 `1.` 变成 `1`，
- * 接着那个 `5` 会接成 `15`），所以敲什么先原样留在缓冲里，同时把能解析的文本换算成人民币
- * 立刻落进草稿——自动保存、脏标记与提交点的语义因此与人民币面完全一样。
- *
- * **换算不出来的原文留着**（格子红着）：它没有人民币形态，所以既不落草稿、也不让这一行
- * 看起来「与磁盘一致」。代价是它只活在这一屏（切模型 / 切 tab 会丢，回落成草稿里最后那个
- * 有效值）；人民币面没有这个不对称——那里的非法文本本来就住在草稿里。
+ * `value` 是这条通道**报价币种下的文本**（草稿里唯一的真源）：显示什么就存什么，
+ * 不做任何换算——换过来看的那一眼挂在悬停提示里（`counterpartOf`）。所以这一格没有
+ * 输入缓冲，也没有「敲美元落人民币」那一层不对称。
  */
 function RateCell({ id, label, hint, value, state, context, placeholder, note, onEdit, view }: {
   id: string
   label: string
   /** 该单元格所属的静态表头（无障碍用）。 */
   hint?: string
-  /** 草稿里的人民币文本。 */
+  /** 草稿里这条通道报价币种下的文本。 */
   value: string
   state: 'ok' | 'empty' | 'bad'
   context: string
-  /** 单元格为空时显示的那个数（沿用来的鬼影，已按当前货币换算）；缺省 = `—`，即这一档还没填。 */
+  /** 单元格为空时显示的那个数（沿用来的鬼影，同一种货币）；缺省 = `—`，即这一档还没填。 */
   placeholder?: string
-  /** 悬停时解释此上下文中空单元格的含义（里面的数已按当前货币换算）。 */
+  /** 悬停时解释此上下文中空单元格的含义。 */
   note?: string
   onEdit?: (next: string) => void
-  /** 这一屏按哪种货币读写价。 */
+  /** 这条通道的报价币种与汇率——只用来在提示里报另一种货币的读数。 */
   view: MoneyView
 }) {
-  // 缓冲只在美元面用：人民币面沿用「受控值就是草稿文本」的原样，行为与引入货币之前逐字一致。
-  const [buffer, setBuffer] = useState<string | null>(null)
-  const buffered = isUsd(view) ? buffer : null
-  const shown = buffered ?? textOf(view, value)
-  // 缓冲里换算不出人民币 = 这一格现在是坏的（草稿没变，所以调用方给的 state 不知道这件事）。
-  const bad = (buffered !== null && storedText(view, buffered) === null) || state === 'bad'
   const errorId = `${id}-err`
   // 可见消息要短（不撑窄 rate 列）；完整句子挂在 title，行下方的问题行重复第一个问题。
-  const message = bad ? '须为非负数字' : undefined
-  // 美元面把「换算自哪个人人民币数」附在提示末尾：显示是透镜这件事随手可核。
-  const origin = originOf(view, value)
-  const tip = bad
+  const message = state === 'bad' ? '须为非负数字' : undefined
+  // 美元通道附上人民币读数（那是计入金额的数），人民币通道附上美元读数（只是给你看）。
+  const counterpart = counterpartOf(view, value)
+  const tip = state === 'bad'
     ? `${label}必须是非负数字（${unitOf(view)}）`
-    : [note, origin].filter((text): text is string => text !== undefined).join(' · ') || undefined
+    : [note, counterpart].filter((text): text is string => text !== undefined && text !== null).join(' · ') || undefined
   return (
-    <div className="dtpl-price-cell" data-state={bad ? 'bad' : state}>
+    <div className="dtpl-price-cell" data-state={state}>
       <label className="dtpl-price-cell-k" htmlFor={id}>{hint ?? label}</label>
       <input
         id={id}
@@ -430,20 +420,11 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
         spellCheck={false}
         placeholder={placeholder ?? '—'}
         title={tip}
-        value={shown}
+        value={value}
         aria-label={`${context} ${label}`}
-        aria-invalid={bad || undefined}
+        aria-invalid={state === 'bad' || undefined}
         aria-describedby={message !== undefined ? errorId : undefined}
-        onChange={(event) => {
-          const next = event.target.value
-          if (isUsd(view)) setBuffer(next)
-          const stored = storedText(view, next)
-          if (stored !== null && stored !== value) onEdit?.(stored)
-        }}
-        onBlur={() => {
-          // 能换算的原文交给草稿与派生显示，缓冲退场；换算不出来的留着（它没别处可去）。
-          if (buffer !== null && storedText(view, buffer) !== null) setBuffer(null)
-        }}
+        onChange={(event) => onEdit?.(event.target.value)}
         onKeyDown={(event) => {
           // Enter 离开单元格（值已暂存）。
           if (event.key === 'Enter') event.currentTarget.blur()
@@ -546,7 +527,7 @@ function SlotEditor({ slot, index, canRemove, segment, view, onChange, onRemove,
   canRemove: boolean
   /** 这一个时段所在的那一段：留空的档从它（缓存两档再往下落到它的输入价）沿用。 */
   segment: SegmentDraft
-  /** 这一屏按哪种货币读写价。 */
+  /** 这条通道的报价币种与汇率。 */
   view: MoneyView
   onChange: (next: SlotDraft) => void
   onRemove: () => void
@@ -632,7 +613,7 @@ function SlotEditor({ slot, index, canRemove, segment, view, onChange, onRemove,
               序号进可见读名会把格子撑宽，四格就散开了——「第 N 个峰谷时段」在 aria-label
               （context）里已经说全。 */}
           {CELLS.map(({ field, label }) => {
-            const cell = inheritedCell(segment, slot, field, cny => textOf(view, cny))
+            const cell = inheritedCell(segment, slot, field)
             return (
               <RateCell
                 key={field}
@@ -662,7 +643,7 @@ function SegmentEditor({ segment, where, serial, active, view, onChange, onRemov
   /** 段序（01、02…）——纯视觉的扫读列。 */
   serial: string
   active: boolean
-  /** 这一屏按哪种货币读写价。 */
+  /** 这条通道的报价币种与汇率。 */
   view: MoneyView
   onChange: (next: SegmentDraft) => void
   onRemove: () => void
@@ -737,7 +718,7 @@ function SegmentEditor({ segment, where, serial, active, view, onChange, onRemov
         <div className="dtpl-price-seg-allday-body">
           <div className="dtpl-price-rates dtpl-price-seg-rates">
             {CELLS.map(({ field, label }) => {
-              const cell = inheritedCell(segment, null, field, cny => textOf(view, cny))
+              const cell = inheritedCell(segment, null, field)
               return (
                 <RateCell
                   key={field}
@@ -798,7 +779,7 @@ function SegmentEditor({ segment, where, serial, active, view, onChange, onRemov
     </div>
   )
 }
-/** 选中模型的详情面：身份 | 货币 | 计费性质 | 调价史直接铺开。
+/** 选中模型的详情面：身份 | 报价币种 | 计费性质 | 调价史直接铺开。
  *
  *  它是这一屏的**主体**（两个下拉在上面选谁），所以不再有折叠：段卡、时段、加段的按钮常驻。
  *  身份行是这一块唯一一行摘要——精确模型串（账本的计费键）与账本记录数都在这里；四档价在读面上
@@ -811,15 +792,15 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
   baseline: ReadonlyMap<string, string>
   /** 年历当前的放假日集合：`workdays` 时段在节假日那天不生效，行内「当前价」据此现算。 */
   holidays: ReadonlySet<string>
-  /** 四档价按哪种货币读写（视图偏好，住在面板里）。 */
-  currency: Currency
-  /** 价文件的汇率；null = 未设，美元面不可用。 */
+  /** 这条通道的报价币种（`$currency`）：四档价格子里的数就是它。 */
+  currency: PriceCurrency
+  /** 价文件的汇率；null = 未设，美元价换算不成人民币（因此也切不过去）。 */
   rate: number | null
-  onCurrency: (currency: Currency) => void
+  onCurrency: (currency: PriceCurrency) => void
   onRowChange: (route: string, model: string, next: ModelDraft) => void
   onBilling: (route: string, billing: BillingNature) => void
 }) {
-  const view: MoneyView = { currency, cnyPerUsd: rate }
+  const view: MoneyView = { route: currency, cnyPerUsd: rate }
   const dirty = modelDirty(route, row, baseline)
   const issue = rowIssue(row)
   // 此刻生效的那一段叠上此刻生效的峰谷时段——null = 这一刻没有一段在生效，轴上的「当前生效」钉就没有落点。
@@ -854,16 +835,16 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
           {named && <span className="dtpl-price-exact" title={row.model}>{row.model}</span>}
         </span>
         <span className="dtpl-price-reqs">{countText}</span>
-        {/* 货币 = **读写四档价时用的单位**（文件里的数永远是人民币），所以它和「按量 / 订阅」
-            一样是这一条的主语之一，摆在同一个右轨上。汇率没填时美元面换算不出来，故停用——
-            理由就在上面那格汇率里。 */}
+        {/* 报价币种 = **这条通道的价用哪种货币记**（`$currency`），所以和「按量 / 订阅」一样
+            是这一条的主语，摆在同一个右轨上。切过去会按汇率把**已有**的价换算成另一种货币
+            （人民币金额不变），那是一次真正的改价；没有汇率就换算不出来，故停用。 */}
         <span className="dtpl-price-currency">
-          <span className="dtpl-price-currency-k">货币</span>
-          <span className="dtpl-price-switch" role="group" aria-label="价格货币">
+          <span className="dtpl-price-currency-k">报价币种</span>
+          <span className="dtpl-price-switch" role="group" aria-label="报价币种">
             <button
               type="button"
               aria-pressed={currency === 'CNY'}
-              title="按人民币读写这四档价（¥/百万词元）"
+              title="这条通道的价按人民币记（¥/百万词元）。切过来会把现有价按汇率换算成人民币，金额不变"
               onClick={() => onCurrency('CNY')}
             >
               ¥
@@ -873,8 +854,8 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
               aria-pressed={currency === 'USD'}
               disabled={rate === null}
               title={rate === null
-                ? '先在上面那格填汇率（1 美元 = ? 元），才换算得出美元'
-                : '按美元读写这四档价（$/百万词元）：敲进去的数按汇率换算成人民币落盘，已写的价不动'}
+                ? '先在上面那格填汇率（1 美元 = ? 元）：美元报价的价没有汇率就算不成人民币'
+                : `按美元记这条通道的价（$/百万词元）：现有价按 1 美元 = ${String(rate)} 元换算成美元，人民币金额不变`}
               onClick={() => onCurrency('USD')}
             >
               $

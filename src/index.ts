@@ -28,7 +28,7 @@ import {
 } from './stats.ts'
 import { workspaceRows, type WorkspaceRef } from './workspaces.ts'
 import {
-  parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
+  cnyTable, parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
   type PriceParse,
 } from './pricing.ts'
 import { holidaySet } from './price-format.ts'
@@ -488,7 +488,11 @@ export class TokenUsageBook extends Service {
   }
 
   /** 读价文件，并造出解到该表上的 rate 解析器——概览 / 用量 / 价格表共用这一读法。
-   *  年历一并解成日期集合：`workdays` 时段靠它把法定节假日排除在高峰之外。 */
+   *  年历一并解成日期集合：`workdays` 时段靠它把法定节假日排除在高峰之外。
+   *
+   *  返回的 `table` 是**计价用的表**：按美元报价的通道已折成人民币（见 `cnyTable`）。
+   *  因此下游的成本层（`attachCosts` / 通道卡 / 工作区视图）全都不认识币种。
+   *  `resolve` 用的是原表——换算只改数字、不改段身份，两表认的 rate 身份完全一样。 */
   private async rateContext(): Promise<{
     table: PricingTable
     billing: BillingMap
@@ -496,10 +500,10 @@ export class TokenUsageBook extends Service {
     revision: string
     resolve: RateResolver
   }> {
-    const { table, billing, calendar, revision } = await readPriceFile(this.dir, this.logger)
+    const { table, billing, calendar, revision, currency, fx } = await readPriceFile(this.dir, this.logger)
     const holidays = holidaySet(calendar)
     return {
-      table,
+      table: cnyTable(table, currency, fx),
       billing,
       calendar,
       revision,

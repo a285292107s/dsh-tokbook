@@ -15,23 +15,25 @@ import {
 } from '../src/stats.ts'
 import { pathKey, workspaceRows } from '../src/workspaces.ts'
 import {
-  billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, instantKey, instantMs,
-  parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_FILE, PRICING_FX_KEY,
+  billingOf, cnyTable, coercePriceFile, costOf, dayKeyOf, dayStartMs, instantKey, instantMs,
+  parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY,
+  PRICING_FILE, PRICING_FX_KEY,
   rateKeyAt, ratesAt,
-  readPriceFile, slotAt, writePriceFile,
+  readPriceFile, slotAt, writePriceFile, type PricingTable,
 } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import {
   baselinesOf, calendarYearTally, composePriceBody, defaultCalendarYear, draftFromView, duplicateSlot,
   effectiveSegments, fxSignature, fxValue, inheritedCell, isBlankSlot, isUnpriced, modelDirty, modelSignature,
   newHoliday, newSegment, newSlot, priceUnknown,
-  ratesInForce, readHolidays, rowIssue, slotRange, stagedChanges, withCalendar, withFx, withSegmentFrom,
+  ratesInForce, readHolidays, rowIssue, slotRange, stagedChanges, withCalendar, withFx, withRouteCurrency,
+  withSegmentFrom,
   withSlotEnd, withSlotStart,
   type CalendarEntries, type CalendarHolidayDraft, type ModelDraft, type PriceDraft, type PriceState,
   type SegmentDraft,
 } from '../src/client/pricing/draft.ts'
 import {
-  CNY_VIEW, isUsd, originOf, storedText, textOf, unitOf,
+  convertText, counterpartOf, parseAmount, unitOf,
   type MoneyView,
 } from '../src/client/pricing/currency.ts'
 import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, dayIndex, dayKeyOfIndex, holidaySet, hourStartMs, slotsOverlap } from '../src/price-format.ts'
@@ -772,68 +774,149 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
     && composePriceBody(draftOf('r', 'm', rowWith('abc').segments)).ok === false)
 }
 
-if (section('价格表币种:换算只改读写面,不改落盘内容')) {
-  const USD: MoneyView = { currency: 'USD', cnyPerUsd: 7.15 }
+if (section('价格表币种:按通道报价币种记,汇率只用来折成人民币')) {
+  const USD: MoneyView = { route: 'USD', cnyPerUsd: 7.15 }
+  const CNY: MoneyView = { route: 'CNY', cnyPerUsd: 7.15 }
+  const NO_RATE: MoneyView = { route: 'USD', cnyPerUsd: null }
 
-  // 两个方向是同一件事:文件里存人民币,美元只是它除以汇率的样子。人民币面两个函数都恒等,
-  // 所以「没设汇率 / 没切过去」时这一屏的行为与引入币种之前逐字一致。
-  check('换算:美元面按汇率读写,人民币面恒等(含空串与换算不出来的原文)',
-    storedText(USD, '0.28') === '2.002' && textOf(USD, '2.002') === '0.28'
-    && textOf(USD, '0.02') === '0.002797' && storedText(USD, '0') === '0'
-    && storedText(USD, '') === '' && storedText(USD, 'abc') === null && textOf(USD, 'abc') === 'abc'
-    && textOf(CNY_VIEW, '2.002') === '2.002' && storedText(CNY_VIEW, 'abc') === 'abc'
-    && isUsd(USD) && !isUsd({ currency: 'USD', cnyPerUsd: null }) && !isUsd(CNY_VIEW))
+  // 格子里的数就是文件里的数:没有透镜,所以敲什么存什么。半输入(`1.`)与极小价的指数写法
+  // 都算数;十六进制不算——`Number('0x10')` 是 16,一个「必须是数字」的格子不该把它读成 16。
+  check('价的写法:十进制与指数收,半输入收,十六进制 / 负数 / 千分位不收',
+    parseAmount('0.28') === 0.28 && parseAmount('1.') === 1 && parseAmount('.5') === 0.5
+    && parseAmount('1e-7') === 1e-7 && parseAmount('') === null && parseAmount('abc') === null
+    && parseAmount('-1') === null && parseAmount('0x10') === null && parseAmount('1_000') === null)
 
-  // 敲进去一个美元价、看一眼还是那个数:这正是「逐键换算却不跟光标抢」（`RateCell` 的输入缓冲）
-  // 成立的前提。一行 = 一个用例;极小价那一行同时挡住「美元价被换算成 ¥0 = 免费」。
-  const typed = ['0.28', '0.0028', '1', '2.002', '0.0000000143', '0']
-  const drifted = typed.filter((text) => {
-    const stored = storedText(USD, text)
-    return stored === null || textOf(USD, stored) !== text
-  })
-  check('美元面敲进去的数看一眼还是它(极小价也不会被换算成 ¥0)', drifted.length === 0, drifted)
+  // 悬停那一眼:美元通道报人民币(那是**计入金额**的数,等号),人民币通道报美元(只是给你读,约等号)。
+  // 没有汇率 / 原文不是数 → 什么也不报,绝不按 1 算。
+  check('提示里的另一种货币:美元→人民币是等号,人民币→美元是约等号,换不出来就不报',
+    counterpartOf(USD, '0.15') === '= ¥1.0725/百万词元'
+    && counterpartOf(CNY, '1.005') === '≈ $0.140559/百万词元'
+    && counterpartOf(NO_RATE, '0.15') === null && counterpartOf(USD, 'abc') === null
+    && unitOf(USD) === '$/百万词元' && unitOf(CNY) === '¥/百万词元')
 
-  // 汇率是全表共用的一份数据,住在价文件里:有 / 无两种播种都要对,且它只算一处脏——
-  // 「只改了汇率」要让状态栏说得出「待保存…」,而 `7.150` 与 `7.15` 写出去的是同一个数。
+  // 切换报价币种换算**已有的**数:人民币金额(6 位小数内)不变,而且换得回来。
+  check('切换报价币种换算已有的数,来回一趟回到原值;换不出来(没汇率)就不动',
+    convertText(USD, '0.15', 'CNY') === '1.0725' && convertText(CNY, '1.0725', 'USD') === '0.15'
+    && convertText(USD, '', 'CNY') === '' && convertText(USD, 'abc', 'CNY') === null
+    && convertText(NO_RATE, '0.15', 'CNY') === null
+    && convertText(USD, '0.15', 'USD') === '0.15')
+
+  // 计价那一步:美元通道乘汇率进人民币表,人民币通道原样;**没有汇率就丢掉美元通道**
+  // (读作价格未知),绝不把美元数当人民币——那会差一个数量级,而账本会当真金白银算。
+  const table: PricingTable = {
+    'usd-route': { m: [{ from: 0, rates: { inputPerMillion: 0.15, outputPerMillion: 0.6, cacheReadPerMillion: 0.02 } }] },
+    'cny-route': { m: [{ from: 0, rates: { inputPerMillion: 1, outputPerMillion: 4 } }] },
+  }
+  const money = cnyTable(table, { 'usd-route': 'USD' }, { cnyPerUsd: 7.15 })
+  check('计价把美元通道乘汇率,人民币通道原样;段身份(生效时刻)不变',
+    Math.abs(money['usd-route']!.m[0]!.rates.inputPerMillion - 1.0725) < 1e-12
+    && money['usd-route']!.m[0]!.rates.cacheReadPerMillion === 0.02 * 7.15
+    && money['cny-route'] === table['cny-route']
+    && money['usd-route']!.m[0]!.from === 0
+    && cnyTable(table, {}, { cnyPerUsd: 7.15 }) === table)
+  check('没有汇率的美元通道按价格未知(丢掉),不按 1 算、也不当人民币',
+    cnyTable(table, { 'usd-route': 'USD' }, undefined)['usd-route'] === undefined
+    && cnyTable(table, { 'usd-route': 'USD' }, undefined)['cny-route'] !== undefined)
+
+  // 草稿这一侧:报价币种从视图播种,换币种算一处脏(价跟着换),只改汇率不弄脏任何一行。
   const view: PricingView = {
-    routes: [{ route: 'r', label: 'r', billing: 'metered', records: 0, models: [
-      { model: 'm', configured: true, records: 0, segments: [{ from: '2026-08-01', inputPerMillion: 2, outputPerMillion: 8 }] },
-    ] }],
+    routes: [
+      { route: 'usd-route', label: 'u', billing: 'subscription', currency: 'USD', records: 3, models: [
+        { model: 'm', configured: true, records: 3, segments: [{ from: '2026-08-01', inputPerMillion: 0.15, outputPerMillion: 0.6 }] },
+      ] },
+      { route: 'cny-route', label: 'c', billing: 'metered', currency: 'CNY', records: 0, models: [
+        { model: 'm', configured: true, records: 0, segments: [{ from: '2026-08-01', inputPerMillion: 2, outputPerMillion: 8 }] },
+      ] },
+    ],
     calendar: {}, calendarMissing: [], fx: { cnyPerUsd: 7.15 }, dataDir: 'x', updatedAt: 0,
   }
   const seeded = draftFromView(view)
   const baseline = baselinesOf(view)
-  check('汇率从视图播种;只改汇率算一处脏,播种的汇率与基线一致(切币种本身不是改动)',
-    seeded.fx === '7.15' && draftFromView({ ...view, fx: undefined }).fx === ''
-    && stagedChanges(seeded, baseline) === 0 && stagedChanges(withFx(seeded, '7.2'), baseline) === 1
+  const switched = withRouteCurrency(seeded, 'cny-route', 'USD', 7.15)
+  check('报价币种随视图播种;换币种算一处脏(整条通道的价一起换),只改汇率不弄脏任何一行',
+    seeded.routes.get('usd-route')?.currency === 'USD'
+    && seeded.routes.get('cny-route')?.models.get('m')?.segments[0]?.input === '2'
+    && stagedChanges(seeded, baseline) === 0
+    && stagedChanges(switched, baseline) === 2
+    && switched.routes.get('cny-route')?.models.get('m')?.segments[0]?.input === '0.27972'
+    && stagedChanges(withFx(seeded, '7.2'), baseline) === 1
     && stagedChanges(withFx(seeded, '7.150'), baseline) === 0
-    && fxSignature('7.150') === fxSignature('7.15') && fxValue('') === null && fxValue('0') === null)
+    && draftFromView({ ...view, fx: undefined }).fx === ''
+    && fxSignature('7.150') === fxSignature('7.15') && fxValue('') === null && fxValue('0') === null
+    && withRouteCurrency(seeded, 'cny-route', 'USD', null) === seeded)
 
-  // 汇率随保存 body 出去,并被宿主同一套解析接受;空着就是未设汇率(不是「按 1 算」)。
-  const rateBody = composePriceBody(seeded)
-  check('$fx 随保存 body 出去且被宿主接受:填了才有这个键,空着就是不写',
-    rateBody.ok && rateBody.body[PRICING_FX_KEY] !== undefined && parsePriceInput(rateBody.body).ok
-    && composePriceBody(withFx(seeded, '')).body[PRICING_FX_KEY] === undefined)
+  // wire:美元通道写进 `$currency`、人民币通道不写;汇率照旧。宿主同一套解析收下它。
+  const body = composePriceBody(seeded)
+  check('$currency 随保存 body 出去且被宿主接受:只写美元那几条,人民币不写',
+    body.ok && JSON.stringify(body.body[PRICING_CURRENCY_KEY]) === JSON.stringify({ 'usd-route': 'USD' })
+    && body.body[PRICING_FX_KEY] !== undefined && parsePriceInput(body.body).ok
+    && JSON.stringify(parsePriceInput(body.body).file.currency) === JSON.stringify({ 'usd-route': 'USD' }))
 
-  // 填了却写不出去的汇率必须挡住这一笔:让它过去就是把用户敲的数**悄悄丢掉**,
-  // 而状态栏还会说「已保存」（与四档价里那一格红着是同一条尺子）。
+  // 美元报价**必须有汇率**:清掉汇率那条路被挡住,而不是写下去之后金额整条读作未知。
+  const noRate = composePriceBody(withFx(seeded, ''))
+  const rateFreeState = withFx(withRouteCurrency(seeded, 'usd-route', 'CNY', 7.15), '')
+  check('有美元通道时清空汇率挡住整笔保存(理由指到汇率与那条通道)',
+    !noRate.ok && noRate.error.includes('汇率')
+    && composePriceBody(rateFreeState).ok
+    && composePriceBody(rateFreeState).body[PRICING_FX_KEY] === undefined)
+
+  // 填了却写不出去的汇率照旧挡住整笔(与四档价里那一格红着是同一条尺子)。
   const badRates = ['abc', '0', '-1'].filter((text) => {
-    const body = composePriceBody(withFx(seeded, text))
-    return body.ok || !body.error.includes('汇率')
+    const composed = composePriceBody(withFx(seeded, text))
+    return composed.ok || !composed.error.includes('汇率')
   })
-  check('填坏的汇率挡住整笔保存,空着不算坏', badRates.length === 0
-    && composePriceBody(withFx(seeded, '')).ok && composePriceBody(withFx(seeded, '  ')).ok)
+  check('填坏的汇率挡住整笔保存;没有美元通道时,空着 / 空白都不算坏', badRates.length === 0
+    && composePriceBody(withFx(rateFreeState, '  ')).ok
+    && composePriceBody(withFx(rateFreeState, '')).body[PRICING_FX_KEY] === undefined)
 
-  // 鬼影与悬停说明里的数跟着货币走:格子里是美元、旁边注解还报人民币是最容易漏的一处。
-  const segment = newSegment({ from: '2026-08-01', input: '2.002', output: '8', cacheRead: '' })
-  const shown = inheritedCell(segment, null, 'cacheRead', cny => textOf(USD, cny))
-  check('留空档的鬼影与说明一起换算(cache 档回落到输入价),人民币面照旧',
-    shown.value === '0.28' && shown.note?.includes('0.28') === true
-    && inheritedCell(segment, null, 'cacheRead').value === '2.002')
+  // 宿主侧的严格解析:坏 `$currency` 与「美元但没有汇率」各自以出错位置拒绝。
+  const usdOnly = { 'usd-route': { m: [{ from: '2026-08-01', inputPerMillion: 0.15, outputPerMillion: 0.6 }] } }
+  const malformed: [Record<string, unknown>, string][] = [
+    [{ [PRICING_CURRENCY_KEY]: 7.15 }, PRICING_CURRENCY_KEY],
+    [{ [PRICING_CURRENCY_KEY]: { r: 'EUR' } }, 'CNY'],
+    [{ [PRICING_CURRENCY_KEY]: { '': 'USD' } }, '空路由名'],
+    [{ [PRICING_CURRENCY_KEY]: { '$x': 'USD' } }, '不能以「$」开头'],
+  ]
+  check('宿主拒绝畸形 $currency(非对象 / 未知值 / 空路由名 / 键以 $ 开头)',
+    malformed.every(([extra, expect]) => {
+      const parsed = parsePriceInput({ ...usdOnly, ...extra })
+      return !parsed.ok && parsed.error.includes(expect)
+    })
+    && parsePriceInput({ ...usdOnly, [PRICING_CURRENCY_KEY]: { 'usd-route': 'USD' }, [PRICING_FX_KEY]: { cnyPerUsd: 7.15 } }).ok
+    && parsePriceInput({ ...usdOnly, [PRICING_CURRENCY_KEY]: { 'usd-route': 'CNY' } }).ok)
+  const noFx = parsePriceInput({ ...usdOnly, [PRICING_CURRENCY_KEY]: { 'usd-route': 'USD' } })
+  check('美元报价没有汇率 → 宿主拒绝整笔(而不是写进去让金额变成未知)',
+    !noFx.ok && noFx.error.includes('汇率'))
 
-  check('单位与换算原值进提示:美元面报 $/百万词元并附上 ¥ 原值',
-    unitOf(USD) === '$/百万词元' && unitOf(CNY_VIEW) === '¥/百万词元'
-    && originOf(USD, '2.002') === '= ¥2.002/百万词元' && originOf(CNY_VIEW, '2.002') === null)
+  // 读路径宽容:畸形的 `$currency` 只掉它自己,价照读(与 `$fx` 同一条尺子)。
+  const lenient = coercePriceFile({ [PRICING_CURRENCY_KEY]: { r: 'EUR', ok: 'USD' } }, quiet)
+  check('读路径宽容:坏币种只掉那条,合法的那条留着',
+    lenient.currency.ok === 'USD' && lenient.currency.r === undefined)
+
+  // 美元通道的数**原样**落盘、原样读回来:它不是人民币,写路径上也不该被换算。
+  const usdDir = await mkdtemp(join(tmpdir(), 'tokbook-fx-'))
+  try {
+    const body = composePriceBody(seeded)
+    if (!body.ok) throw new Error(`usd draft not composable: ${body.error}`)
+    const parsed = parsePriceInput(body.body)
+    if (!parsed.ok) throw new Error(`usd body rejected by host: ${parsed.error}`)
+    await writePriceFile(usdDir, parsed.file, quiet)
+    const back = await readPriceFile(usdDir, quiet)
+    const text = await readFile(join(usdDir, PRICING_FILE), 'utf8')
+    check('美元报价的价原样写在文件里($currency 只记美元那条),读回来还是那个数',
+      text.includes('"$currency"')
+      && back.currency['usd-route'] === 'USD' && back.currency['cny-route'] === undefined
+      && back.table['usd-route']?.m?.[0]?.rates.inputPerMillion === 0.15
+      && back.table['cny-route']?.m?.[0]?.rates.inputPerMillion === 2)
+  } finally {
+    await rm(usdDir, { recursive: true, force: true })
+  }
+
+  // 鬼影与说明里的数:留空的档报的是**同一种货币**下的沿用量,与格子同一单位。
+  const segment = newSegment({ from: '2026-08-01', input: '0.15', output: '0.6', cacheRead: '' })
+  const shown = inheritedCell(segment, null, 'cacheRead')
+  check('留空档的鬼影与说明用同一种货币(不换算),cache 档回落到输入价',
+    shown.value === '0.15' && shown.note?.includes('0.15') === true)
 }
 
 if (section('折叠自证有效:天级水位线看不见往日的追加')) {
