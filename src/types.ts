@@ -80,12 +80,21 @@ export interface UsageModelRow {
   totals: UsageTotals
 }
 
-/** 单个价格段的每百万 token 价格（¥）。cache 桶省略时回落到 input 价。 */
+/** 单个价格段的每百万 token 价格（人民币）。cache 桶省略时回落到 input 价。
+ *  文件里的数**永远**是人民币：美元只是价格表读写面的换算（见 {@link FxSetting}）。 */
 export interface ModelPricing {
   inputPerMillion: number
   outputPerMillion: number
   cacheReadPerMillion?: number
   cacheWritePerMillion?: number
+}
+
+/** 价文件的汇率（保留键 `$fx`）：1 美元值多少元，手填。**只服务价格表的读写面**——
+ *  它把人民币价换算成美元显示 / 把美元输入换算回人民币落盘，host 的计价路径不读它，
+ *  所以改汇率不动任何历史金额。缺席 = 未设汇率（美元面不可用）。 */
+export interface FxSetting {
+  /** 每 1 美元的人民币数；必须是正的有限数。 */
+  cnyPerUsd: number
 }
 
 /** 通道金额如何计：真实消费 vs 订阅价值。route 级事实（价表 `$billing`）；
@@ -120,7 +129,7 @@ export interface HolidayRange {
 }
 
 /** 价格段的例外时段：本地日的小时区间（`[start, end)`，`24` 关日），按星期
- * 集合生效，自带四档 ¥/M。生效时叠在段的基准价之上——省略的档沿用基准价。 */
+ * 集合生效，自带四档人民币/百万词元。生效时叠在段的基准价之上——省略的档沿用基准价。 */
 export interface PriceSlot {
   days: DaySet
   /** 覆盖的首小时，0–23。 */
@@ -255,6 +264,9 @@ export interface PricingView {
   calendar: PricingCalendarInput
   /** 账本覆盖到、但年历里没有的年份——`workdays` 在那几年会多算高峰。空 = 不用补。 */
   calendarMissing: string[]
+  /** 价文件的汇率（`$fx` 原样）。缺席 = 未设汇率，价格表只能按人民币读写（美元面停用）。
+   *  它**不参与**任何计价：文件里的价已一律是人民币。 */
+  fx?: FxSetting
   dataDir: string
   updatedAt: number
 }

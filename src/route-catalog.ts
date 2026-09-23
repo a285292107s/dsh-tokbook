@@ -2,8 +2,9 @@
  * 价格表 tab 的 route catalog：哪些 provider route 存在，各自当前可对哪些
  * model 计费。
  *
- * 真源是 settings 文档与活的适配器 registry 联合；两个源都不知道的（账本
- * 计过费的 route、只带手写价格的串）由 `readPricingView` 补入。
+ * 真源是 profile 里声明的配置（`ctx.settings.describe()` 给出的活动值）与活的
+ * 适配器 registry 联合；两个源都不知道的（账本计过费的 route、只带手写价格的
+ * 串）由 `readPricingView` 补入。
  */
 
 import type { ModelEntry, RouteCatalogEntry } from './types.ts'
@@ -14,6 +15,7 @@ export const DEEPSEEK_ROUTE = 'deepseek-official'
 const PI_AI_NS = 'llm-pi-ai'
 const DEEPSEEK_NS = 'llm-deepseek'
 
+/** 按命名空间取活动配置值；由 host 的 `settings.describe()` 装配（见 index）。 */
 export interface SettingsLike {
   get(ns: string): unknown
 }

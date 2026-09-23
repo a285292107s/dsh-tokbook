@@ -31,9 +31,9 @@ export interface SyncProgressTick {
 
 /**
  * 同步读到的会话列表项：不可变 header，外加（后端有则）廉价变更 token
- * （revision 相等 = 日志未变）。`revision` 可选——`listSnapshots()` 提供，
- * 裸 `list()` 回落没有（届时每个会话都算 stale）。header 的 `cwd` 一并
- * 带上，概览的按工作区一节用它 join 账本。
+ * （revision 相等 = 日志未变）。`revision` 可选——当前 `list()` 与旧的
+ * `listSnapshots()` 都给，更早的裸 header 列表没有（届时每个会话都算 stale）。
+ * header 的 `cwd` 一并带上，概览的按工作区一节用它 join 账本。
  */
 export interface PersistenceSnapshotLike {
   header: { id: string; cwd?: string }
@@ -42,14 +42,43 @@ export interface PersistenceSnapshotLike {
 
 /**
  * 同步所需的持久化面（为测试鸭子类型），对齐当前 DSH `SessionPersistence`
- * 服务：会话经 `listSnapshots()` 列出（每个已物化会话一个 header + opaque
- * revision；裸 header 的 `list()` 可作回落），经 `inspect(id)` 读该会话的
- * 校验后逻辑事件日志（`{ meta, events }`）。不透传取消选项。
+ * 服务：会话经 `list()` 列出（每会话一个 header + opaque revision），经
+ * `open(id, 'read')` 取该会话校验后的逻辑事件日志。两个更早的形状仍接受——
+ * `listSnapshots()`（列表的旧名）与 `inspect()`（一次返回整份日志的旧读法），
+ * 使本包在新旧宿主上读的是同一份数据。不透传取消选项。
  */
 export interface SyncPersistence {
-  listSnapshots?(): Promise<readonly PersistenceSnapshotLike[]>
-  list?(): Promise<readonly { id: string }[]>
-  inspect(id: string): Promise<{ meta: { id: string }; events: readonly SessionEventLike[] }>
+  /** 列全部已物化会话：当前形状 `{ header, revision }`，更早的后端回裸 header。 */
+  list?(): Promise<readonly unknown[]>
+  /** `list()` 的旧名（0.1.7 前的持久化面）。 */
+  listSnapshots?(): Promise<readonly unknown[]>
+  /** 旧读法：一次返回校验后的整份逻辑日志。 */
+  inspect?(id: string): Promise<{ meta: { id: string }; events: readonly SessionEventLike[] }>
+  /** 当前读法：开只读句柄。`read` 不取写所有权，故与在写的宿主并行安全。 */
+  open?(id: string, access: 'read'): Promise<SessionHandleLike>
+}
+
+/** 只读句柄上本模块用到的部分：`read()` 默认给到日志末尾。 */
+export interface SessionHandleLike {
+  read(offset?: number, length?: number): Promise<{ events: readonly SessionEventLike[] }>
+  close?(): Promise<void>
+}
+
+/** 读一份会话的逻辑事件日志：优先旧的 `inspect()`，否则开只读句柄读到底再关。
+ *  两者都缺席时抛错——该会话只计一次失败，不中止整轮 walk。 */
+async function readSessionEvents(persistence: SyncPersistence, id: string): Promise<readonly SessionEventLike[]> {
+  if (typeof persistence.inspect === 'function') {
+    return (await persistence.inspect(id)).events
+  }
+  if (typeof persistence.open !== 'function') {
+    throw new Error('sessionPersistence exposes neither inspect() nor open()')
+  }
+  const handle = await persistence.open(id, 'read')
+  try {
+    return (await handle.read()).events
+  } finally {
+    await handle.close?.()
+  }
 }
 
 /** 把一条原始列表项纠错成 snapshot；不带 id 则答 null。同时接受裸
@@ -70,26 +99,26 @@ function normalizeSnapshot(value: unknown): PersistenceSnapshotLike | null {
   }
 }
 
-/** 列出全部已物化会话为规范化 snapshot。优先 `listSnapshots()`
- *  （廉价变更 token）；回落到裸 header 的 `list()`，届时每个会话默认 stale
- *  （无 revision 可比）。 */
+/** 列出全部已物化会话为规范化 snapshot。当前面用 `list()`——它回 `{header,
+ *  revision}` 快照，更早的后端回裸 header（归一化两种都吃）；旧名 `listSnapshots()`
+ *  作为回落。没有 revision 的条目默认 stale。 */
 export async function listPersistenceSnapshots(
   persistence: SyncPersistence,
   logger: { error(...args: unknown[]): void } = console,
 ): Promise<readonly PersistenceSnapshotLike[]> {
-  if (typeof persistence.listSnapshots === 'function') {
+  if (typeof persistence.list === 'function') {
     try {
-      return (await persistence.listSnapshots())
+      return (await persistence.list())
         .map(normalizeSnapshot)
         .filter((snap): snap is PersistenceSnapshotLike => snap !== null)
     } catch (error) {
-      logger.error('[tokbook] listSnapshots failed, falling back to list():', error)
+      logger.error('[tokbook] list() failed, falling back to listSnapshots():', error)
     }
   }
-  if (typeof persistence.list !== 'function') {
-    throw new Error('sessionPersistence exposes neither listSnapshots() nor list()')
+  if (typeof persistence.listSnapshots !== 'function') {
+    throw new Error('sessionPersistence exposes neither list() nor listSnapshots()')
   }
-  return (await persistence.list())
+  return (await persistence.listSnapshots())
     .map(normalizeSnapshot)
     .filter((snap): snap is PersistenceSnapshotLike => snap !== null)
 }
@@ -143,10 +172,9 @@ export async function syncHistory(
     // 整轮 walk：跳过该会话、报出，让其余历史落盘。
     let events: readonly SessionEventLike[]
     try {
-      // `inspect` 返回校验过的 header 与该会话的逻辑事件日志；进行中会话
+      // 当前持久化面按句柄读：`read()` 返回校验过的逻辑事件日志；进行中会话
       // 的未关 turn 可能出现在日志中部，在此无害——只有计费调用事件投影行。
-      const inspection = await deps.persistence.inspect(id)
-      events = inspection.events
+      events = await readSessionEvents(deps.persistence, id)
     } catch (error) {
       failedSessions += 1
       processed += 1

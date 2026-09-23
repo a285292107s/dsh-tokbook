@@ -23,6 +23,12 @@ export const PRICING_BILLING_KEY = '$billing'
 /** 价文件另一个保留顶层键：`YYYY` → 放假日区间数组（法定节假日年历）。 */
 export const PRICING_CALENDAR_KEY = '$calendar'
 
+/** 价文件的第三个保留顶层键：`{ cnyPerUsd }`——1 美元值多少元。**它只服务价格表的
+ *  读写面**：文件里的价永远是人民币/百万词元，host 的计价路径（`pricing.ts` 的
+ *  `priceAt` / `costOf`、`stats.ts` 的折叠）从不读它，所以改汇率不动任何历史金额。
+ *  手填（不联网）、缺席 = 未设汇率（美元面不可用）。 */
+export const PRICING_FX_KEY = '$fx'
+
 /** 通道路由名与模型串的长度上限（写路径拒绝超长，读路径不设限）。放在共享词表里，
  *  草稿才能在自己这一侧就报出「写不进去」的原因，而不是把整份文件交给 host 拒掉。 */
 export const MAX_ROUTE_LENGTH = 128
@@ -178,11 +184,6 @@ export function yearOfDate(date: string): string | null {
 /** 年份 `YYYY` 是否合法（四位数字）。 */
 export function isYearKey(year: string): boolean {
   return /^\d{4}$/u.test(year)
-}
-
-/** 一段放假日区间的读法：`02-15 ~ 02-23`。 */
-export function holidayRangeLabel(range: HolidayRange): string {
-  return `${range.start.slice(5)} ~ ${range.end.slice(5)}`
 }
 
 /** 时段小时区间在各界面上的打印形式：`09:00–12:00`。 */

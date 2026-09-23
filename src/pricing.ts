@@ -2,8 +2,9 @@
  * 手工价表：provider route key → 精确 model 串 → 该 pair 的价格时间轴。
  *
  * 记录按「已到达的最新生效时刻」的段计价，再按该段在记录本地时间生效的时段计
- * （无时段 = 基准价），因此改价 / 改时段只重算历史，从不重建聚合。唯一保留键
- * `$billing`：route → 计费性质（metered = 真实消费，subscription = 订阅价值）。
+ * （无时段 = 基准价），因此改价 / 改时段只重算历史，从不重建聚合。三个保留键：
+ * `$billing`（route → 计费性质：metered = 真实消费，subscription = 订阅价值）、
+ * `$calendar`（法定节假日年历）、`$fx`（价格表读写面的汇率——**不参与计价**）。
  *
  * 读宽松（畸形段/时段丢弃，不致命）；写严格且整文件替换，坏 PUT 不会半落地。
  * 时间轴规则经 `./price-format.ts` 与 browser 半区共享。
@@ -13,11 +14,12 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   DAY_SETS, EARLIEST, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
+  PRICING_FX_KEY,
   dayIndex, dayKeyOfIndex, holidayDates, instantKey, instantMs, isHourRange, isValidHolidayRange, isYearKey,
   slotCovers, slotsOverlap, yearOfDate,
 } from './price-format.ts'
 import type {
-  BillingMap, BillingNature, HolidayCalendar, HolidayRange, ModelPricing, PriceSegment, PriceSlot,
+  BillingMap, BillingNature, FxSetting, HolidayCalendar, HolidayRange, ModelPricing, PriceSegment, PriceSlot,
   PricingSegmentInput, PricingSlotInput, PricingTable, RateKey, SlotRef, UsageTotals,
 } from './types.ts'
 import { UNPRICED_KEY } from './types.ts'
@@ -25,7 +27,7 @@ import { UNPRICED_KEY } from './types.ts'
 export const PRICING_FILE = 'pricing.json'
 
 export {
-  DAY_SETS, EARLIEST, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
+  DAY_SETS, EARLIEST, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_FX_KEY,
   dayKeyOf, dayStartMs, instantKey, instantMs,
 } from './price-format.ts'
 
@@ -33,13 +35,15 @@ interface Logger {
   error(...args: unknown[]): void
 }
 
-/** 整个价文件：(route, model) 时间轴 + billing 映射 + 法定节假日年历。`revision`
+/** 整个价文件：(route, model) 时间轴 + billing 映射 + 法定节假日年历 + 汇率。`revision`
  *  是内容签名——派生 rollup 记下其 rate 行所折叠的 revision，不同则重建。 */
 export interface PriceFile {
   table: PricingTable
   billing: BillingMap
   /** 法定节假日年历（`$calendar`）；空 = 未收录任何一年。 */
   calendar: HolidayCalendar
+  /** 价格表读写面的汇率（`$fx`）；缺席 = 未设汇率。计价路径从不读它。 */
+  fx?: FxSetting
   revision: string
 }
 
@@ -203,6 +207,14 @@ function mergeHolidayDates(dates: readonly string[]): HolidayRange[] {
   return ranges
 }
 
+/** 读路径的汇率：非对象、缺 `cnyPerUsd`、非正有限数一律丢弃（不致命）——与其余宽松
+ *  读法一致，一个手写坏的数不该让整张价表读不出来。 */
+function coerceFx(raw: unknown): FxSetting | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const value = (raw as Record<string, unknown>).cnyPerUsd
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? { cnyPerUsd: value } : undefined
+}
+
 /** 宽松解析整个文件：畸形 route / model / 段丢弃（不致命），与账本读自身分日
  *  文件一致。 */
 export function coercePriceFile(value: unknown, logger: Logger = console): PriceFile {
@@ -214,6 +226,7 @@ export function coercePriceFile(value: unknown, logger: Logger = console): Price
   const table: PricingTable = {}
   const billing: BillingMap = {}
   const calendar = coerceCalendar(raw[PRICING_CALENDAR_KEY])
+  const fx = coerceFx(raw[PRICING_FX_KEY])
   const rawBilling = raw[PRICING_BILLING_KEY]
   if (typeof rawBilling === 'object' && rawBilling !== null && !Array.isArray(rawBilling)) {
     for (const [route, nature] of Object.entries(rawBilling as Record<string, unknown>)) {
@@ -234,7 +247,7 @@ export function coercePriceFile(value: unknown, logger: Logger = console): Price
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
-  return { table, billing, calendar, revision: '' }
+  return { table, billing, calendar, ...(fx !== undefined ? { fx } : {}), revision: '' }
 }
 
 /** 读一个数据目录的价文件。缺失 / 畸形读作空表（无人定价）。revision 是文件
@@ -381,6 +394,22 @@ function parseCalendar(value: unknown): { ok: true; calendar: HolidayCalendar } 
   return { ok: true, calendar }
 }
 
+/** 严格解析 `$fx`：`{ cnyPerUsd: 正有限数 }`。`{}`（或省掉 `cnyPerUsd`）= 未设汇率，合法
+ *  ——那是「不用美元面」，不是错误。0 / 负数 / 非数一律拒：0 会让换算除零。 */
+function parseFx(value: unknown): { ok: true; fx?: FxSetting } | { ok: false; error: string } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: `${PRICING_FX_KEY} 必须是对象（{ cnyPerUsd: 1 美元等于多少元 }）` }
+  }
+  const raw = value as Record<string, unknown>
+  const extra = Object.keys(raw).find(key => key !== 'cnyPerUsd')
+  if (extra !== undefined) return { ok: false, error: `${PRICING_FX_KEY} 含未知字段「${extra}」` }
+  if (raw.cnyPerUsd === undefined) return { ok: true }
+  if (typeof raw.cnyPerUsd !== 'number' || !Number.isFinite(raw.cnyPerUsd) || raw.cnyPerUsd <= 0) {
+    return { ok: false, error: `${PRICING_FX_KEY} 的 cnyPerUsd 必须是大于 0 的数字（1 美元等于多少元）` }
+  }
+  return { ok: true, fx: { cnyPerUsd: raw.cnyPerUsd } }
+}
+
 /** 严格解析完整目标文件：任何偏差都以出错位置拒绝，坏 body 绝不半落地。 */
 export function parsePriceInput(value: unknown): PriceParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -390,6 +419,7 @@ export function parsePriceInput(value: unknown): PriceParse {
   const table: PricingTable = {}
   const billing: BillingMap = {}
   let calendar: HolidayCalendar = {}
+  let fx: FxSetting | undefined
   for (const [route, models] of Object.entries(raw)) {
     if (route.startsWith('$')) {
       if (route === PRICING_CALENDAR_KEY) {
@@ -398,8 +428,17 @@ export function parsePriceInput(value: unknown): PriceParse {
         calendar = parsed.calendar
         continue
       }
+      if (route === PRICING_FX_KEY) {
+        const parsed = parseFx(models)
+        if (!parsed.ok) return { ok: false, error: parsed.error }
+        fx = parsed.fx
+        continue
+      }
       if (route !== PRICING_BILLING_KEY) {
-        return { ok: false, error: `未知保留键「${route}」（只支持 ${PRICING_BILLING_KEY} / ${PRICING_CALENDAR_KEY}）` }
+        return {
+          ok: false,
+          error: `未知保留键「${route}」（只支持 ${PRICING_BILLING_KEY} / ${PRICING_CALENDAR_KEY} / ${PRICING_FX_KEY}）`,
+        }
       }
       if (typeof models !== 'object' || models === null || Array.isArray(models)) {
         return { ok: false, error: `${PRICING_BILLING_KEY} 必须是对象（路由 → "metered" | "subscription"）` }
@@ -440,7 +479,7 @@ export function parsePriceInput(value: unknown): PriceParse {
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
-  return { ok: true, file: { table, billing, calendar, revision: '' } }
+  return { ok: true, file: { table, billing, calendar, ...(fx !== undefined ? { fx } : {}), revision: '' } }
 }
 
 /** 一段价的一个例外时段在文件中的形态。 */
@@ -478,6 +517,9 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
     }
     body[PRICING_CALENDAR_KEY] = calendar
   }
+  // 汇率与年历、计费性质同处保留键前缀之下，写在 route 之前（与 client 的 writer 同一顺序）。
+  // 它就是那一个数：文件被改回未设汇率时这个键整个消失。
+  if (file.fx !== undefined) body[PRICING_FX_KEY] = { cnyPerUsd: file.fx.cnyPerUsd }
   for (const route of Object.keys(file.table).sort((left, right) => left.localeCompare(right))) {
     const models = file.table[route]!
     const priced: Record<string, unknown[]> = {}

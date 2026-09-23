@@ -45,7 +45,7 @@ refile 这类读代码读不出结论的路径)——这套工具就是为它存
 
 - 源码唯一真源在 `src/`(host `src/*.ts`,browser `src/client/*.tsx`);`lib/` 是 gitignore 的
   构建产物——改 `src/` 再 `pnpm build`,不要手改或提交 `lib/`。布局见 README。
-- host 改动经 profile 的 `cordis-plugin-hmr` 行热替换,browser 改动刷新页面生效;确切保证见
-  README(Dev / HMR)与 `docs/HMR.md`。
+- host 改动经 profile 的 `dsh-hmr` 行热替换,browser 改动刷新页面生效(`hmr` 行只按 id 覆写、
+  不写 `name:`;确切保证见 README(Dev / HMR)与 `docs/HMR.md`)。
 - 「别养巨型单文件」:单一职责文件 ~400 行就该审视拆不拆(600+ 行且混多类关注点必须拆),但
   **拆分是独立一轮**——碰到大文件先修眼前的问题。

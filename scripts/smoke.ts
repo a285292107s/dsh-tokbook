@@ -16,16 +16,24 @@ import {
 import { pathKey, workspaceRows } from '../src/workspaces.ts'
 import {
   billingOf, coercePriceFile, costOf, dayKeyOf, dayStartMs, instantKey, instantMs,
-  parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_FILE, rateKeyAt, ratesAt,
+  parsePriceInput, priceAt, priceOfKey, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_FILE, PRICING_FX_KEY,
+  rateKeyAt, ratesAt,
   readPriceFile, slotAt, writePriceFile,
 } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import {
-  baselinesOf, composePriceBody, draftFromView, duplicateSlot, effectiveSegments, isBlankSlot,
-  isUnpriced, modelDirty, newSegment, newSlot, priceUnknown, ratesInForce, rowIssue, slotRange,
-  withCalendar, withSegmentFrom, withSlotEnd, withSlotStart,
-  type CalendarEntries, type ModelDraft, type PriceDraft, type PriceState, type SegmentDraft,
+  baselinesOf, calendarYearTally, composePriceBody, defaultCalendarYear, draftFromView, duplicateSlot,
+  effectiveSegments, fxSignature, fxValue, inheritedCell, isBlankSlot, isUnpriced, modelDirty, modelSignature,
+  newHoliday, newSegment, newSlot, priceUnknown,
+  ratesInForce, readHolidays, rowIssue, slotRange, stagedChanges, withCalendar, withFx, withSegmentFrom,
+  withSlotEnd, withSlotStart,
+  type CalendarEntries, type CalendarHolidayDraft, type ModelDraft, type PriceDraft, type PriceState,
+  type SegmentDraft,
 } from '../src/client/pricing/draft.ts'
+import {
+  CNY_VIEW, isUsd, originOf, storedText, textOf, unitOf,
+  type MoneyView,
+} from '../src/client/pricing/currency.ts'
 import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, holidaySet, hourStartMs, slotsOverlap } from '../src/price-format.ts'
 import { axisNodes, labelWidth, placeNodes } from '../src/client/pricing/axis.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-catalog.ts'
@@ -89,6 +97,7 @@ const draftOfRow = (row: ModelDraft, ids: { route?: string; model?: string; bill
     }]]),
     calendar: new Map(),
     holidays: new Set(),
+    fx: '',
   }
 }
 
@@ -139,6 +148,7 @@ if (section('聚合:totals / byDay / byModel')) {
 if (section('手写价表:日期 / 价段 / 取价')) {
   const file = parsePriceInput({
     [PRICING_BILLING_KEY]: { 'opencode-go': 'subscription' },
+    [PRICING_FX_KEY]: { cnyPerUsd: 7.15 },
     'deepseek-official': {
       'deepseek-v4-flash': [
         { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
@@ -164,6 +174,10 @@ if (section('手写价表:日期 / 价段 / 取价')) {
   check('费率行身份 = 该价段的 from;没价 = 哨兵(-1)',
     rateKeyAt(table, 'deepseek-official', 'deepseek-v4-flash', after)?.from === dayStartMs('2026-09-01')
     && rateKeyAt(table, 'deepseek-official', 'never-priced', after).from === -1)
+  // 汇率是价文件里第三个保留键，但它与计价无关：解析出来只是给价格表的读写面用。
+  const noFx = parsePriceInput({ r: {} })
+  check('$fx 是保留键、只服务读写面:解析得出汇率,省略 = 未设汇率',
+    file.file.fx?.cnyPerUsd === 7.15 && noFx.ok && noFx.file.fx === undefined)
 
   // 金额只存身份、读取时回查当前表 → 一次改价重算全部历史(不改账本行)。
   const edited: PricingTable = { 'deepseek-official': { 'deepseek-v4-flash': [
@@ -186,6 +200,9 @@ if (section('手写价表:日期 / 价段 / 取价')) {
     ['两个都会生效的时段', { r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'daily', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }, { days: 'weekdays', start: 11, end: 13, inputPerMillion: 2, outputPerMillion: 4 }] }] } }, '重叠'],
     ['未知的星期几', { r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2, slots: [{ days: 'mondays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 4 }] }] } }, 'days'],
     ['非整点的生效时刻(轴是整点的)', { r: { m: [{ from: '2026-09-10T12:30', inputPerMillion: 1, outputPerMillion: 2 }] } }, '整点'],
+    ['$fx 不是对象', { [PRICING_FX_KEY]: 7.15, r: {} }, PRICING_FX_KEY],
+    ['$fx 的 cnyPerUsd 不是数', { [PRICING_FX_KEY]: { cnyPerUsd: '7.15' }, r: {} }, 'cnyPerUsd'],
+    ['$fx 为 0(换算会除零)', { [PRICING_FX_KEY]: { cnyPerUsd: 0 }, r: {} }, '大于 0'],
   ]
   const accepted = refuses.filter(([, body, expected]) => {
     const out = parsePriceInput(body)
@@ -195,16 +212,21 @@ if (section('手写价表:日期 / 价段 / 取价')) {
   const lenient = coercePriceFile({ r: { good: [{ inputPerMillion: 1, outputPerMillion: 2 }], bad: [{ inputPerMillion: 'x' }] } }, quiet)
   check('读路径宽容:畸形的 (路由, 模型) 只降级它自己,整份文件仍读得出',
     lenient.table.r?.good?.length === 1 && lenient.table.r?.bad === undefined && Object.keys(coercePriceFile('nope', quiet).table).length === 0)
+  // 手写坏了的汇率同样只掉它自己：它不是价,一个数写错不该让整张价表读不出来。
+  const lenientFx = coercePriceFile({ [PRICING_FX_KEY]: { cnyPerUsd: -1 }, r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2 }] } }, quiet)
+  check('读路径宽容:畸形的 $fx 只掉它自己(读作未设汇率),价照读',
+    lenientFx.fx === undefined && lenientFx.table.r?.m?.length === 1)
 
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-price-'))
   try {
     await writePriceFile(dir, file.file, quiet)
     const back = await readPriceFile(dir, quiet)
     const text = await readFile(join(dir, PRICING_FILE), 'utf8')
-    check('价格文件是能手改的 JSON,读写往返不丢(含可选 cache 档与 $billing)',
-      text.includes('"$billing"') && text.includes('"2026-09-01"')
+    check('价格文件是能手改的 JSON,读写往返不丢(含可选 cache 档、$billing 与 $fx)',
+      text.includes('"$billing"') && text.includes('"2026-09-01"') && text.includes('"$fx"')
       && back.table['deepseek-official']?.['deepseek-v4-flash']?.length === 2 && billingOf(back.billing, 'opencode-go') === 'subscription'
-      && back.table['deepseek-official']?.['deepseek-v4-flash']?.[0]?.rates.cacheReadPerMillion === 0.15)
+      && back.table['deepseek-official']?.['deepseek-v4-flash']?.[0]?.rates.cacheReadPerMillion === 0.15
+      && back.fx?.cnyPerUsd === 7.15)
 
     // 价格表 tab 的卡片 = 路由目录 ∪ 账本 ∪ 价格文件。
     const view = await readPricingView(
@@ -440,12 +462,14 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
     await rm(calDir, { recursive: true, force: true })
   }
 
-  // 草稿侧同一条规则:年历改一个字,行内「此刻的价」当场跟着走;草稿产出的
+  // 草稿侧同一条规则:年历改一段假期,行内「此刻的价」当场跟着走;草稿产出的
   // 年历也必须被宿主接受(client ⊆ host)。
-  const entry: CalendarEntries = new Map([['2026', { year: '2026', text: '2026-10-01 ~ 2026-10-07' }]])
-  const withYear = withCalendar(draftOfRow(modelRow([
+  const draft = draftOfRow(modelRow([
     { ...newSegment({ from: '2026-01-01', input: '1', output: '2' }), slots: [newSlot({ days: 'workdays', start: '9', end: '12', input: '2' })] },
-  ])), entry)
+  ]))
+  const yearOf = (...holidays: CalendarHolidayDraft[]): CalendarEntries =>
+    new Map([['2026', { year: '2026', holidays }]])
+  const withYear = withCalendar(draft, yearOf(newHoliday({ start: '2026-10-01', end: '2026-10-07' })))
   const nationalDay = dayMillis('2026-10-01', 10)
   check('草稿里的年历参与此刻取价:放假日按基准价,平日按高峰价',
     ratesInForce(withYear.routes.get('r')!.models.get('m')!, withYear.holidays, nationalDay)?.slot === null
@@ -455,9 +479,57 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
   check('草稿写出的年历被宿主接受,且落成同一份年历',
     accepted.ok && accepted.file.calendar['2026']?.[0]?.start === '2026-10-01'
     && new Set(Object.keys(accepted.file.calendar)).size === 1)
-  check('年历文本里的畸形写法在草稿这一侧就报出位置',
-    composePriceBody(withCalendar(withYear, new Map([['2026', { year: '2026', text: '10月1日' }]]))).ok === false
-    && composePriceBody(withCalendar(withYear, new Map([['2026', { year: '2026', text: '2027-10-01' }]]))).ok === false)
+
+  // 填完了却错的三条：跨年、起晚于止、两段重叠。它们在草稿这一侧就拒（并说出是第几段）。
+  check('年历里填完却错的段在草稿这一侧就被拒:跨年 / 起晚于止 / 两段重叠',
+    composePriceBody(withCalendar(draft, yearOf(newHoliday({ start: '2026-12-30', end: '2027-01-02' })))).ok === false
+    && composePriceBody(withCalendar(draft, yearOf(newHoliday({ start: '2026-10-07', end: '2026-10-01' })))).ok === false
+    && composePriceBody(withCalendar(draft, yearOf(
+      newHoliday({ start: '2026-10-01', end: '2026-10-03' }),
+      newHoliday({ start: '2026-10-03', end: '2026-10-05' }),
+    ))).ok === false)
+
+  // 还没写完的（整组没填 / 只填了一头）是占位：不落盘，也不把同一份文件里的价冻住——
+  // 年历与价共用一个文件，为一行占位拒掉整笔写入就是拿错的代价去罚没错的东西。
+  const placeholder = composePriceBody(withCalendar(draft, new Map([
+    ['2026', { year: '2026', holidays: [
+      newHoliday({ start: '2026-10-01', end: '2026-10-07' }),
+      newHoliday({ start: '2027-01-01' }),
+    ] }],
+    ['2027', { year: '2027', holidays: [newHoliday()] }],
+  ])))
+  check('还没填完的段与整组没填的年不写进文件,也不挡住同一份文件里的价',
+    placeholder.ok
+    && Object.keys((placeholder.body[PRICING_CALENDAR_KEY] ?? {}) as Record<string, unknown>).join() === '2026'
+    && parsePriceInput(placeholder.body).ok)
+
+  // 每段的天数含两端，是拿来对通知里「每条假期共 N 天」的那个数；一年的总数就是各段之和
+  // （重叠已经算错，所以不必再去重）。只填一头是「还没写完」，整组没填是「还没写」。
+  const rows = [
+    newHoliday({ start: '2026-02-15', end: '2026-02-23' }),
+    newHoliday({ start: '2026-10-01', end: '2026-10-08' }),
+    newHoliday({ start: '2026-05-01' }),
+    newHoliday(),
+  ]
+  const reads = readHolidays('2026', rows)
+  const tally = calendarYearTally('2026', rows)
+  check('每段天数含两端;只填一头读作「还没写完」,整组没填读作「还没写」',
+    reads[0]!.kind === 'ok' && reads[0]!.days === 9
+    && reads[1]!.kind === 'ok' && reads[1]!.days === 8
+    && reads[2]!.kind === 'partial' && reads[3]!.kind === 'empty'
+    && tally.ranges === 2 && tally.days === 17)
+
+  // 不填年份时加哪一年：一年都没填过日期 → 今年（先把眼下这一年记上）；填过 → 下一年
+  // （安排提前一年公布）；下一年的安排早记好了 → 再往后找一个空位（不填也得点得动）。
+  const today = new Date(2026, 8, 23)
+  const blank = (year: string): CalendarEntries => new Map([[year, { year, holidays: [newHoliday()] }]])
+  const filled = (year: string, start: string, end: string): CalendarEntries =>
+    new Map([[year, { year, holidays: [newHoliday({ start, end })] }]])
+  check('不填年份时加哪一年:没填过 → 今年,填过 → 下一年,下一年的安排早记好了就再往后',
+    defaultCalendarYear(new Map(), today) === '2026'
+    && defaultCalendarYear(blank('2025'), today) === '2026'
+    && defaultCalendarYear(filled('2026', '2026-10-01', '2026-10-07'), today) === '2027'
+    && defaultCalendarYear(filled('2027', '2027-01-01', '2027-01-03'), today) === '2028')
 }
 
 
@@ -669,6 +741,70 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
     && composePriceBody(draftOf('r', 'm', rowWith('abc').segments)).ok === false)
 }
 
+if (section('价格表币种:换算只改读写面,不改落盘内容')) {
+  const USD: MoneyView = { currency: 'USD', cnyPerUsd: 7.15 }
+
+  // 两个方向是同一件事:文件里存人民币,美元只是它除以汇率的样子。人民币面两个函数都恒等,
+  // 所以「没设汇率 / 没切过去」时这一屏的行为与引入币种之前逐字一致。
+  check('换算:美元面按汇率读写,人民币面恒等(含空串与换算不出来的原文)',
+    storedText(USD, '0.28') === '2.002' && textOf(USD, '2.002') === '0.28'
+    && textOf(USD, '0.02') === '0.002797' && storedText(USD, '0') === '0'
+    && storedText(USD, '') === '' && storedText(USD, 'abc') === null && textOf(USD, 'abc') === 'abc'
+    && textOf(CNY_VIEW, '2.002') === '2.002' && storedText(CNY_VIEW, 'abc') === 'abc'
+    && isUsd(USD) && !isUsd({ currency: 'USD', cnyPerUsd: null }) && !isUsd(CNY_VIEW))
+
+  // 敲进去一个美元价、看一眼还是那个数:这正是「逐键换算却不跟光标抢」（`RateCell` 的输入缓冲）
+  // 成立的前提。一行 = 一个用例;极小价那一行同时挡住「美元价被换算成 ¥0 = 免费」。
+  const typed = ['0.28', '0.0028', '1', '2.002', '0.0000000143', '0']
+  const drifted = typed.filter((text) => {
+    const stored = storedText(USD, text)
+    return stored === null || textOf(USD, stored) !== text
+  })
+  check('美元面敲进去的数看一眼还是它(极小价也不会被换算成 ¥0)', drifted.length === 0, drifted)
+
+  // 汇率是全表共用的一份数据,住在价文件里:有 / 无两种播种都要对,且它只算一处脏——
+  // 「只改了汇率」要让状态栏说得出「待保存…」,而 `7.150` 与 `7.15` 写出去的是同一个数。
+  const view: PricingView = {
+    routes: [{ route: 'r', label: 'r', billing: 'metered', records: 0, models: [
+      { model: 'm', configured: true, records: 0, segments: [{ from: '2026-08-01', inputPerMillion: 2, outputPerMillion: 8 }] },
+    ] }],
+    calendar: {}, calendarMissing: [], fx: { cnyPerUsd: 7.15 }, dataDir: 'x', updatedAt: 0,
+  }
+  const seeded = draftFromView(view)
+  const baseline = baselinesOf(view)
+  check('汇率从视图播种;只改汇率算一处脏,播种的汇率与基线一致(切币种本身不是改动)',
+    seeded.fx === '7.15' && draftFromView({ ...view, fx: undefined }).fx === ''
+    && stagedChanges(seeded, baseline) === 0 && stagedChanges(withFx(seeded, '7.2'), baseline) === 1
+    && stagedChanges(withFx(seeded, '7.150'), baseline) === 0
+    && fxSignature('7.150') === fxSignature('7.15') && fxValue('') === null && fxValue('0') === null)
+
+  // 汇率随保存 body 出去,并被宿主同一套解析接受;空着就是未设汇率(不是「按 1 算」)。
+  const rateBody = composePriceBody(seeded)
+  check('$fx 随保存 body 出去且被宿主接受:填了才有这个键,空着就是不写',
+    rateBody.ok && rateBody.body[PRICING_FX_KEY] !== undefined && parsePriceInput(rateBody.body).ok
+    && composePriceBody(withFx(seeded, '')).body[PRICING_FX_KEY] === undefined)
+
+  // 填了却写不出去的汇率必须挡住这一笔:让它过去就是把用户敲的数**悄悄丢掉**,
+  // 而状态栏还会说「已保存」（与四档价里那一格红着是同一条尺子）。
+  const badRates = ['abc', '0', '-1'].filter((text) => {
+    const body = composePriceBody(withFx(seeded, text))
+    return body.ok || !body.error.includes('汇率')
+  })
+  check('填坏的汇率挡住整笔保存,空着不算坏', badRates.length === 0
+    && composePriceBody(withFx(seeded, '')).ok && composePriceBody(withFx(seeded, '  ')).ok)
+
+  // 鬼影与悬停说明里的数跟着货币走:格子里是美元、旁边注解还报人民币是最容易漏的一处。
+  const segment = newSegment({ from: '2026-08-01', input: '2.002', output: '8', cacheRead: '' })
+  const shown = inheritedCell(segment, null, 'cacheRead', cny => textOf(USD, cny))
+  check('留空档的鬼影与说明一起换算(cache 档回落到输入价),人民币面照旧',
+    shown.value === '0.28' && shown.note?.includes('0.28') === true
+    && inheritedCell(segment, null, 'cacheRead').value === '2.002')
+
+  check('单位与换算原值进提示:美元面报 $/百万词元并附上 ¥ 原值',
+    unitOf(USD) === '$/百万词元' && unitOf(CNY_VIEW) === '¥/百万词元'
+    && originOf(USD, '2.002') === '= ¥2.002/百万词元' && originOf(CNY_VIEW, '2.002') === null)
+}
+
 if (section('折叠自证有效:天级水位线看不见往日的追加')) {
   const rollupOf = (upto: string, files: Record<string, string>): RollupFile => ({
     schemaVersion: 7, upto, pricingRevision: '', files,
@@ -853,7 +989,7 @@ if (section('持久化列表与历史回填')) {
     inspect,
     listSnapshots: async () => [{ header: { id: 's1' }, revision: 'r1' }, { header: { id: 's2' }, revision: 'r2' }, null as never],
   })
-  check('listSnapshots() 优先;只有裸 list() 时也能归一化,垃圾条目丢掉',
+  check('list() 优先;只有旧名 listSnapshots() 时也能归一化,垃圾条目丢掉',
     bare.length === 1 && bare[0]!.header.id === 's1' && preferred.length === 2 && preferred[1]!.revision === 'r2')
   check('没有 revision 的快照永远读不成新鲜(它没法与同步签名比对)',
     staleSessionIds(true, new Map([['s1', 'r1']]), [{ header: { id: 's1' } }]).length === 1
@@ -883,6 +1019,19 @@ if (section('历史回填 syncHistory')) {
     const again = await syncHistory({ persistence, log, recordCompaction: true })
     check('回填把 2 条请求 + 1 次压缩 + 2 次失败记成 5 行,再跑一次不重复写(幂等)',
       result.added === 5 && result.skipped === 0 && result.failedSessions === 0 && again.added === 0 && again.skipped === 5)
+    // 格式迁移会稠密重排信封 seq:压缩/失败行的身份必须取自事件自带的 id,
+    // 否则同一事件会被记成两行(压缩成本与失败计数都会偏)。
+    const shifted = events.map(event => ({ ...event, seq: event.seq + 4096 }))
+    const afterMigration = await syncHistory({
+      persistence: {
+        listSnapshots: async () => [{ header: { id: 'sess-1', version: 1 }, revision: 'rev-1-migrated' }],
+        inspect: async () => ({ meta: { id: 'sess-1' }, events: shifted }),
+      },
+      log,
+      recordCompaction: true,
+    })
+    check('信封 seq 被格式迁移重排后回填不重复写(身份取自事件自带 id)',
+      afterMigration.added === 0 && afterMigration.skipped === 5 && afterMigration.failedSessions === 0)
     // 一个会话读不动时跳过它并计数,不弄坏其余会话。
     const partial = await syncHistory({
       persistence: {
@@ -897,6 +1046,31 @@ if (section('历史回填 syncHistory')) {
       recordCompaction: true,
     })
     check('读不动的会话被跳过并计数,其余照常走完', partial.failedSessions === 1 && partial.skipped === 5)
+    // 0.1.7 起的持久化面没有 inspect/listSnapshots:`list()` 给快照,
+    // `open(id,'read')` 给只读句柄。回填必须走这条路,且句柄读完就关。
+    const accesses: string[] = []
+    const handles: string[] = []
+    const v4 = {
+      list: async () => [{ header: { id: 'sess-1', cwd: '/w' }, revision: 'rev-1' }],
+      open: async (id: string, access: 'read') => {
+        accesses.push(`${id}:${access}`)
+        return {
+          read: async () => ({ eventState: 'owned' as const, events }),
+          close: async () => { handles.push(id) },
+        }
+      },
+    }
+    const viaHandles = await syncHistory({ persistence: v4, log, recordCompaction: true })
+    check('新持久化面(list + open/read、无 inspect)照样回填,句柄只读且读完即关',
+      viaHandles.added === 0 && viaHandles.skipped === 5 && viaHandles.failedSessions === 0
+      && accesses.join(',') === 'sess-1:read' && handles.join(',') === 'sess-1')
+    // 两条读法都没有时,该会话计失败而不是把整轮 walk 掀掉。
+    const neither = await syncHistory({
+      persistence: { list: async () => [{ header: { id: 'sess-1' }, revision: 'rev-1' }] },
+      log,
+      recordCompaction: true,
+    })
+    check('既没有 inspect 也没有 open:会话计失败,walk 不抛', neither.failedSessions === 1 && neither.added === 0)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

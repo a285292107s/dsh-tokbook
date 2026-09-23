@@ -5,8 +5,9 @@
  * 当前会话每来一条消息就变一次 revision，await 它等于每次打开都重读那份
  * 完整会话日志（单份可达数 MB 压缩、秒级）。
  *
- * WIRE NOTES：事件与持久化面是鸭子类型（待 DSH 类型包接入可收紧）。单个
- * `list()` 只有裸 header，故新鲜度探针走 `listSnapshots()`（带变更令牌）。
+ * WIRE NOTES：事件与持久化面是鸭子类型（待 DSH 类型包接入可收紧）。持久化面
+ * 0.1.7 起是 `list()`（每会话 header + opaque revision）与 `open(id,'read')`，
+ * 旧的 `listSnapshots()` / `inspect()` 仍被 `sync.ts` 接受。
  */
 
 import { join } from 'node:path'
@@ -62,6 +63,12 @@ interface WorkspaceLike {
 }
 interface WorkspaceRegistryLike {
   list(): readonly WorkspaceLike[]
+}
+/** settings 缝是**表单**服务：`describe()` 按 profile entry id 给出每个插件的
+ *  活动配置值（只投影可热改的字段）。价表目录要的正是「用户声明了什么」，故在
+ *  这里把它收成 route-catalog 认的按命名空间取值。 */
+interface SettingsFormsLike {
+  describe(): readonly { ns: string; value: unknown }[]
 }
 interface LoggerLike {
   error(...args: unknown[]): void
@@ -443,9 +450,19 @@ export class TokenUsageBook extends Service {
   }
 
   /** host settings 缝（`ctx.settings`），未挂载时 undefined。`ctx.get` 是反射式
-   *  访问器：以属性方式读未挂载服务会抛错（without inject），只读视图不得这样做。 */
+   *  访问器：以属性方式读未挂载服务会抛错（without inject），只读视图不得这样做。
+   *  读值走 `describe()`——`settings` 服务不再有按命名空间的 `get`。 */
   private settings(): SettingsLike | undefined {
-    return this.hostCtx.get('settings') as SettingsLike | undefined
+    const forms = this.hostCtx.get('settings') as SettingsFormsLike | undefined
+    if (forms === undefined || typeof forms.describe !== 'function') return undefined
+    try {
+      const byNs = new Map(forms.describe().map(row => [row.ns, row.value]))
+      return { get: (ns: string) => byNs.get(ns) }
+    } catch (error) {
+      // 读不到声明不阻塞 tab：目录退化成只有 live 适配器注册表。
+      this.logger.warn?.('[tokbook] cannot describe settings namespaces:', error)
+      return undefined
+    }
   }
 
   /** host LLM 缝（`ctx.llm`），未挂载时 undefined。 */

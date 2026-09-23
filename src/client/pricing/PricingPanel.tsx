@@ -13,9 +13,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PriceVerdict, PricingView } from '../../types.ts'
 import { ROUTE_PRICING } from '../../route-paths.ts'
+import { inverseHint, type Currency } from './currency.ts'
 import {
-  baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, modelDirty, modelOptionLabel,
-  routeOptionLabel, rowKey, stagedChanges, withCalendar,
+  baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxValue, modelDirty,
+  modelOptionLabel,
+  routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx,
   type CalendarDraft, type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
 import { CalendarEditor, ModelDetail } from './editors.tsx'
@@ -55,8 +57,8 @@ interface Staged {
 let staged: Staged | null = null
 
 /** 还没读到宿主视图之前的空状态。 */
-const EMPTY_STATE: PriceState = { routes: new Map(), calendar: new Map(), holidays: new Set() }
-const EMPTY_BASELINE: PriceBaseline = { models: new Map(), billing: new Map(), calendar: '[]' }
+const EMPTY_STATE: PriceState = { routes: new Map(), calendar: new Map(), holidays: new Set(), fx: '' }
+const EMPTY_BASELINE: PriceBaseline = { models: new Map(), billing: new Map(), calendar: '[]', fx: '' }
 
 /** 选中的 (通道, 模型)。`model` 为空串 = 「这条通道里请求最多的那一个」，即换通道时的中间态。 */
 interface Picked {
@@ -95,6 +97,21 @@ function rememberPicked(pick: Picked | null): void {
   else localStorage.setItem(PICKED_KEY, JSON.stringify(pick))
 }
 
+/**
+ * 四档价按哪种货币读写。与「选了哪一行」同一类：**视图偏好**（每台浏览器自己的记账习惯），
+ * 不是账本数据，所以进 localStorage 而不是价文件——价文件里只存汇率这一个事实。
+ */
+const CURRENCY_KEY = 'dsh-tokbook.pricing-currency'
+
+/** 读回上次选的货币。只认这两个值，其余一律当人民币。 */
+function readCurrency(): Currency {
+  return localStorage.getItem(CURRENCY_KEY) === 'USD' ? 'USD' : 'CNY'
+}
+
+function rememberCurrency(currency: Currency): void {
+  localStorage.setItem(CURRENCY_KEY, currency)
+}
+
 function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
   return fetch(ROUTE_PRICING, {
     method: 'PUT',
@@ -127,11 +144,18 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [save, setSave] = useState<SaveState>({ kind: 'clean' })
   /** 手动选过的那一份；null = 还没选过，一切走「列表里的第一个」。 */
   const [picked, setPicked] = useState<Picked | null>(readPicked)
+  /** 四档价按哪种货币读写（视图偏好，见 `CURRENCY_KEY`）。 */
+  const [currency, setCurrency] = useState<Currency>(readCurrency)
 
   /** 记下一次选择：组件状态（这一屏立刻跟手）与 localStorage（下次打开还认它）。 */
   const choosePicked = useCallback((pick: Picked) => {
     setPicked(pick)
     rememberPicked(pick)
+  }, [])
+
+  const chooseCurrency = useCallback((next: Currency) => {
+    setCurrency(next)
+    rememberCurrency(next)
   }, [])
 
   const changes = useMemo(() => stagedChanges(state, baseline), [state, baseline])
@@ -332,6 +356,11 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     })
   }, [])
 
+  /** 改汇率。它是全表共用的一份数据（不属于任何一行），写不写得出去由 `composePriceBody` 说。 */
+  const updateFx = useCallback((text: string) => {
+    setState(current => withFx(current, text))
+  }, [])
+
   // Ctrl/Cmd+S 立即 flush 待写的保存（文件本来也会自动保存）。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -361,6 +390,12 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const row = models.find(item => item.model === picked?.model) ?? models[0]
 
   const stateText = saveStateText(save)
+  // 汇率：`rate` 是换算能力（null = 未设，美元面不可用），`fxProblem` 是这一格的问题。
+  // **存了美元偏好而文件里没有汇率**（换机器、文件被改回）时回落到人民币：一个记不住的偏好
+  // 不该让这一屏停在一个换算不出来的状态上。
+  const rate = fxValue(state.fx)
+  const fxProblem = fxIssue(state.fx)
+  const shownCurrency: Currency = currency === 'USD' && rate === null ? 'CNY' : currency
   // 什么都没选过、也没有任何待写的改动：状态栏没有话要说。常驻一个空盒子会在选择带与
   // 调价史之间撑出一道什么也不说的空隙。
   const veiled = picked === null && save.kind === 'clean' && changes === 0
@@ -430,6 +465,37 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
               ))}
             </select>
           </label>
+          {/* 汇率是选择带里唯一**不属于任何一行**的输入：它是全表共用的一份事实，决定下面
+              四档价在美元面上读写时怎么换算。它旁边那句反向读数就是「汇率换算」本身。
+              它是价文件的一部分（保留键 `$fx`），所以自动保存、状态栏、未保存圆点全套照旧。 */}
+          <label className="dtpl-price-pick-row">
+            <span className="dtpl-price-pick-k">汇率</span>
+            <span className="dtpl-price-fx">
+              <span className="dtpl-price-fx-eq">1 美元 =</span>
+              <input
+                className="dtpl-price-input dtpl-price-fx-in"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                spellCheck={false}
+                value={state.fx}
+                placeholder="—"
+                aria-label="汇率：1 美元等于多少元"
+                aria-invalid={fxProblem !== null || undefined}
+                title="1 美元等于多少元。它只服务这一屏的美元读写面：改它只改换算读数，不动已写的价，也不动任何金额（文件里的价永远是人民币）。"
+                onChange={(event) => updateFx(event.target.value)}
+                onKeyDown={(event) => {
+                  // Enter 离开这一格（值已暂存）。
+                  if (event.key === 'Enter') event.currentTarget.blur()
+                }}
+              />
+              <span className="dtpl-price-fx-unit">元</span>
+              <span className="dtpl-price-fx-note">
+                {inverseHint({ currency: 'USD', cnyPerUsd: rate }) ?? '填了才能按美元读写价'}
+              </span>
+            </span>
+          </label>
+          {fxProblem !== null && <span className="dtpl-price-fx-err" role="alert">{fxProblem}</span>}
         </div>
       )}
 
@@ -499,6 +565,9 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 billing={card.billing}
                 baseline={baseline.models}
                 holidays={state.holidays}
+                currency={shownCurrency}
+                rate={rate}
+                onCurrency={chooseCurrency}
                 onRowChange={updateModel}
                 onBilling={updateBilling}
               />

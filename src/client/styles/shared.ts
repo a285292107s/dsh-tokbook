@@ -126,6 +126,11 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   /* 段的身份行要折行：右轨现在装着「当前生效」芯片 + 段自己的复制/删除，而左边是序号 +
      最小 150px 的生效时刻——窄 sheet 一行放不下。折行后右轨（margin-left:auto）自己落第二行靠右。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-line{flex-wrap:wrap;row-gap:4px;}
+  /* 年历的一段假期在窄处要留在**一行**里：两个日期格收到 100px、字号降一档（一个 ISO 日期
+     10 个字符，12px 等宽约 76px + 内边距仍装得下），天数那一列也收窄——这样「8 天 删除」不必
+     折到第二行去，一年七八段不至于变成十四五行的长条。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{width:100px;font-size:12px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-cal-days{min-width:40px;}
 }
 
 /* 动效（共享 keyframes；尊重 reduced motion） */

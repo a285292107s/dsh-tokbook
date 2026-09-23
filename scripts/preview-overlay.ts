@@ -363,6 +363,18 @@ const PRICING_FIXTURE = {
       ],
     },
   ],
+  // 年历只收录了去年：今年的安排还没公布——**缺年**是这套数据唯一要人记得补的状态，
+  // 所以 fixture 默认就停在它上面（头里那句告警 + 一颗「补上」都看得见）。
+  calendar: {
+    2025: [
+      { start: '2025-01-28', end: '2025-02-04' },
+      { start: '2025-10-01', end: '2025-10-08' },
+    ],
+  },
+  calendarMissing: ['2026'],
+  // 汇率（`$fx`）：价格表的美元读写面靠它换算。默认给一个真值，好让「切到美元看四档价」
+  // 这条路径一打开就在；把它清空就是「未设汇率」那一态（美元开关停用）。
+  fx: { cnyPerUsd: 7.15 },
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
   updatedAt: Date.now(),
 }
@@ -374,10 +386,24 @@ const PRICING_FIXTURE = {
  * (nothing is persisted, and the merge is a fixture approximation of the host's
  * own read path — not a reimplementation of it).
  */
-const pricingState = { routes: PRICING_FIXTURE.routes }
+const pricingState = {
+  routes: PRICING_FIXTURE.routes,
+  calendar: PRICING_FIXTURE.calendar,
+  // 汇率与年历同档：PUT 整体替换它（清空 → `$fx` 被省掉 → 这里成为 undefined，正是
+  // 「未设汇率」在 wire 上的样子，价格表的美元开关随之停用）。
+  fx: PRICING_FIXTURE.fx,
+}
 
 function pricingView() {
-  return { ...PRICING_FIXTURE, routes: pricingState.routes, updatedAt: Date.now() }
+  return {
+    ...PRICING_FIXTURE,
+    routes: pricingState.routes,
+    calendar: pricingState.calendar,
+    fx: pricingState.fx,
+    // 年历写进来的年份就不再是缺的（host 那条「账本覆盖到而年历没有」的规则，这里按同一形状答）。
+    calendarMissing: PRICING_FIXTURE.calendarMissing.filter((year) => pricingState.calendar[year] === undefined),
+    updatedAt: Date.now(),
+  }
 }
 
 /** Merge a `PUT /tokbook/pricing` body (the WHOLE price file). */
@@ -406,6 +432,10 @@ function withPricingWrite(body) {
     })
   }
   pricingState.routes = routes
+  // 年历随同一笔 PUT 整体替换（空 = 客户端把 `$calendar` 省了，此时年历真的空了）。
+  pricingState.calendar = body.$calendar ?? {}
+  // 汇率同理：客户端只在汇率可写时才带上 `$fx`，省掉就是「未设汇率」。
+  pricingState.fx = body.$fx
 }
 
 /* ── quota-tab fixtures ─────────────────────────────────────────────────── */

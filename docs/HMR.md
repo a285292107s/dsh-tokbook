@@ -1,13 +1,17 @@
 # dsh-tokbook · DSH 热重载（HMR）机制与本项目实况
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-11 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-23 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）插件热重载机制的**官方语义 + 本项目实际接线与实测**。
 > 官方依据：<https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>（“插件与生命周期”页）。
-> 本地核对：运行中的 Web GUI = 全局安装 `@deepseek-ai/dsh@0.1.2-rc.1`；DSH 源码检出
-> `C:\Users\28529\Desktop\deepseek-harness` = `0.1.3-alpha.1`（较新，作机制参考，文中已注明出处）。
+> 本地核对：运行中的 Web GUI = 全局安装 `@deepseek-ai/dsh@0.1.7-alpha.1`；DSH 源码检出
+> `C:\Users\28529\Desktop\deepseek-harness` = `0.1.7-alpha.2`（`00102833df`，2026-09-22，作机制参考，文中已注明出处）。
 > 整理时间：2026-09-07（同日修正 §2.1 / §4：模块级 HMR 的卸载**不被等待**、模块级状态**不跨 HMR
 > 共享**——早期版本把这两点说反了，详见 §4 结尾说明）。
+> **2026-09-23 修订**：模块改名 `cordis-plugin-hmr` → `dsh-hmr`；profile patch 里**重申模块名**的那一行会被
+> 启动器按「name mismatch」整行跳过（本项目正是这样静默失去了模块级热更，见 §3.1）。§2.1 / §2.2 / §3.1 /
+> §5 / §6 的包名、base 行语义、版本与实测证据均已按 `0.1.7-alpha.1` 重新核对；§3.2 的 client 链本轮只做了
+> 一次抽查（SSE graph 与 `dsh-tokbook` 的独立 rev 仍在），其余仍为 2026-09-11 的记录。
 
 ---
 
@@ -31,48 +35,62 @@
 
 ## 2. 这套机制在 DSH 里的实现落点（源码核对）
 
-以下路径相对 DSH 源码检出 `C:\Users\28529\Desktop\deepseek-harness`（`0.1.3-alpha.1`），
-行为与运行中的 `0.1.2-rc.1` 安装一致（已逐条核对安装版 patch/产物）。
+以下路径相对 DSH 源码检出 `C:\Users\28529\Desktop\deepseek-harness`（`0.1.7-alpha.2`），
+行为与运行中的 `0.1.7-alpha.1` 安装一致（已逐条核对安装版 patch/产物）。
 
-### 2.1 host 侧模块级 HMR：`@deepseek-ai/cordis-plugin-hmr`
+### 2.1 host 侧模块级 HMR：`@deepseek-ai/dsh-hmr`
 
-- 实现：`vendor/hmr/src/index.ts`。`Hmr extends Service`，`inject = ['loader','timer']`。
-  - **默认不启用**：`packages/bundle/base/cordis.patch.yml` 里 `id: hmr` 这一行是
-    `disabled: true`（注释：module reload 是 profile 级别的 opt-in）。`web-app / headless / sdk-app / acp-app`
-    都没有覆盖它（`apps/cli/tests/profile-hmr.spec.ts` 用 compose 断言了“继承 base 的 disabled 行”）。
-  - **配置**（`Hmr.Config`，schema 即 Chokidar 选项的超集）：
-    - `base?: string` —— 监控根的基础目录；`this.baseDir = fileURLToPath(new URL(config.base || '.', ctx.baseUrl))`。
-    - `root: string[]`（默认 `['.']`）—— chokidar 要 watch 的路径（相对 base）。
-    - `ignored`（默认 `['**/node_modules','**/.*','cache','data']`）。
-    - `debounce`（默认 100ms）。
-  - **变化分类**（`analyzeChanges` / `partialReload`）：
-    - 属于框架依赖树（`externals`）的文件 → `loader.exit()`（整体重启，不叫“热更”）。
-    - 在 Node ESM `loadCache` 里的文件（含经 `import()` 的 CJS）→ stash + debounce 后做 **partial reload**。
-    - 其它 → 只发 `hmr/change` 事件。
-  - **partial reload 的落地**：把 accepted 文件从 ESM `loadCache` 与 CJS `Module._cache` 中清出
-    （先备份、失败可 rollback）→ 重新 `loader.import` 每个受影响的插件入口（**同一文件 URL 重新
-    import 会得到全新的模块对象，模块级状态随之重置**）→ `registry.delete(旧插件)` → 用**新模块对象**
-    按旧 fiber 的 config 重新 `registry.plugin` → 旧注册被 Cordis 自动清理，新 `apply` 生效
-    （`vendor/hmr/src/index.ts` `reload()`）。任何一步抛错走 `rollback()` 还原旧模块。
-  - **⚠️ 卸载不被等待**：`registry.delete(plugin)` 只同步发起 Cordis 的 fiber 卸载（`fiber.dispose()`），
-    **不 `await`** 旧 fiber 的异步 disposer 跑完，紧接着就注册新 fiber、执行新 `apply`。所以旧实例
-    的异步清理（如本文 §4 的 `flush()`）与新 `apply` **并发**，不保证先于新实例完成。依赖方不能把
-    “旧 disposer 已排空”当作 HMR 的既定顺序。
-  - 依赖 `ctx.loader.internal`（Node 内部 ESM loader 句柄）：`--expose-internals` 时直取，否则经
-    `node-addon-require-builtin`（`vendor/loader/src/internal.ts`）——两种方式都可达即无需特殊启动参数。
+- **模块名**：`0.1.7` 起 DSH 用 `@deepseek-ai/dsh-hmr`（实现 `packages/boot/hmr/src/index.ts`
+  + `watch-config.ts`）。同仓库 `vendor/hmr` 仍是上游 `@deepseek-ai/cordis-plugin-hmr@1.0.19`
+  的 vendored 副本；dsh-hmr 的 README 对此的说法是 “The vendored package remains available;
+  DSH profiles use this package.”——**留着的是 vendored 那份，DSH 用的是 dsh-hmr**，而
+  **dsh-base 的依赖就是 `dsh-hmr`**、全局安装里已无 `cordis-plugin-hmr`。README 同时给了迁移口径：
+  “Existing configurations replace the module name `@deepseek-ai/cordis-plugin-hmr` with
+  `@deepseek-ai/dsh-hmr`.”——所以 profile patch 里**不要再写 `name:`**（§3.1）。
+- `Hmr extends Service`。**由 base bundle 插入并启用**：`packages/bundle/base/cordis.patch.yml`
+  的 `id: hmr` 行是 `name: '@deepseek-ai/dsh-hmr'` + `disabled: !!js "!ctx.get('profileContext')"`
+  + `config.root: []` —— 有 profileContext 的启动器（`web` 就是）拿到的是**已启用但只 watch 配置**
+  的行；`headless / sdk-app / acp-app` 各自再 `disabled: true` 把它关掉
+  （`apps/cli/tests/profile-hmr.spec.ts` 用 compose 断言这一组语义）。
+  模块级 watching 是 profile 级的 opt-in：patch 只覆写 `config`（§3.1）。
+- **配置**（`Hmr.Config`，schema 即 Chokidar 选项的超集）：
+  - `base?: string` —— 监控根的基础目录；`this.baseDir = fileURLToPath(new URL(config.base || '.', ctx.baseUrl))`。
+  - `root: string[]`（默认 `['.']`；base 行显式给 `[]`）—— chokidar 要 watch 的路径（相对 base）。
+    `[]` = 只保留显式的配置 watch，不 watch 任何模块树。
+  - `ignored`（默认 `['**/node_modules','**/.*','cache','data']`）。
+  - `debounce`（默认 100ms）。
+- **变化分类**（`analyzeChanges` / `partialReload`）：
+  - 属于框架依赖树（`externals`）的文件 → `loader.exit()`（整体重启，不叫“热更”）。
+  - 在 Node ESM `loadCache` 里的文件（含经 `import()` 的 CJS）→ stash + debounce 后做 **partial reload**。
+  - 其它 → 只发 `hmr/change` 事件。
+- **partial reload 的落地**：把 accepted 文件从 ESM `loadCache` 与 CJS `Module._cache` 中清出
+  （先备份、失败可 rollback）→ 重新 `loader.import` 每个受影响的插件入口（**同一文件 URL 重新
+  import 会得到全新的模块对象，模块级状态随之重置**）→ `registry.delete(旧插件)` → 用**新模块对象**
+  按旧 fiber 的 config 重新 `registry.plugin` → 旧注册被 Cordis 自动清理，新 `apply` 生效
+  （`packages/boot/hmr/src/index.ts` `reload()`）。任何一步抛错走 `rollback()` 还原旧模块。
+- **profile patch / manifest 走同一条队列**：HMR 初始化时注册用户 patch（`cordis.patch.yml`、
+  home patch）与 profile manifest 的 watch，变化即重组配置（`runExclusive` 串行）。所以**改 patch
+  行本身就是热生效的**，包括改 `hmr` 行自己的 `config`（§3.1 实测）。
+- **⚠️ 卸载不被等待**：`registry.delete(plugin)` 只同步发起 Cordis 的 fiber 卸载（`fiber.dispose()`），
+  **不 `await`** 旧 fiber 的异步 disposer 跑完，紧接着就注册新 fiber、执行新 `apply`。所以旧实例
+  的异步清理（如本文 §4 的 `flush()`）与新 `apply` **并发**，不保证先于新实例完成。依赖方不能把
+  “旧 disposer 已排空”当作 HMR 的既定顺序。
+- 依赖 `ctx.loader.internal`（Node 内部 ESM loader 句柄）：`--expose-internals` 时直取，否则经
+  `node-addon-require-builtin`（`packages/boot/hmr/src/index.ts` 的检查、`vendor/loader/src/internal.ts`
+  的回落）——两种方式都可达即无需特殊启动参数（本机安装带该 addon，已核对）。
 
-### 2.2 live profile 的兜底：只 watch 用户 patch 层
+### 2.2 base 行就是 watch-only 兜底：只 watch 配置不需要额外行
 
-`apps/cli/src/profile-boot.ts`：当 profile `patchReload: 'live'`（`web` profile 就是 live）且组合里
-**没有 hmr 服务**时，启动器会创建一个 `root: []` 的 watch-only HMR 实例来热载用户
-`cordis.patch.yml` / home patch（**只改配置、不替换源码模块**）。这与“模块级 HMR”是两回事：
-- 没有显式 `hmr` 行 → 改 `cordis.patch.yml` 可热生效，但**改插件源码不会热更**。
-- 显式 `hmr` 行 `disabled:false` → 模块级 HMR 激活（见 §3.1）。
+`0.1.7` 的 base bundle 已经把 `hmr` 行插进组合（§2.1），`0.1.2-rc.1` 里“组合中没有 hmr 服务时由
+启动器另建一个 `root: []` 实例”的兜底已不存在（源码里已无 `patchReload`）。因此：
+- base 行（`root: []`）→ 改 `cordis.patch.yml` / home patch 可热生效，**改插件源码不会热更**；
+- 再把该行的 `config.root` 覆盖成 `['.']`（§3.1）→ 模块级 HMR 才激活。
 
 ### 2.3 client（浏览器 bundle）侧的 reload 链：`@deepseek-ai/dsh-client-hmr`
 
 - **挂载**：`packages/bundle/web-app/cordis.patch.yml` 里 `client-hmr` 行**常驻挂载**
-  （注释：“always mounted: it is idle until a rebuild watcher actually rewrites client bundles”），
+  （注释：“The client-plugin reload chain, always mounted: it is idle until a rebuild watcher
+  (pnpm run dev:web) actually rewrites client bundles.”），
   且 `@deepseek-ai/dsh-client-modules`（`id: modules`）提供 `/plugins/<id>/client.js` 与 `rev`。
 - **node 半区**（`packages/client/hmr/src/index.ts`）：默认每 **500ms** stat-poll **每个 graph row**
   的 client bundle 文件（mtime+size），变化 → `clientModules.rebuilt(id)` 重哈希（**哈希没变就不广播**）
@@ -92,11 +110,10 @@
 ### 3.1 Host 侧：模块级 HMR **已启用**（不是默认状态）
 
 `$DSH_HOME/profiles/web/cordis.patch.yml`（本机 = `C:\Users\28529\.dsh\profiles\web\cordis.patch.yml`）
-在 base bundle 之上显式启用了 `hmr`：
+在 base bundle 之上把 `hmr` 行的 `root` 打开（**只按 id 覆写，不重复模块名**）：
 
 ```yaml
 - id: hmr
-  name: '@deepseek-ai/cordis-plugin-hmr'
   disabled: false
   config:
     base: 'file:///C:/Users/28529/Desktop/dsh-tokbook'
@@ -104,7 +121,24 @@
     ignored: ['**/node_modules', '**/.*', 'cache', 'data']
 ```
 
-为什么必须这样配（注释已写，机制见 §2.1）：
+**⚠️ 不要写 `name:`**：启动器按 (id, name) 匹配 patch 行，模块名对不上就**整行跳过**（`disabled` /
+`config` 一起丢），只在启动输出里留一句。2026-09-23 前的本机配置写的还是改名前的
+`name: '@deepseek-ai/cordis-plugin-hmr'`，于是：
+
+```
+dsh: [...\cordis.patch.yml] patch: name mismatch for "hmr"
+     (expected "@deepseek-ai/dsh-hmr", got "@deepseek-ai/cordis-plugin-hmr"), skipping
+```
+
+结果不是报错、而是**静默退回 base 行的 `root: []`**——配置能热载、模块级 HMR 全关，`pnpm build`
+之后插件毫无动静。校验组合是否吃到了这一行（只读、不启动服务）：
+
+```sh
+dsh --profile web --dump-config | grep -A8 'id: hmr'
+# 期望：name 是 @deepseek-ai/dsh-hmr，且 config.root 是 ['.']；出现 "name mismatch" 即没吃到
+```
+
+为什么必须这样配（机制见 §2.1）：
 
 - **base 指向本仓库**（`file:///…` URL，HMR 会 `new URL()` 再 `fileURLToPath()`）。
 - **为什么 root 要 `['.']` 而 ignored 排除 `node_modules`**：`dsh-tokbook` 是经
@@ -113,8 +147,11 @@
   “名义上”在 profile 的 node_modules 里，若不把 base 指向仓库并把仓库树纳入 watch，重建的
   `lib/index.js` 不会被看见。`ignored` 里的 `cache` / `data` 是本仓库不存在的顶层名，保留默认防御即可。
 
-**启用边界**：`hmr` 行是启动时组合进 loader 的，**改动后需要一次完整的 `dsh web` 重启**才挂载；
-挂载之后（进程不重启）改 host 源码即可热更。§2.2 的 watch-only 兜底不会出现——组合里已有显式 hmr 行。
+**启用边界（2026-09-23 实测修正）**：base 行在 `web` profile 里**始终挂载**（`root: []`），而
+profile patch / manifest 的 watch 与 patch 行本身走 HMR 的同一条重组队列（§2.1）。所以**改这一行不需要
+重启**：本机改完 patch 后约 5 s，`GET /tokbook/pricing` 就从 500 变成 200（该次重组把 `tokbook` 行也
+重新 apply 了一遍，吃到了刚 build 的产物）。只有“组合里根本没有 hmr 行”的 profile 才需要一次完整
+`dsh web` 重启。
 
 **触发条件（本项目）**：HMR 观察的是**产物文件**，不是 `src/*.ts` 本身：
 
@@ -125,29 +162,28 @@ pnpm build     # scripts/build-client.mjs（esbuild）重写 lib/index.js（host
 
 `tsc --watch`（`pnpm watch`）**不会**重写 `lib/index.js`，所以只改源码不 build 不会触发 host 热更。
 
-**实测证据（本机，运行中）**：`lib/index.js` 于 18:22:31 重建；数据目录
-`~/.dsh/tokbook/owner.json` 的时间戳恰好是 **18:22:31** —— `owner.json` 只在 `TokenUsageBook`
-构造时写，时间戳与重建产物落盘一致，说明**重建后该插件做了一次 module reload、重新 `apply`**
-（而非进程重启）。注意：`owner.json` 里的 `pid` 是**写 owner 那一刻的宿主进程**，不是“此后永不
-重启”的宿主 PID —— 它只能作为“这次 reload 发生过”的探针（每次 reload 都会重写该文件），不能
-当作当前宿主进程的身份。其后 quota 快照 / `sync-progress.json` / 当日 `usage-*.jsonl` 持续更新，
-证明 reload 后的实例正常工作。
+**实测证据（本机，2026-09-23 运行中）**：`pnpm build` 前 `GET /tokbook/sync` =
+`{"status":"done","lastSyncAt":1790096202959}`；build 后同一个 route 立刻变成
+`{"status":"idle","lastSyncAt":null}`——`lastSyncAt` 只在 `TokenUsageBook` 构造时归零、同步落定才写，
+所以这个翻面证明**实例被卸载并重新 `apply` 了**（不是进程重启）。随后 `/tokbook/pricing` 200、
+`/tokbook/sync` 重新走到 `done`，说明新实例正常工作。较老的一版用 `~/.dsh/tokbook/owner.json` 的
+mtime 作探针（它只在构造时重写，同样只在 reload 时变），今天仍是有效探针；`lastSyncAt` 的优势是
+不用碰数据目录。
 
 ### 3.2 Client 侧：链路是活的；本项目主路径 = `pnpm build` + 浏览器刷新
 
 - `@deepseek-ai/dsh-client-hmr` 在 web-app bundle 里**常驻挂载**（§2.3），运行中的 GUI 实测
-  `GET http://127.0.0.1:3080/plugins/events` 能收到 SSE：首帧 `: connected` + `{"type":"graph",…}`，
-  graph 中同时存在 `@deepseek-ai/dsh-client-hmr` 与 `dsh-tokbook` 两个 entry。
-- **reload 链确实活着（实测）**：graph 里其它 entry 的 rev 都带启动批前缀 `87866ab28633ef1e-N`，而
-  `dsh-tokbook` 的 rev 是独立的 `56d79160f1b0` —— 即 18:22:31 那次 `pnpm build` 之后，
-  `clientModules.rebuilt()` 已在**运行中**按新内容哈希改写该插件的 rev 并经 SSE 广播（`rebuilt`
-  帧是浏览器热换的触发信号）。
+  `GET http://127.0.0.1:3080/plugins/events` 能收到 SSE：首帧 `: connected` + `{"type":"graph",…}`
+  （2026-09-23 实测 64 个 entry，graph rev `88901c1372ed`）。
+- **reload 链确实活着（实测）**：graph 里每个 entry 带自己的内容哈希 rev，`dsh-tokbook` 是
+  `16c36ea4e189`（独立于其它 entry）——`pnpm build` 之后 `clientModules.rebuilt()` 会在**运行中**
+  按新内容哈希改写该插件的 rev 并经 SSE 广播（`rebuilt` 帧是浏览器热换的触发信号）。
 - **本项目口径：client 改动以 `pnpm build` + 浏览器刷新为主路径，不依赖免刷新热更**（浏览器刷新
   成本可接受）：
 
   ```sh
   pnpm build     # 重写 lib/client.js（样式在 client/styles/*.ts，也打进这个 bundle）
-  # host 半区：profile 已启用 cordis-plugin-hmr → 自动 卸载→重载→重 apply（§3.1）
+  # host 半区：profile 已按 id 覆写 hmr 行（root:['.']）→ 自动 卸载→重载→重 apply（§3.1）
   # client 半区：刷新浏览器取新 rev 的 bundle；client-hmr 活着时也可能 ≤500ms 免刷新热换，
   #              但那是加分项不是保证——没生效就硬刷新兜底（永远能取到新 rev）
   ```
@@ -164,7 +200,7 @@ pnpm build     # scripts/build-client.mjs（esbuild）重写 lib/index.js（host
 
 | 半区 | 观察对象 | 热更执行者 | 本项目触发方式 |
 | --- | --- | --- | --- |
-| Host（Node/Cordis） | `lib/index.js`（仓库树，经 `base`/`root` 配置） | `@deepseek-ai/cordis-plugin-hmr`（profile 显式启用，§3.1） | 改 `src/index.ts` 等 host 源码 → `pnpm build` → 自动 卸载→重载→重 `apply` |
+| Host（Node/Cordis） | `lib/index.js`（仓库树，经 `base`/`root` 配置） | `@deepseek-ai/dsh-hmr`（base 行 + profile 覆写 `root`，§3.1） | 改 `src/index.ts` 等 host 源码 → `pnpm build` → 自动 卸载→重载→重 `apply` |
 | Client（浏览器 bundle） | `lib/client.js`（graph row 的文件路径） | `@deepseek-ai/dsh-client-hmr`（web-app 常驻挂载，§3.2） | 改 `src/client/*` → `pnpm build` → **刷新浏览器取新 rev**（client-hmr 活着时可能 ≤500ms 免刷新，加分项非保证） |
 
 两者互不影响、也不会互相误触发：host HMR 只重载 host 半区，client HMR 只换浏览器 bundle。
@@ -178,7 +214,7 @@ pnpm build     # scripts/build-client.mjs（esbuild）重写 lib/index.js（host
 - **Cordis 的 `dispose` / 卸载确实“异步可等待”**——但那是对**显式 `fiber.dispose()`**（或依赖驱动
   的 dispose → auto-reload）而言：注册在 fiber 上的处置器会逆序被调用、多个异步处置器并发、返回的
   Promise 等所有异步清理完成。
-- **模块级 HMR（cordis-plugin-hmr）不走这条可等待路径**：它调 `registry.delete(plugin)` **不 await**
+- **模块级 HMR（dsh-hmr）不走这条可等待路径**：它调 `registry.delete(plugin)` **不 await**
   fiber 的异步卸载，随即重新 import 并 `apply` 新实例（§2.1 已注明）。因此：
   - 旧实例的 disposer 与新实例的启动**并发**，没有“旧先排空、新再写”的顺序保证；
   - hmr 清 cache 后重新 import，**同一文件 URL 得到全新模块对象** —— `usage-log.ts` / `stats.ts` 的
@@ -213,11 +249,12 @@ pnpm build     # scripts/build-client.mjs（esbuild）重写 lib/index.js（host
 
 ## 5. 易错点 / 一页 Checklist
 
-- [ ] base bundle 里 `hmr` 默认 `disabled: true`——模块级 HMR 要 profile patch 显式 `disabled: false`（本项目已配，勿删）。
+- [ ] base bundle 已经插入 `hmr` 行（`@deepseek-ai/dsh-hmr`，有 profileContext 时启用，`root: []` = 只 watch 配置）；模块级 HMR 要 profile patch **按 id** 覆写 `config.root: ['.']`（本项目已配，勿删）。
+- [ ] patch 行**绝不写 `name:`**：写成改名前的 `@deepseek-ai/cordis-plugin-hmr` 会被「name mismatch」整行跳过、静默退回 `root: []`；用 `dsh --profile web --dump-config` 核对。
 - [ ] 改 host 源码后必须 `pnpm build`（esbuild 落盘 `lib/index.js`）才触发 host HMR；`tsc --watch` 只产 `.d.ts`。
 - [ ] 改 client 源码后必须 `pnpm build`（落盘 `lib/client.js`）；主路径 = 刷新浏览器取新 rev；client-hmr 活着时可能 ≤500ms 免刷新热更（加分项，不依赖）。
 - [ ] 插件须以 **link/junction** 装进 profile（`node_modules/dsh-tokbook → 本仓库`），否则 profile 读到的是拷贝、重建产物不可见。
-- [ ] 启用/修改 `hmr` 行本身需要重启一次 `dsh web`；挂载后才是免重启热更。
+- [ ] 改 `hmr` 行的 `config` 不需要重启（patch watch 会重组并热 apply）；只有组合里**没有** hmr 行时才需要重启一次 `dsh web`。
 - [ ] 兜底：某次没热更成功 → 重启 `dsh web` + 硬刷新（永远取到当前 rev）。
 - [ ] **热更链没生效时不要只刷新**：宿主已按新内容重哈希、浏览器仍按启动时的旧 `rev` 请求 → `/plugins/<id>/client.js` 按「pathname+rev」精确匹配不到（源码注释口径 "mismatched revisions are rejected"）→ **404**，插件可能加载失败（按钮消失）。先按 §3.2 确认链活着再刷新。
 - [ ] `dev:web` 只重建 DSH 仓库内包；外置插件的重建 = 仓库自己的 `pnpm build`。
@@ -227,13 +264,16 @@ pnpm build     # scripts/build-client.mjs（esbuild）重写 lib/index.js（host
 
 ## 6. 版本与出处（本次核对）
 
-- 运行中的 Web GUI：`@deepseek-ai/dsh@0.1.2-rc.1`（`C:\Users\28529\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh`）。
-- 安装到 web profile 的机制包：`C:\Users\28529\.dsh\profiles\node_modules\@deepseek-ai\`
-  `cordis-plugin-hmr@1.0.17`、`dsh-client-hmr@0.1.2-rc.1`、`dsh-web-app@0.1.2-rc.1`、`dsh-base@0.1.2-rc.1`。
-- 源码检出（`0.1.3-alpha.1`，机制参考）：`vendor/hmr/src/index.ts`、`vendor/loader/src/{index,internal}.ts`、
-  `packages/client/hmr/src/{index.ts,client/index.ts}`、`packages/client/modules/src/index.ts`、
-  `packages/bundle/base/cordis.patch.yml`、`packages/bundle/web-app/cordis.patch.yml`、
-  `apps/cli/src/profile-boot.ts`、`scripts/dev-web.ts`。
+- 运行中的 Web GUI：`@deepseek-ai/dsh@0.1.7-alpha.1`（`C:\Users\28529\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh`）。
+- 安装到 web profile 的机制包：`C:\Users\28529\.dsh\profiles\node_modules\@deepseek-ai\` 的 junction 指向
+  全局安装；本轮实际生效的是 `dsh-hmr@0.1.7-alpha.1`、`dsh-client-hmr@0.1.7-alpha.1`、
+  `dsh-web-app@0.1.7-alpha.1`、`dsh-base@0.1.7-alpha.1`（`dsh-base` 的 `dependencies` 里是
+  `@deepseek-ai/dsh-hmr: ^0.1.7-alpha.1`，**不是** `cordis-plugin-hmr`）。该目录里遗留的
+  `cordis-plugin-hmr` junction 目标已不存在（悬空链接：DSH 会跳过，不影响启动）。
+- 源码检出（`0.1.7-alpha.2`，`00102833df` 2026-09-22，机制参考）：`packages/boot/hmr/src/{index,watch-config}.ts`、
+  `vendor/loader/src/{index,internal}.ts`、`packages/client/hmr/src/{index.ts,client/index.ts}`、
+  `packages/client/modules/src/index.ts`、`packages/bundle/base/cordis.patch.yml`、
+  `packages/bundle/web-app/cordis.patch.yml`、`apps/cli/tests/profile-hmr.spec.ts`、`scripts/dev-web.ts`。
 - 官方文档：<https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>
 
 相关本地文档：`docs/LESSONS.md` §3（客户端 `rev` 缓存 + HMR 姿势）、`docs/DESIGN.md` §8

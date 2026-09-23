@@ -236,6 +236,8 @@ export async function readPricingView(
     routes: cards,
     calendar: file.calendar,
     calendarMissing: missingCalendarYears(ledger, file.calendar, now),
+    // 汇率原样过 wire（缺席 = 未设）：价格表 tab 的读写面按它换算，计价层不看它。
+    ...(file.fx !== undefined ? { fx: file.fx } : {}),
     dataDir: dir,
     updatedAt: now,
   }

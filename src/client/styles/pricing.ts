@@ -14,52 +14,112 @@ export const CSS_PRICING = `
   box-shadow:inset 2px 0 0 var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-/* 整条头都是开关：年历平时只是个注脚，展开才是一份数据。 */
+/* 整条头都是开关：年历平时只是个注脚，展开才是一份数据。热区 24px——与这一屏其余控件
+   同一个下限（WCAG 2.2 SC 2.5.8）：它是**唯一的**展开入口，靠住一行 16px 高的字不够。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-toggle{
   appearance:none;background:transparent;border:0;cursor:pointer;padding:0;
-  display:inline-flex;align-items:center;gap:5px;
+  display:inline-flex;align-items:center;gap:5px;min-height:24px;
   font-size:11px;line-height:16px;font-weight:600;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-toggle:hover{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-caret{font-size:9px;color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-sum{font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
+/* 年报指名到年、摆在头里：收起时下面那些原因看不到，只说「有年份写不出来」等于把地点藏起来。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-warn{font-size:11px;line-height:16px;color:var(--dtpl-warn-ink);font-weight:600;}
-/* 缺年提示与状态条同档：它是**要读**的一句话，不是装饰。 */
+/* 缺年告警：它是**要读**的一句话（与状态条同档），而它说的那件事有且只有一个动作——
+   补上国家公布的安排。那颗按钮因此住进这一框、共用同一条左缘，而不是让人先想清楚该怎么加。
+   底走 warn 的 12%、正文走 warn-ink（warn 直接做正文只有 2.15:1）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-miss{
-  margin:0;padding:6px 8px;
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+  padding:6px 8px;
   background:color-mix(in srgb,var(--dtpl-warn) 12%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-miss-text{
+  flex:1 1 auto;min-width:0;margin:0;
   font-size:11px;line-height:16px;color:var(--dtpl-warn-ink);overflow-wrap:anywhere;
+}
+/* 恢复动作走**刻线**（一次性动作的那一档，与 .dtpl-price-add / .dtpl-price-ghost 同记），
+   只是墨与边取告警那一档：方框在本仓库留给幽灵行与成阵列重复的填数格，动作不吃框。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-fix{
+  appearance:none;box-sizing:border-box;flex:none;
+  display:inline-flex;align-items:center;gap:6px;
+  min-height:24px;padding:2px 8px;
+  border:0;border-bottom:1px solid color-mix(in srgb,var(--dtpl-warn) 55%,transparent);
+  background:transparent;color:var(--dtpl-warn-ink);
+  font:inherit;font-size:11px;letter-spacing:.08em;cursor:pointer;white-space:nowrap;
+  transition:background .12s ease,border-color .12s ease,color .12s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-fix:hover{
+  border-bottom-color:var(--dtpl-warn-ink);
+  background:color-mix(in srgb,var(--dtpl-warn-ink) 12%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-body{display:flex;flex-direction:column;gap:6px;margin-top:2px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-note{margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);overflow-wrap:anywhere;}
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-row{
-  display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;column-gap:8px;
+/* 一年一组：组头是年份与它的读数（几段假期、共几天），下面是这个年的每一段假期。
+   组与组之间用一道发丝线分开——年份换了一个，读的人也换了一件事。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-year{display:flex;flex-direction:column;gap:4px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-year + .dtpl-price-cal-year{
+  margin-top:4px;padding-top:8px;border-top:.5px solid var(--dtpl-hairline);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-row[data-bad="true"] .dtpl-price-cal-text{border-color:var(--dtpl-err);}
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-row .dtpl-price-cell-err{grid-column:1 / -1;text-align:left;white-space:normal;}
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-year{
-  font-family:var(--dtpl-mono);font-size:12px;line-height:16px;color:var(--dtpl-fg);
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-year-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-year-num{
+  font-family:var(--dtpl-mono);font-size:12px;line-height:16px;font-weight:600;color:var(--dtpl-fg);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-text{
-  width:100%;box-sizing:border-box;resize:vertical;
-  padding:4px 6px;border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
-  background:transparent;color:var(--dtpl-fg);
-  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-year-sum{font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-year-head .dtpl-price-ghost{margin-left:auto;}
+/* 一段假期一行：起 ~ 止。两个日期格是**控件**，所以是盒子（成组重复的填数格那一档）；
+   原生日历按钮收掉（与段卡的生效时刻同一条规矩），宽度由它要装的东西定：一个 ISO 日期。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-holiday{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-date::-webkit-calendar-picker-indicator{display:none;}
+/* 选择器带 .dtpl-price-cal 是必需的：后面那段 .dtpl-price-input（width:100% / text-align:right /
+   只有一条底边）同权重、写在后面，不带上它就会被压成整行宽的一条底线（见「加一年」那一格）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{
+  width:118px;text-align:left;
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-text:hover{border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-text:focus{outline:none;border-color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-text::placeholder{color:var(--dtpl-fg-2);}
-/* 读回来的区间：等宽、走 fg-2，它说的是「这段文本解析成了哪几天」。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-read{
-  max-width:180px;font-family:var(--dtpl-mono);font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+[data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date:hover{
+  border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-add{display:flex;align-items:center;gap:8px;}
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-newyear{
-  width:72px;text-align:center;border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
-  padding:0 6px;
+[data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date:focus{border-color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-holiday[data-bad="true"] .dtpl-price-cal-date{border-color:var(--dtpl-err);}
+/* 起止之间那条 ~：行内分隔符，走 dim 那一档（全表最弱的墨，只够当分隔符）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-tilde{flex:none;font-size:11px;color:var(--dtpl-fg-dim);}
+/* 这一段的读数：几天。它是**拿来对通知的**那个数（「共 N 天」），所以等宽 + 定宽右对齐，
+   一年里的几段成一条可以竖着扫下来的列。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-holiday-tail{
+  margin-left:auto;display:inline-flex;align-items:center;gap:8px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-cal-newyear:focus{border-color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-days{
+  min-width:48px;text-align:right;
+  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+/* 「还没填完」是一句话，不是读数：不吃等宽。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-days[data-kind="partial"]{font-family:inherit;}
+/* 行内的问题独占一行（它比这一行的三个控件都长）：左对齐、可折行，与其余填数格同一档。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-holiday .dtpl-price-cell-err{
+  flex:1 1 100%;text-align:left;white-space:normal;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-add{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+/* 「加一年」那一行的字段名：跟选择带同款（那条带子也是「字段名 + 原生控件」），
+   走 fg-2——它是要读的文本，不是装饰。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-year-k{font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
+/* 这一格是**盒子**不是刻线：四个数字，宽度由它能是什么定（72px）。选择器必须带上 .dtpl-price-cal，
+   否则后面那段 .dtpl-price-input（width:100% / text-align:right / 只有一条底边）同权重、写在后面，
+   会把这一格压成整行宽的一条底线——「加一年」那格因此看起来像别的填数格。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-newyear{
+  width:72px;text-align:center;
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-newyear:hover{
+  border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-newyear:focus{border-color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-newyear[aria-invalid="true"]{border-color:var(--dtpl-err);}
+[data-plugin="dsh-tokbook"] .dtpl-price-cal-newyear-err{
+  flex:1 1 auto;min-width:0;
+  font-size:10px;line-height:14px;color:var(--dtpl-err);overflow-wrap:anywhere;
+}
 
 /* 选择带 = 这一屏的**唯一**导航面：两个下拉，一行一个。
    min-width:0 是必需的——grid 项的自动最小宽度是内容宽度，不给 0 的话长 route key
@@ -82,6 +142,34 @@ export const CSS_PRICING = `
    不需要数字对齐；原生 select 的字体在这里正合适。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-sel{
   width:100%;height:26px;font-size:12px;
+}
+/* 汇率那一行：1 美元 = [ 7.15 ] 元，句尾跟一句反向读数（¥1 ≈ $0.14）。它是**全表共用的
+   一份事实**（不属于任何一行），所以和两个下拉同住这条带子、同一档的「字段名 + 控件」形状；
+   句尾那句反向读数是要读的文本，走 fg-2（dim 那一档在浅色卡面上读不出）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-fx{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-fx-eq,
+[data-plugin="dsh-tokbook"] .dtpl-price-fx-unit{font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
+/* 这一格是**盒子**不是刻线：它只装一个人写下的汇率。选择器必须带上 .dtpl-price-fx，
+   否则后面那段 .dtpl-price-input（width:100% / text-align:right / 只有一条底边）同权重、
+   写在后面，会把这一格压成整行宽的一条底线（与年历「加一年」同一处坑）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in{
+  width:72px;flex:none;text-align:center;
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in:hover{
+  border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in:focus{border-color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in[aria-invalid="true"]{border-color:var(--dtpl-err);}
+[data-plugin="dsh-tokbook"] .dtpl-price-fx-note{
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-variant-numeric:tabular-nums;
+}
+/* 汇率写不出去时那句话独占一行：它与这一行的控件都不同长，挤在一起会把选择带顶歪。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-fx-err{
+  font-size:10px;line-height:14px;color:var(--dtpl-err);overflow-wrap:anywhere;
 }
 
 /* 选中模型的详情面：身份行在最上，下面整块是让位层 .dtpl-price-rail（竖轨与段卡都在那一层里）。
@@ -177,6 +265,15 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-switch button[aria-pressed="true"]::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
 }
+/* 货币开关：读写的单位（¥ / $）。它与计费性质同一档「当前项」，所以共用 .dtpl-price-switch
+   的样子，只是前面多一个字段名——两组紧挨着摆，没有名字就会被读成一条四格的带子。
+   停用态（汇率还没填）只降不透明度：理由写在上面那格汇率里，这里不重复。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-currency{
+  flex:none;display:inline-flex;align-items:center;gap:6px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-currency-k{font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-currency .dtpl-price-switch button:disabled{opacity:.45;cursor:not-allowed;}
+[data-plugin="dsh-tokbook"] .dtpl-price-currency .dtpl-price-switch button:disabled:hover{background:transparent;}
 
 /* 四个格子：段卡的基准价与峰谷时段共用同一套度量（等宽是列宽的前提）与同一个左缘。
    四格**紧挨成一簇**，不摊到整行——摊开后相邻两个数之间空出一大段，四档价就不再是一组可比
@@ -261,14 +358,17 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-add-plus{
   flex:none;width:12px;text-align:center;letter-spacing:0;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-add-ghost:hover{
+[data-plugin="dsh-tokbook"] .dtpl-price-add-ghost:not(:disabled):hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 30%,transparent);
   background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-add-ghost:active{
+[data-plugin="dsh-tokbook"] .dtpl-price-add-ghost:not(:disabled):active{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
   background:color-mix(in srgb,var(--dtpl-fg) 11%,transparent);
 }
+/* 幽灵行也会被停用（年历「加一年」在年份还没写全时就停着）：停用态不接悬停/按下的洗色，
+   只留一个「按不动」的样子。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-add-ghost:disabled{opacity:.45;cursor:not-allowed;}
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost:disabled{opacity:.45;cursor:not-allowed;}
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost{
   appearance:none;

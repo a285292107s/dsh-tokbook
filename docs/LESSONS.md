@@ -241,11 +241,50 @@ padding-top:24px` ❌（居中照旧）。**判据**：固定高度 + 绝对定�
 
 ---
 
-## 8. 一页速查（Checklist）
+## 8. DSH 会话持久化面换 API：`inspect()` → `open(id,'read')` + `read()`（2026-09-23）
+
+### 现象
+账本只涨 live hook 记下的行；历史回填一行不写，而 `/tokbook/sync` 一路报 `done`（`error: null`），
+`sync-progress.json` 的 `sessions` 还被写成 `{}`——于是**每次重启后都重走一遍全部会话**（本机 329 个、
+上百秒），却什么也没回填。
+
+### 根因
+DSH 0.1.7 的 `sessionPersistence` 只剩 `create/open/stat/list/flush`：旧的整份读取 `inspect(id)` 与旧
+列表名 `listSnapshots()` 都没了。`syncHistory` 每会话调 `inspect` → TypeError → 按设计计入
+`failedSessions` 并继续；`doSync` 随后把这一批 id 从基线里删掉（`setBaseline(snapshots, failed)`），
+**全部失败 = 基线清空**。两个症状因此叠在一起，且都不冒错。
+
+### 修复
+`src/sync.ts` 的 `SyncPersistence` 同时吃两代形状：列表走 `list()`（回 `{header, revision}` 快照），
+日志走 `open(id,'read')` → `read()`（默认给到日志末尾）→ `close()`；旧名 `inspect()` /
+`listSnapshots()` 仍在，新宿主上缺席就自动走新路。只读句柄不取写所有权，可与在写的宿主并行。
+
+### 连带：信封 `seq` 不是行身份（2026-09-23 已清账）
+walk 一通就暴露出第二件事：V4 迁移会**稠密重排信封 `seq`**，而 `compaction:` / `failure:` 两类行的
+requestId 当时绑在 `seq` 上——同一事件被记成两个身份、各占一行。存量账本实测：31,796 行里
+**229 行是重复**（113 行同一 requestId 逐字节重复 + 116 个事件两个 seq 键；失败行 465 行对应 353 个
+事件）。修法：
+
+- 身份改成**跨格式稳定的事实**：压缩用 `compactionId`，失败用 `turn`（一个回合只关一次）或
+  `retryId` + 第几次；只有畸形/旧形态缺这些字段才回落到 `seq`（`src/usage-record.ts`）。
+- 存量按当前日志重算身份、就地重写日文件并去重（一次性脚本，先备份到 `~/.dsh/tokbook/.ledger-migrate-backup-*`）：
+  31,796 → 31,588 行、0 重复、0 歧义，3 行无源日志保留；再跑一轮 walk `added = 0`。
+- 注意 `~/.dsh/tokbook` 是**宿主在写**的目录：重写前先备份、落地前复核文件大小/mtime 未变，否则跳过。
+
+### 口诀
+**host 缝“没抛错”不等于“在干活”**：任何能把失败整段吞掉、又把失败者从基线里剔除的 walk，都必须让
+失败可观察——否则它会以“成功且无事发生”的样子长期空转。
+另一句：**派生账本的行身份必须是事件自带的事实，不是它在日志里的坐标**（seq 只是坐标）。
+
+---
+
+## 9. 一页速查（Checklist）
 
 - [ ] 选择器：元素自身带 `data-plugin` → 用复合 `[data-plugin].class`；真子元素 → 用后代 `[data-plugin] .class`。
 - [ ] 改 UI（client）后：`pnpm build` 落盘 `lib/client.js` → 刷新浏览器取新 rev（client-hmr 活着时可能 ≤500ms 自动热更，加分项非保证）。
 - [ ] 改 host 后：`pnpm build` 落盘 `lib/index.js` → host HMR 自动 卸载→重载→重 `apply`（profile 已启用 `hmr`）。
+- [ ] 会话持久化面按两代写：当前 `list()` + `open(id,'read')`，旧 `listSnapshots()` / `inspect()` 作为回落（见 §8）。
+- [ ] 派生账本的行身份只能用事件自带的事实（`message.id` / `compactionId` / `turn` / `retryId`），不用日志坐标 `seq`（见 §8）。
 - [ ] 兜底（首次接线 / 没热更上）：`pnpm build` → **重启 `dsh web`** → **硬刷新**（`Cmd/Ctrl+Shift+R`）。
 - [ ] `pnpm run dev:web` 只重建 DSH 仓库内包；外置插件的重建 = 自己的 `pnpm build`（详见 [`HMR.md`](HMR.md)）。
 - [ ] 只刷新不重启（且热更链没生效时）：会因 `rev` 不符被拒 → 可能插件加载失败，**不要**。

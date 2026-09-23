@@ -2,6 +2,11 @@
  * token-book 的纯记录词汇：JSONL 行类型、从会话事件的投影（assistant 消息、
  * compaction summary、turn 结束的 LLM 失败、重试的失败尝试），以及供去重扫描
  * 使用的宽松行解析。无 I/O，所有消费方共享同一 wire 格式。
+ *
+ * **行身份必须是跨格式稳定的事实**，因为会话日志的格式迁移会稠密重排信封
+ * `seq`：assistant 消息用 `message.id`；压缩用事件自带的 `compactionId`；
+ * 失败用 `turn`（一个回合只关一次）或 `retryId` + 第几次。只有畸形/旧形态
+ * 缺这些字段时才回落到 `seq`——同一事件被两个身份记成两行正是这么来的。
  */
 
 import type { UsageFields, UsageRecord, UsageRecordKind } from './types.ts'
@@ -30,11 +35,31 @@ export interface SessionEventLike {
     source?: { provider?: string; model: string }
     reason?: { kind: string; error?: { code?: string } }
     failure?: { code?: string }
+    /** 压缩调用自带的身份（格式迁移会重排信封 seq，它不变）。 */
+    compactionId?: string
+    /** 一次重试尝试的身份：`retryId` 标定这次重试，`retry` 是它的第几次。 */
+    retryId?: string
+    retry?: number
+    /** `turn/end` 关闭的回合号——一个回合只关一次。 */
+    turn?: number
   }
 }
 
 function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+/** 事件自带的稳定 id（非空字符串才算），否则 undefined。 */
+function stableId(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** 失败行的身份：事件自带的判别串优先，畸形/旧形态缺它时回落到 `seq`。
+ *  格式迁移会重排信封 seq，而事件自带的身份不变——否则同一事件会被记成两行。 */
+function failureKey(sessionId: string, event: { seq: number }, discriminator: string | undefined): string {
+  return discriminator !== undefined
+    ? `failure:${sessionId}:${discriminator}`
+    : `failure:${sessionId}:${String(event.seq)}`
 }
 
 /** 把事件的可选 provider usage 投影为基础桶。usage 缺失，或必需桶非法时，
@@ -70,8 +95,11 @@ export function recordFromMessage(event: SessionEventLike, sessionId: string): U
  * 连同它的用量一起消失——那比「用量未知」更不可查。 */
 export function recordFromCompaction(event: SessionEventLike, sessionId: string): UsageRecord {
   const usage = projectUsage(event.data?.usage)
+  const compactionId = stableId(event.data?.compactionId)
   return {
-    requestId: `compaction:${sessionId}:${String(event.seq)}`,
+    // 身份取事件自带的 `compactionId`（信封 seq 会被格式迁移重排，它不会）；
+    // 畸形/旧形态缺它时回落到 seq。
+    requestId: `compaction:${sessionId}:${compactionId ?? String(event.seq)}`,
     time: event.time,
     sessionId,
     model: event.data!.model ?? '',
@@ -81,15 +109,16 @@ export function recordFromCompaction(event: SessionEventLike, sessionId: string)
   }
 }
 
-/** 为一次失败的 provider 尝试构建行（turn/end 的终止错误与 `llm/retry` 共用）。 */
+/** 一次失败尝试身份行（turn/end 的终止错误与 `llm/retry` 共用）。 */
 function failureRow(
   event: { seq: number; time: number },
   sessionId: string,
   model: string,
   code: string | undefined,
+  discriminator: string | undefined,
 ): UsageRecord {
   return {
-    requestId: `failure:${sessionId}:${String(event.seq)}`,
+    requestId: failureKey(sessionId, event, discriminator),
     time: event.time,
     sessionId,
     model,
@@ -98,24 +127,37 @@ function failureRow(
   }
 }
 
-/** 为 reason 是 LLM 错误的 `turn/end` 事件构建日志行。 */
+/** 为 reason 是 LLM 错误的 `turn/end` 事件构建日志行。一个回合只关一次，
+ *  `turn` 因此是跨格式稳定的身份。 */
 export function recordFromTurnEnd(
   event: SessionEventLike,
   sessionId: string,
   model: string,
 ): UsageRecord | null {
   if (event.data?.reason?.kind !== 'error') return null
-  return failureRow(event, sessionId, model, event.data.reason.error?.code)
+  const turn = event.data.turn
+  return failureRow(
+    event,
+    sessionId,
+    model,
+    event.data.reason.error?.code,
+    isCount(turn) ? `turn:${String(turn)}` : undefined,
+  )
 }
 
 /** 为一条 `llm/retry` 事件构建日志行——一次已失败、且 retry 插件已安排重试的
- *  provider 尝试。 */
+ *  provider 尝试。身份取 `retryId` + 第几次重试，故与信封 seq 无关。 */
 export function recordFromRetry(
   event: SessionEventLike,
   sessionId: string,
   model: string,
 ): UsageRecord {
-  return failureRow(event, sessionId, model, event.data?.failure?.code)
+  const retryId = stableId(event.data?.retryId)
+  const retry = event.data?.retry
+  const discriminator = retryId === undefined
+    ? undefined
+    : isCount(retry) ? `retry:${retryId}:${String(retry)}` : `retry:${retryId}`
+  return failureRow(event, sessionId, model, event.data?.failure?.code, discriminator)
 }
 
 /** 把一条会话事件投影成日志行；不是已记录的来源时为 null。`lastModel` 是会话
