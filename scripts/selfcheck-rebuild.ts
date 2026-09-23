@@ -12,6 +12,8 @@
  *     缺失或残缺的基线读作 null(调用方退回全量走一遍并重写一份)。
  *  5. **派生态自证有效**:往日被补写之后,折叠(逐文件版本)与解析缓存(逐文件版本)都自己作废,
  *     没有调用方需要「记得」;1970 前的 `from` 写进文件后仍是它自己那一段(每段价都带日期)。
+ *  6. **会话同步**:seeded(fork)子会话只折 `inheritedEventCount` 之后的历史——继承前缀重折会
+ *     按子会话 id 再记一行压缩;单个会话的投影抛错只算一份失败,不掀掉整轮 walk。
  *
  * Run: node --experimental-strip-types scripts/selfcheck-rebuild.ts
  *
@@ -22,10 +24,11 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { UsageLog, dayFileNameOf, resetUsageLogState } from '../src/usage-log.ts'
-import { serializeRecord } from '../src/usage-record.ts'
+import { serializeRecord, type SessionEventLike } from '../src/usage-record.ts'
+import { syncHistory } from '../src/sync.ts'
 import {
-  attachCosts, buildSummary, clearRecordCache, readCachedRecords, readRecordsByDayRange, snapshotBaseline,
-  staleSessionIds, summarizeRecords, type PersistenceSnapshotLike, type RateResolver,
+  attachCosts, buildSummary, clearRecordCache, readCachedRecords, readRecordsByDayRange, ROLLUP_SCHEMA_VERSION,
+  snapshotBaseline, staleSessionIds, summarizeRecords, type PersistenceSnapshotLike, type RateResolver,
 } from '../src/stats.ts'
 import { readSyncProgress, writeSyncProgress } from '../src/sync-state.ts'
 import { rateKeyAt, readPriceFile, writePriceFile, PRICING_FILE } from '../src/pricing.ts'
@@ -124,7 +127,7 @@ console.log('rollup: 派生状态无损重建')
     const restamped = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
     check('旧版本折叠按当前形状重建并盖上新的 schemaVersion',
       foldKey(first) === foldKey(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined)
-      && restamped.schemaVersion === 7, restamped.schemaVersion)
+      && restamped.schemaVersion === ROLLUP_SCHEMA_VERSION, restamped.schemaVersion)
     // 用量未知是冻结折叠的一部分:它必须活过往返,而不是读回来变成 0。
     check('用量未知活过折叠往返', first.total.usageUnknown === 2 && rebuilt.total.usageUnknown === 2 && fromV1.total.usageUnknown === 2,
       [first.total.usageUnknown, rebuilt.total.usageUnknown, fromV1.total.usageUnknown])
@@ -335,6 +338,94 @@ console.log('price: 1970 前的生效时刻照样写成一个日期身份')
   } finally {
     await rm(dir, { recursive: true, force: true })
     clearRecordCache(dir)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 8. 会话同步:fork 的继承前缀不重折,单会话投影抛错不掀掉整轮 walk
+// ---------------------------------------------------------------------------
+console.log('sync: seeded 会话只折自己的历史 + 投影抛错只算一份失败')
+{
+  const snapshot = (id: string, revision: string): PersistenceSnapshotLike => ({ header: { id }, revision })
+  const route = { provider: 'deepseek-official', model: 'deepseek-chat' }
+  // 父会话的一段历史。seeded(fork)子会话的存盘日志从 seq 0 起就含它,切点是
+  // `inheritedEventCount`(DSH:child-owned history starts at inheritedEventCount)。
+  const prefix: SessionEventLike[] = [
+    { type: 'request/context', time: dayMs('2026-05-01', 9), seq: 0, data: route },
+    { type: 'compaction/summary', time: dayMs('2026-05-01', 9), seq: 1, data: { ...route, compactionId: 'c-parent', usage: { inputTokens: 400_000, outputTokens: 2_000, cacheReadTokens: 380_000 } } },
+    { type: 'assistant/message', time: dayMs('2026-05-01', 9), seq: 2, data: { message: { id: 'm-parent', source: route }, usage: { inputTokens: 10, outputTokens: 5 } } },
+  ]
+  const childOwn: SessionEventLike[] = [
+    { type: 'request/context', time: dayMs('2026-05-02', 9), seq: 3, data: route },
+    { type: 'compaction/summary', time: dayMs('2026-05-02', 9), seq: 4, data: { ...route, compactionId: 'c-child', usage: { inputTokens: 30_000, outputTokens: 1_000 } } },
+    { type: 'assistant/message', time: dayMs('2026-05-02', 10), seq: 5, data: { message: { id: 'm-child', source: route }, usage: { inputTokens: 20, outputTokens: 8 } } },
+  ]
+  const dir = await cleanDir()
+  try {
+    const log = new UsageLog(dir, quiet)
+    const logs = new Map<string, readonly SessionEventLike[]>([
+      ['parent', prefix],
+      ['child', [...prefix, ...childOwn]],
+    ])
+    const persistence = {
+      list: async () => [snapshot('parent', 'rev-p'), snapshot('child', 'rev-c')],
+      open: async (id: string, _access: 'read') => ({
+        ...(id === 'child' ? { inheritedEventCount: prefix.length } : {}),
+        // 不带 offset 的真实语义是从 seq 0 读起:不传切点的实现会整份重折父前缀。
+        read: async (offset = 0) => ({ events: (logs.get(id) ?? []).slice(offset) }),
+        close: async () => undefined,
+      }),
+    }
+    const result = await syncHistory({ persistence, log, recordCompaction: true })
+    const rows = await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', quiet)
+    const compactions = rows.filter(row => row.kind === 'compaction').map(row => row.requestId).sort()
+    check('seeded 子会话只折 inheritedEventCount 之后:父前缀的压缩不按子会话 id 再记一行',
+      result.added === 4 && result.skipped === 0 && result.failedSessions === 0
+      && compactions.join(',') === 'compaction:child:c-child,compaction:parent:c-parent',
+      { added: result.added, skipped: result.skipped, compactions, rows: rows.map(row => row.requestId) })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+    clearRecordCache(dir)
+    resetUsageLogState(dir)
+  }
+
+  // 投影层的非空断言(event.data.message 缺席)一旦抛错,只作废该会话:折到一半的行留下,
+  // 其余会话照走,`failedSessions` 计数——异常穿出 syncHistory 会让调用方永不推进同步基线。
+  const dir2 = await cleanDir()
+  try {
+    const log = new UsageLog(dir2, quiet)
+    const boom: SessionEventLike[] = [
+      { type: 'request/context', time: dayMs('2026-06-01', 9), seq: 0, data: route },
+      { type: 'assistant/message', time: dayMs('2026-06-01', 9), seq: 1, data: { usage: { inputTokens: 5, outputTokens: 5 } } },
+    ]
+    const good: SessionEventLike[] = [
+      { type: 'assistant/message', time: dayMs('2026-06-02', 9), seq: 0, data: { message: { id: 'm-good', source: route }, usage: { inputTokens: 7, outputTokens: 3 } } },
+    ]
+    const logs = new Map<string, readonly SessionEventLike[]>([['boom', boom], ['good', good]])
+    const failedIds: string[] = []
+    const persistence = {
+      list: async () => [snapshot('boom', 'rev-1'), snapshot('good', 'rev-2')],
+      open: async (id: string, _access: 'read') => ({
+        read: async () => ({ events: logs.get(id) ?? [] }),
+        close: async () => undefined,
+      }),
+    }
+    let threw = false
+    let failedSessions = -1
+    try {
+      failedSessions = (await syncHistory({ persistence, log, recordCompaction: true, onSessionFailure: (id) => { failedIds.push(id) } })).failedSessions
+    } catch {
+      threw = true
+    }
+    const rows = await readRecordsByDayRange(dir2, '0000-01-01', '9999-12-31', quiet)
+    check('单个会话的投影抛错只算一份失败:walk 不抛,后面的会话照折',
+      !threw && failedSessions === 1 && failedIds.join(',') === 'boom'
+      && rows.map(row => row.requestId).sort().join(',') === 'm-good',
+      { threw, failedSessions, failedIds, rows: rows.map(row => row.requestId) })
+  } finally {
+    await rm(dir2, { recursive: true, force: true })
+    clearRecordCache(dir2)
+    resetUsageLogState(dir2)
   }
 }
 

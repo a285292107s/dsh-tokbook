@@ -186,18 +186,29 @@ async function fileStamp(dir: string, name: string): Promise<{ size: number; mti
  *  模块级 HMR 后的第二个实例也会写，而日文件是可以被追加的，所以冻结日的缓存同样要
  *  过一次版本核对（一次 `stat`，省下的是整份解码）。 */
 async function loadFileCached(cache: DirCache, dir: string, name: string, logger: StatsLogger): Promise<UsageRecord[]> {
+  return (await loadFileStamped(cache, dir, name, logger)).records
+}
+
+/** {@link loadFileCached} 的带版本形：版本核对与解码在同一次 `stat` 里做完，所以
+ *  折叠要记下自己所依据的文件版本时不必为同一份文件再 `stat` 一遍。 */
+async function loadFileStamped(
+  cache: DirCache,
+  dir: string,
+  name: string,
+  logger: StatsLogger,
+): Promise<{ records: UsageRecord[]; stamp: string | null }> {
   const cached = cache.files.get(name)
-  const stamp = await fileStamp(dir, name)
-  if (stamp === null) {
+  const info = await fileStamp(dir, name)
+  if (info === null) {
     cache.files.delete(name)
-    return []
+    return { records: [], stamp: null }
   }
-  if (cached !== undefined && cached.size === stamp.size && cached.mtimeMs === stamp.mtimeMs) {
-    return cached.records
+  if (cached !== undefined && cached.size === info.size && cached.mtimeMs === info.mtimeMs) {
+    return { records: cached.records, stamp: stampKey(info) }
   }
   const records = await readDayFile(dir, name, logger)
-  cache.files.set(name, { records, size: stamp.size, mtimeMs: stamp.mtimeMs })
-  return records
+  cache.files.set(name, { records, size: info.size, mtimeMs: info.mtimeMs })
+  return { records, stamp: stampKey(info) }
 }
 
 async function loadDir(dir: string, cache: DirCache, logger: StatsLogger): Promise<UsageRecord[]> {
@@ -260,7 +271,7 @@ export async function warmRecordCache(dir: string, logger?: StatsLogger): Promis
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
-export const ROLLUP_SCHEMA_VERSION = 7
+export const ROLLUP_SCHEMA_VERSION = 8
 
 export interface RollupFile {
   schemaVersion: number
@@ -272,6 +283,9 @@ export interface RollupFile {
    *  水位线：它看不见往日被追加（权威 walk 补写、模块级 HMR 后的第二个实例、
    *  手工编辑），所以折叠必须自己记下它依据的那批文件版本。 */
   files: Record<string, string>
+  /** 折进去的记录里最大的事件时刻（epoch ms；`null` = 折进去的日子里一条记录都没有）。
+   *  概览的 `lastEventAt` 由它出，读路径因此不必为求一个 max 物化整本账。 */
+  lastEventAt: number | null
   total: UsageTotals
   byDay: UsageDayRow[]
   byHour: UsageHourRow[]
@@ -317,6 +331,8 @@ function isRollupFile(value: unknown): value is RollupFile {
     && typeof rollup.upto === 'string' && DAY_KEY.test(rollup.upto)
     && typeof rollup.pricingRevision === 'string'
     && isFileStamps(rollup.files)
+    && (rollup.lastEventAt === null
+      || (typeof rollup.lastEventAt === 'number' && Number.isFinite(rollup.lastEventAt)))
     && isTotals(rollup.total)
     && Array.isArray(rollup.byDay)
     && Array.isArray(rollup.byHour)
@@ -495,16 +511,24 @@ function addUsage(totals: UsageTotals, record: UsageRecord): void {
   if (usage.cacheWriteTokens !== undefined) totals.cacheWriteTokens += usage.cacheWriteTokens
 }
 
+/** 纯 token 聚合 + 账本最大事件时刻（`null` = 没有记录）。概览的 `lastEventAt`
+ *  取自它，所以折叠是唯一需要扫全部记录时刻的地方。 */
+export interface SummaryWithLastEvent extends TokenSummary {
+  lastEventAt: number | null
+}
+
 /** 把记录折成 token-summary 形状：resolver 指定的每个 (日, 模型, provider,
  * rate 身份) 一行 rate 行，每个 (provider, model) 一行模型行——同一 model 串被
  * 两个 provider 计费时**不得**合并，因为价格与计费性质是 provider 特有的。 */
-export function summarizeRecords(records: readonly UsageRecord[], resolve: RateResolver = () => UNPRICED_KEY): TokenSummary {
+export function summarizeRecords(records: readonly UsageRecord[], resolve: RateResolver = () => UNPRICED_KEY): SummaryWithLastEvent {
   const total = emptyTotals()
   const days = new Map<string, UsageTotals>()
   const hours = new Map<string, UsageTotals>()
   const models = new Map<string, UsageModelRow>()
   const rated = new Map<string, UsageRateRow>()
+  let lastEventAt: number | null = null
   for (const record of records) {
+    if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
     addUsage(total, record)
     const day = dayKey(record.time)
     const dayTotals = days.get(day) ?? emptyTotals()
@@ -535,11 +559,11 @@ export function summarizeRecords(records: readonly UsageRecord[], resolve: RateR
   const byDay: UsageDayRow[] = dayRows(days)
   const byHour: UsageHourRow[] = hourRows(hours)
   const byModel: UsageModelRow[] = modelRows(models)
-  return { total, byDay, byHour, byModel, rateRows: rateRowsSorted(rated.values()) }
+  return { total, byDay, byHour, byModel, rateRows: rateRowsSorted(rated.values()), lastEventAt }
 }
 
 /** 合并两个 summary 为一个。与顺序无关、可结合。 */
-export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSummary {
+export function mergeSummaries(left: SummaryWithLastEvent, right: SummaryWithLastEvent): SummaryWithLastEvent {
   const total = emptyTotals()
   addTotals(total, left.total)
   addTotals(total, right.total)
@@ -576,12 +600,16 @@ export function mergeSummaries(left: TokenSummary, right: TokenSummary): TokenSu
     addTotals(cell.totals, row.totals)
     rated.set(key, cell)
   }
+  const later = left.lastEventAt === null ? right.lastEventAt
+    : right.lastEventAt === null ? left.lastEventAt
+      : Math.max(left.lastEventAt, right.lastEventAt)
   return {
     total,
     byDay: dayRows(days),
     byHour: hourRows(hours),
     byModel: modelRows(models),
     rateRows: rateRowsSorted(rated.values()),
+    lastEventAt: later,
   }
 }
 
@@ -678,19 +706,25 @@ export async function buildSummary(
   resolve: RateResolver = () => UNPRICED_KEY,
   logger: StatsLogger = consoleLogger,
   options: { pricingRevision?: string } = {},
-): Promise<TokenSummary & { dataDir: string }> {
+): Promise<SummaryWithLastEvent & { dataDir: string }> {
   const pricingRevision = options.pricingRevision ?? ''
   const today = dayKey(now().getTime())
+  const cache = stateOf(dir)
   const names = await listDayFiles(dir)
+  const stored = await readRollup(dir, logger, pricingRevision)
+  // 折叠的版本核对只看得见水位线之内的文件：水位线之外的文件会在下面装载时各取
+  // 一次版本（冷文件顺手把版本记进新折叠），这里不为它们白取一遍。
   const stamps = new Map<string, string>()
-  for (const name of names) {
-    const stamp = await fileStamp(dir, name)
-    if (stamp !== null) stamps.set(name, stampKey(stamp))
+  if (stored !== null) {
+    for (const name of names) {
+      if (dayOfFileName(name)! > stored.upto) continue
+      const stamp = await fileStamp(dir, name)
+      if (stamp !== null) stamps.set(name, stampKey(stamp))
+    }
   }
-  const loaded = await readRollup(dir, logger, pricingRevision)
-  const rollup = loaded !== null && rollupIsCurrent(loaded, stamps)
-    ? loaded
-    : { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', pricingRevision, files: {}, total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [] }
+  const rollup = stored !== null && rollupIsCurrent(stored, stamps)
+    ? stored
+    : { schemaVersion: ROLLUP_SCHEMA_VERSION, upto: '', pricingRevision, files: {}, total: emptyTotals(), byDay: [], byHour: [], byModel: [], rateRows: [], lastEventAt: null }
   const cold: string[] = []
   const hot: string[] = []
   for (const name of names) {
@@ -704,9 +738,9 @@ export async function buildSummary(
     const records: UsageRecord[] = []
     const files: Record<string, string> = { ...rollup.files }
     for (const name of cold) {
-      const stamp = stamps.get(name)
-      if (stamp !== undefined) files[name] = stamp
-      records.push(...await readDayFile(dir, name, logger))
+      const file = await loadFileStamped(cache, dir, name, logger)
+      if (file.stamp !== null) files[name] = file.stamp
+      records.push(...file.records)
     }
     absorbed = {
       upto: dayOfFileName(cold[cold.length - 1]!)!,
@@ -720,6 +754,6 @@ export async function buildSummary(
     })
   }
   const fresh: UsageRecord[] = []
-  for (const name of hot) fresh.push(...await readDayFile(dir, name, logger))
+  for (const name of hot) fresh.push(...await loadFileCached(cache, dir, name, logger))
   return { dataDir: dir, ...mergeSummaries(absorbed, summarizeRecords(fresh, resolve)) }
 }

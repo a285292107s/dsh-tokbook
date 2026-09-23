@@ -32,9 +32,11 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
   useEffect(() => injectStyles(), [])
   const { open, overview, error, pricingDirty } = useSyncExternalStore(view.subscribe, view.getSnapshot)
   const [scanning, setScanning] = useState(false)
+  /** 在飞的那一轮「重新扫描」跟随。存 ref 是为了让关窗 / 卸载能中止它——轮询本身没有生命周期。 */
+  const rescanRef = useRef<AbortController | null>(null)
 
   const fetchOverview = useCallback((signal?: AbortSignal): Promise<void> => {
-    return fetch(ROUTE_OVERVIEW)
+    return fetch(ROUTE_OVERVIEW, { signal })
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() })
       .then((data: TokBookOverview) => { if (!signal?.aborted) view.setOverview(data) })
       .catch((err: unknown) => { if (!signal?.aborted) view.setError(err instanceof Error ? err.message : String(err)) })
@@ -45,7 +47,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
    *  那条路径上。读不到就返回 null（调用方按「已落定」处理，随后照常拉一次概览：
    *  同一份包里 client 与 host 同版本，探针失败只可能是路由之外的意外）。 */
   const fetchSyncState = useCallback((signal?: AbortSignal): Promise<SyncStatusView | null> => {
-    return fetch(ROUTE_SYNC)
+    return fetch(ROUTE_SYNC, { signal })
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<SyncStatusView> })
       .then((state) => (signal?.aborted === true ? null : state))
       .catch(() => null)
@@ -82,16 +84,29 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     return () => { controller.abort() }
   }, [open, fetchOverview, followSync, view])
 
+  // 关闭浮窗 / 组件卸载即中止这一轮跟随：轮询没有自己的生命周期，浮窗不在了就该停手。
+  useEffect(() => {
+    if (!open) {
+      rescanRef.current?.abort()
+      return
+    }
+    return () => { rescanRef.current?.abort() }
+  }, [open])
+
   // 触发一次权威再同步，然后轮询总览直到同步结束。
   const onRescan = useCallback(async () => {
+    rescanRef.current?.abort()
+    const controller = new AbortController()
+    rescanRef.current = controller
     setScanning(true)
     try {
       await fetch(ROUTE_RESCAN, { method: 'POST' }).then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
-      await followSync()
+      await followSync(controller.signal)
     } catch (err) {
-      view.setError(err instanceof Error ? err.message : String(err))
+      // 被中止不是失败：那一轮已经随着关窗作废，报错只会把「关掉了」说成「扫不动」。
+      if (!controller.signal.aborted) view.setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setScanning(false)
+      if (rescanRef.current === controller) setScanning(false)
     }
   }, [followSync, view])
 

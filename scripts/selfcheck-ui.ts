@@ -144,16 +144,18 @@ const dswSpread = dswFiles.filter((n) => !DSW_ALLOWED.has(n))
 check('--dsw-* 只在白名单片段里直连', dswSpread.length === 0, { dswSpread })
 
 // --- 6. reduced motion -----------------------------------------------------
+// 6/7/8 三项是**存在性**断言：任意一个分片里有那段规则就为真，不校验它覆盖了哪个面。
+// 与 1-5 项的逐类 / 逐行判定不是一个强度，别读成「每个面都有」。
 const hasReduce = fragments.some((f) => f.code.includes('prefers-reduced-motion'))
-check('prefers-reduced-motion 分支存在', hasReduce)
+check('prefers-reduced-motion 分支存在(存在性:不校验覆盖面)', hasReduce)
 
 // --- 7. 焦点与窄屏分支必须存在 ---------------------------------------------
 // §1.4「焦点必须可见」与 §2「窄屏是一整段独立配方」落成的就是那几段规则——整段被删掉时
 // 页面照常渲染。「某一处的 outline:none 有没有替代指示」仍是人的判断，这里不冒充。
 const hasFocus = fragments.some((f) => f.code.includes(':focus-visible'))
-check(':focus-visible 分支存在', hasFocus)
+check(':focus-visible 分支存在(存在性:不校验覆盖面)', hasFocus)
 const hasNarrow = fragments.some((f) => /@media[^{]*max-width\s*:/.test(f.code))
-check('窄屏 @media (max-width) 分支存在', hasNarrow)
+check('窄屏 @media (max-width) 分支存在(存在性:不校验覆盖面)', hasNarrow)
 
 // --- 8. 字面量 ARIA / label 引用必须解析得到 --------------------------------
 // `aria-controls` 指到一个不存在的 id 是静默的无障碍失效:读数正常、键盘焦点跳空,

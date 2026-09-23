@@ -107,9 +107,14 @@ export function ProviderPanel() {
   viewsRef.current = views
 
   const load = useCallback(async (target: ProviderRange, force?: boolean) => {
-    if (!force && viewsRef.current.has(target)) return // 已缓存——切换回来免费
-    const token = ++activeRef.current
+    // 清错误条在缓存短路之前：命中缓存同样是「这一次读到了」，别的窗口上一轮的失败不该留在屏上。
     setError(null)
+    if (!force && viewsRef.current.has(target)) {
+      // 命中缓存 = 屏上换了一份数据：在飞请求的成败同样不该落到这一份上（它属于刚离开的那个窗口）。
+      activeRef.current += 1
+      return
+    }
+    const token = ++activeRef.current
     try {
       const res = await fetch(`${ROUTE_USAGE}?${QUERY_RANGE}=${target}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)

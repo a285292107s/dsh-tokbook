@@ -10,8 +10,6 @@
  * 旧的 `listSnapshots()` / `inspect()` 仍被 `sync.ts` 接受。
  */
 
-import { join } from 'node:path'
-import { unlink } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   BillingMap, HolidayCalendar, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
@@ -24,8 +22,8 @@ import { modelOfEvent, providerOfEvent, recordOfEvent, type SessionEventLike } f
 import { autoSyncIfNeeded, listPersistenceSnapshots, syncHistory, type SyncDeps, type SyncPersistence } from './sync.ts'
 import { readSyncProgress, writeSyncProgress } from './sync-state.ts'
 import {
-  attachCosts, buildSummary, clearRecordCache, listDayFiles, rangeDayWindow, readCachedRecords,
-  readRecordsByDayRange, ROLLUP_FILE_NAME, snapshotBaseline, staleSessionIds, warmRecordCache,
+  attachCosts, buildSummary, listDayFiles, rangeDayWindow, readCachedRecords,
+  readRecordsByDayRange, snapshotBaseline, staleSessionIds, warmRecordCache,
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import { workspaceRows, type WorkspaceRef } from './workspaces.ts'
@@ -99,11 +97,13 @@ export class TokenUsageBook extends Service {
   private quotaCardCache = new Map<string, { at: number; card: QuotaCard }>()
   private credentials: CredentialResolver | undefined
   private persistence: SyncPersistence | undefined
-  private syncing = false
   private lastSyncAt = 0
   /** 上一轮 walk **开始**的时刻，用于 {@link SYNC_MIN_INTERVAL_MS} 节流。 */
   private lastWalkAt = 0
-  /** 在飞的那轮 walk（含启动时的一次性回填）。只在冷账本时被读路径 await。 */
+  /** 在飞的那轮同步（首装回填或权威 walk），**同步互斥的唯一判据**：两条进入路径
+   *  都先经 {@link startWalk} 在这里占位，故它们不可能并行（并行只是 I/O 翻倍，
+   *  且两条轮次会互相覆盖同步基线）；落定后归位 `null`，冷账本上的第一次读据它
+   *  判断「还在飞」并等它。 */
   private walkInFlight: Promise<void> | null = null
   private syncStatus: 'idle' | 'running' | 'done' | 'error' = 'idle'
   private syncError: string | null = null
@@ -185,13 +185,13 @@ export class TokenUsageBook extends Service {
       const persistence = persistenceCtx.get('sessionPersistence') as SyncPersistence
       this.persistence = persistence
       const failed = new Set<string>()
-      // 一次性历史回填也在后台跑；它被记进 `walkInFlight`，使冷账本上的第一次读
-      // 能等它（只有那时等待才有意义：账本一条记录都没有，没什么可显示的）。
-      this.walkInFlight = autoSyncIfNeeded(this.syncDeps(persistence, failed), this.dir)
-        .then(async (result) => {
+      // 一次性历史回填也在后台跑，并与探针触发的权威 walk 共用同一互斥（见
+      // `startWalk`）——首装 / 冷账本上因此不会并行两轮全量 walk。
+      this.startWalk(async () => {
+        try {
+          const result = await autoSyncIfNeeded(this.syncDeps(persistence, failed), this.dir)
           if (this.disposed || result === null) return
           this.logger.info?.(`[tokbook] first-run sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions`)
-          if (result.added > 0) invalidateDerivedState(this.dir)
           // 这次一次性回填刚折叠了全部会话；立刻记下签名，使现在到首次概览之间
           // 的重启不重走一切。
           try {
@@ -201,10 +201,10 @@ export class TokenUsageBook extends Service {
           }
           // 回填 append 了新行：重读缓存，使首次概览看到它们。
           await warmRecordCache(this.dir, this.logger)
-        })
-        .catch((error: unknown) => {
+        } catch (error) {
           this.logger.error('[tokbook] first-run sync failed:', error)
-        })
+        }
+      })
     })
 
     // 额度 tab 经 DSH credentials 缝（`ctx.credentials`）解析 provider key。没有
@@ -293,13 +293,13 @@ export class TokenUsageBook extends Service {
    */
   private scheduleSync(snapshots: readonly PersistenceSnapshotLike[], stale: readonly string[]): void {
     if (stale.length === 0) {
-      if (!this.syncing) this.syncStatus = 'done'
+      if (this.walkInFlight === null) this.syncStatus = 'done'
       return
     }
-    if (this.syncing) return
+    if (this.walkInFlight !== null) return
     const neverSynced = stale.some((id) => !this.syncedBySession.has(id))
     if (!neverSynced && Date.now() - this.lastWalkAt < SYNC_MIN_INTERVAL_MS) return
-    void this.doSync(snapshots, stale)
+    this.doSync(snapshots, stale)
   }
 
   /** 一轮同步的依赖：一次性回填与权威 walk 共用；`failed` 收集读不了日志的会话。 */
@@ -308,21 +308,41 @@ export class TokenUsageBook extends Service {
       persistence,
       log: this.log,
       recordCompaction: this.recordCompaction,
-      onSessionFailure: (id) => { failed.add(id) },
+      onSessionFailure: (id, error) => {
+        failed.add(id)
+        this.logger.error(`[tokbook] cannot fold session ${id}:`, error)
+      },
     }
   }
 
-  /** 权威 walk：把（有变化的）持久化日志折叠进账本，再记下同步后的 revision 签名。 */
-  private async doSync(snapshots: readonly PersistenceSnapshotLike[], sessionIds: readonly string[]): Promise<void> {
+  /**
+   * 启动一轮后台同步并占用同步互斥。首装回填与权威 walk 都经这里：并行两轮全量
+   * walk 只是 I/O 翻倍，且两条轮次会互相覆盖同步基线。
+   *
+   * 互斥在**同步段**内占位，故返回时「是否真的跑了起来」已是定论——扫描按钮据此
+   * 如实答 running / skipped，不必等整轮 walk 落地。落定后归位 `null`，冷账本上
+   * 的第一次读据此判断它是否还在飞。
+   */
+  private startWalk(run: () => Promise<void>): boolean {
+    if (this.walkInFlight !== null) return false
+    const tracked = run().finally(() => {
+      if (this.walkInFlight === tracked) this.walkInFlight = null
+    })
+    this.walkInFlight = tracked
+    return true
+  }
+
+  /** 权威 walk：把（有变化的）持久化日志折叠进账本，再记下同步后的 revision 签名。
+   *  @returns 本轮是否真的跑了起来（已有一轮在飞时为 false）。 */
+  private doSync(snapshots: readonly PersistenceSnapshotLike[], sessionIds: readonly string[]): boolean {
     const persistence = this.persistence
-    if (persistence === undefined || this.syncing) return
-    this.syncing = true
-    this.syncStatus = 'running'
-    this.syncError = null
+    if (persistence === undefined) return false
     const startedAt = Date.now()
-    this.lastWalkAt = startedAt
-    const failed = new Set<string>()
-    const run = (async (): Promise<void> => {
+    return this.startWalk(async () => {
+      this.syncStatus = 'running'
+      this.syncError = null
+      this.lastWalkAt = startedAt
+      const failed = new Set<string>()
       try {
         const result = await syncHistory(
           this.syncDeps(persistence, failed),
@@ -331,7 +351,6 @@ export class TokenUsageBook extends Service {
         this.lastSyncAt = Date.now()
         this.syncStatus = 'done'
         this.setBaseline(snapshots, failed)
-        if (result.added > 0) invalidateDerivedState(this.dir)
         // 时长写进日志：这条路径的成本全在「整份日志重读重折叠」上，它是否拖慢了读路径
         // 只能从这行看出来。
         this.logger.info?.(`[tokbook] sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions (${String(sessionIds.length)} of ${String(snapshots.length)} sessions) in ${String(Date.now() - startedAt)} ms`)
@@ -339,12 +358,8 @@ export class TokenUsageBook extends Service {
         this.syncStatus = 'error'
         this.syncError = error instanceof Error ? error.message : String(error)
         this.logger.error('[tokbook] sync failed:', error)
-      } finally {
-        this.syncing = false
       }
-    })()
-    this.walkInFlight = run
-    await run
+    })
   }
 
   /** 把一次已完成同步的签名收为当前内存基线并置 `syncedOnce`，再持久化为跨进程
@@ -371,11 +386,6 @@ export class TokenUsageBook extends Service {
     const { table, billing, revision, resolve } = await this.rateContext()
     const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger, { pricingRevision: revision })
     const costed = attachCosts(summary, table, billing)
-    const records = await readCachedRecords(this.dir, this.logger)
-    let lastEventAt: number | null = null
-    for (const record of records) {
-      if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
-    }
     // 精简 wire 载荷：价表、rateRows、byModel 不过 wire（成本已折进 cost 字段）；
     // byModel / byWorkspace 随用量明细 tab 走窗口载荷，不在这里；unpricedModels 概览
     // 不再渲染（价格未知在用量明细 / 价格表里），也不占 wire。
@@ -384,8 +394,9 @@ export class TokenUsageBook extends Service {
       ...slim,
       totalTokens: totalsTokens(costed.total),
       updatedAt: Date.now(),
-      records: records.length,
-      lastEventAt,
+      // 账本行数 = 计费调用 + 失败行（失败不计入 requests）。
+      records: costed.total.requests + (costed.total.failures ?? 0),
+      lastEventAt: summary.lastEventAt,
       syncStatus: this.syncStatus,
       syncError: this.syncError,
     }
@@ -585,18 +596,25 @@ export class TokenUsageBook extends Service {
     }
   }
 
-  /** 强制对全部会话做一次权威再同步（绕过新鲜探针）并报告其启动，供扫描按钮用。 */
+  /**
+   * 强制对全部会话做一次权威再同步（绕过新鲜探针）并报告其启动，供扫描按钮用。
+   * 会话清单**先取到**才占互斥：先答 `running` 再被在飞的那轮顶掉，等于用户按了
+   * 扫描却什么都没发生。取清单只读每会话元数据，与新鲜度探针同价。
+   */
   async rescan(): Promise<{ status: 'running' | 'skipped'; lastSyncAt: number | null }> {
     const persistence = this.persistence
     const lastSyncAt = this.lastSyncAt > 0 ? this.lastSyncAt : null
-    if (persistence === undefined || this.syncing) return { status: 'skipped', lastSyncAt }
-    void listPersistenceSnapshots(persistence, this.logger)
-      .then((snapshots) => this.doSync(snapshots, snapshots.map(snapshot => snapshot.header.id)))
-      .catch((error: unknown) => {
-        // 没有可信的会话清单就无从 walk；报给日志，下次探针自然接手。
-        this.logger.error('[tokbook] rescan cannot list sessions:', error)
-      })
-    return { status: 'running', lastSyncAt }
+    if (persistence === undefined) return { status: 'skipped', lastSyncAt }
+    let snapshots: readonly PersistenceSnapshotLike[]
+    try {
+      snapshots = await listPersistenceSnapshots(persistence, this.logger)
+    } catch (error) {
+      // 没有可信的会话清单就无从 walk；报给日志，下次探针自然接手。
+      this.logger.error('[tokbook] rescan cannot list sessions:', error)
+      return { status: 'skipped', lastSyncAt }
+    }
+    const started = this.doSync(snapshots, snapshots.map(snapshot => snapshot.header.id))
+    return { status: started ? 'running' : 'skipped', lastSyncAt }
   }
 
   /**
@@ -641,16 +659,6 @@ export class TokenUsageBook extends Service {
     return parsed
   }
 
-}
-
-/** 同步 append 了新行之后丢掉派生态。折叠会自己核对它所依据的文件版本
- *  （`rollupIsCurrent`）、解析缓存也按版本判新旧，所以这里不再是正确性的依靠——
- *  提前丢掉只是省下「读到一份注定作废的折叠」那一趟往返。 */
-function invalidateDerivedState(dir: string): void {
-  clearRecordCache(dir)
-  const rollup = join(dir, ROLLUP_FILE_NAME)
-  void unlink(rollup).catch(() => undefined)
-  void unlink(`${rollup}.tmp`).catch(() => undefined)
 }
 
 export default TokenUsageBook

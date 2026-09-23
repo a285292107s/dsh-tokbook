@@ -63,10 +63,14 @@ export function QuotaPanel() {
     })
   }, [])
 
-  // 每次挂载拉取一次已启用 route 列表。快速、不走网络。
+  // 每次挂载（以及按下「重试」）拉取一次已启用 route 列表。快速、不走网络。
+  // 拉取开始把 providers 清回 null：一次失败留下的空列表若被留下，第二笔在飞期间就会被读成
+  // 「尚未配置」——而真相是还没读到。
+  const [reload, setReload] = useState(0)
   useEffect(() => {
     let cancelled = false
     setListError(null)
+    setProviders(null)
     fetch(ROUTE_QUOTA)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -82,7 +86,7 @@ export function QuotaPanel() {
         }
       })
     return () => { cancelled = true }
-  }, [])
+  }, [reload])
 
   // 自动刷新：按选定间隔推进 ticker（0 = 关闭）。
   useEffect(() => {
@@ -118,37 +122,41 @@ export function QuotaPanel() {
       {listError !== null && (
         <div className="dtpl-error" role="alert">
           <p className="dtpl-error-text">额度加载失败：{listError}</p>
-          <button type="button" className="dtpl-retry" onClick={() => setListError(null)}>重试</button>
+          <button type="button" className="dtpl-retry" onClick={() => setReload((count) => count + 1)}>重试</button>
         </div>
       )}
 
-      {providers === null && listError === null
-        ? (
-          <div className="dtpl-skeleton" aria-hidden="true">
-            <div className="dtpl-quota-sk-card dtpl-sk" />
-            <div className="dtpl-quota-sk-card dtpl-sk" />
-          </div>
-        )
-        : !hasProviders
+      {/* 错误条独占这一屏：它下面不再补一句「尚未配置」——那句话说的是「你没配置」，
+          而真相是这一次没读到。 */}
+      {listError !== null
+        ? null
+        : providers === null
           ? (
-            <div className="dtpl-empty">
-              <UsageGlyph className="dtpl-empty-ico" />
-              <p className="dtpl-empty-title">尚未配置任何订阅额度查询</p>
-              <p className="dtpl-empty-sub">在插件配置的 <code>plans</code> 里为 opencode-go / commandcode 提供 API key（或登录对应官方 CLI），这里就会展示官方账户用量。</p>
+            <div className="dtpl-skeleton" aria-hidden="true">
+              <div className="dtpl-quota-sk-card dtpl-sk" />
+              <div className="dtpl-quota-sk-card dtpl-sk" />
             </div>
           )
-          : (
-            <div className="dtpl-quota-cards">
-              {ordered.map((provider) => (
-                <QuotaCardController
-                  key={provider}
-                  provider={provider}
-                  autoTicker={autoTicker}
-                  onGate={reportGate}
-                />
-              ))}
-            </div>
-          )}
+          : !hasProviders
+            ? (
+              <div className="dtpl-empty">
+                <UsageGlyph className="dtpl-empty-ico" />
+                <p className="dtpl-empty-title">尚未配置任何订阅额度查询</p>
+                <p className="dtpl-empty-sub">在插件配置的 <code>plans</code> 里为 opencode-go / commandcode 提供 API key（或登录对应官方 CLI），这里就会展示官方账户用量。</p>
+              </div>
+            )
+            : (
+              <div className="dtpl-quota-cards">
+                {ordered.map((provider) => (
+                  <QuotaCardController
+                    key={provider}
+                    provider={provider}
+                    autoTicker={autoTicker}
+                    onGate={reportGate}
+                  />
+                ))}
+              </div>
+            )}
     </section>
   )
 }

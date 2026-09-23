@@ -57,7 +57,10 @@ function isRate(value: unknown): value is number {
 
 async function readTextFile(dir: string, name: string, logger: Logger): Promise<string | null> {
   try {
-    return await readFile(join(dir, name), 'utf8')
+    const text = await readFile(join(dir, name), 'utf8')
+    // Windows PowerShell 5.1 的 `Set-Content -Encoding utf8`、不少编辑器的「UTF-8 with BOM」
+    // 都会在开头留一个 U+FEFF；那是编码标记，不是内容，剥掉它才轮得到 JSON.parse。
+    return text.startsWith('\uFEFF') ? text.slice(1) : text
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     logger.error(`[tokbook] cannot read ${name}:`, error)
@@ -77,8 +80,9 @@ function revisionOf(text: string): string {
 function parseJson(text: string, name: string, logger: Logger): unknown {
   try {
     return JSON.parse(text)
-  } catch {
-    logger.error(`[tokbook] ${name} is not valid JSON; treating it as empty`)
+  } catch (error) {
+    // 整表按空读 = 所有金额静默变成 ¥0，所以这句要说清后果，并带上位置（第几个字符）。
+    logger.error(`[tokbook] ${name} is not valid JSON; the whole price table is read as empty, so every amount is ¥0`, error)
     return null
   }
 }

@@ -129,16 +129,22 @@ export function clockLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`
 }
 
-/** `YYYY-MM-DD` → 自 epoch 起的天数；不是真实日历日时为 null。本地日历运算
- *  的中间量（只有拿它算加减，才能避免夏令时把「加一天」变成 23 或 25 小时）。 */
+/** `YYYY-MM-DD` → 自 epoch 起的天数；不是真实日历日时为 null。轴取 **UTC 日**：它必须与
+ *  {@link dayKeyOfIndex} 严格互逆——本地零点除以一天只在 UTC 以东恰好落回正确的日号，
+ *  在 UTC 以西会让整份年历错一天。日期字符串在这里就是日历日，故加减是纯整数运算，
+ *  不受夏令时影响。 */
 export function dayIndex(date: string): number | null {
-  const at = dayStartMs(date)
-  return at === null ? null : Math.round(at / 86_400_000)
+  if (dayStartMs(date) === null) return null
+  // Date.UTC 把 0–99 年当 19xx，但那些年上一步已判为非法（本地 Date 也加 1900）。
+  return Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))) / 86_400_000
 }
 
-/** 自 epoch 起的天数 → `YYYY-MM-DD`（本地）。 */
+/** 自 epoch 起的天数 → `YYYY-MM-DD`（UTC 日，与 {@link dayIndex} 互逆）。 */
 export function dayKeyOfIndex(index: number): string {
-  return dayKeyOf(index * 86_400_000)
+  const at = new Date(index * 86_400_000)
+  const month = String(at.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(at.getUTCDate()).padStart(2, '0')
+  return `${String(at.getUTCFullYear())}-${month}-${day}`
 }
 
 /** 一段放假日是否合法：两端都是真实日期，且起不晚于止。 */
@@ -149,7 +155,7 @@ export function isValidHolidayRange(range: HolidayRange): boolean {
 }
 
 /**
- * 一段放假日包含哪些天（本地 `YYYY-MM-DD`）。所有年历都是「一段连续假期」，
+ * 一段放假日包含哪些天（`YYYY-MM-DD` 日历日）。所有年历都是「一段连续假期」，
  * 但覆盖判定要按天问，所以这里把区间展开成集合。
  */
 export function holidayDates(range: HolidayRange): string[] {

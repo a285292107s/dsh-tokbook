@@ -15,7 +15,7 @@
     "isolatedModules": true,
     "allowImportingTsExtensions": true,
     "forceConsistentCasingInFileNames": true,
-    "noEmitOnError": false
+    "noEmitOnError": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "lib", "scripts"]

@@ -5,13 +5,13 @@
 // 去重 / 重启基线)在 `selfcheck-rebuild.ts`,这里不重测。
 //
 // Run: node --experimental-strip-types scripts/smoke.ts
-//      加 `--only <节名子串>` 只跑命中的那几节(改一处计价规则不必跑全 26 节)。
+//      加 `--only <节名子串>` 只跑命中的那几节(改一处计价规则不必读完整套输出)。
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import {
   summarizeRecords, mergeSummaries, attachCosts, buildSummary, isLedgerStale, staleSessionIds,
-  readRecordsByDayRange, rangeDayWindow, rollupIsCurrent, type RollupFile,
+  readRecordsByDayRange, rangeDayWindow, rollupIsCurrent, ROLLUP_SCHEMA_VERSION, type RollupFile,
 } from '../src/stats.ts'
 import { pathKey, workspaceRows } from '../src/workspaces.ts'
 import {
@@ -34,7 +34,7 @@ import {
   CNY_VIEW, isUsd, originOf, storedText, textOf, unitOf,
   type MoneyView,
 } from '../src/client/pricing/currency.ts'
-import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, holidaySet, hourStartMs, slotsOverlap } from '../src/price-format.ts'
+import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, dayIndex, dayKeyOfIndex, holidaySet, hourStartMs, slotsOverlap } from '../src/price-format.ts'
 import { axisNodes, labelWidth, placeNodes } from '../src/client/pricing/axis.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-catalog.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
@@ -65,11 +65,18 @@ function check(name: string, cond: boolean, detail?: unknown): void {
 /** 只吞日志的 seam:`{ error: () => {} }` 那类。 */
 const quiet = { error: () => {} }
 
-// 节过滤。跑全套是**提交门**,不是编辑循环的门:改一条取价规则却要读完整 26 节的输出,
+// 节过滤。跑全套是**提交门**,不是编辑循环的门:改一条取价规则却要读完整套输出,
 // 那点输出就是白花的 token。`--only` 只筛节,不改任何断言。
 const only = ((): string | null => {
   const flag = process.argv.indexOf('--only')
-  return flag === -1 ? null : (process.argv[flag + 1] ?? '')
+  if (flag === -1) return null
+  const value = process.argv[flag + 1]
+  // 缺值时空串会让 `name.includes('')` 恒真、静默跑全套——那与「只跑这一节」相反,直接报错。
+  if (value === undefined || value === '') {
+    console.error('--only 需要一个节名子串:node scripts/smoke.ts --only <节名子串>')
+    process.exit(1)
+  }
+  return value
 })()
 
 let ranSections = 0
@@ -278,6 +285,30 @@ if (section('手写价表:日期 / 价段 / 取价')) {
       && migratedRow.segments[1]!.from === '2026-09-01')
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+}
+
+if (section('日历日轴与价文件读入:UTC 日号互逆、BOM 不是畸形')) {
+  // 日号与日键必须互逆;轴定在 UTC 日,所以这条对任何时区都成立——本地零点除以一天只在
+  // UTC 以东恰好落对日号,UTC 以西(如 America/Los_Angeles)会让整份年历错一天。
+  const days = ['1969-12-31', '1970-01-01', '1970-01-02', '2000-02-29', '2026-02-15', '2026-12-31', '2100-01-01']
+  const drifted = days.filter(day => dayKeyOfIndex(dayIndex(day)!) !== day)
+  check('日号与日键互逆(含 1970 前后、闰年与世纪年)', drifted.length === 0, drifted)
+  check('epoch 日号 0 是 1970-01-01(轴是一个具体的 UTC 日,不是「本地零点的时刻」)', dayKeyOfIndex(0) === '1970-01-01')
+
+  // 手写工具链会给 UTF-8 加 BOM(PowerShell 5.1 的 Set-Content -Encoding utf8、编辑器的
+  // 「UTF-8 with BOM」):那一个字符不该把整张价表读成空表。
+  const bomDir = await mkdtemp(join(tmpdir(), 'tokbook-bom-'))
+  try {
+    const body = JSON.stringify({ r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 2 }] } })
+    await writeFile(join(bomDir, PRICING_FILE), body, 'utf8')
+    const plain = await readPriceFile(bomDir, quiet)
+    await writeFile(join(bomDir, PRICING_FILE), `\uFEFF${body}`, 'utf8')
+    const withBom = await readPriceFile(bomDir, quiet)
+    check('带 BOM 的 pricing.json 读成与不带时相同的价表(不是空表)',
+      withBom.table.r?.m?.length === 1 && JSON.stringify(withBom.table) === JSON.stringify(plain.table))
+  } finally {
+    await rm(bomDir, { recursive: true, force: true })
   }
 }
 
@@ -807,7 +838,7 @@ if (section('价格表币种:换算只改读写面,不改落盘内容')) {
 
 if (section('折叠自证有效:天级水位线看不见往日的追加')) {
   const rollupOf = (upto: string, files: Record<string, string>): RollupFile => ({
-    schemaVersion: 7, upto, pricingRevision: '', files,
+    schemaVersion: ROLLUP_SCHEMA_VERSION, upto, pricingRevision: '', files, lastEventAt: null,
     total: { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
     byDay: [], byHour: [], byModel: [], rateRows: [],
   })

@@ -58,10 +58,14 @@ export interface SyncPersistence {
   open?(id: string, access: 'read'): Promise<SessionHandleLike>
 }
 
-/** 只读句柄上本模块用到的部分：`read()` 默认给到日志末尾。 */
+/** 只读句柄上本模块用到的部分：`read()` 默认从 seq 0 读到日志末尾。
+ *  `inheritedEventCount` 是 seeded(fork)会话的父前缀长度：这类会话的存盘日志从
+ *  seq 0 就含父会话的历史，「child-owned history starts at inheritedEventCount」。
+ *  非 seeded 会话不设该字段；旧宿主也没有。 */
 export interface SessionHandleLike {
   read(offset?: number, length?: number): Promise<{ events: readonly SessionEventLike[] }>
   close?(): Promise<void>
+  inheritedEventCount?: number
 }
 
 /** 读一份会话的逻辑事件日志：优先旧的 `inspect()`，否则开只读句柄读到底再关。
@@ -75,7 +79,12 @@ async function readSessionEvents(persistence: SyncPersistence, id: string): Prom
   }
   const handle = await persistence.open(id, 'read')
   try {
-    return (await handle.read()).events
+    // 继承前缀（父会话的历史）不是本会话的计费调用，重折它会让带 sessionId 的
+    // 压缩 / 失败行按子会话 id 再落一行，且 append-only 永久留下。
+    const cut = typeof handle.inheritedEventCount === 'number' && handle.inheritedEventCount > 0
+      ? handle.inheritedEventCount
+      : 0
+    return (await handle.read(cut)).events
   } finally {
     await handle.close?.()
   }
@@ -168,35 +177,35 @@ export async function syncHistory(
   options.onTick?.({ processed, total, added, skipped, failedSessions })
   for (const session of sessions) {
     const id = session.header.id
-    // 一份读不了的会话日志（当前 dsh 拒绝的格式、撕裂文件……）不得中止
-    // 整轮 walk：跳过该会话、报出，让其余历史落盘。
-    let events: readonly SessionEventLike[]
+    // 一份读不了的会话日志（当前 dsh 拒绝的格式、撕裂文件……）或一条折不动的事件
+    // 都不得中止整轮 walk：跳过该会话、报出，让其余历史落盘。异常穿出本函数时
+    // 调用方记 error 而不推进同步基线，该会话会被每个探针反复重走。
     try {
       // 当前持久化面按句柄读：`read()` 返回校验过的逻辑事件日志；进行中会话
       // 的未关 turn 可能出现在日志中部，在此无害——只有计费调用事件投影行。
-      events = await readSessionEvents(deps.persistence, id)
+      const events = await readSessionEvents(deps.persistence, id)
+      // 本会话最近已知的 route model/provider：失败行需要一个 model 来归属，
+      // 而 turn/end 不带，所以 walk 跟随与实时记录器相同的 request/context +
+      // assistant/message 事件。
+      let model = ''
+      let provider: string | undefined
+      for (const event of events) {
+        const revealedModel = modelOfEvent(event)
+        if (revealedModel !== undefined) model = revealedModel
+        const revealedProvider = providerOfEvent(event)
+        if (revealedProvider !== undefined) provider = revealedProvider
+        const record = recordOfEvent(event, id, model, deps.recordCompaction !== false)
+        if (record === null) continue
+        if (provider !== undefined && record.provider === undefined) record.provider = provider
+        if (await deps.log.record(record)) added += 1
+        else skipped += 1
+      }
     } catch (error) {
       failedSessions += 1
       processed += 1
       deps.onSessionFailure?.(id, error)
       options.onTick?.({ processed, total, added, skipped, failedSessions })
       continue
-    }
-    // 本会话最近已知的 route model/provider：失败行需要一个 model 来归属，
-    // 而 turn/end 不带，所以 walk 跟随与实时记录器相同的 request/context +
-    // assistant/message 事件。
-    let model = ''
-    let provider: string | undefined
-    for (const event of events) {
-      const revealedModel = modelOfEvent(event)
-      if (revealedModel !== undefined) model = revealedModel
-      const revealedProvider = providerOfEvent(event)
-      if (revealedProvider !== undefined) provider = revealedProvider
-      const record = recordOfEvent(event, id, model, deps.recordCompaction !== false)
-      if (record === null) continue
-      if (provider !== undefined && record.provider === undefined) record.provider = provider
-      if (await deps.log.record(record)) added += 1
-      else skipped += 1
     }
     processed += 1
     options.onTick?.({ processed, total, added, skipped, failedSessions })

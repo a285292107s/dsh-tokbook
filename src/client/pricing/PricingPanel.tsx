@@ -15,7 +15,7 @@ import type { PriceVerdict, PricingView } from '../../types.ts'
 import { ROUTE_PRICING } from '../../route-paths.ts'
 import { inverseHint, type Currency } from './currency.ts'
 import {
-  baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxValue, modelDirty,
+  baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxSignature, fxValue, modelDirty,
   modelOptionLabel,
   routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx,
   type CalendarDraft, type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
@@ -55,6 +55,44 @@ interface Staged {
   baseline: PriceBaseline
 }
 let staged: Staged | null = null
+
+/**
+ * 把一份尚未落盘的草稿合并到刚读回来的宿主视图上：只有**真正 dirty** 的那几处胜出——
+ * 逐 (通道, 模型) 行、通道的计费性质、年历、汇率各按自己的签名判。基线同步换成磁盘的，
+ * 所以被保留的那几处仍显示「未保存」；其余内容（新增的 route / 模型、账本计数、缺年告警）
+ * 一律用磁盘上的新值。视图里没有的通道整个丢弃——**「有哪些通道」由宿主说了算**，
+ * 留着一份陈旧整卡只会在下一次写回里把它重新写进文件。
+ */
+function mergeStaged(fresh: PricingView, saved: Staged): { state: PriceState; baseline: PriceBaseline } {
+  let state = draftFromView(fresh)
+  const baseline = baselinesOf(fresh)
+  for (const [route, card] of saved.state.routes) {
+    const freshCard = state.routes.get(route)
+    if (freshCard === undefined) continue
+    const models = new Map(freshCard.models)
+    let billing = freshCard.billing
+    if ((saved.baseline.billing.get(route) ?? 'metered') !== card.billing) {
+      billing = card.billing
+      baseline.billing.set(route, saved.baseline.billing.get(route) ?? 'metered')
+    }
+    for (const [model, row] of card.models) {
+      if (!modelDirty(route, row, saved.baseline.models)) continue
+      models.set(model, row)
+      const key = rowKey(route, model)
+      baseline.models.set(key, saved.baseline.models.get(key) ?? '')
+    }
+    state.routes.set(route, { ...freshCard, models, billing })
+  }
+  if (calendarDirty(saved.state, saved.baseline)) {
+    state = withCalendar(state, saved.state.calendar)
+    baseline.calendar = saved.baseline.calendar
+  }
+  if (fxSignature(saved.state.fx) !== saved.baseline.fx) {
+    state = withFx(state, saved.state.fx)
+    baseline.fx = saved.baseline.fx
+  }
+  return { state, baseline }
+}
 
 /** 还没读到宿主视图之前的空状态。 */
 const EMPTY_STATE: PriceState = { routes: new Map(), calendar: new Map(), holidays: new Set(), fx: '' }
@@ -198,19 +236,27 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       const res = await fetch(ROUTE_PRICING)
       if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
       const body = await res.json() as PricingView
-      if (aliveRef.current) seed(body)
+      if (!aliveRef.current) return
+      // 未落盘的草稿只把它真正 dirty 的那几处压上去（见 `mergeStaged`）——于是重读既刷新了
+      // 磁盘上的变化，也没有把草稿整份写回去。
+      if (staged === null) {
+        seed(body)
+        return
+      }
+      const merged = mergeStaged(body, staged)
+      setView(body)
+      setState(merged.state)
+      setBaseline(merged.baseline)
     } catch (err) {
       if (aliveRef.current) setLoadError(err instanceof Error ? err.message : String(err))
     }
   }, [seed])
 
-  // 首次挂载：从未到达磁盘的草稿优先于宿主文件。
+  // 每次挂载都重读宿主文件：草稿只在自己 dirty 的那几处胜出，不重读就会让期间新增的
+  // route / 模型、账本计数与缺年告警一直停在离开那一刻。
   useEffect(() => {
     // 回到面板 = 一次提交点：上次没写完的坏草稿要说出原因，而不是只挂着一句「待保存…」。
-    if (staged !== null) {
-      committedRef.current = true
-      return
-    }
+    if (staged !== null) committedRef.current = true
     void loadView()
   }, [loadView])
 
