@@ -715,7 +715,8 @@ export function rateKeyAt(  table: PricingTable,
 /** 一个 rate 身份的价格：在当前表里回查该段的生效时刻，再找它命名的时段
  *  （rate 行以计费时所依据的段时刻 + 时段为键，故重算历史无需每条记录的时间戳）。
  *  表里不再持有该身份时为 null——段时刻消失，或命名的时段被移动/删除——
- *  这些行就读作价格未知。 */
+ *  这些行就读作价格未知。（生产里折叠与计价读同一张表，这条落空只为「美元通道
+ *  没设汇率」现形；改过时段的历史由签名重建就地重算，不悬空。） */
 export function priceOfKey(
   table: PricingTable,
   route: string | undefined,

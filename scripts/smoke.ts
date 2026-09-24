@@ -285,6 +285,59 @@ if (section('手写价表:日期 / 价段 / 取价')) {
       && migratedRow.segments[0]!.from === instantKey(hourStartMs(legacyFirst))
       && migratedRow.segments[0]!.inputPerMillion === 5
       && migratedRow.segments[1]!.from === '2026-09-01')
+
+    // 越过钳制:首记不早于下一段时,无 from 段的原始覆盖里没有任何记录——迁移若照落首记,
+    // 它会越过下一段、把所有后续记录改到它头上计价。落点必须退回下一段之前一个整点。
+    const lateFirst = dayMillis('2026-09-02', 10)
+    const clamped = await readPricingView(dir, [], {
+      byRouteModel: new Map([['deepseek-official', new Map([['deepseek-v4-flash', {
+        records: 2, firstAt: lateFirst, lastAt: dayMillis('2026-09-03', 9), unpriced: 0,
+      }]])]]),
+      byRoute: new Map([['deepseek-official', 2]]),
+    }, quiet)
+    const clampedRow = clamped.routes.find(c => c.route === 'deepseek-official')?.models.find(m => m.model === 'deepseek-v4-flash')
+    // 把钳制后的 wire 段真的喂给写路径:首记时刻的价仍属下一段(¥1),¥5 段没越过它。
+    const clampedSave = clampedRow === undefined ? null : parsePriceInput({
+      'deepseek-official': { 'deepseek-v4-flash': clampedRow.segments },
+    })
+    check('迁移落点不越过下一段:首记不早于它时退回其前一小时,后续记录仍归下一段计价',
+      clampedRow?.segments[0]!.from === instantKey(dayStartMs('2026-09-01')! - 3_600_000)
+      && clampedRow.segments[0]!.inputPerMillion === 5 && clampedRow.segments[1]!.from === '2026-09-01'
+      && clampedSave !== null && clampedSave.ok
+      && ratesAt(clampedSave.file.table, 'deepseek-official', 'deepseek-v4-flash', lateFirst)?.inputPerMillion === 1,
+      clampedSave !== null && !clampedSave.ok ? clampedSave.error : undefined)
+
+    // 没有记录也同一条钳制:落点用今天,而今天不早于下一段时同样退回。
+    await writeFile(join(dir, PRICING_FILE), JSON.stringify({
+      'deepseek-official': { 'deepseek-v4-flash': [
+        { inputPerMillion: 5, outputPerMillion: 20 },
+        { from: '2020-01-01', inputPerMillion: 1, outputPerMillion: 4 },
+      ] },
+    }), 'utf8')
+    const noRecords = await readPricingView(dir, [], { byRouteModel: new Map(), byRoute: new Map() }, quiet)
+    const noRecordsRow = noRecords.routes.find(c => c.route === 'deepseek-official')?.models.find(m => m.model === 'deepseek-v4-flash')
+    check('没有记录时无 from 段也不越过下一段:落点退回其前一小时(今天永远不早于 2020)',
+      noRecordsRow?.segments[0]!.from === instantKey(dayStartMs('2020-01-01')! - 3_600_000))
+
+    // 只出现在 $billing / $currency 里的路由也要有卡片:保存是整表重写、以卡片为真源,
+    // 没有卡片的那两条键会在下一次自动保存时静默消失(「磁盘 ≡ 草稿」对手写文件也成立)。
+    await writeFile(join(dir, PRICING_FILE), JSON.stringify({
+      [PRICING_BILLING_KEY]: { 'ghost-route': 'subscription' },
+      [PRICING_CURRENCY_KEY]: { 'usd-ghost': 'USD' },
+      [PRICING_FX_KEY]: { cnyPerUsd: 7 },
+    }), 'utf8')
+    const ghosts = await readPricingView(dir, [], { byRouteModel: new Map(), byRoute: new Map() }, quiet)
+    const ghostCard = ghosts.routes.find(c => c.route === 'ghost-route')
+    const usdCard = ghosts.routes.find(c => c.route === 'usd-ghost')
+    check('孤儿 $billing / $currency 路由进卡片(空行,带各自的键值)',
+      ghostCard?.billing === 'subscription' && ghostCard.models.length === 0
+      && usdCard?.currency === 'USD' && usdCard.models.length === 0)
+    const ghostBody = composePriceBody(draftFromView(ghosts))
+    const ghostBack = ghostBody.ok ? parsePriceInput(ghostBody.body) : null
+    check('这样的卡片过一遍草稿写回后键还在(草稿产出 ⊇ 手写事实)',
+      ghostBack !== null && ghostBack.ok
+      && ghostBack.file.billing['ghost-route'] === 'subscription' && ghostBack.file.currency['usd-ghost'] === 'USD',
+      ghostBody.ok ? undefined : ghostBody.error)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -566,7 +619,7 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
 }
 
 
-if (section('时段身份:改费率就地重算,改时段 / 删时段 = 价格未知')) {
+if (section('时段身份:回查落空只标明旧身份;改时段后重建立地重算')) {
   const route = 'deepseek-official'
   const model = 'deepseek-v4-flash'
   const inside = dayMillis('2026-09-14', 10)   // 周一 10:00,落在 09:00–12:00 工作时段里
@@ -581,15 +634,17 @@ if (section('时段身份:改费率就地重算,改时段 / 删时段 = 价格�
   const segment = priceAt(table([slot(9, 2)]), route, model, inside)
   check('身份 = 价段 from + 那一刻生效的时段(start + days)',
     segment !== null && slotAt(segment, inside)?.start === 9 && key.from === dayStartMs('2020-01-01') && key.slot?.start === 9 && key.slot.days === 'weekdays')
-  check('改费率 → 身份不变、就地重算;改 start / 改 days / 删时段 → 那一刻另有一个身份在生效,旧身份回查不到 = 价格未知',
+  check('改费率 → 身份不变、就地按新价重算;改 start / 改 days / 删时段 → 那一刻另有一个身份在生效,旧身份回查不到',
     JSON.stringify(rateKeyAt(table([slot(9, 3)]), route, model, inside)) === JSON.stringify(key)
     && priceOfKey(table([slot(9, 3)]), route, model, key)?.inputPerMillion === 3
     && rateKeyAt(table([slot(8, 2)]), route, model, inside)?.slot?.start === 8 && priceOfKey(table([slot(8, 2)]), route, model, key) === null
     && priceOfKey(table([slot(9, 2, 'daily')]), route, model, key) === null
     && ratesAt(table([]), route, model, inside)?.inputPerMillion === 1 && priceOfKey(table([]), route, model, key) === null)
 
-  // 悬空的身份要在**成本层**现形:那一刻的身份取自旧表(start 9),计价用改过时段的新表
-  // (start 8)——旧身份回查不到,那条历史按 ¥0 计并被列为价格未知,绝不静默按邻近时段重算。
+  // 回查落空要在**成本层**现形:身份取自旧表(start 9),计价用改过时段的新表(start 8)——
+  // 那条历史按 ¥0 计并列进 unpricedModels。生产里折叠与计价读同一张表,所以这条路径只为
+  // 「按美元报价却没设汇率」的通道现形(`cnyTable` 整条丢掉,见「价格表币种」一节);
+  // 改了时段之后仍是就地重算:旧的费率行随签名作废重建,由新表按记录时刻重新解身份。
   const records: UsageRecord[] = [{ requestId: 'peak-1', time: inside, sessionId: 's1', provider: route, model, usage: { inputTokens: 1_000_000, outputTokens: 0 } }]
   const resolve = (record: UsageRecord) => rateKeyAt(table([slot(9, 2)]), record.provider, record.model, record.time)
   const orphaned = attachCosts({ ...summarizeRecords(records, resolve), dataDir: 'x' }, table([slot(8, 2)]))

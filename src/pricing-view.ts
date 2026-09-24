@@ -7,7 +7,7 @@
  * 与拥有价**文件**本身（读、写、解析）的 `./pricing.ts` 分开。
  */
 
-import { hourStartMs, instantKey, EARLIEST } from './price-format.ts'
+import { HOUR_MS, hourStartMs, instantKey, EARLIEST } from './price-format.ts'
 import { billingOf, rateKeyAt, readPriceFile } from './pricing.ts'
 import type {
   HolidayCalendar, ModelEntry, PriceSegment, PriceSlot, PricingModelView, PricingRouteView,
@@ -108,6 +108,19 @@ function slotInput(slot: PriceSlot): PricingSlotInput {
   }
 }
 
+/** 无 `from` 那一段的迁移落点。段按生效时刻升序，哨兵段（`from = EARLIEST`）的原始
+ *  覆盖是 `[0, 其后第一个真实段)`。落点是该模型的首记整点（没有记录用今天），但不得
+ *  不早于那一下一段——否则哨兵段会越过后面的真实段、把所有后续记录改成它计价。
+ *  越界时落回那一段之前一个整点。 */
+function migrationFrom(segments: readonly PriceSegment[], firstAt: number | undefined, now: number): number {
+  const landing = hourStartMs(firstAt ?? now)
+  const next = segments.find(segment => segment.from > EARLIEST)
+  if (next === undefined || landing < next.from) return landing
+  const at = next.from - HOUR_MS
+  // 落在 0 上会被重新读成「没有生效时刻」，所以再退一个整点。
+  return at === EARLIEST ? at - HOUR_MS : at
+}
+
 /** 一个价段在 wire 上的形态。旧文件里「没有生效时刻」的那一段（`from === EARLIEST`）
  *  由调用方给出迁入日期：界面与写入形态都不再有「自始生效」这个概念。 */
 function segmentInput(segment: PriceSegment, inheritedFrom: number): PricingSegmentInput {
@@ -197,6 +210,9 @@ export async function readPricingView(
       if (!models.has(model)) models.set(model, { configured: false, records: 0 })
     }
   }
+  // 只出现在 `$billing` / `$currency` 里的路由也有卡片：价表 tab 的保存是整份重写，
+  // 没有卡片就没有草稿行，这些手写的键会在下一次自动保存时静默消失。
+  for (const route of [...Object.keys(file.billing), ...Object.keys(file.currency)]) ensure(route)
 
   const now = Date.now()
   const cards: PricingRouteView[] = []
@@ -205,9 +221,10 @@ export async function readPricingView(
     for (const [model, acc] of entry.models) {
       const segments = file.table[route]?.[model]
       // 旧形态（无生效时刻的那一段，自始生效）在**读**里活最后一次：它被落成真实日期——
-      // 该模型的首记整点（没有记录就用今天）。金额因此一分不变（首记之前本来没有任何记录），
+      // 该模型的首记整点（没有记录就用今天），但不得越过它的后继段（见 migrationFrom）。
+      // 金额因此一分不变（首记之前本来没有任何记录，越过时落点退回后继段之前），
       // 而界面与写入形态从此只剩「有生效时刻的段」；下一次保存就把文件写成新形态。
-      const inheritedFrom = hourStartMs(acc.firstAt ?? now)
+      const inheritedFrom = migrationFrom(segments ?? [], acc.firstAt, now)
       models.push({
         model,
         ...(acc.name !== undefined ? { name: acc.name } : {}),

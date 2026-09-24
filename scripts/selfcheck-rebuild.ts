@@ -222,6 +222,15 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
       },
     })
     const resolverOf = (table: PricingTable) => (row: UsageRecord) => rateKeyAt(table, row.provider, row.model, row.time)
+    // 同一张表、同一份基准价，只是**没有时段**——「删掉时段」后的磁盘形状。
+    const noSlot = (inputPerMillion: number): PricingTable => ({
+      'deepseek-official': {
+        'deepseek-chat': [{
+          from: dayMs('2000-01-01', 0),
+          rates: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
+        }],
+      },
+    })
     const foldedRevision = async (): Promise<string> =>
       (JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8')) as { pricingRevision: string }).pricingRevision
     const daySpend = (costed: ReturnType<typeof attachCosts>): number[] => costed.byDay.map(row => row.spend ?? 0)
@@ -235,7 +244,8 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
       && daySpend(beforeCost).length === 2 && daySpend(beforeCost).every(spend => Math.abs(spend - 4) < 1e-9))
 
     // 价格文件变了:时段 start 挪位(费率行身份跟着变)且费率下降。按旧签名折出来的行指着一个
-    // 新表里不再存在的时段,所以整份折叠必须作废。
+    // 新表里不再存在的时段,而那份折叠必须整份作废——重建之后没有任何一行停在价格未知:
+    // 历史由新表按记录时刻重新解身份,就地跟上新价。
     await writePriceFile(dir, { table: prices(8, 1), billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
     const after = await readPriceFile(dir, quiet)
     const secondFold = await buildSummary(dir, never, resolverOf(after.table), quiet, { pricingRevision: after.revision })
@@ -247,6 +257,18 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
       && afterCost.unpricedModels.length === 0, afterCost.unpricedModels.join(','))
     const direct = summarizeRecords(await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', quiet), resolverOf(after.table))
     check('重折的结果来自日文件而不是被丢掉的旧折叠(== 新价下的直接全量聚合)', foldKey(direct) === foldKey(secondFold))
+
+    // 删掉时段是同一条规则的极端形:那一刻另有一个身份在生效(段的基准价),历史因此退回
+    // 基准价而不是掉成价格未知。
+    await writePriceFile(dir, { table: noSlot(1), billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
+    const stripped = await readPriceFile(dir, quiet)
+    const thirdFold = await buildSummary(dir, never, resolverOf(stripped.table), quiet, { pricingRevision: stripped.revision })
+    const thirdCost = attachCosts(thirdFold, stripped.table)
+    check('删掉时段后重折:那两个小时按段基准价就地重算(¥1/天),身份不再指向时段,也没有价格未知',
+      stripped.revision !== after.revision && await foldedRevision() === stripped.revision
+      && thirdFold.rateRows.length === 2 && thirdFold.rateRows.every(row => row.rate.slot === null)
+      && daySpend(thirdCost).every(spend => Math.abs(spend - 1) < 1e-9)
+      && thirdCost.unpricedModels.length === 0, thirdCost.unpricedModels.join(','))
   } finally {
     await rm(dir, { recursive: true, force: true })
     clearRecordCache(dir)

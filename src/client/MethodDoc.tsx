@@ -174,7 +174,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">两个金额桶，不是一笔支出</span>
-                <span className="dtpl-doc-gap-item-desc"><b>实际支出</b>是按量通道的真金白银；<b>订阅价值</b>是订阅通道这些用量若按量付费本来要花的钱，<b>不是现金</b>。没定价、或原价段已被改掉的记录记 ¥0，并列为<b>价格未知</b>——不是免费。</span>
+                <span className="dtpl-doc-gap-item-desc"><b>实际支出</b>是按量通道的真金白银；<b>订阅价值</b>是订阅通道这些用量若按量付费本来要花的钱，<b>不是现金</b>。没定价的记录记 ¥0，并列为<b>价格未知</b>——不是免费；改过价之后，历史按记录时刻用新价<b>重算</b>，不会留下无主的旧行。</span>
               </li>
             </ul>
           </article>
