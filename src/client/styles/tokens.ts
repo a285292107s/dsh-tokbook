@@ -20,7 +20,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
      要读的文本只许用 fg / fg-2；fg-3 是装饰，dim 是"·"这类行内分隔符。
      三级色压白卡 3.47:1、压浅色卡面 4.12:1，都不是正文色。
      实测（压卡面）：dim 浅色 1.64 / 深色 2.50——**它是全表最弱的一档**，只够当分隔符；
-     拿它报一个数字（价、时长）或一句说明，等于没报（价格表里那几处因此回到 fg-2）。 */
+     拿它报一个数字（价、时长）或一句说明，等于没报（价格表里那几处因此用 fg-2）。 */
   --dtpl-fg:var(--dsw-alias-label-primary,#1f2328);      /* 主墨：读数与标题 */
   --dtpl-fg-2:var(--dsw-alias-label-secondary,#59636e);  /* 次级：说明句、标签、未选中项 */
   --dtpl-fg-3:var(--dsw-alias-label-tertiary,#81858c);   /* 只给装饰：插入符、缀点 */
@@ -53,7 +53,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   /* ── 五、品牌黄：它是"料"，不是"线" ───────────────────────────────────────
      恒定黄无法同时当浅底与深底上的线条色（#FFCD00 压白卡 1.57:1），
      所以只以实心块 + 墨边出现，两个主题共用形态，周围面色随主题翻转。 */
-  --dtpl-brand:#ffcd00;    /* 当前页标记、峰值牌、工业徽记、草稿点、选区 */
+  --dtpl-brand:#ffcd00;    /* 当前页标记、峰值牌、工业徽记、草稿点、选区，以及价表「当前生效」的钉点与芯片 */
   --dtpl-on-brand:#14150f; /* 黄块上的字与墨边 */
 
   /* ── 六、材质：面板的两条配方 ─────────────────────────────────────────────
@@ -63,7 +63,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-metal:
     inset 0 1px 0 0 color-mix(in srgb,#fff 7%,transparent),
     inset 0 -1px 0 0 color-mix(in srgb,#000 12%,transparent);
-  /* 所有"一块读数面"共用的面板底（3% 洗色）；深色不再单独提亮，否则同屏出现两种面板。 */
+  /* 所有"一块读数面"共用的面板底（3% 洗色）；深色不另提亮，否则同屏出现两种面板。 */
   --dtpl-panel-bg:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
 
   /* ── 七、几何与字体 ───────────────────────────────────────────────────────

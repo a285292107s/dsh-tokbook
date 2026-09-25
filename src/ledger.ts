@@ -1,13 +1,12 @@
 /**
- * 数据目录解析与「一目录一写进程」属主标记。默认 `$DSH_HOME/tokbook`，
- * 否则 `~/.dsh/tokbook`；`path` 配置可指向既有存储。
+ * 数据目录解析与「一目录一写进程」属主标记（所有权口径见 docs/CONTRACTS.md §3）。
  */
 
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 
-/** 显式 `path` 优先；空白 `$DSH_HOME` 视为未设。 */
+/** 空白 `$DSH_HOME` 视为未设。 */
 export function defaultDataDir(configPath: string | undefined): string {
   if (configPath !== undefined && configPath !== '') return configPath
   const envHome = process.env.DSH_HOME
@@ -17,7 +16,6 @@ export function defaultDataDir(configPath: string | undefined): string {
   return join(base, 'tokbook')
 }
 
-/** 属主标记；第二个存活宿主指向同一目录时启动告警。 */
 export const OWNER_FILE = 'owner.json'
 
 interface OwnerMarker {
@@ -25,7 +23,7 @@ interface OwnerMarker {
   startedAt: number
 }
 
-/** 尽力而为：权限/平台失败读作「不存活」。 */
+/** 尽力而为：畸形 pid 与 EPERM 之外的探测失败读作「不存活」（EPERM 见下方注释）。从不抛。 */
 function pidIsAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false
   try {

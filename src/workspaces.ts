@@ -17,7 +17,6 @@ import { attachCosts, summarizeRecords } from './stats.ts'
 /** 无人认领的兜底行的行 id。 */
 export const UNATTRIBUTED_ID = ''
 
-/** 兜底行的展示标题。 */
 export const UNATTRIBUTED_TITLE = '未归属'
 
 /** 本聚合所需的 workspace 事实，由宿主从 workspace registry 读出。保持
@@ -45,7 +44,7 @@ export function pathKey(path: string): string {
  * 把每条记录折入其工作区行，最近用过的在前。
  *
  * `cwdOf` 是宿主的会话 header 查找（实时或已持久化）。没有 provider usage 的
- * 记录仍计入请求；失败行只计入 `failures` 维度，与概览自身的 totals 一致。
+ * 记录仍计入请求；失败行只计入 `failures` 维度。
  * 从未计费过请求的工作区（只有失败行）跳过，而不是显示为零行。
  */
 export function workspaceRows(

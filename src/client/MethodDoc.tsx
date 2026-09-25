@@ -7,9 +7,7 @@ import { formatDateTime } from './format.ts'
 
 /**
  * 「记了哪些调用」判定表：一行一种**用户看得见的情况**，后两列是两个维度的判定。
- *
- * 口径真源是 `src/stats.ts` 的 `addUsage`（失败只进 `failures`，既不进请求数也不进
- * 词元；缺 `usage` 的计费调用进 `requests` + `usageUnknown`）。这里只做白话转写，
+ * 口径真源是 `src/stats.ts` 的 `addUsage`（规则另见 CONTRACTS §2）；这里只做白话转写，
  * 不引入第三套说法——改口径先改那里。
  */
 interface JudgeRow {
@@ -76,23 +74,17 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </div>
         <div className="dtpl-doc-fact">
           <span className="dtpl-doc-fact-k">范围</span>
-          {/* 这一格按**作用域**陈述边界，而不是给产品自评（一个假精度、一个形容词挂在速览里，
-              只会让读者先怀疑整页）；可核对性来自 §2 的表 + §3 的漏项。
-              「只记」两个不能省：省掉就与上一格「来源」变成同一件事，边界本身消失。
-              这里钉的是**哪个工具**这一维（别的 AI 工具、直连脚本都看不到）；至于**哪台设备**
-              那一维——同一账号在多设备上对不齐——由第 3 节的「记账维度不同」负责。两维分开，
-              两处不再复述同一个轴。 */}
+          {/* 这一格钉的是**哪个工具**这一维（别的 AI 工具、直连脚本都看不到）；**哪台设备**
+              那一维由第 3 节的「记账维度不同」负责，两处不复述同一个轴。
+              「只记」两字不能省：省掉这一格就与上一格「来源」是同一件事，边界消失。 */}
           <span className="dtpl-doc-fact-v">只记 DeepSeek Harness 的会话记录</span>
         </div>
       </div>
 
       <section className="dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">1</span>词元分四桶</h2>
-        {/* 这一节只回答两件事：词元合计是哪四个数加出来的、「未命中输入」不是「我发过去的全部文字」。
-            因此只有一句定义 + 四块磁贴。**不再画那条加总公式**——上一句已经说了「加起来」，
-            磁贴的排列就是这四桶，再画一行是同一个事实印两遍。
-            金额 / 计价 / 价格表页怎么改价都不在这里：前者在「差额从哪来」，后两者是价格表 tab
-            自己的操作，界面就地有提示（`pricing/editors.tsx` 的行内单元格与「＋ 加一段价」）。 */}
+        {/* 金额 / 计价 / 怎么改价不在这一节：前者在 §3「差额从哪来」，后两者是价格表 tab
+            自己的操作。 */}
         <p className="dtpl-doc-sub">
           厂商按 <b>词元（token）</b>计费——可以理解为模型读写的最小文字单位。一次请求的用量被拆成
           <b>四类、互不重复</b>，加起来就是「词元合计」：

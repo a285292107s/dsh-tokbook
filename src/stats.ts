@@ -17,9 +17,8 @@ import {
 } from './types.ts'
 import { billingOf, costOf, priceOfKey } from './pricing.ts'
 
-/** 陈旧探针读到的持久化会话快照：header，加上（后端有的话）廉价的变更令牌
- * （纯 header 的 `list()` 回落不带 `revision`）。header 的 `cwd` 是概览「按
- * 工作区」节的 join 键，故同一次 listing 服务两者。 */
+/** 与 sync.ts 的 `PersistenceSnapshotLike` 同形——变更令牌与 `cwd` 的外部事实
+ *  记在那份注释里。 */
 export interface PersistenceSnapshotLike {
   header: { id: string; cwd?: string }
   revision?: unknown
@@ -27,9 +26,8 @@ export interface PersistenceSnapshotLike {
 
 /**
  * 从快照 listing 构建「已同步到哪」的签名映射：每个带变更令牌的快照映射
- * `id → String(revision)`。没有 revision 的快照（纯 header `list()` 回落）被
- * 跳过——没有变更令牌的会话永远不可信任为「新鲜」，每次探针都会再走一遍
- * （request-id 去重保证幂等）。
+ * `id → String(revision)`。没有 revision 的快照被跳过——没有令牌就永远不可
+ * 信任为「新鲜」（处理与其理由见 {@link staleSessionIds} 的行内注释）。
  */
 export function snapshotBaseline(snapshots: readonly PersistenceSnapshotLike[]): Map<string, string> {
   const baseline = new Map<string, string>()
@@ -182,9 +180,8 @@ async function fileStamp(dir: string, name: string): Promise<{ size: number; mti
 }
 
 /** 经目录缓存加载一个分日文件：解析结果按 `size:mtimeMs` 版本缓存——版本没变就复用
- *  内存里那份，变过就重读。**不把「今日之前」当成不可变**：权威 walk 会补写往日、
- *  模块级 HMR 后的第二个实例也会写，而日文件是可以被追加的，所以冻结日的缓存同样要
- *  过一次版本核对（一次 `stat`，省下的是整份解码）。 */
+ *  内存里那份，变过就重读。**不把「今日之前」当成不可变**（往日会被追加），冻结日
+ *  同样过一次版本核对——一次 `stat`，省下的是整份解码；道理见 docs/CONTRACTS.md §2。 */
 async function loadFileCached(cache: DirCache, dir: string, name: string, logger: StatsLogger): Promise<UsageRecord[]> {
   return (await loadFileStamped(cache, dir, name, logger)).records
 }
@@ -276,12 +273,12 @@ export const ROLLUP_SCHEMA_VERSION = 8
 export interface RollupFile {
   schemaVersion: number
   upto: string
-  /** 这些 rate 行所折叠的价文件签名。rate 行以**源自价表**的值为键，不同价
-   *  文件使每个冻结行失去意义——此时 rollup 从分日文件重建。空 = 无价文件。 */
+  /** 折叠所依据的价文件签名；不符整份作废、从日文件重建（docs/CONTRACTS.md §2）。
+   *  空 = 无价文件。 */
   pricingRevision: string
-  /** 折进去的每一天分日文件**当时的版本**（`size:mtimeMs`）。`upto` 只是天级
-   *  水位线：它看不见往日被追加（权威 walk 补写、模块级 HMR 后的第二个实例、
-   *  手工编辑），所以折叠必须自己记下它依据的那批文件版本。 */
+  /** 折进去的每一天分日文件**当时的版本**（`size:mtimeMs`）。折叠为何得自己记
+   *  文件版本，见 docs/CONTRACTS.md §2 的 `rollup.json` 条（天级水位线 `upto`
+   *  看不见往日被追加）。 */
   files: Record<string, string>
   /** 折进去的记录里最大的事件时刻（epoch ms；`null` = 折进去的日子里一条记录都没有）。
    *  概览的 `lastEventAt` 由它出，读路径因此不必为求一个 max 物化整本账。 */
@@ -341,8 +338,8 @@ function isRollupFile(value: unknown): value is RollupFile {
 }
 
 /** 折叠是否仍与磁盘上的分日文件相符：它折进去的每一天都还在、且版本没变，
- *  水位线之内也没有冒出折叠时还不存在的日文件（往日第一次被补写）。
- *  不相符就必须丢掉整份折叠——`upto` 是天级水位线，看不见往日的追加。 */
+ *  水位线之内也没有冒出折叠时还不存在的日文件。不相符就整份丢弃重折——
+ *  为何逐版本核对而非只认 `upto`，见 docs/CONTRACTS.md §2。 */
 export function rollupIsCurrent(rollup: RollupFile, stamps: ReadonlyMap<string, string>): boolean {
   for (const [name, stamp] of Object.entries(rollup.files)) {
     if (stamps.get(name) !== stamp) return false
@@ -355,9 +352,8 @@ export function rollupIsCurrent(rollup: RollupFile, stamps: ReadonlyMap<string, 
   return true
 }
 
-/** 加载一个数据目录的 rollup。缺失、畸形或非法的 rollup 读作 null——调用方
- * 随后从分日文件重建。在**不同**价文件下折叠的 rollup 同样非法：其 rate 行
- * 命名的是已不存在的表的段。 */
+/** 加载一个数据目录的 rollup。缺失、畸形或价签名不符都读作 null——调用方
+ *  随后从分日文件重建。 */
 export async function readRollup(
   dir: string,
   logger: StatsLogger = consoleLogger,
@@ -473,7 +469,6 @@ function modelMapKey(provider: string | undefined, model: string): string {
   return `${providerKey(provider)}\n${model}`
 }
 
-/** 一行 rate 行的聚合身份：段时刻 + 段内生效的例外时段（`-` = 段的基准价）。 */
 function rateRowKey(day: string, model: string, provider: string | undefined, rate: RateKey): string {
   const slot = rate.slot === undefined || rate.slot === null ? '-' : `${String(rate.slot.start)}:${rate.slot.days}`
   return `${day}\n${model}\n${providerKey(provider)}\n${String(rate.from)}\n${slot}`
@@ -483,8 +478,8 @@ function hourRowKey(hour: string, model: string): string {
   return `${hour}\n${model}`
 }
 
-/** 把一条记录折入 totals；没有 provider usage 的记录仍计入 request，并计一次
- *  `usageUnknown`（未知 ≠ 0），失败记录只计入 `failures` 维度。 */
+/** 把一条记录折入 totals：失败记录只进 `failures` 维度；用量未知的记录仍计
+ *  入 `requests` 并另计 `usageUnknown`（未知 ≠ 0，口径见 docs/CONTRACTS.md §2）。 */
 function addUsage(totals: UsageTotals, record: UsageRecord): void {
   if (record.kind === 'failure') {
     totals.failures = (totals.failures ?? 0) + 1
@@ -613,13 +608,12 @@ export function mergeSummaries(left: SummaryWithLastEvent, right: SummaryWithLas
   }
 }
 
-/** 给纯 token summary 叠上成本层：每个 rate 行以其 (route, model, rate 身份)
- *  在当前价表回查定价——行的身份是当时生效段的生效时刻 + 段内生效的例外时段，
- *  故改价无需重建即可重算历史。每行金额落入其 **route** 计费性质命名的桶：
- *  `metered` 累进 `spend`，`subscription` 累进 `subscriptionValue`；
- *  `totalCost` 仍是两者之和。表无法定价的行计 ¥0，其 model 串进入
- *  `unpricedModels`——既覆盖无人定价的 (route, model)，也覆盖自身身份（段时刻，
- *  或被移动/删除的例外时段）表里已不存在的行。 */
+/** 给纯 token summary 叠上成本层：每个 rate 行按 (route, model, rate 身份) 在
+ *  当前价表回查定价——身份规则见 docs/CONTRACTS.md §2，改价无需重建即可重算
+ *  历史。每行金额落入其 route 计费性质命名的桶（分桶规则同样在 §2）。表无法
+ *  定价的行计 ¥0，其 model 串进入 `unpricedModels`——既覆盖无人定价的
+ *  (route, model)，也覆盖自身身份（段时刻，或被移动/删除的例外时段）表里已不
+ *  存在的行。 */
 export function attachCosts(
   summary: TokenSummary & { dataDir: string },
   pricing: PricingTable,
@@ -695,11 +689,11 @@ function stampKey(stamp: { size: number; mtimeMs: number }): string {
 }
 
 /** 构建一个数据目录的完整 stats 载荷：所有冻结分日文件的 rollup 合并今日文件
- * 的新鲜读取。
+ *  的新鲜读取。
  *
- * `pricingRevision` 是调用方解析 rate 所依据的价文件签名；在不同签名下折叠的
- * rollup 会被丢弃并重建，因此改价会重算每个冻结日。折叠所依据的分日文件版本对
- * 不上（往日被追加、被删）时同样整份作废重折。 */
+ *  `pricingRevision` 是调用方解析 rate 所依据的价文件签名；签名不符或折叠依据
+ *  的分日文件版本对不上（往日被追加、被删）都使整份 rollup 作废重折——规则见
+ *  docs/CONTRACTS.md §2。 */
 export async function buildSummary(
   dir: string,
   now: () => Date = () => new Date(),

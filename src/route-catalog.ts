@@ -103,7 +103,7 @@ export function routeLabels(
 }
 
 /** 合并 settings route 与活的适配器 registry。文档未携带的 registry route 成为
- *  自己的一张卡；配置模型列表为空的 route 询问其适配器。 */
+ *  自己的一张卡。 */
 export async function collectRoutes(
   settings: SettingsLike | undefined,
   llm: LlmLike | undefined,

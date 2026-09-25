@@ -1,9 +1,7 @@
 /**
  * 订阅额度卡的标记：壳（身份 + 新鲜度 + 仪表 + 刷新）、ok 正文与状态面板。
- *
- * 环回答固定问题——本月预算已用多少——并在数字下方自报指代，绝不静默换窗口。没有读数时同一只环
- * 只画轨道、中心改写状态词（过期 / 无订阅 / 未配置 / 失败 / 无读数），形状与位置都不换；正文照旧按
- * gate 分（非订阅 gate 的正文与环无关——余额没有分母，不画环）。
+ * 环指代哪个预算由 `metrics.ts` 的 `ringPressure` 决定；没有读数时环只画轨道、中心改写
+ * 状态词，形状与位置都不换。正文按 gate 分（余额没有分母，不画环）。
  *
  * 数据半区在 `QuotaPanel.tsx`；算术在 `metrics.ts`。
  */
@@ -29,7 +27,6 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   const ok = card !== null && card.state === 'ok'
   const ctx = ok && card !== null ? planContext(card) : ''
   const ring = ok && card !== null ? ringPressure(card) : undefined
-  // 同一只环的另一种形态：没有读数（无分母 / 无数据）时只画轨道、中心写状态词，标题因此从不位移。
   const idle = headStateWord(card)
   // 一次性点击反馈：按钮立刻切到 `disabled`（spinner）后，每次按下仍能重新触发弹出动画。
   const [popTick, setPopTick] = useState(0)
@@ -66,7 +63,7 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
             aria-label={`刷新 ${title} 用量`}
             title="刷新此卡片"
           >
-            {/* 外层 wrapper 拥有一次性点击弹出动画；经 `key` remount 使每次按下都重新启动。内部图标保持旋转 spinner——两个独立元素。 */}
+            {/* `key` remount 让每次按下都重启弹出；spinner 在内层图标上，与弹出互不干涉。 */}
             <span key={popTick} className={`dtpl-quota-refresh-anim${popTick > 0 ? ' dtpl-quota-refresh-pop' : ''}`}>
               <RefreshGlyph className={`dtpl-quota-refresh-ico${loading ? ' dtpl-spin' : ''}`} />
             </span>
@@ -99,7 +96,6 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
         </div>
       ) : (
         <>
-          {/* 已渲染的卡绝不被拉取错误替换：失败的就地刷新保留最近一次已知数字，并以提示形式报告失败。 */}
           {error !== null && (
             <p className="dtpl-quota-stale" role="status">刷新失败（{error}），当前显示上次官方数据</p>
           )}
@@ -110,7 +106,7 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   )
 }
 
-/** ok 卡的数据正文：预算窗口 meter 行、活动条。余额门控的卡获得不同正文。 */
+/** ok 卡的数据正文；余额门控的卡获得不同正文。 */
 function QuotaCardBody({ card }: { card: QuotaCard }) {
   if (card.gate === 'balance') return <QuotaBalanceBody card={card} />
   if (card.gate === 'none') return <QuotaNoSubscriptionBody card={card} />
@@ -146,7 +142,7 @@ function QuotaNoSubscriptionBody({ card }: { card: QuotaCard }) {
   )
 }
 
-/** 余额门控卡的正文：滚动窗口不是它承受的约束故隐藏，环也去掉（无分母，环心改写状态词）。充值和免费额度在计划过期后存活，来源逐项列出。 */
+/** 余额门控卡的正文：滚动窗口不是它承受的约束故隐藏；余额来源逐项列出（充值 / 免费额度在计划过期后存活，见 `metrics.ts`）。 */
 function QuotaBalanceBody({ card }: { card: QuotaCard }) {
   return (
     <>
@@ -163,7 +159,7 @@ function QuotaBalanceBody({ card }: { card: QuotaCard }) {
   )
 }
 
-/** 额度来源的一行紧凑展示。余额门控卡列出全部三项；生效订阅卡只列额外项。恰好零的来源省略。 */
+/** 额度来源的一行紧凑展示。余额门控卡列出全部三项；生效订阅卡只列额外项。 */
 function CreditSources({ credits, extraOnly = false }: {
   credits: NonNullable<QuotaCard['credits']>
   extraOnly?: boolean
@@ -258,7 +254,7 @@ function ActivityStrip({ usage }: { usage: NonNullable<QuotaCard['usage']> }) {
 const GAUGE_R = 15.5
 const GAUGE_C = 2 * Math.PI * GAUGE_R
 
-/** 环本身：外圈轨道 + 可选弧。两种形态共用它，所以半径 / 粗细 / viewBox 只有一份。 */
+/** 环本体：外圈轨道 + 可选弧。两种形态共用，几何常量在上面。 */
 function GaugeRing({ dash }: { dash?: string }) {
   return (
     <svg viewBox="0 0 40 40" aria-hidden="true" className="dtpl-quota-gauge-svg">
@@ -284,7 +280,7 @@ function QuotaIdleRing({ word, alert }: { word: string; alert: boolean }) {
   )
 }
 
-/** 卡身份行的环形仪表。百分比指代的预算以小标题写在数字下方，环绝不静默换窗口。同一文本喂给无障碍名称 / tooltip。 */
+/** 卡身份行的环形仪表；百分比指代的预算以小标题写在数字下方（指代哪个窗口由 `ringPressure` 定）。 */
 function QuotaGauge({ pct, tone, cap }: { pct: number; tone: QuotaTone; cap: string }) {
   const p = Math.max(0, Math.min(100, pct))
   return (

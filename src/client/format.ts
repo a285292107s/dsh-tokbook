@@ -27,7 +27,6 @@ export function shortDay(day: string): string {
   return `${Number(month)}/${Number(date)}`
 }
 
-/** 某值占总量的百分比，夹取到 0–100。 */
 export function share(value: number, total: number): number {
   if (total <= 0) return 0
   return Math.max(0, Math.min(100, (value / total) * 100))
@@ -63,7 +62,6 @@ export function formatTokens(value: number): string {
   return `${Math.round((value / 1_000_000) * 10) / 10}M`
 }
 
-/** wire 金额一律为人民币；展示约定为 ¥。 */
 export function formatMoney(value: number): string {
   return `¥${value.toFixed(2)}`
 }

@@ -7,8 +7,6 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   backdrop-filter:var(--dsw-mask-blur,blur(2px));
 }
 
-/* 弹窗卡片：直角、一条硬边、四角括号。括号画在 ::before/::after 上而不是用 clip-path 切角
-   ——切角会连子元素的焦点环一起裁掉，而 L 形边框不影响控件与焦点环。 */
 [data-plugin="dsh-tokbook"] .dtpl-card{
   position:relative;
   width:min(720px,100%);height:min(680px,88dvh);height:min(680px,88vh);
@@ -19,7 +17,8 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
     inset 0 0 0 1px var(--dtpl-border);
   overflow:hidden;
 }
-/* 四角括号只画左上与右下两端，其余两角留空（四角都补全会读成相框）。 */
+/* 四角括号只画左上与右下两端，其余两角留空（四角都补全会读成相框）；画在 ::before/::after 上
+   而不是用 clip-path 切角——切角会连子元素的焦点环一起裁掉，而 L 形边框不影响控件与焦点环。 */
 [data-plugin="dsh-tokbook"] .dtpl-card::before,
 [data-plugin="dsh-tokbook"] .dtpl-card::after{
   content:"";position:absolute;width:16px;height:16px;pointer-events:none;z-index:2;
@@ -33,7 +32,6 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
 }
 [data-plugin="dsh-tokbook"] .dtpl-card:focus{outline:none;}
 
-/* 字体保守：不做衬线 / 等宽的字体文章。标题回普通无衬线，只保留一点字距。 */
 [data-plugin="dsh-tokbook"] .dtpl-head{
   display:flex;align-items:center;justify-content:space-between;gap:16px;
   padding:14px 20px 12px;
@@ -42,7 +40,7 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   display:flex;align-items:center;gap:10px;min-width:0;
   font-size:16px;line-height:24px;font-weight:600;letter-spacing:.02em;
 }
-/* 工业徽记（第一处出现）：黄底 + 墨色图形。这是**抽象替身**，不是鹰角商标的复刻。 */[data-plugin="dsh-tokbook"] .dtpl-title-ico-chip{
+/* 工业徽记：黄底 + 墨色图形。这是**抽象替身**，不是鹰角商标的复刻。 */[data-plugin="dsh-tokbook"] .dtpl-title-ico-chip{
   display:inline-flex;align-items:center;justify-content:center;flex:none;
   width:22px;height:22px;
   background:var(--dtpl-brand);
@@ -96,8 +94,7 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   vertical-align:middle;
 }
 
-/* 上下留白比横向大一档：首屏第一个元素（hero）因此不贴着 tab 条。
-   scrollbar-gutter:stable 常驻滚动条槽：用量明细的窗口一换，行数就从个位数跳到上千，
+/* scrollbar-gutter:stable 常驻滚动条槽：用量明细的窗口一换，行数就从个位数跳到上千，
    不留槽的话整块正文会横向挪 8px——比滚动条本身显眼得多。 */
 [data-plugin="dsh-tokbook"] .dtpl-body{
   flex:1;min-height:0;

@@ -1,14 +1,11 @@
 /**
- * token-book 的持久 JSONL 存储：按本地日的分文件、串行追加队列，以及 live hook
- * 与 history sync 共享的进程级 request-id 去重集。一行落在其事件时间的分日文件
+ * token-book 的持久 JSONL 存储：按本地日的分文件、每目录一条串行追加队列，以及 live
+ * hook 与 history sync 共享的进程级 request-id 去重集。一行落在其事件时间的分日文件
  * （`record.time` 的本地 Y-M-D），绝不是追加时的墙钟。
  *
- * 状态作用域：可变的去重/队列状态按**数据目录**键控，而非按 UsageLog 实例——
- * 同一目录、且共享**本模块副本**的所有 `UsageLog` 也共享一个去重集与一个串行
- * 追加队列。这种共享**不能**跨过模块级 HMR reload：dsh-hmr 宿主
- * reload 清空模块缓存并重新 import 插件入口，重建的模块得到一份**全新的** `dirs`
- * 映射。跨该边界的重叠安全来自磁盘，而非本映射：新实例在首次写入前从磁盘行
- * 重建去重集。进程重启以空映射开始；该目录的首次写入会先从磁盘行重建去重集。
+ * 可变的去重/队列状态按**数据目录**键控而非按实例键控；这份共享**不跨**模块级 HMR
+ * reload，跨该边界的重叠安全来自磁盘而非内存 Map。边界语义见 `docs/HMR.md` §4，
+ * 去重身份与单写者口径见 `docs/CONTRACTS.md` §2/§3。
  */
 
 import { appendFile, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
@@ -21,7 +18,6 @@ const DAY_FILE = /^usage-(\d{4}-\d{2}-\d{2})\.jsonl$/u
 /** 本存储的分日文件名测试；stats 的读路径与 migration 共享这一份命名契约。 */
 export { DAY_FILE }
 
-/** 分日文件名里的日期部分；不是分日文件时为 null。 */
 export function dayOfFileName(name: string): string | null {
   return DAY_FILE.exec(name)?.[1] ?? null
 }
@@ -42,11 +38,7 @@ function dayFilePath(dir: string, time: number): string {
   return join(dir, dayFileNameOf(time))
 }
 
-/**
- * 本进程内**一个**数据目录的可变状态：去重集、串行追加队列、目录就绪/已扫描
- * 标志。持有**本模块副本**的该目录的所有 UsageLog 共享。模块级 HMR reload
- * 替换整个映射；跨该边界的守卫是磁盘，不是本映射。
- */
+/** 本进程内某数据目录的可变状态；持有**本模块副本**的该目录所有 UsageLog 共享（边界见文件头）。 */
 interface DirState {
   seen: Set<string>
   queue: Promise<void>
@@ -162,7 +154,7 @@ export class UsageLog {
    * 本进程对某目录的首次写入先加载磁盘行到去重集，因此重启宿主从不重追加
    * 已落地的行。listing 失败绝不能挡住写入——坏数据目录不得丢掉实时记录——
    * 故在该（已降级）情形下行仍写出，稍后的幂等 rescan 会清理。从不 reject：
-   * 扫描失败降级为未扫描写入，与旧的常驻内存路径一致。
+   * 扫描失败降级为未扫描写入。
    */
   record(record: UsageRecord): Promise<boolean> {
     const state = this.state
@@ -232,8 +224,7 @@ export class UsageLog {
     await state.ready
   }
 
-  /** 追加一行；缓存创建后目录消失时自愈一次。目标是
-   *  {@link UsageRecord.time} 的本地日。 */
+  /** 追加一行；ready 缓存后目录消失时自愈一次。 */
   private async appendOnce(record: UsageRecord): Promise<void> {
     const path = dayFilePath(this.dir, record.time)
     try {

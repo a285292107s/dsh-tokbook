@@ -1,7 +1,7 @@
 /**
  * 历史同步：重放持久化的会话日志，append 账本尚未持有的请求行，按
  * request-id 去重。安装后首次启动自动跑一次；之后在概览读时，对新鲜度探针报
- * 为 stale 的会话跑。日志 inspect 失败的会话被跳过并计数，绝不使整轮致命。
+ * 为 stale 的会话跑。
  *
  * 本 walk 刻意不取消：这是一次短的权威刷新，不接 `AbortSignal` 管道可
  * 避免向持久化后端喂非 signal。
@@ -69,7 +69,7 @@ export interface SessionHandleLike {
 }
 
 /** 读一份会话的逻辑事件日志：优先旧的 `inspect()`，否则开只读句柄读到底再关。
- *  两者都缺席时抛错——该会话只计一次失败，不中止整轮 walk。 */
+ *  两者都缺席时抛错——调用方只把该会话计一次失败。 */
 async function readSessionEvents(persistence: SyncPersistence, id: string): Promise<readonly SessionEventLike[]> {
   if (typeof persistence.inspect === 'function') {
     return (await persistence.inspect(id)).events
@@ -90,8 +90,8 @@ async function readSessionEvents(persistence: SyncPersistence, id: string): Prom
   }
 }
 
-/** 把一条原始列表项纠错成 snapshot；不带 id 则答 null。同时接受裸
- *  `SessionHeader` 与 `{ header, revision }` snapshot——真实后端的两种形状。 */
+/** 把一条原始列表项纠错成 snapshot；不带 id 的条目答 null（两种真实后端形状，
+ *  见 {@link SyncPersistence}）。 */
 function normalizeSnapshot(value: unknown): PersistenceSnapshotLike | null {
   if (typeof value !== 'object' || value === null) return null
   const raw = value as Record<string, unknown>
@@ -108,9 +108,8 @@ function normalizeSnapshot(value: unknown): PersistenceSnapshotLike | null {
   }
 }
 
-/** 列出全部已物化会话为规范化 snapshot。当前面用 `list()`——它回 `{header,
- *  revision}` 快照，更早的后端回裸 header（归一化两种都吃）；旧名 `listSnapshots()`
- *  作为回落。没有 revision 的条目默认 stale。 */
+/** 列出全部已物化会话为规范化 snapshot（形状与回落顺序见
+ *  {@link SyncPersistence}）。没有 revision 的条目默认 stale。 */
 export async function listPersistenceSnapshots(
   persistence: SyncPersistence,
   logger: { error(...args: unknown[]): void } = console,
@@ -132,7 +131,6 @@ export async function listPersistenceSnapshots(
     .filter((snap): snap is PersistenceSnapshotLike => snap !== null)
 }
 
-/** 一轮同步的依赖。 */
 export interface SyncDeps {
   persistence: SyncPersistence
   log: UsageLog
@@ -140,7 +138,6 @@ export interface SyncDeps {
   onSessionFailure?: (id: string, error: unknown) => void
 }
 
-/** 一轮同步的选项。 */
 export interface SyncOptions {
   /**
    * 调用方新鲜探针已取好的会话 snapshot。给了就复用，不再列一次；缺省
@@ -148,9 +145,8 @@ export interface SyncOptions {
    */
   snapshots?: readonly PersistenceSnapshotLike[]
   /**
-   * 增量子集：只走这些会话。缺省（或调用方在做首次全量同步）走列出的
-   * 全部。每个保留的会话整份日志重读再折叠——request-id 去重使与已记行
-   * 的重叠成为空操作。
+   * 增量子集：只走这些会话。缺省（或调用方在做首次全量同步）走列出的全部。
+   * 每个保留的会话整份日志重读再折叠。
    */
   sessionIds?: readonly string[]
   /** 转发给调用方进度条的进度 tick。 */

@@ -35,7 +35,7 @@ export interface SessionEventLike {
     source?: { provider?: string; model: string }
     reason?: { kind: string; error?: { code?: string } }
     failure?: { code?: string }
-    /** 压缩调用自带的身份（格式迁移会重排信封 seq，它不变）。 */
+    /** 压缩调用自带的稳定身份。 */
     compactionId?: string
     /** 一次重试尝试的身份：`retryId` 标定这次重试，`retry` 是它的第几次。 */
     retryId?: string
@@ -54,8 +54,6 @@ function stableId(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-/** 失败行的身份：事件自带的判别串优先，畸形/旧形态缺它时回落到 `seq`。
- *  格式迁移会重排信封 seq，而事件自带的身份不变——否则同一事件会被记成两行。 */
 function failureKey(sessionId: string, event: { seq: number }, discriminator: string | undefined): string {
   return discriminator !== undefined
     ? `failure:${sessionId}:${discriminator}`
@@ -89,16 +87,13 @@ export function recordFromMessage(event: SessionEventLike, sessionId: string): U
   }
 }
 
-/** 为一条 `compaction/summary` 事件构建日志行。summarize 的 provider 调用与
- * 普通请求同价计费。usage 缺失或非法时**仍写行**，只是没有桶：它照样计一次
- * 请求与一次压缩，并进入 `usageUnknown`（未知 ≠ 0）。丢行等于让一次计费调用
- * 连同它的用量一起消失——那比「用量未知」更不可查。 */
+/** 为一条 `compaction/summary` 事件构建日志行。summarize 的 provider 调用与普通
+ *  请求同价计费；usage 缺失或非法时**仍写行**、只欠桶，「用量未知 ≠ 0」的口径见
+ *  docs/CONTRACTS.md §2。 */
 export function recordFromCompaction(event: SessionEventLike, sessionId: string): UsageRecord {
   const usage = projectUsage(event.data?.usage)
   const compactionId = stableId(event.data?.compactionId)
   return {
-    // 身份取事件自带的 `compactionId`（信封 seq 会被格式迁移重排，它不会）；
-    // 畸形/旧形态缺它时回落到 seq。
     requestId: `compaction:${sessionId}:${compactionId ?? String(event.seq)}`,
     time: event.time,
     sessionId,
@@ -127,8 +122,7 @@ function failureRow(
   }
 }
 
-/** 为 reason 是 LLM 错误的 `turn/end` 事件构建日志行。一个回合只关一次，
- *  `turn` 因此是跨格式稳定的身份。 */
+/** 为 reason 是 LLM 错误的 `turn/end` 事件构建日志行；身份用 `turn`。 */
 export function recordFromTurnEnd(
   event: SessionEventLike,
   sessionId: string,
@@ -146,7 +140,7 @@ export function recordFromTurnEnd(
 }
 
 /** 为一条 `llm/retry` 事件构建日志行——一次已失败、且 retry 插件已安排重试的
- *  provider 尝试。身份取 `retryId` + 第几次重试，故与信封 seq 无关。 */
+ *  provider 尝试。 */
 export function recordFromRetry(
   event: SessionEventLike,
   sessionId: string,

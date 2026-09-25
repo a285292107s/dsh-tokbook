@@ -39,8 +39,7 @@ function isSnapshotFile(value: unknown): value is QuotaSnapshotFile {
   return card.state === 'ok' && Array.isArray(card.windows)
 }
 
-/** 读一个 provider 最近已知的 'ok' 额度卡。缺失/撕裂/畸形快照读作 null——
- *  绝非部分或非 'ok' 卡。 */
+/** 读一个 provider 最近已知的 'ok' 额度卡（严格读法见文件头）。 */
 export async function readQuotaSnapshot(dir: string, provider: string): Promise<QuotaCard | null> {
   let text: string
   try {

@@ -2,10 +2,9 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
 /* 这一页有三层，从上到下各管一件事：**分区词**（窗口 + 「用量」）领起并报出该窗口的**合计**；
    **窗口**是贴在分区词右端的作用域控件；**切法**（按模型 / 按工作区 / 按通道）是这一页**唯一**
    那条 tab 条，它下面才是数据。
-   窗口控件与切法子 tab、窗口 tab、额度页的档位共用**同一套**选择器语言——横排 + 竖发丝分隔 +
-   当前项底部实条。**层级靠形与位**分开：切法是 29px 的 tab 条（横贯全宽、带底线，页面的主结构），
-   窗口是 24px、带「窗口」标签、贴在标题右端的小控件（与额度页「自动刷新」同形）——
-   两条一模一样的 tab 条叠着会分不出哪个是「这一页」、哪个是「范围」。 */
+   选择器语言全窗口共用（横排 + 竖发丝分隔 + 底部实条，见 overlay 片段）。**层级靠形与位**分开：
+   切法是横贯全宽、带底线的 tab 条（页面的主结构），窗口是带「窗口」标签、贴在标题右端的小控件
+   （与额度页「自动刷新」同形）——两条一模一样的 tab 条叠着会分不出哪个是「这一页」、哪个是「范围」。 */
 /* 页头**固定两行**：第一行分区词 + 窗口控件，第二行窗口合计。合计单独占一整行是关键——
    它随窗口变宽变窄（四位数的词元更长），挤进第一行就会把窗口控件推来推去、并在「一行 / 两行」
    之间来回折行，下面整块跟着上下跳。固定两行之后页头高度与任何数字无关。 */
@@ -54,7 +53,7 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
 [data-plugin="dsh-tokbook"] .dtpl-range-tab.dtpl-range-active::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
 }
-/* 切法还不知道时的占位条：与 .dtpl-bd-tab 同高（3+18+8），数据到达时这一行不跳。 */
+/* 切法还不知道时的占位条：与 .dtpl-bd-tab 同高，数据到达时这一行不跳。 */
 [data-plugin="dsh-tokbook"] .dtpl-usage-cuts-sk{width:192px;height:29px;}
 [data-plugin="dsh-tokbook"] .dtpl-providers{display:flex;flex-direction:column;gap:10px;}
 
@@ -110,7 +109,6 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
 [data-plugin="dsh-tokbook"] .dtpl-provider-nums{
   display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none;
 }
-/* 数字走等宽（全窗口同一条规矩，另外位数变化不抖）。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-tokens{
   font-family:var(--dtpl-mono);
   color:var(--dtpl-fg);font-size:19px;line-height:25px;font-weight:600;

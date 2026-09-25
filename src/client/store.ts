@@ -1,6 +1,6 @@
 /**
  * 触发按钮与浮窗共享的 view store（经 `apply` 创建、`inject` 分发）。
- * pricingDirty 跨 unmount 存活；quotaAlert 来自宿主快照、不走网络。
+ * 两个字段有超出代码的口径，见 `pricingDirty` / `quotaAlert` 各自注释。
  */
 
 import type { TokBookOverview } from '../types.ts'

@@ -96,8 +96,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
    **这条必须排在 .dtpl-quota-gauge 之后、色调块之前**：同特异性下靠源码顺序，色相才算数
    （.dtpl-quota-tone-danger 在更后面，故错误态仍是红的）。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-idle{color:var(--dtpl-fg-2);}
-/* 词的字号受环内径限制（内圈净空 ≈30px，三个汉字在 9.5px 已贴到描边上），故只容得下两三个字
-   ——长句归正文，不归这里。 */
+/* 词的字号受环内径限制（再大一号就贴到描边），只容得下两三个字——长句归正文，不归这里。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-word{
   font-size:9px;line-height:1;font-weight:600;
 }
@@ -224,7 +223,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   margin:8px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
 }
-/* 用量摘要活动条：**与总览的「今日词元构成」同一只框**（1px 硬边框 + 竖发丝分隔的读数格），
+/* 用量摘要活动条：**与总览的「今日词元构成」同一只框**（见 ledger 的 .dtpl-grid），
    不是又一层染色块——一块卡里不出现「面板 + 面板」两层盒子。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-stats{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0;

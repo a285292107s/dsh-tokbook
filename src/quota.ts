@@ -14,10 +14,8 @@ export type { QuotaCard, QuotaView, QuotaWindowView } from './types.ts'
 // 内置计划（仅展示身份——无预算、无价格）
 // ---------------------------------------------------------------------------
 
-/** 内置 OpenCode Go 计划的 provider route key。 */
 export const OPENCODE_GO_PROVIDER = 'opencode-go'
 
-/** 内置 Command Code 计划的 provider route key。 */
 export const COMMAND_CODE_PROVIDER = 'commandcode'
 
 export const BUILTIN_PLAN_TITLES: Readonly<Record<string, string>> = {
@@ -25,7 +23,7 @@ export const BUILTIN_PLAN_TITLES: Readonly<Record<string, string>> = {
   [COMMAND_CODE_PROVIDER]: 'Command Code',
 }
 
-/** 已知的 Command Code 订阅计划 id → 展示名（参考 provider 映射的子集）。 */
+/** 已知的 Command Code 订阅计划 id → 展示名。 */
 export const COMMAND_CODE_PLAN_NAMES: Readonly<Record<string, string>> = {
   'individual-go': 'Go',
   'individual-goat': 'GOAT',
@@ -60,9 +58,8 @@ export function isQuotaAlert(card: QuotaCard | null | undefined): boolean {
 }
 
 /**
- * 哪些 provider route 携带官方额度拉取。计划「开启」当 route 已知且未禁用
- * （配置中 `enabled:false`）。key 是否存在在拉取时检查；已启用但无 key 的
- * 计划产出 `unconfigured` 卡。
+ * 该 provider route 是否携带官方额度拉取。key 是否存在在拉取时检查；开关与
+ * 无 key 的 `unconfigured` 语义见 docs/CONTRACTS.md §4。
  */
 export function isBuiltinQuotaPlan(provider: string): boolean {
   return provider === OPENCODE_GO_PROVIDER || provider === COMMAND_CODE_PROVIDER
@@ -72,11 +69,10 @@ export function isBuiltinQuotaPlan(provider: string): boolean {
  * 订阅额度 tab 的卡片顺序：账户无生效订阅的卡沉到有生效订阅的之下，使 tab
  * 打开在真正还能花的计划上，而不是已退役的那个。
  *
- * 稳定切分，不是排序：`providers` 是宿主的展示顺序（见
- * `QuotaView.providers`），并保持**组内**顺序，因此除降级本身外无任何重排。
- * 还没有已知 gate 的 provider——仍在加载，或最近一次拉取失败——算作 active，
- * 与卡渲染的读法一致（缺席的 gate 意味着 `subscription`）；从缺失数据里猜
- * 「已退役」正是 gate 要防止的错误。
+ * 稳定切分，不是排序：`providers` 是宿主的展示顺序（见 `QuotaView.providers`），
+ * 组内次序保持。还没有已知 gate 的 provider——仍在加载，或最近一次拉取失败——
+ * 算作 active，与卡渲染的读法一致（缺席的 gate 意味着 `subscription`）；从缺失
+ * 数据里猜「已退役」正是 gate 要防止的错误。
  */
 export function orderQuotaProviders(
   providers: readonly string[],
@@ -242,7 +238,6 @@ export function hasQuotaContent(card: QuotaCard): boolean {
     || card.account !== undefined
 }
 
-/** 为内置计划构建 `unconfigured` 卡（未找到 API key）。 */
 export function unconfiguredCard(provider: string, hint?: string): QuotaCard {
   return {
     plan: provider,
@@ -253,7 +248,6 @@ export function unconfiguredCard(provider: string, hint?: string): QuotaCard {
   }
 }
 
-/** 为内置计划构建 `error` 卡（官方拉取失败）。 */
 export function errorCard(provider: string, reason: string): QuotaCard {
   return {
     plan: provider,
@@ -266,8 +260,7 @@ export function errorCard(provider: string, reason: string): QuotaCard {
 
 /**
  * 为 provider **已回答**、但答案是「没有生效订阅，且此端点也无可报告余额」的
- * 账户构建 `ok` 卡——OpenCode Go 的 403，端点自身参考将其读作「有效 key、无
- * Go 订阅」（区别于 401 认证失败）。
+ * 账户构建 `ok` 卡（OpenCode Go 403 的端点语义见 quota-official.ts 文件头）。
  *
  * 刻意 `state: 'ok'`：什么都没失败，标成「查询失败」会教用户调试错方向。缺陷
  * 移到 `gate: 'none'`——正是它阻止渲染方展示仪表，并把卡挡在自动刷新循环与

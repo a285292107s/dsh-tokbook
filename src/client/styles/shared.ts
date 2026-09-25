@@ -1,7 +1,4 @@
-export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg + --dtpl-metal），不为深色皮肤单独补一层提亮
-   ——那样会让同一块面板在两个 tab 里深浅不同。 */
-
-/* 只给读屏的文本：视觉上不占位，但留在无障碍树里。
+export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但留在无障碍树里。
    用途是**列的意义**——读屏读不到表头与单元格的对应关系，所以每个格子自己把列名带上
    （「通道 commandcode」「词元 830.3M」），读出来才是一句说得通的话。 */
 [data-plugin="dsh-tokbook"] .dtpl-sr{
@@ -16,8 +13,6 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
 
 /* 窄屏 */
 @media (max-width:640px){
-  /* 底部抽屉：主动选择，而不是半吊子的居中 94dvh 对话框。全宽、贴底——方舟语言里没有
-     圆角，所以这里也不再有「只圆上角」这条移动端习语。 */
   [data-plugin="dsh-tokbook"].dtpl-overlay{padding:0;align-items:flex-end;}
   [data-plugin="dsh-tokbook"] .dtpl-card{
     width:100%;height:min(94dvh,94vh);
@@ -108,10 +103,10 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates .dtpl-price-cell-k{
     text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
   }
-  /* 卡片缩进（--dtpl-slot-indent，时段卡与那条幽灵行共用）收到 29px：桌面那一列是 41px 时，
-     卡的内容盒正好落在基准价四档价的左缘上；窄处四档价折成 2×2 撑满整宽，这条对齐不再成立，
-     让位只剩它的另一个用途——给栅栏（轨 + 圆点）那一列留位置，所以收到能容下栅栏的 29px。
-     窄处轨与 7px 实心点已经贴在一起，挖洞只会把轨咬掉一截、露出卡边的亮缝，所以窄屏不用那条挖洞渐变。 */
+  /* 卡片缩进（--dtpl-slot-indent，时段卡与那条幽灵行共用）：桌面那列的值让卡的内容盒正好落在
+     基准价四档价的左缘上——改任一边都要重量这条对齐；窄处四档价折成 2×2 撑满整宽，这条对齐
+     不复存在，让位只剩它的另一个用途——给栅栏（轨 + 圆点）那一列留位置，所以收到刚好容下栅栏。
+     窄处轨与实心点已经贴在一起，挖洞只会把轨咬掉一截、露出卡边的亮缝，所以窄屏不用那条挖洞渐变。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-sec{--dtpl-slot-indent:29px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-rail{width:6.5px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-slots-spine{
@@ -126,9 +121,8 @@ export const CSS_SHARED = `/* 面板材质是**一条**配方（--dtpl-panel-bg 
   /* 段的身份行要折行：右轨现在装着「当前生效」芯片 + 段自己的复制/删除，而左边是序号 +
      最小 150px 的生效时刻——窄 sheet 一行放不下。折行后右轨（margin-left:auto）自己落第二行靠右。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-seg-line{flex-wrap:wrap;row-gap:4px;}
-  /* 年历的一段假期在窄处要留在**一行**里：两个日期格收到 100px、字号降一档（一个 ISO 日期
-     10 个字符，12px 等宽约 76px + 内边距仍装得下），天数那一列也收窄——这样「8 天 删除」不必
-     折到第二行去，一年七八段不至于变成十四五行的长条。 */
+  /* 年历的一段假期在窄处要留在**一行**里：两个日期格与字号收窄、天数那一列也收窄——
+     这样「8 天 删除」不必折到第二行去，一年七八段不至于变成十四五行的长条。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{width:100px;font-size:12px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-cal-days{min-width:40px;}
 }

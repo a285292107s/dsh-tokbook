@@ -1,5 +1,4 @@
 export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
-/* 三条线：直角与硬边（工程感）、黄只作"料"、构件而非贴图。字体保持保守，不做字体文章。 */
 
 /* hero = **今日**那一块卡：卡首一条图，其下是被框住的读数仪表（总额 + 参照 + 金额），
    中间一条 1px 分区线，下半是它拆出来的四桶读数格（每桶自带份额——「多少」与「占多少」同处一格）。
@@ -15,9 +14,8 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   box-shadow:var(--dtpl-metal);
   overflow:hidden;
 }
-/* 四角括号只画左上与右下两端，其余两角留空（四角都补全会读成相框）；画在 ::before/::after
-   上，所以控件与焦点环都不受影响。左上那一枚**永远压在卡首那条图上**，故单独取浅墨——墨色
-   在浅色皮肤上落在深色图上就等于没有（实测只剩 1px 卡边框）；右下那一枚底下恒为卡面，随 fg 走。 */
+/* 左上那一枚**永远压在卡首那条图上**，故单独取浅墨——墨色在浅色皮肤上落在深色图上就等于没有
+   （实测只剩 1px 卡边框）；右下那一枚底下恒为卡面，随 fg 走。两端画法与焦点环那条见 overlay 片段。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero::before,
 [data-plugin="dsh-tokbook"] .dtpl-hero::after{
   content:"";position:absolute;width:14px;height:14px;pointer-events:none;z-index:2;
@@ -56,8 +54,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-head{
   display:flex;align-items:baseline;justify-content:space-between;gap:16px;
 }
-/* 口径词：普通无衬线，靠字号与字距区分层级，不靠字体换家族。前面那枚黄牌是节标题那套
-   工业徽记（黄牌 + 墨边），与 .dtpl-sec-title::before 同一手法。 */
+/* 前面那枚黄牌是节标题那套工业徽记，与 .dtpl-sec-title::before 同一手法。 */
 [data-plugin="dsh-tokbook"] .dtpl-total-k{
   display:inline-flex;align-items:center;gap:8px;
   font-size:12px;line-height:18px;font-weight:500;letter-spacing:.06em;
@@ -118,9 +115,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   font-family:var(--dtpl-mono);font-weight:600;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-facts i{font-style:normal;color:var(--dtpl-fg-dim);padding:0 5px;}
-/* 行里的两个金额桶按**同一套口径**分主次（DESIGN §4）：现金升到主墨色 + 600，订阅价值留在
-   次要色 + 400，并永远带着「订阅价值」这个名字。桶名与数字的区分由字重 + 名字承担，
-   色相不外借（本窗口唯一有色相的 token 是品牌黄）。 */
+/* 行里的两个金额桶与上面 is-cash 同一口径：字重 + 始终在场的桶名分主次，色相不外借。 */
 [data-plugin="dsh-tokbook"] .dtpl-cash-amt{
   font-style:normal;
   font-family:var(--dtpl-mono);color:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;
@@ -149,8 +144,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   font-size:12px;line-height:18px;font-weight:500;letter-spacing:.05em;color:var(--dtpl-fg-2);
   white-space:nowrap;
 }
-/* 一格里的两件东西同行：值（20px 主角）与份额（12px 次级），靠 baseline 对齐。
-   份额取 fg-2（它是读数），且自己带「占」字——卡上不留裸百分比（一个百分比要么带桶名，
+/* 份额取 fg-2（它是读数），且自己带「占」字——卡上不留裸百分比（一个百分比要么带桶名，
    要么带「占」字）。 */
 [data-plugin="dsh-tokbook"] .dtpl-stat .dtpl-v{
   display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
@@ -202,9 +196,8 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   background:color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
 }
 /* 峰值：**更亮的中性块 + 柱值标签前一枚小黄牌**，柱身上不带任何黄。
-   缘由：黄只以「实心块 + 墨边」出现（tokens：它是"料"，不是"线"）——黄做线条在浅底上是 1.57:1
-   的糊线，画上柱身则把满屏唯一的饱和色放到最大的那块面上，视线被钉住，而这张图要读的是分布形状
-   （「哪天最多」柱高与加粗标签已经说了，黄只是冗余编码）。
+   缘由（tokens：黄是"料"，不是"线"）：画上柱身就把满屏唯一的饱和色放到最大的那块面上，
+   视线被钉住，而这张图要读的是分布形状（「哪天最多」柱高与加粗标签已经说了，黄只是冗余编码）。
    70% 是量出来的：再亮则与黄牌明度接近、黄牌读不出来；再暗则与邻柱糊在一起、峰值认不出。
    墨边让峰值边界在两个主题下分别由「深块 + 更深描边」与「清晰墨框」给出。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak{
@@ -232,10 +225,8 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   white-space:nowrap;pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:600;}
-/* 峰值的黄牌：4×8px（节徽记的 0.6 倍）+ 墨边，挂在**数值前面**——标记与它标注的值不走散，
-   且峰值的表达不只靠颜色（形状 + 文字 + 明度，三层各自成立）。
-   内联块 + vertical-align:-1px，与 10px 等宽数字的基线对齐；标签整体仍由 left:50% +
-   translateX(-50%) 居中，「黄牌 + 数字」作为一组居中在柱顶。 */
+/* 峰值的黄牌：挂在**数值前面**——标记与它标注的值不走散，且峰值的表达不只靠颜色
+   （形状 + 文字 + 明度，三层各自成立）。vertical-align:-1px 让黄牌与等宽数字同基线。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak::before{
   content:"";display:inline-block;width:4px;height:8px;vertical-align:-1px;
   margin-right:5px;background:var(--dtpl-brand);
@@ -251,7 +242,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis span{flex:1 1 0;min-width:0;text-align:center;white-space:nowrap;}
 
 /* 明细头部：与其余各节同一套——黄牌 + 分区词，右端旁注；子 tab 挂在这一行上，用「横排 +
-   竖分隔 + 底部实条」那套（实条取墨色——品牌黄这一屏只留给当前页、峰值、徽记三处）。
+   竖分隔 + 底部实条」那套（实条取墨色——「第二层选择器一律墨色」见 provider 片段）。
    分区词是**窗口词**（今天 / 近 7 天 / 全账本累计）：这一页陈述的就是某个窗口的用量，
    窗口自己就是它该有的名字；切法只是它的三种切法。 */
 [data-plugin="dsh-tokbook"] .dtpl-bd-head{
@@ -280,9 +271,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 /* 列头 + 行共用同一条网格——两列宽度由网格定死，这一节才是**读数表**而不是一叠段落：
      ① 占比条横跨整条网格（grid-column:1/-1），长度由**区块**决定、与哪一行无关；
      ② 金额列每一行都结束在同一条竖线上。
-   右列宽 --dtpl-row-nums-w 定义在 tokens 片段：『.dtpl-row』是**跨 tab 共用**的行组件
-   （通道用量、按工作区也走它），所以度量必须挂在插件根上——挂在使用处，另一个 tab 取不到
-   变量、整条声明会静默失效。它取 minmax 的**下限**：位数不受控，写死会让金额在轨道里被裁。 */
+   右列宽 --dtpl-row-nums-w 的定义、挂根的理由与 minmax 取下限的推导都在 tokens 片段。 */
 [data-plugin="dsh-tokbook"] .dtpl-bd-cols,
 [data-plugin="dsh-tokbook"] .dtpl-row{
   display:grid;
@@ -344,8 +333,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
 [data-plugin="dsh-tokbook"] .dtpl-cost-seg{
   display:flex;align-items:baseline;gap:5px;min-width:0;
 }
-/* 段之间用这个窗口表示「一串事实」的那个『·』，间距走它自己的 padding 而不是容器的 gap
-   （两段之间因此只留 6+6.6+6，宽度让给数额）。 */
+/* 段之间用这个窗口表示「一串事实」的那个『·』，间距走它自己的 padding 而不是容器的 gap。 */
 [data-plugin="dsh-tokbook"] .dtpl-cost-sep{flex:none;padding:0 6px;color:var(--dtpl-fg-dim);}
 [data-plugin="dsh-tokbook"] .dtpl-cost-main{min-width:0;overflow:hidden;text-overflow:ellipsis;}
 [data-plugin="dsh-tokbook"] .dtpl-cost-k{
@@ -454,7 +442,7 @@ export const CSS_LEDGER = `/* 用量总览 · 明日方舟：终末地 风格 */
   background-size:200% 100%;
   animation:dtpl-shimmer 1.4s ease infinite;
 }
-/* 骨架块高度 = 对应真块的**实测**高度，首屏因此不会在数据到达时整体下跳：真块里 hero 与读数格
+/* 骨架块高度 = 对应真块的高度，首屏因此不会在数据到达时整体下跳：真块里 hero 与读数格
    同为一张卡，所以 sk-hero + tile 要等于整卡高，chart 对上「近 14 天趋势」那一节。
    **改真块的高度或内边距时必须同步改这里**——这几个数是一组，不各自独立。 */
 [data-plugin="dsh-tokbook"] .dtpl-sk-hero{height:250px;}

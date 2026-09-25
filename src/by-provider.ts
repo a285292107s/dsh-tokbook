@@ -79,12 +79,9 @@ export function providerCards(
 }
 
 /**
- * 同一批记录的**按模型**切法：把各卡的模型行摊平。
- *
- * 直接摊平卡而不另跑一遍 `summarizeRecords` + `attachCosts`,是为了让
- * 「按模型」与「按通道」**同源**:两者的合计因此天然逐分相等,也共用同一条
- * 「只有失败的行不成清单」规矩(卡在 `requests === 0` 时整组跳过)。顺序不是
- * 契约——展示层按词元降序排。
+ * 同一批记录的**按模型**切法：摊平各卡的模型行，而不另跑一遍
+ * `summarizeRecords` + `attachCosts`——「按模型」与「按通道」因此同源，合计逐分
+ * 相等，也共用「只有失败的行不成清单」的规矩。顺序不是契约——展示层按词元降序排。
  */
 export function modelRowsOf(cards: readonly ProviderUsageCard[]): CostedModelRow[] {
   const rows: CostedModelRow[] = []

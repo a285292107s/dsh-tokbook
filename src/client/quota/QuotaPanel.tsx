@@ -1,7 +1,8 @@
 /**
  * 订阅额度 tab：官方账户用量（宿主侧从 provider 拉取；浏览器不持有 API key）。
  *
- * 打开延迟是一等关切：tab 立即渲染最近已知的卡（宿主 TTL 或持久化快照——首帧不触达 provider），仅当已服务数据老于新鲜度预算时就地刷新。刷新绝不清空卡。无生效订阅的卡被下沉。
+ * 打开延迟是一等关切：tab 立即渲染最近已知的卡，仅当已服务数据老于新鲜度预算时就地刷新；
+ * 刷新绝不清空卡。无生效订阅的卡被下沉。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -126,8 +127,7 @@ export function QuotaPanel() {
         </div>
       )}
 
-      {/* 错误条独占这一屏：它下面不再补一句「尚未配置」——那句话说的是「你没配置」，
-          而真相是这一次没读到。 */}
+      {/* 错误时不再补一句「尚未配置」——那句话说的是「你没配置」，而真相是这一次没读到。 */}
       {listError !== null
         ? null
         : providers === null
@@ -215,7 +215,8 @@ function QuotaCardController({ provider, autoTicker, onGate }: {
         cardRef.current = data
         setCard(data)
         setError(null)
-        // 在取代检查之后报告：成功但无 gate 的响应（服务端拉取失败或 key 已消失）报告 `undefined` 并删掉条目。失败的刷新永远到不了这里。
+        // 在取代检查之后报告：成功但无 gate 的响应（服务端拉取失败或 key 已消失）报告
+        // `undefined` 并删掉条目。
         onGate(provider, data.gate)
         return data
       })

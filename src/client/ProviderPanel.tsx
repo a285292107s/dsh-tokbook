@@ -1,10 +1,6 @@
 /**
- * 用量明细 tab：**选定窗口**内同一批用量的三种切法——按模型 / 按工作区 / 按通道。
- *
- * 三层信息，从上到下各管一件事：**分区词**说明这一页是什么（窗口 + 用量）并报出该窗口的
- * **合计**；**窗口**是贴在分区词右端的作用域控件（它约束整页，不是第二排页签）；
- * **切法**是这一页唯一那条 tab 条（底下才是数据）。窗口作用于三种切法，换窗口时三面一起换、
- * 合计逐分对得上。
+ * 用量明细 tab：**选定窗口**内同一批用量的三种切法——按模型 / 按工作区 / 按通道
+ * （三层信息形的分法见 provider 片段页头段）。
  *
  * 数据来自 `GET /tokbook/usage?range=…`（一次拉回三种切法 + 窗口合计）。刻意独立于总览
  * store——总览失败时本 tab 仍可用。
@@ -29,10 +25,7 @@ const RANGE_LABELS: Record<ProviderRange, string> = {
   all: '全部',
 }
 
-/**
- * 窗口词（分区词的前半）。这一页陈述的就是「某个窗口的用量」，所以窗口自己就是它该有的
- * 名字（与「近 14 天趋势」同一写法）：`${窗口词}用量`。
- */
+/** 窗口词 = 分区词的前半（命名规矩见 ledger 片段 .dtpl-bd-head 段）。 */
 const RANGE_WORDS: Record<ProviderRange, string> = {
   today: '今天',
   yesterday: '昨天',
@@ -53,9 +46,7 @@ const SLICE_LABELS: Record<Slice, string> = {
 }
 
 /**
- * 各切法的右端旁注：**排序口径 + 占比条的分母**。条是这一页唯一没有数字的形状，所以它量的
- * 是「占谁的多少」必须写在旁边——按模型 / 按工作区归一到一个窗口，按通道的条归一在各自卡内
- * （卡是「一条通道」这块面板，条跟着卡走才对得上卡头的合计）。
+ * 各切法的右端旁注：**排序口径 + 占比条的分母**。条没有数字，「占谁的多少」必须写在旁边。
  */
 const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
   model: {
@@ -72,10 +63,8 @@ const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
   },
 }
 
-/** 列头。**一行**写：两列各自是一串上下叠起来的事实（身份两行、数值两行），
- *  所以列名也按同样的先后写成「甲 · 乙」——分隔符用的就是这个窗口里表示「一串事实」的 `·`
- *  （旁注与工作区事实行都用它）。一行牺牲「精确对位」，换来的是它终于像一行表头。
- *  按通道那一面没有列头：通道卡是「铭牌 + 卡身」的两段式，列头会与卡头打架。 */
+/** 列头一行式的写法（含「甲 · 乙」分隔的理由）见 ledger 片段 .dtpl-bd-cols 段。
+ *  按通道那一面没有列头：卡头铭牌就是它的列头，再来一行会与卡头打架。 */
 const COLUMNS: Partial<Record<Slice, { id: string; nums: string }>> = {
   model: { id: '模型 · 通道', nums: '词元 · 金额' },
   workspace: { id: '工作区 · 目录', nums: '词元 · 金额' },
@@ -89,10 +78,7 @@ function cutsOf(view: ProviderUsageView): Slice[] {
         : view.providers.length > 0)
 }
 
-/**
- * 浮窗的用量明细 tab。数据来自自身路由 `/tokbook/usage?range=…`（一次拉回三种切法）；
- * 每个已加载的窗口有缓存，切回来不重新拉取。
- */
+/** 用量明细 tab 本体；每个已加载的窗口有缓存，切回来不重新拉取。 */
 export function ProviderPanel() {
   const [range, setRange] = useState<ProviderRange>('last7')
   const [slice, setSlice] = useState<Slice>('model')
@@ -132,7 +118,7 @@ export function ProviderPanel() {
     }
   }, [])
 
-  // 每个选中的窗口拉取一次；切换后的过期响应被丢弃。
+  // 每个选中的窗口拉取一次。
   useEffect(() => {
     void load(range)
   }, [range, load])
@@ -149,8 +135,8 @@ export function ProviderPanel() {
   const active: Slice = available.includes(slice) ? slice : available[0] ?? 'model'
   const note = SLICE_NOTES[active]
   const cols = COLUMNS[active]
-  // 切法条：加载中留着上一次的切法集（不闪、也不整块消失）；窗口没数据可看时（错误态）整条收掉
-  // ——一条点不动的切法条加一个空面板，读起来像「这里没有行」，而真相是这一次没读到。
+  // 切法条：窗口没数据可看时（错误态）整条收掉——一条点不动的切法条加一个空面板，
+  // 读起来像「这里没有行」，而真相是这一次没读到。
   const showCuts = view !== undefined ? available.length > 0 : busy
 
   const onTablistKeyDown = (e: ReactKeyboardEvent): void => {
@@ -165,10 +151,6 @@ export function ProviderPanel() {
 
   return (
     <section aria-label="用量明细">
-      {/* 页头常驻，且**行数固定**：第一行是分区词 + 窗口控件，第二行是窗口合计。合计单独占一整行
-          （而不是挤在标题与控件之间）是关键——它随窗口变宽变窄，挤在同一行就会把窗口控件推来推去、
-          在「一行 / 两行」之间来回折行，下面整块跟着上下跳。固定成两行之后，页头高度与任何数字
-          无关，窗口控件的右边缘也永远在同一个位置。 */}
       <div className="dtpl-usage-head">
         <div className="dtpl-usage-head-top">
           <h2 className="dtpl-sec-title dtpl-usage-title">{RANGE_WORDS[range]}用量</h2>
@@ -190,8 +172,7 @@ export function ProviderPanel() {
           </div>
         </div>
         {view !== undefined ? (
-          // 事实带与总览 hero 的「累计」那条同一套词汇（请求 / 词元 / 实际支出 / 订阅价值），
-          // 所以两个 tab 的口径读起来是一句话。窗口合计与当前切法无关——三面加起来就是它。
+          // 窗口合计与当前切法无关——三种切法加起来就是它。
           <span className="dtpl-hero-facts dtpl-usage-facts">
             <span className="dtpl-hero-fact"><b>{view.totalRequests}</b> 请求</span>
             <i aria-hidden="true">·</i>
@@ -206,10 +187,8 @@ export function ProviderPanel() {
             )}
           </span>
         ) : busy ? (
-          // 合计的占位：与真事实带同高，数据到达时这一行不重排。
           <span className="dtpl-sk dtpl-usage-facts-sk" aria-hidden="true" />
         ) : (
-          // 错误态：这一行留空而不是收掉——收掉会让下面的错误块与切法条整体上移。
           <span className="dtpl-usage-facts dtpl-usage-facts-empty" aria-hidden="true" />
         )}
       </div>
@@ -242,8 +221,7 @@ export function ProviderPanel() {
               ))}
             </div>
           ) : (
-            // 首次加载：切法还不知道（无工作区注册表的宿主只有两面）。占位条与真 tab 条同高，
-            // 数据到达时这一行不跳。
+            // 首次加载：切法还不知道——没有工作区注册表的宿主只有两面。
             <span className="dtpl-sk dtpl-usage-cuts-sk" aria-hidden="true" />
           )}
           <span className="dtpl-sec-aside" title={note.title}>{note.text}</span>
@@ -267,7 +245,8 @@ export function ProviderPanel() {
         role="tabpanel"
         id="dtpl-usage-panel"
         aria-busy={busy}
-        // 只在切法条真的挂着时才指向它：错误态整条收掉，指向一个不存在的 id 比不指更糟。
+        // 只在切法条真的挂着时才指向它：错误态整条收掉，指向不存在的 id 比不指更糟
+        // （同一条判据见 `LedgerOverlay` 的 tab 条注释）。
         aria-labelledby={showCuts && available.length > 0 ? `dtpl-usage-tab-${active}` : undefined}
       >
         {view === undefined
@@ -298,12 +277,9 @@ function ProviderCards({ cards, labels, money }: {
 }
 
 /**
- * 一张 provider 卡：头部（通道 + 合计）在模型行之上。
- *
- * 头部命名通道的方式与价格表 tab 一致——settings 的 `displayName` 优先
- * （否则适配器的 provider 名），route key 作为副标题。计费标签说明卡上
- * 金额的含义：按量 = 现金支出，订阅 = 按手工价表折算的价值。计费是 route
- * 事实（`$billing`），故卡上所有模型一致。
+ * 一张 provider 卡：头部命名通道的方式与价格表 tab 一致——settings 的 `displayName` 优先
+ * （否则适配器的 provider 名），route key 作为副标题。计费是 route 级事实、两桶口径见
+ * CONTRACTS §2。
  */
 function ProviderCard({ card, money, labels }: {
   card: ProviderUsageCard
@@ -312,8 +288,6 @@ function ProviderCard({ card, money, labels }: {
 }) {
   const cardTokens = card.tokens
   const label = labels[card.provider]
-  // 计费是 ROUTE 事实（价表的 `$billing`），卡上所有模型一致；无人声明的
-  // route 读作 metered，与 `billingOf` 一致。
   const subscription = card.models.some(model => model.billing === 'subscription')
   const billingTag = subscription ? '订阅' : '按量'
   const billingTitle = subscription
@@ -360,9 +334,8 @@ function ProviderCard({ card, money, labels }: {
               </span>
             </div>
             <div className="dtpl-model-nums">
-              {/* 每一格自带列名（`.dtpl-sr`）：这一面没有列头（通道卡的模型行是「身份 + 数字」
-                  两列形态），读屏听到「830.3M」时得知道那是词元还是金额——与用量明细同一套补偿。
-                  占比条同理：它的分母是**这张卡**，所以读屏也这么念。 */}
+              {/* 这一面没有列头（见 `COLUMNS` 注释），所以读屏文本自带列名；占比条的
+                  分母是**这张卡**，读屏也这么念。 */}
               <span className="dtpl-val">
                 <span className="dtpl-sr">词元 </span>{formatTokens(m.tokens)}
                 <span className="dtpl-sr">，占本通道 {formatShare(m.tokens, cardTokens)}</span>

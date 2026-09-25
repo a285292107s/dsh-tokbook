@@ -72,8 +72,7 @@ export async function readSyncProgress(dir: string): Promise<SyncProgressFile | 
   return isProgressFile(value) ? value : null
 }
 
-/** 原子持久化同步基线（temp + rename；目标先 unlink，兼容 Windows 上的
- *  rename-over-existing）。 */
+/** 原子持久化同步基线（temp + rename，unlink 在前——同 {@link markInitialized}）。 */
 export async function writeSyncProgress(dir: string, progress: SyncProgressFile): Promise<void> {
   const target = join(dir, PROGRESS_FILE)
   const tmp = join(dir, PROGRESS_TMP)

@@ -7,14 +7,13 @@ import type { CostedModelRow, WorkspaceUsageRow } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import { formatDateTime, formatRelative, formatShare, formatTokens, share } from './format.ts'
 
-/** 每 (provider, model) 一行：词元、占比、计费金额——订阅通道显示省下的钱，绝不用现金外观包装。 */
 export function ModelRows({ byModel, totalTokens, money }: {
   byModel: readonly CostedModelRow[]
   totalTokens: number
   money: (value: number) => string
 }) {
-  // 按**显示出来的**量排序。占比条编码的是词元，清单若按别的键排，条长就不是单调的，
-  // 整列读起来像渲染坏了；而「按请求数排」还得让读者去别处找那个没显示的数字。
+  // 按**显示出来的**量排序：占比条编码的是词元，清单若按别的键排，条长就不是单调的，
+  // 整列读起来像渲染坏了。
   const rows = [...byModel].sort((left, right) =>
     totalsTokens(right.totals) - totalsTokens(left.totals)
     || right.totals.requests - left.totals.requests
@@ -23,9 +22,8 @@ export function ModelRows({ byModel, totalTokens, money }: {
   return (
     <div className="dtpl-models">
       {rows.map((m) => {
-        // 一行只有一个金额桶（计费是 route 事实），但**标明是哪一桶**不是可省的：现金行写
-        // 「实际支出」、订阅行写「订阅价值」。两枚标签都是四个汉字、在等宽栈里同宽，
-        // 所以数字的右边缘仍然落在同一条竖线上，而标签永远不会换行或被裁掉。
+        // 一行只有一个金额桶（计费是 route 事实，CONTRACTS §2），但**标明是哪一桶**不是可省的。
+        // 各段数额右缘对齐依赖两枚桶名等宽（都是四个汉字）——改名要重量。
         const showsSub = m.spend === 0
         const bucket = showsSub ? '订阅价值' : '实际支出'
         const costText = `${showsSub ? money(m.subscriptionValue) : money(m.spend)} ${bucket}`
@@ -34,9 +32,8 @@ export function ModelRows({ byModel, totalTokens, money }: {
           <div className="dtpl-row" key={`${m.provider}/${m.model}`} title={modelDetail(m, totalTokens, money)}>
             <div className="dtpl-model">
               <span className="dtpl-model-name">{m.model}</span>
-              {/* 通道由列头命名，行内不再重复「通道」两个字——但那两个字对读屏是**列的意义**，
-                  所以它们换成只给读屏的文本留在格子里（旧版把它们一起删掉，等于从无障碍树里
-                  也删掉了「commandcode 是什么」）。 */}
+              {/* 通道由列头命名，行内不重复「通道」两个字；但列头对读屏是 aria-hidden 的，
+                  列的意义得靠格子里这枚只给读屏的「通道」。 */}
               {m.provider !== '' && (
                 <span className="dtpl-model-provider"><span className="dtpl-sr">通道 </span>{m.provider}</span>
               )}
@@ -71,7 +68,8 @@ export function ModelRows({ byModel, totalTokens, money }: {
 }
 
 /**
- * 每个工作区一行，最近使用在前。未归属行收尾：它持有无注册工作区认领的记录，因此各行才能加回窗口词元。它是对账行、不是项目。
+ * 每个工作区一行，最近使用在前。未归属行收尾：它持有无注册工作区认领的记录，因此各行才能
+ * 加回窗口词元。
  *
  * 失败数进**行内**而不是只留在 hover 里：它是这一行唯一会改变动作的事实，而 hover
  * 在触屏与键盘上够不着。四桶拆分与精确时刻是补充细节，留在 hover 里没有代价。
@@ -87,8 +85,8 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
         const failed = row.totals.failures ?? 0
         const cash = row.spend > 0
         const sub = row.subscriptionValue > 0
-        // 金额这一格的完整文本：格子可能被裁（界面上它是被**限宽**的那一个），
-        // 所以同一条串也交给 title——值是不可预测的那部分，只限它、不限标签。
+        // 数额这一格被限宽、可能被裁（见 ledger 片段的 .dtpl-cost），所以 title 带同一条
+        // 完整文本——只限不可预测的数额，不限标签。
         const costText = [
           cash || !sub ? `${money(row.spend)} 实际支出` : '',
           sub ? `${money(row.subscriptionValue)} 订阅价值` : '',
@@ -101,9 +99,8 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
           >
             <div className="dtpl-model">
               <span className="dtpl-model-name">{row.title}</span>
-              {/* 目录在压力下截断（省略号）；两个事实不截——被截断的「最近 …」会被读成坏掉的数字。
-                  「N 失败」是这一行唯一会改变动作的事实，所以它带色相（色相只给要看一眼的状态），
-                  而请求数、最近时刻是读数，不染色。 */}
+              {/* 目录在压力下截断（省略号）；事实串永不截——被截断的「最近 …」会被读成
+                  坏掉的数字。 */}
               <span className="dtpl-ws-meta">
                 {row.path !== '' && (
                   <>
@@ -123,10 +120,9 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
                 <span className="dtpl-sr">词元 </span>{formatTokens(row.tokens)}
                 <span className="dtpl-sr">，占本窗口 {formatShare(row.tokens, totalTokens)}</span>
               </span>
-              {/* 工作区跨通道，两个金额桶可同时非零——所以一格里有**两段**「数额 + 桶名」，段之间用
-                  这个窗口表示「一串事实」的 `·` 分隔（与 hero 的累计事实带同一条写法）。桶名与模型行
-                  共用同一条槽位，所以各段数额的右边缘仍然落在同一条竖线上；两者都无话时用一枚零
-                  撑住格子：「价格未知」是口径，不是免费。 */}
+              {/* 工作区可跨通道、两个金额桶同时非零——不像模型行的单段，这里是两段
+                  「数额 + 桶名」；桶名与模型行共用同一条槽位，各段数额的右边缘仍在同一条
+                  竖线上。 */}
               <span className="dtpl-cost" title={costText}>
                 {(cash || !sub) && (
                   <span className="dtpl-cost-seg">
@@ -156,10 +152,7 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
   )
 }
 
-/**
- * 工作区行的 hover 审计信息：身份、窗口词元四桶、请求/失败、两个金额桶、最近使用时间。
- * 与模型行同一套写法（`modelDetail`）——两面的 hover 说的是同一类事实。
- */
+/** 工作区行的 hover 审计信息；与模型行的 `modelDetail` 同一套写法——两面的 hover 说的是同一类事实。 */
 function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => string): string {
   const totals = row.totals
   const failed = totals.failures ?? 0
@@ -174,10 +167,7 @@ function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => strin
   ].join('\n')
 }
 
-/**
- * 模型行的 hover 审计信息：身份（模型 + 通道）、窗口词元与占比、请求 / 压缩 / 失败、
- * 四桶、两个金额桶。行内只放得下身份、词元与一个金额桶，其余留在这里。
- */
+/** 模型行的 hover 审计信息：行内只放得下身份、词元与一个金额桶，其余留在这里。 */
 function modelDetail(row: CostedModelRow, totalTokens: number, money: (value: number) => string): string {
   const totals = row.totals
   const tokens = totalsTokens(totals)

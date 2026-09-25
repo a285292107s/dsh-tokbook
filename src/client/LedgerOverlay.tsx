@@ -1,7 +1,6 @@
 /**
- * 词元账本浮窗（路由 A：`shell.overlay`）——纯壳层。
- *
- * 对话语义：Escape 和点背景都关闭；打开时焦点移入卡片，Tab 被困在内部，关闭后焦点回到触发按钮。
+ * 词元账本浮窗（路由 A：`shell.overlay`）——纯壳层：tab 条、面板分发与浮窗级生命周期，
+ * 各 tab 内容在各自组件里。
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -24,7 +23,7 @@ export interface LedgerOverlayProps {
 }
 
 /** 追一轮后台 walk 的轮询步长与上限（30 s）：够覆盖一次「整份会话日志重读」，又不至于
- *  在状态真卡住时无限打路由。tick 本身是内存探针，代价与上限无关。 */
+ *  在状态真卡住时无限打路由。 */
 const SYNC_FOLLOW_INTERVAL_MS = 500
 const SYNC_FOLLOW_ATTEMPTS = 60
 
@@ -42,10 +41,10 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       .catch((err: unknown) => { if (!signal?.aborted) view.setError(err instanceof Error ? err.message : String(err)) })
   }, [view])
 
-  /** 只读 host 内存的同步状态探针（≈0 ms）。追 walk 落定靠它，不靠反复拉概览：概览每次
-   *  都是全量聚合，而追的 tick 次数正比于 walk 耗时——那等于把负载加在正被 walk 压着的
-   *  那条路径上。读不到就返回 null（调用方按「已落定」处理，随后照常拉一次概览：
-   *  同一份包里 client 与 host 同版本，探针失败只可能是路由之外的意外）。 */
+  /** 只读 host 内存的同步状态探针。追 walk 落定靠它、不靠反复拉概览：概览每次都是全量
+   *  聚合，而追的 tick 次数正比于 walk 耗时——那等于把负载加在正被 walk 压着的路径上。
+   *  读不到就返回 null（调用方按「已落定」处理，随后照常拉一次概览：同一份包里 client 与
+   *  host 同版本，探针失败只可能是路由之外的意外）。 */
   const fetchSyncState = useCallback((signal?: AbortSignal): Promise<SyncStatusView | null> => {
     return fetch(ROUTE_SYNC, { signal })
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<SyncStatusView> })
@@ -53,14 +52,11 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       .catch(() => null)
   }, [])
 
-  // host 的读路径刻意**不**等后台的权威 walk，所以一次读到的 `running` 只是
-  // 那一刻的事实：不追它，footer 就会一直停在「正在重新扫描…」。打开浮窗（读路径自己
-  // 排了 walk）与按下重新扫描（路由在扫描完成前就返回）都靠它把状态追到落定——否则
-  // 不仅状态是假的，walk 补进来的行也不会出现在屏上。
-  //
-  // 退出条件看**屏上那份快照**、不看探针：探针比概览早几百毫秒，可能在 walk 真正开始前
-  // 就报 `done`（`rescan` 的 walk 是 fire-and-forget 起跑的）。所以探针说落定后仍拉一次
-  // 概览，若它报 `running` 就继续追，而不是停下留下一个卡住的状态。
+  // host 的读路径不等后台 walk（CONTRACTS §2），所以概览里的 `running` 只是那一刻的事实：
+  // 打开浮窗与按下重新扫描都靠追到落定，walk 补进来的行也才会被拉回屏上。
+  // 退出条件看**屏上那份快照**、不看探针：探针可能在 walk 真正开始前就报 `done`
+  // （`rescan` 的 walk 是 fire-and-forget 起跑的）。所以探针说落定后仍拉一次概览，
+  // 若它报 `running` 就继续追。
   const followSync = useCallback(async (signal?: AbortSignal): Promise<void> => {
     for (let attempt = 0; attempt < SYNC_FOLLOW_ATTEMPTS; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, SYNC_FOLLOW_INTERVAL_MS))
@@ -74,7 +70,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     await fetchOverview(signal)
   }, [fetchOverview, fetchSyncState, view])
 
-  // 每次打开拉取一次（读到 running 则继续追到落定）；关闭/重开后忽略过期响应。
+  // 每次打开拉取一次（读到 running 则继续追到落定）。
   useEffect(() => {
     if (!open) return
     const controller = new AbortController()
@@ -84,7 +80,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     return () => { controller.abort() }
   }, [open, fetchOverview, followSync, view])
 
-  // 关闭浮窗 / 组件卸载即中止这一轮跟随：轮询没有自己的生命周期，浮窗不在了就该停手。
+  // 关闭浮窗 / 组件卸载即中止这一轮跟随。
   useEffect(() => {
     if (!open) {
       rescanRef.current?.abort()
@@ -93,7 +89,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     return () => { rescanRef.current?.abort() }
   }, [open])
 
-  // 触发一次权威再同步，然后轮询总览直到同步结束。
+  // 触发一次权威再同步，然后追到落定。
   const onRescan = useCallback(async () => {
     rescanRef.current?.abort()
     const controller = new AbortController()
@@ -126,7 +122,6 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
   )
 }
 
-/** 浮窗当前显示的 surface。 */
 type OverlayTab = 'ledger' | 'provider' | 'quota' | 'pricing' | 'method'
 
 const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'quota', 'provider', 'pricing', 'method']
@@ -223,7 +218,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
         <div className="dtpl-tabs" role="tablist" aria-label="账本视图" onKeyDown={onTablistKeyDown}>
           {/* 五个 tab 共指**同一个** tabpanel（`dtpl-panel`）：面板是同一个滚动容器、内容随 tab 换，
               所以每格写死一个自己的 id 会让四个 `aria-controls` 指向不存在的元素——指向一个不存在的
-              id 比不指更糟（`ProviderPanel` 的切法条是同一条判据的另一处落地）。 */}
+              id 比不指更糟。 */}
           <button
             type="button"
             role="tab"
@@ -324,9 +319,6 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
 
         {overview !== null && tab === 'ledger' && (
           <footer className="dtpl-foot">
-            {/* 正常态（待同步 / 已同步）不占字。读者要的答案是「屏上这份数据有多新」，
-                而那个时刻就是答案；插件内部状态机的名字只在该他采取行动时出现
-                （正在扫 / 上次失败）。 */}
             <span className="dtpl-foot-state">
               {overview.syncStatus === 'running' && (
                 <span className="dtpl-sync dtpl-sync-running">

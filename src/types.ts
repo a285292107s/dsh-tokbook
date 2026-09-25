@@ -1,8 +1,7 @@
 /**
- * dsh-tokbook 共享领域类型（纯类型；无运行时 import）。
- *
- * 成本是叠加层：按 (route, model) 解析人工价表（¥ / 百万 token）。金额拆成
- * metered（真实消费）与 subscription（订阅价值）。改价只重算历史计价，不重建聚合。
+ * dsh-tokbook 共享领域类型：wire 载荷与共享类型的**逐字段真源**，另含两半区
+ * 共用的少量运行时值（常量与 {@link totalsTokens}）。
+ * 成本层与计价口径见 docs/CONTRACTS.md §2。
  */
 
 /** 单次模型调用的 provider token 桶。 */
@@ -20,7 +19,7 @@ export type UsageRecordKind = 'request' | 'compaction' | 'failure'
 /** 一行 JSONL：一次 provider 模型调用（成功或失败）。 */
 export interface UsageRecord {
   /** 稳定请求身份（去重键）：assistant message id，或合成的
-   * `compaction:<session>:<seq>` / `failure:<session>:<seq>`。 */
+   * `compaction:`/`failure:` 复合 id——身份的构成与回落规则见 `src/usage-record.ts`。 */
   requestId: string
   /** 会话事件墙钟时间，epoch 毫秒。 */
   time: number
@@ -46,11 +45,9 @@ export interface UsageTotals {
   compactions?: number
   failures?: number
   failuresByCode?: Record<string, number>
-  /** 组内**用量未知**的计费调用数：通道没回报 `usage`（或回报的桶非法）。
-   *  这类调用计入 `requests`，却没有 token 可加——它们对四桶的贡献是**未知**，
-   *  不是零消耗，所以单独计数而不是让它们混进 0。`assistant/message` 与
-   *  `compaction/summary` 都会走到这里（后者的行在缺 `usage` 时同样落盘）。
-   *  旧 rollup 省略（读作 0）。 */
+  /** 组内**用量未知**的计费调用数（通道没回报 `usage` 或回报的桶非法）：计入
+   *  `requests` 却没有 token 可加，单独计数——「用量未知 ≠ 0」的口径见
+   *  docs/CONTRACTS.md §2。旧 rollup 省略（读作 0）。 */
   usageUnknown?: number
 }
 
@@ -59,7 +56,7 @@ export interface UsageDayRow {
   day: string
   totals: UsageTotals
   /** 当日真实消费（¥）；仅成本层跑过（`attachCosts`）后才有。token-only
-   * 汇总与落盘 rollup 都不含——读时再由 rateRows 重算。 */
+   *  汇总与落盘 rollup 都不含。 */
   spend?: number
   /** 当日订阅价值（¥，非现金）；在场条件同 {@link spend}。 */
   subscriptionValue?: number
@@ -96,10 +93,9 @@ export type PriceCurrency = 'CNY' | 'USD'
 /** route → 报价币种（保留键 `$currency`）。**只记美元那几条**，人民币不写出来。 */
 export type CurrencyMap = Record<string, PriceCurrency>
 
-/** 价文件的汇率（保留键 `$fx`）：1 美元值多少元，手填。它是**唯一的**换算率，干两件事：
- *  ① 把 `$currency` 标成美元的通道折成人民币（计价与悬停读数）；② 切换一条通道的报价币种时
- *  换算它已有的数。所以**改汇率会重算美元通道的金额**——那些价是美元记的，人民币数字本来就是
- *  汇率的函数；人民币通道一分不动。缺席 = 未设汇率（换算不出来，绝不按 1 算）。 */
+/** 价文件的汇率（保留键 `$fx`）：1 美元值多少人民币，手填。它是**唯一的**换算率。
+ *  缺席 = 未设汇率（美元报价的通道算不成人民币，按价格未知报出，绝不按 1 算）。
+ *  改汇率的后果与切换规则见 docs/CONTRACTS.md §2。 */
 export interface FxSetting {
   /** 每 1 美元的人民币数；必须是正的有限数。 */
   cnyPerUsd: number
@@ -137,7 +133,8 @@ export interface HolidayRange {
 }
 
 /** 价格段的例外时段：本地日的小时区间（`[start, end)`，`24` 关日），按星期
- * 集合生效，自带四档人民币/百万词元。生效时叠在段的基准价之上——省略的档沿用基准价。 */
+ *  集合生效，自带四档每百万词元费率（币种随该通道报价，见 {@link ModelPricing}）。
+ *  生效时叠在段的基准价之上——省略的档沿用基准价。 */
 export interface PriceSlot {
   days: DaySet
   /** 覆盖的首小时，0–23。 */
@@ -162,8 +159,7 @@ export interface PriceSegment {
 
 /** 例外时段的身份：起始小时 + 星期集合。段内唯一——共享两者会在整个公共
  * 区间重叠，写路径拒绝——因此 rate 行可在无价格时仍标明当时计费所依据的
- * 时段。它是折叠的归组与回查键，不是跨价表的保护：价文件任何改动都会整份
- * 重折、按记录时刻就地重算，移动 / 删除时段同样只改后续读法，不掉成价格未知。 */
+ * 时段。折叠归组与改价重算的语义见 docs/CONTRACTS.md §2。 */
 export interface SlotRef {
   start: number
   days: DaySet
@@ -179,8 +175,8 @@ export type BillingMap = Record<string, BillingNature>
 /** 价文件里的法定节假日年历形态（保留键 `$calendar`）。 */
 export type PricingCalendarInput = Record<string, HolidayRange[]>
 
-/** 记录计价所依据的身份：生效段的起始时刻 + 段内生效的例外时段
- * （null/缺 = 该段基准价）。只存身份、不存数字，改价后下次读即重算历史。 */
+/** 记录计价所依据的费率行身份：生效段的起始时刻 + 段内生效的例外时段
+ *  （null/缺 = 该段基准价）。折叠与重算语义见 docs/CONTRACTS.md §2。 */
 export interface RateKey {
   from: number
   slot?: SlotRef | null
@@ -237,7 +233,7 @@ export interface PricingModelView {
    * 省略（账本记得它，或价表里手写了它）——选择器回落到 `provider/model` 的方式。 */
   name?: string
   /** settings / 适配器目录是否列出该串（即 route 上可调用）。false 有两种来历——
-   * 账本记得、配置已删，或只在价表里手写。界面不再播报它，只作 route 卡内的排序键。 */
+   * 账本记得、配置已删，或只在价表里手写。UI 不播报它，只作 route 卡内的排序键。 */
   configured: boolean
   records: number
   firstAt?: number
@@ -245,8 +241,8 @@ export interface PricingModelView {
   /** 落在所有价格段之外的记录数（按各自时间戳）——这些记 ¥0。省略 =
    * 未知（无账本透镜），**不等于** 0：有价的行仍可能有未定价历史。 */
   unpriced?: number
-  /** 按生效序的价格段（空 = 价格未知，计 ¥0）。行内显示的价由 client 从这些段**按当前时刻**
-   *  现算（生效段 + 生效时段），所以 wire 上不带一份会过期的「当前价」。 */
+  /** 按生效序的价格段（空 = 价格未知，计 ¥0）。行内「此刻价」由 client 按当前
+   *  时刻现算，wire 不带快照（口径见 docs/CONTRACTS.md §2）。 */
   segments: PricingSegmentInput[]
 }
 
@@ -257,8 +253,7 @@ export interface PricingRouteView {
   label: string
   /** 计费性质（`$billing`；默认 metered）。 */
   billing: BillingNature
-  /** 报价币种（`$currency`；默认人民币）。段里的数就用它记——client 原样显示，
-   *  换算成另一种货币只发生在悬停读数与切换报价币种时。 */
+  /** 报价币种（`$currency`；缺席 = 人民币），该 route 段里的数就用它记。 */
   currency: PriceCurrency
   /** 整条 route 的账本记录数（驱动卡片排序）。 */
   records: number
@@ -271,12 +266,12 @@ export interface PricingView {
    * route key。 */
   routes: PricingRouteView[]
   /** 法定节假日年历（价文件 `$calendar` 原样）。`workdays` 时段靠它把节假日
-   * 排除在高峰之外；缺一年就是那一年未知。 */
+   *  排除在高峰之外。 */
   calendar: PricingCalendarInput
   /** 账本覆盖到、但年历里没有的年份——`workdays` 在那几年会多算高峰。空 = 不用补。 */
   calendarMissing: string[]
-  /** 价文件的汇率（`$fx` 原样）。缺席 = 未设汇率：美元报价的通道算不出人民币（那些行按价格
-   *  未知报出），也切不过去。它**参与**计价——美元通道的价按它折成人民币。 */
+  /** 价文件的汇率（`$fx` 原样）。缺席 = 未设汇率：美元报价的通道算不出人民币
+   *  （那些行按价格未知报出），也切不过去（口径见 docs/CONTRACTS.md §2）。 */
   fx?: FxSetting
   dataDir: string
   updatedAt: number
@@ -400,7 +395,7 @@ export interface ProviderUsageCard {
   requests: number
   compactions: number
   /** 窗口内**用量未知**的计费调用数（通道没上报 `usage`）：计入 `requests` 与
-   *  `compactions`，但没有词元可加，金额因此按 ¥0 计——**不是免费**。 */
+   *  `compactions`，但没有词元可加，金额按 ¥0 计（口径见 docs/CONTRACTS.md §2）。 */
   usageUnknown: number
 }
 
@@ -435,14 +430,11 @@ export interface ProviderUsageView {
 }
 
 /**
- * 浏览器浮窗读取的聚合快照。刻意从 {@link CostedSummary} 瘦身：价表、
- * rateRows、byHour 不过 wire——浮窗不渲染它们，成本已折进 spend /
- * subscriptionValue / totalCost。
- *
- * 按模型 / 按工作区也不在这里：两者是**窗口**的切法，随
- * {@link ProviderUsageView} 走（用量明细 tab，窗口由那一页自己选）。
- * `unpricedModels` 同理不过 wire：概览不再渲染价格未知的模型清单，
- * 该事实在用量明细的通道卡与价格表的筛选里。
+ * 浏览器浮窗读取的聚合快照。刻意从 {@link CostedSummary} 瘦身：价表、rateRows、
+ * byHour、byModel、unpricedModels 不过 wire——浮窗不渲染它们，成本已折进
+ * spend / subscriptionValue / totalCost。按模型 / 按工作区是**窗口**的切法，随
+ * {@link ProviderUsageView} 走（用量明细 tab，窗口由那一页自己选）；「价格未知」
+ * 由用量明细的通道卡与价格表报出。
  */
 export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRows' | 'byHour' | 'byModel' | 'unpricedModels'> {
   /** 四桶之和（input + cacheRead + cacheWrite + output）。 */
@@ -476,17 +468,16 @@ export interface TokBookConfig {
   path?: string
   /** 是否记录并计费 compaction summarize（默认 true）。 */
   recordCompaction?: boolean
-  /** 按 provider route 键的额度计划（`opencode-go`、`commandcode`）。找到
-   * 可用 API key（配置、env 或 provider 认证文件）后自动开启，除非
-   * `enabled:false`。用量从 provider 官方账户端点拉取——tab 不回落到本地
-   * 估算。见 `src/quota.ts` / `src/quota-official.ts`。 */
+  /** 按 provider route 键的额度计划（`opencode-go`、`commandcode`）：找到可用
+   *  API key 即默认开启，除非 `enabled: false`；key 解析顺序与默认口径见
+   *  docs/CONTRACTS.md §4。见 `src/quota.ts` / `src/quota-official.ts`。 */
   plans?: Record<string, PlanConfig>
 }
 
 /** 用户配置的额度计划覆盖（见 `src/quota.ts`）。 */
 export interface PlanConfig {
   enabled?: boolean
-  /** 明文 API key；优先于 credentials 服务。面向测试 / 非 DSH 宿主——
+  /** 明文 API key；解析顺序见 docs/CONTRACTS.md §4。面向测试 / 非 DSH 宿主——
    * DSH Models 页里的 key 在 credentials 服务里，无需此字段。 */
   apiKey?: string
   /** 经 `ctx.credentials` 解析的凭据引用名；默认 provider 引用
@@ -546,8 +537,7 @@ export type QuotaCardState = 'ok' | 'unconfigured' | 'error'
  *
  * `subscription` — 生效中的计划：包含的月度额度 + 限制其节奏的 5 小时/周
  * 滚动窗口。
- * `balance` — 无生效订阅，但 provider 报了余额（故 `balance` 卡必有
- * `credits`；余额接口无响应时走 `none` 门，而不是展示一个没人报过的 0），
+ * `balance` — 无生效订阅，但 provider 报了余额（故 `balance` 卡必有 `credits`），
  * 且仅余额约束用量。这是 provider 自己的规则，并覆盖两种正常情形：计划已
  * 结束（含文档化的「期末取消」流程），以及从未订过的账户（按量付费）。
  * `none` — 无生效订阅也无余额可展示（OpenCode Go 只暴露窗口百分比）。
@@ -567,11 +557,10 @@ export interface QuotaCard {
   planInfo?: QuotaPlanInfo
   usage?: QuotaUsageSummary
   credits?: QuotaCreditPool
-  /** 此刻约束用量的是什么（见 {@link QuotaGate}）；省略读作 `subscription`。
-   * 非 `subscription` 卡的 `windows` **不是**账户当前承受的限额——滚动
-   * 窗口只限制生效计划所含的月度额度。省略（而非写成 `subscription`）是
-   * 证据源无响应时的产物：门从不由失败调用推断，渲染方在该情形下保持
-   * 门之前读法。 */
+  /** 此刻约束用量的是什么（见 {@link QuotaGate}）；**省略读作 `subscription`**。
+   *  非 `subscription` 卡的 `windows` **不是**账户当前承受的限额——滚动
+   *  窗口只限制生效计划所含的月度额度。门绝不从失败的拉取推断（口径见
+   *  docs/CONTRACTS.md §2），渲染方在该情形下保持门前读法。 */
   gate?: QuotaGate
   /** 解释 `balance` 门的一句话（依据哪条证据、API 报告的日期）。由 host
    * 拼好，client 不重推 provider 订阅状态词汇。 */

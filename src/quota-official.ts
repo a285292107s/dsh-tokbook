@@ -58,11 +58,9 @@ function num(value: unknown): number | undefined {
 // ---------------------------------------------------------------------------
 
 /**
- * 从 DSH 凭据缝解析一个内置 provider 的 API key。引用名是设置了的
- * `plans[<key>].apiKeyEnv`，否则是 provider 默认（`COMMANDCODE_API_KEY`、
- * `OPENCODE_GO_API_KEY`）——正是 provider 适配器 settings 页经凭据服务写入的
- * 名字。配置里的字面量 `plans[<key>].apiKey` 优先，供显式/测试覆盖。无缝 →
- * undefined（调用方展示 `unconfigured` 卡）。
+ * 从 DSH 凭据缝解析一个内置 provider 的 API key（顺序与 `unconfigured` 语义见
+ * docs/CONTRACTS.md §4）。引用名正是 provider 适配器 settings 页经凭据服务写入
+ * 的名字，DSH 里存的 key 因此找得到；配置里的字面量 `apiKey` 供显式/测试覆盖。
  */
 export async function resolvePlanApiKey(
   provider: string,
@@ -80,7 +78,8 @@ export async function resolvePlanApiKey(
     const value = await credentials.resolve(envName)
     if (value !== undefined && value !== '') return value
   } catch {
-    // 缝失败不得崩掉额度拉取；当作 unconfigured。宿主记下底层原因。
+    // 缝失败不得崩掉额度拉取；按 unconfigured 卡继续。底层原因在这里丢弃——
+    // 缝的实现（index.ts）不记日志。
   }
   return undefined
 }
@@ -92,8 +91,8 @@ export async function resolvePlanApiKey(
 const COMMAND_CODE_API_BASE = 'https://api.commandcode.ai'
 const COMMAND_CODE_CLI_VERSION = '1.47.0'
 
-/** 一个 `/alpha/*` 路径及其查询参数；空/缺席值剔除。`orgId` 圈定 billing
- *  端点，`since` 圈定用量摘要。 */
+/** 拼一个 Command Code `/alpha/*` 路径与查询参数。`orgId` 圈定 billing 端点，
+ *  `since` 圈定用量摘要。 */
 function ccPath(path: string, params: Record<string, string | undefined>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -111,8 +110,8 @@ function rawTimestamp(value: unknown): string | undefined {
   return undefined
 }
 
-/** 拉取一个 Command Code `/alpha/*` 端点，返回解析后的 body，失败时返回
- *  `{ status }`。 */
+/** 拉取一个 Command Code `/alpha/*` 端点，返回解析后的 body；HTTP 失败返回
+ *  `{ __httpStatus: 状态码 }`，网络错误或非对象 body 返回 `{ __httpStatus: 0 }`。 */
 async function ccGet(
   path: string,
   key: string,
@@ -140,13 +139,12 @@ async function ccGet(
   }
 }
 
-/** `/alpha/*` 结果体是否表示认证失败。 */
 function isAuthFailure(body: Record<string, unknown> | { __httpStatus: number }): boolean {
   if ('__httpStatus' in body) return body.__httpStatus === 401
   return body.error === 'invalid-key' || body.message === 'Unauthorized'
 }
 
-/** Command Code 计划 id 的友好展示名（回落到 id）。 */
+/** Command Code 计划 id 查展示名；不在表内返回 undefined（标题回落由调用方处理）。 */
 function commandCodePlanName(planId: string): string | undefined {
   const normalized = planId.toLowerCase().replace(/_/g, '-')
   return COMMAND_CODE_PLAN_NAMES[normalized]
@@ -164,8 +162,8 @@ function attachPlanInfo(card: QuotaCard, raw: Record<string, unknown> | undefine
   else if (display !== undefined) card.title = display
 }
 
-/** 拉取 Command Code 账户用量（whoami + usage/summary + billing/credits +
- *  billing/subscriptions）。返回归一后的卡，或 `error`/`unconfigured` 卡。 */
+/** 拉取 Command Code 账户用量，返回归一后的卡；key 缺席或被拒、全无数据时
+ *  返回 `unconfigured`/`error` 卡。 */
 export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<QuotaCard> {
   const key = await resolvePlanApiKey(COMMAND_CODE_PROVIDER, deps.plan, deps.credentials)
   if (key === undefined) return unconfiguredCard(COMMAND_CODE_PROVIDER)
@@ -271,20 +269,15 @@ export async function fetchCommandCodeQuota(deps: QuotaFetchDeps = {}): Promise<
   // 上面数字**意味着什么**取决于是否有生效订阅。滚动窗口与月度池只限制生效
   // 计划所含的 credits；无订阅时 provider 仅按余额约束用量，窗口不适用。故卡
   // 说出自己的 gate，而不是让残留的窗口数字读作预算。
-  //
-  // gate **只**从携带证据的端点读：`status` 与 `periodEnd` 只存在于
-  // `billing/subscriptions`，该调用失败意味着「未知」，绝非「无订阅」。从 5xx
-  // 推出计划已失效，既会藏掉账户仍在其下的窗口，**还会用文字说出来**。未设定
-  // 时 gate 默认为 `subscription`，卡渲染与 gate 出现之前完全相同，直到稍后
-  // 刷新真正答上。
+  // 门只从 `billing/subscriptions` 推导——`status` 与 `periodEnd` 只存在于那里，
+  // 该调用没答上就保持不设门。硬规则见 docs/CONTRACTS.md §2。
   if (subscriptionBody !== undefined) {
     card.gate = quotaGate(card.planInfo)
     if (card.gate === 'balance') {
       card.gateNote = balanceGateNote(card.planInfo)
-      // `balance` 门承诺有余额可展示。当 `billing/credits` 也没答上时，没有
-      // 数字可放在窗口的位置，而缺席的余额会渲染成 `$0.00`——我们无法支持的
-      // 断言。与 OpenCode Go 的「无物可展示」是同一情形，故取同一 gate，而
-      // 不是编造零。
+      // `balance` 门保证带余额（docs/CONTRACTS.md §2）：`billing/credits` 也没
+      // 答上时，缺席的余额会渲染成 `$0.00`——我们无法支持的断言，与 OpenCode Go
+      // 的「无物可展示」同一情形，降级为 `none` 而不是编造零。
       if (card.credits === undefined) {
         card.gate = 'none'
         card.gateNote = `${card.gateNote}（本次未取到余额，暂无法显示可用量）`
@@ -312,9 +305,9 @@ interface GoUsageWindow {
   resetInSec?: unknown
 }
 
-/** 把原始 OpenCode Go 用量体（`{ usage: { rolling, weekly, monthly } }`，各
- *  `{ status, percent, resetsAt }`）归一成额度卡。纯函数并导出，解析可无网
- *  单测。 */
+/** 把原始 OpenCode Go 用量体归一成额度卡——live 端点答 `{ usage: { rolling|weekly|monthly:
+ *  { status, percent, resetsAt } } }`（经 cc-switch 与 dsh-opencode-go-usage 插件验证）。
+ *  纯函数并导出，解析可无网单测。 */
 export function parseOpenCodeGoUsage(body: Record<string, unknown>, now: number = Date.now()): QuotaCard {
   const usage = isRecord(body.usage) ? body.usage : body
   const rolling = isRecord(usage.rolling) ? usage.rolling as GoUsageWindow : undefined
@@ -338,9 +331,7 @@ export function parseOpenCodeGoUsage(body: Record<string, unknown>, now: number 
   return card
 }
 
-/** 拉取 OpenCode Go 官方用量（三个窗口：rolling/weekly/monthly，仅百分比 +
- *  重置）。live 端点答 `{ usage: { rolling|weekly|monthly: { status, percent,
- *  resetsAt } } }`（经 cc-switch 与 dsh-opencode-go-usage 插件验证）。 */
+/** 拉取 OpenCode Go 官方用量；响应形状见 `parseOpenCodeGoUsage`。 */
 export async function fetchOpenCodeGoQuota(deps: QuotaFetchDeps = {}): Promise<QuotaCard> {
   const key = await resolvePlanApiKey(OPENCODE_GO_PROVIDER, deps.plan, deps.credentials)
   if (key === undefined) return unconfiguredCard(OPENCODE_GO_PROVIDER)
@@ -362,10 +353,9 @@ export async function fetchOpenCodeGoQuota(deps: QuotaFetchDeps = {}): Promise<Q
       return errorCard(OPENCODE_GO_PROVIDER, '官方接口拒绝了该 key（401）——请检查 OpenCode Go API key。')
     }
     if (response.status === 403) {
-      // 文档化为「有效 key、无 Go 订阅」——Zen 与 Go 共享同一 workspace key，
-      // 故这不是认证失败也不是故障：账户只是没有生效中的 Go 计划（从未订阅，
-      // 或已结束）。答为状态，tab 展示真相而不是「查询失败」。此端点只报窗口
-      // 百分比，与 Command Code 不同，没有余额可放在窗口的位置。
+      // 语义见文件头：有效 key、无 Go 订阅——不是认证失败也不是故障，答为状态，
+      // tab 展示真相而不是「查询失败」。此端点与 Command Code 不同，没有余额可
+      // 放在窗口的位置。
       return noSubscriptionCard(
         OPENCODE_GO_PROVIDER,
         '该 key 有效，但当前没有生效中的 OpenCode Go 订阅（未订阅或已过期）——订阅后点右上角刷新即可恢复显示。',

@@ -9,15 +9,14 @@ import type { QuotaCard, QuotaWindowView } from '../../types.ts'
 /** 窗口条 / 仪表可着的色调。 */
 export type QuotaTone = 'ok' | 'warn' | 'danger'
 
-/** 已用百分比到色调：绿 < 60，琥珀 < 85，红更远。 */
+/** 已用百分比到色调。 */
 export function toneOf(pct: number): QuotaTone {
   if (pct >= 85) return 'danger'
   if (pct >= 60) return 'warn'
   return 'ok'
 }
 
-/** provider 报告的三个额度来源之和——与参考实现推导的
- *  `remainingCredits` 相同，也是无生效订阅账户的全部约束。 */
+/** provider 报告的三个额度来源之和，也是无生效订阅账户的全部约束。 */
 export function balanceUsd(credits: QuotaCard['credits']): number {
   if (credits === undefined) return 0
   return (credits.monthlyUsd ?? 0) + (credits.purchasedUsd ?? 0) + (credits.freeUsd ?? 0)
@@ -69,9 +68,13 @@ export function monthlyAllowanceWindow(card: QuotaCard): QuotaWindowView | null 
   }
 }
 
-/** 头部环概括的内容。环回答**固定的**问题——账户用掉了本月预算的多少——而不是恰好最紧的滚动窗口（「最差窗口」标题会让指代模糊）。只有完全没有月度度量时环才回落到最紧的滚动窗口——且 `cap` 随之命名那个窗口。 */
+/**
+ * 头部环概括的内容。环回答**固定的**问题——账户用掉了本月预算的多少——而不是恰好最紧的
+ * 滚动窗口（「最差窗口」标题会让指代模糊）。只有完全没有月度度量时环才回落到最紧的滚动窗口
+ * ——且 `cap` 随之命名那个窗口。非订阅 gate 的卡不画环：正文没有对应的窗口行，环会去概括
+ * 一个卡上不显示的数字；余额没有分母，以金额形式展示。
+ */
 export function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; cap: string } | undefined {
-  // 非订阅卡不受窗口限额约束，正文隐藏或省略那些行——从其中之一画环会概括一个卡上不显示的数字。余额没有分母，故以金额形式展示。
   if (card.gate !== undefined && card.gate !== 'subscription') return undefined
   const monthly = card.windows.find((w) => w.id === 'monthly')
   if (monthly !== undefined) {
@@ -89,11 +92,11 @@ export function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; c
   return { pct: worst.usagePercent, tone: toneOf(worst.usagePercent), cap: worst.label }
 }
 
-/** 环**没有读数**时写在环里的话（环照旧只画轨道）。槽位空着等于 54px 缩进里什么都没有，
- *  读作「少了东西」；假装一个 0% 的环则是另一句假话。判据是「有没有环」，不是 gate：
- *  有订阅但端点一个窗口都没报的卡同样是「无读数」，绝不能错说成「无订阅」。
- *  「过期」也只在 provider 真的报了一个已经过去的周期终点时才用——端点只说「没有生效中的
- *  订阅」时（按量账户 / 从未订阅 / 欠费），不替它把话升级成「过期」。 */
+/**
+ * 环**没有读数**时写在环里的话（环照旧只画轨道）。判据是「有没有环」，不是 gate：
+ * 有订阅但端点一个窗口都没报的卡绝不能错说成「无订阅」；「过期」也只在 provider 真的报了
+ * 一个已经过去的周期终点时才用——端点没这么说时，不替它把话升级。
+ */
 export function headStateWord(card: QuotaCard | null): { word: string; alert: boolean } {
   if (card === null) return { word: '—', alert: false }
   if (card.state === 'error') return { word: '失败', alert: true }

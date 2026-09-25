@@ -1,7 +1,8 @@
 /**
  * dsh-tokbook client 入口。
  *
- * 路由 A：填入两个已声明的 root-scoped slot（`sidebar.footer.action` + `shell.overlay`），无需改 DSH 本体。
+ * 填入两个已声明的 root-scoped slot（`sidebar.footer.action` + `shell.overlay`，
+ * 即 DESIGN.md §6.0 的路线 A），无需改 DSH 本体。
  */
 
 import type { QuotaView } from '../types.ts'
@@ -13,10 +14,10 @@ import { LedgerOverlay } from './LedgerOverlay.tsx'
 
 export const inject = ['slots']
 
-/** 浮窗关闭时徽标重读宿主列表的间隔（纯磁盘，不走网络）。 */
+/** 徽标轮询间隔；宿主额度列表路由纯磁盘、不走网络。 */
 const QUOTA_ALERT_POLL_MS = 5 * 60_000
 
-/** 拉取非网络的额度列表并写入 alert 位。失败时保留上一次徽标——宿主抖动不得清除真实的告警。 */
+/** 失败时保留上一次徽标——宿主抖动不得清除真实的告警。 */
 function refreshQuotaAlert(view: TokBookViewStore): Promise<void> {
   return fetch(ROUTE_QUOTA)
     .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<QuotaView> })
@@ -25,7 +26,6 @@ function refreshQuotaAlert(view: TokBookViewStore): Promise<void> {
 }
 
 export function apply(ctx: TokBookContext): void {
-  // 两个入口共享的 root 级 store（按钮 ↔ 浮窗状态）。
   const view = createTokBookViewStore()
 
   ctx.slots.inject('sidebar.footer.action', () =>

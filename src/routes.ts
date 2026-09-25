@@ -62,7 +62,7 @@ export function registerTokBookRoutes(
     }
   }
 
-  /** 与概览同形，但提供方只读内存——它是「追 walk」的廉价观察点（见 `route-paths.ts`）。 */
+  /** 提供方只读内存——它是「追 walk」的廉价观察点（对外语义见 `route-paths.ts`）。 */
   const handleSyncState = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (req.method !== 'GET') return refuse(res, 405, 'method not allowed')
     if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
@@ -151,8 +151,8 @@ export function registerTokBookUsageRoute(
   })
 }
 
-/** 把额度 route 绑到快照提供方。返回 disposer。可选 `?provider=` 只取该
- *  provider 的卡；可选 `&refresh=1` 绕过单卡 TTL 缓存。 */
+/** 把额度 route 绑到概览快照提供方与单卡拉取器，返回 disposer；query 键语义以
+ *  `route-paths.ts` 为准。 */
 export function registerTokBookQuotaRoute(
   webServer: WebServerLike | undefined,
   quotaView: () => QuotaView | Promise<QuotaView>,
@@ -190,7 +190,7 @@ export function registerTokBookQuotaRoute(
 }
 
 /** 读一个小 JSON 请求体（价格写路径会发一个）。有界，使恶意或破损 client
- *  无法让 host 无界缓冲；答 `{ ok, body }` / `{ ok: false, tooLarge }` 判决。 */
+ *  无法让 host 无界缓冲。 */
 function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown } | { ok: false; tooLarge: boolean }> {
   return new Promise((resolveBody) => {
     const chunks: Buffer[] = []
@@ -226,10 +226,9 @@ function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown }
   })
 }
 
-/** 把价格表 route 绑到视图提供方与保存路径。返回 disposer。`/tokbook/pricing`
- *  上一条 exact route 按 method 分发（同一 path 注册两次会撞）：GET 答只读
- *  route 卡视图；PUT 接受完整的期望价表，持久化，并答解析判决——**不回视图**
- *  （client 只读判决，而自动保存是最热的写路径）。 */
+/** 把价格表 route 绑到视图提供方与保存路径，返回 disposer。GET/PUT 的对外语义以
+ *  `route-paths.ts` 为准；同一 path 注册两次会撞，故只挂一条 exact route 按 method
+ *  分发。PUT **不回视图**——client 只读判决，而自动保存是最热的写路径。 */
 export function registerTokBookPricingRoutes(
   webServer: WebServerLike | undefined,
   pricingView: () => PricingView | Promise<PricingView>,

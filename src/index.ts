@@ -1,9 +1,8 @@
 /**
  * host 半区：durable 事件流实时记账 + 权威再同步（`sessionPersistence` 日志，
- * request-id 去重）。实时 hook 是新鲜度的**主路径**；权威 walk 是自愈路径
- * （折叠失败、插件缺席期间写下的行），**排在后台，读路径绝不 await 它**——
- * 当前会话每来一条消息就变一次 revision，await 它等于每次打开都重读那份
- * 完整会话日志（单份可达数 MB 压缩、秒级）。
+ * request-id 去重）。实时 hook 是新鲜度的**主路径**；权威 walk 只做自愈
+ * （折叠失败、插件缺席期间写下的行），排在后台，读路径绝不 await 它——
+ * 成本与理由见 {@link TokenUsageBook.ensureFresh}。
  *
  * WIRE NOTES：事件与持久化面是鸭子类型（待 DSH 类型包接入可收紧）。持久化面
  * 0.1.7 起是 `list()`（每会话 header + opaque revision）与 `open(id,'read')`，
@@ -43,10 +42,9 @@ import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
 const BUILTIN_PLAN_KEYS: readonly string[] = [OPENCODE_GO_PROVIDER, COMMAND_CODE_PROVIDER]
 const QUOTA_TTL_MS = 30_000
 /**
- * 两轮后台权威 walk 之间的最小间隔。walk 对漂移会话**整份日志重读重折叠**，
- * 而当前会话每条消息都会漂移——不节流就是每次打开（概览 / 通道用量 / 价格表）
- * 都重读那份日志。它只承担自愈（折叠失败、别的进程写下的行），新鲜度由
- * `session/event` 实时 hook 保证，所以间隔按「秒」而不按「次」。
+ * 两轮后台权威 walk 之间的最小间隔。walk 只承担自愈，新鲜度由 `session/event`
+ * 实时 hook 保证；而当前会话每条消息都会让 revision 漂移，所以节流按「秒」而
+ * 不按「次」（walk 的成本见 {@link TokenUsageBook.ensureFresh}）。
  */
 const SYNC_MIN_INTERVAL_MS = 15_000
 
@@ -100,10 +98,8 @@ export class TokenUsageBook extends Service {
   private lastSyncAt = 0
   /** 上一轮 walk **开始**的时刻，用于 {@link SYNC_MIN_INTERVAL_MS} 节流。 */
   private lastWalkAt = 0
-  /** 在飞的那轮同步（首装回填或权威 walk），**同步互斥的唯一判据**：两条进入路径
-   *  都先经 {@link startWalk} 在这里占位，故它们不可能并行（并行只是 I/O 翻倍，
-   *  且两条轮次会互相覆盖同步基线）；落定后归位 `null`，冷账本上的第一次读据它
-   *  判断「还在飞」并等它。 */
+  /** 在飞的那轮同步（首装回填或权威 walk），**同步互斥的唯一判据**；占位与归位
+   *  都经 {@link startWalk}，冷账本的首次读据它等待。 */
   private walkInFlight: Promise<void> | null = null
   private syncStatus: 'idle' | 'running' | 'done' | 'error' = 'idle'
   private syncError: string | null = null
@@ -122,9 +118,8 @@ export class TokenUsageBook extends Service {
   constructor(ctx: Context, config: TokBookConfig = {}) {
     super(ctx, 'tokbook')
     validateConfig(config)
-    // 卸载清理：标记 disposed 并 settle 已入队的 append。HMR reload 不 await
-    // fiber disposal，继任者拿到全新的模块级 map；跨该边界的去重由磁盘重建
-    // （见 usage-log）。
+    // 模块级 HMR **不 await** 这条处置器，继任者拿到全新的模块级 map；跨该边界的
+    // 去重由磁盘重建兜底（docs/HMR.md §4 与 usage-log）。
     ctx.effect(() => {
       return () => {
         this.disposed = true
@@ -138,8 +133,8 @@ export class TokenUsageBook extends Service {
     this.hostCtx = ctx
     this.planConfig = coercePlansConfig(config.plans)
 
-    // 「一个数据目录、一个写进程」守卫：发现别的存活 host 拥有本目录时告警（双写者
-    // 会竞争 rollup/cache），然后把本进程记为当前 owner。只建议，绝不致命。
+    // 单写者守卫（docs/CONTRACTS.md §3）：别的存活 host 拥有本目录时只告警、
+    // 绝不致命——双写者会竞争 rollup/cache。
     void warnIfForeignOwner(this.dir, this.logger).then(() => writeOwnerMarker(this.dir))
     void warmRecordCache(this.dir, this.logger)
 
@@ -156,7 +151,6 @@ export class TokenUsageBook extends Service {
         this.logger.warn?.('[tokbook] cannot read sync baseline; will re-sync from scratch:', error)
       })
 
-    // 从 durable 会话事件流实时记账（快路径；request-id 去重与权威再同步同源）。
     // 每个会话记住最近看到的 model / provider——turn/end 与失败行不带它们。
     const lastModel = new Map<string, string>()
     const lastProvider = new Map<string, string>()
@@ -185,8 +179,8 @@ export class TokenUsageBook extends Service {
       const persistence = persistenceCtx.get('sessionPersistence') as SyncPersistence
       this.persistence = persistence
       const failed = new Set<string>()
-      // 一次性历史回填也在后台跑，并与探针触发的权威 walk 共用同一互斥（见
-      // `startWalk`）——首装 / 冷账本上因此不会并行两轮全量 walk。
+      // 一次性历史回填也在后台跑，并与探针触发的权威 walk 共用同一互斥
+      // （`startWalk`）——冷账本上因此不会并行两轮全量 walk。
       this.startWalk(async () => {
         try {
           const result = await autoSyncIfNeeded(this.syncDeps(persistence, failed), this.dir)
@@ -250,7 +244,7 @@ export class TokenUsageBook extends Service {
   /**
    * 读之前的**廉价**新鲜度探针：列出持久化会话、（用 revision）挑出漂移的，把
    * 需要折的行交给后台的权威 walk，然后立刻把会话清单交回调用方（各会话的 `cwd`，
-   * 按工作区一节用它 join）。签名集从持久化基线播种，重启后只走变更的会话。
+   * 按工作区一节用它 join）。
    *
    * **读路径不 await walk。** 理由是实测出来的：当前会话的消息一落日志 revision
    * 就变，探针因此永远报它 stale，而 walk 会把它整份日志重读重折叠（单份日志
@@ -273,8 +267,8 @@ export class TokenUsageBook extends Service {
       snapshots = []
     }
     this.scheduleSync(snapshots, staleSessionIds(this.syncedOnce, this.syncedBySession, snapshots))
-    // 冷账本（本目录还没有任何日文件）时等一轮：否则首次安装 / 换数据目录后
-    // 打开，会把「还没回填完」显示成「没有记录」。账本一旦有行就不再等。
+    // 冷账本（还没有日文件）时等一轮，否则首次安装会把「还没回填完」显示成
+    // 「没有记录」；账本一旦有行就不再等（口径见 docs/CONTRACTS.md §2）。
     if (this.walkInFlight !== null && (await listDayFiles(this.dir)).length === 0) {
       await this.walkInFlight
     }
@@ -284,7 +278,6 @@ export class TokenUsageBook extends Service {
   /**
    * 把一轮权威 walk 排到后台（或判定这一轮不必走）。
    *
-   * - 没有漂移会话 → 什么都不做，状态归位 `done`。
    * - 已有一轮在飞 → 跳过：它结束时写下的基线覆盖同一批快照，重复启动没有收益。
    * - **没有任何基线签名的会话不受节流**：首次安装的回填、以及刚开的新会话都属于
    *   这一类——它们便宜（新会话的日志很短）而且该立刻同步。
@@ -387,8 +380,8 @@ export class TokenUsageBook extends Service {
     const summary = await buildSummary(this.dir, () => new Date(), resolve, this.logger, { pricingRevision: revision })
     const costed = attachCosts(summary, table, billing)
     // 精简 wire 载荷：价表、rateRows、byModel 不过 wire（成本已折进 cost 字段）；
-    // byModel / byWorkspace 随用量明细 tab 走窗口载荷，不在这里；unpricedModels 概览
-    // 不再渲染（价格未知在用量明细 / 价格表里），也不占 wire。
+    // byModel / byWorkspace 随用量明细 tab 走窗口载荷，价格未知在用量明细 / 价格表
+    // 里报出，unpricedModels 因此也不占 wire。
     const { pricing: _pricing, rateRows: _rateRows, byHour: _byHour, byModel: _byModel, unpricedModels: _unpricedModels, ...slim } = costed
     return {
       ...slim,
@@ -439,8 +432,8 @@ export class TokenUsageBook extends Service {
     const { fromDay, toDay } = rangeDayWindow(range)
     const records = await readRecordsByDayRange(this.dir, fromDay, toDay, this.logger)
     const cards = providerCards(records, table, resolve, billing)
-    // 卡片的通道名：settings profile 的 displayName，否则适配器 provider 名，
-    // 使 route 与价格表 tab 同名。
+    // 通道名走 `routeLabels`（settings displayName 优先于适配器名），使 route 与
+    // 价格表 tab 同名。
     const providerLabels = routeLabels(this.settings(), this.llm(), this.logger)
     return {
       range,
@@ -462,7 +455,7 @@ export class TokenUsageBook extends Service {
 
   /** host settings 缝（`ctx.settings`），未挂载时 undefined。`ctx.get` 是反射式
    *  访问器：以属性方式读未挂载服务会抛错（without inject），只读视图不得这样做。
-   *  读值走 `describe()`——`settings` 服务不再有按命名空间的 `get`。 */
+   *  读值走 `describe()`——`settings` 服务没有按命名空间的 `get`。 */
   private settings(): SettingsLike | undefined {
     const forms = this.hostCtx.get('settings') as SettingsFormsLike | undefined
     if (forms === undefined || typeof forms.describe !== 'function') return undefined
@@ -490,9 +483,9 @@ export class TokenUsageBook extends Service {
   /** 读价文件，并造出解到该表上的 rate 解析器——概览 / 用量 / 价格表共用这一读法。
    *  年历一并解成日期集合：`workdays` 时段靠它把法定节假日排除在高峰之外。
    *
-   *  返回的 `table` 是**计价用的表**：按美元报价的通道已折成人民币（见 `cnyTable`）。
-   *  因此下游的成本层（`attachCosts` / 通道卡 / 工作区视图）全都不认识币种。
-   *  `resolve` 用的是原表——换算只改数字、不改段身份，两表认的 rate 身份完全一样。 */
+   *  返回的 `table` 是**计价用的表**：按美元报价的通道已折成人民币（币种口径见
+   *  docs/CONTRACTS.md §2）。`resolve` 用的是原表——换算只改数字、不改段身份，
+   *  两表认的 rate 身份完全一样。 */
   private async rateContext(): Promise<{
     table: PricingTable
     billing: BillingMap
@@ -512,13 +505,13 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * 订阅额度 tab 的快照：拉取每个内置 provider 的*官方*账户用量（绝不本地估算
-   * ——订阅 key 跨工具/设备共享，本地账本不可能知道真实账户花费）。结果按短 TTL
-   * 缓存，重复打开不 hammer provider API。
+   * 订阅额度 tab 的清单：只回已启用的内置 provider 与 footer 告急位，**绝不打
+   * provider API**——绝不本地估算（订阅 key 跨工具/设备共享，本地账本不可能知道
+   * 真实账户花费），拉卡也留给逐卡的 {@link quotaCardOf}。
    */
   async quota(): Promise<QuotaView> {
-    // 快、无网络：按展示顺序列出已启用的内置 provider。client 再经 `?provider=`
-    // 逐个拉卡，使某个慢/失败的 provider 不阻塞其余卡渲染。
+    // 按展示顺序列出；client 再经 `?provider=` 逐个拉卡，使某个慢/失败的
+    // provider 不阻塞其余卡渲染。
     const providers = BUILTIN_PLAN_KEYS.filter((key) => this.planConfig[key]?.enabled !== false)
     // footer 告急点：只从 durable 的最近 'ok' 快照推出。打开本路由绝不能打
     // provider API——该徽章是「上次看时某个窗口快满了」的廉价信号。
@@ -576,8 +569,8 @@ export class TokenUsageBook extends Service {
       card = errorCard(provider, error instanceof Error ? error.message : String(error))
     }
     this.quotaCardCache.set(provider, { at: now, card })
-    // 只有 'ok' 卡成为 durable 的最近快照；拉取失败或缺 key 便宜可重推，不得掩盖
-    // 后续恢复。
+    // 只有 'ok' 卡成为 durable 快照（CONTRACTS §2 的门规则）；拉取失败或缺 key
+    // 便宜可重推，不得掩盖后续恢复。
     if (card.state === 'ok') {
       void writeQuotaSnapshot(this.dir, provider, card)
         .catch((error: unknown) => {
@@ -650,11 +643,12 @@ export class TokenUsageBook extends Service {
   /**
    * 从价格表 tab 校验并持久化一份完整价表。body 是完整的期望文件（`$billing` +
    * route → model → 价格段），因此写路径整体替换 `pricing.json`，被省略的
-   * (route, model) 停止定价（其记录落到价格未知）。读时成本层在下次读时重算历史
-   * ——不重写账本或 rollup。
+   * (route, model) 停止定价（其记录落到价格未知；历史金额在下次读时重算，见
+   * docs/CONTRACTS.md §2）。
    *
-   * **不回视图**：自动保存是全程最热的写路径（每次停止输入一拍、或字段失焦就写一次），而 client 读
-   * 响应只取 `ok` / `error`——回一份 `pricingView()` 等于每次白跑一次全表读 + 16 KB 载荷。
+   * **不回视图**：自动保存是全程最热的写路径（每次停止输入一拍、或字段失焦就写
+   * 一次），而 client 读响应只取 `ok` / `error`——回一份 `pricingView()` 等于每次
+   * 白跑一次全表读与一份大载荷。
    */
   async savePricing(body: unknown): Promise<PriceParse> {
     const parsed = parsePriceInput(body)
