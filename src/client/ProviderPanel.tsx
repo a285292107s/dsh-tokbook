@@ -11,8 +11,9 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ProviderRange, ProviderUsageCard, ProviderUsageView } from '../types.ts'
 import { QUERY_RANGE, ROUTE_USAGE } from '../route-paths.ts'
 import { UsageGlyph } from './icons.tsx'
-import { formatMoney, formatShare, formatTokens, share } from './format.ts'
-import { ModelRows, WorkspaceRows } from './Breakdowns.tsx'
+import { formatMoney, formatTokens } from './format.ts'
+import { isNoPrice, ModelRows, WorkspaceRows } from './Breakdowns.tsx'
+import { ShareRing } from './ShareRing.tsx'
 
 /** 窗口 id，按展示顺序。`all` = 全账本，不收窄下界。 */
 const RANGE_IDS: ReadonlyArray<ProviderRange> = ['today', 'yesterday', 'last7', 'last30', 'all']
@@ -46,20 +47,20 @@ const SLICE_LABELS: Record<Slice, string> = {
 }
 
 /**
- * 各切法的右端旁注：**排序口径 + 占比条的分母**。条没有数字，「占谁的多少」必须写在旁边。
+ * 各切法的右端旁注：**排序口径 + 占比环的分母**。环心只写读数，「占谁的多少」必须写在旁边。
  */
 const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
   model: {
-    text: '词元从多到少 · 条为占本窗口',
-    title: '每个（通道，模型）在该窗口内的词元与费用，按词元从多到少排列；占比条的分母是这个窗口的总词元。',
+    text: '词元从多到少 · 环为占本窗口',
+    title: '每个（通道，模型）在该窗口内的词元与费用，按词元从多到少排列；占比环的分母是这个窗口的总词元。',
   },
   workspace: {
-    text: '最近有操作在前 · 条为占本窗口',
-    title: '每个工作区在该窗口内的词元。记录按会话的创建目录归属到工作区；没有工作区目录、或目录未注册为工作区的记录归入「未归属」。占比条的分母是这个窗口的总词元。',
+    text: '最近有操作在前 · 环为占本窗口',
+    title: '每个工作区在该窗口内的词元。记录按会话的创建目录归属到工作区；没有工作区目录、或目录未注册为工作区的记录归入「未归属」。占比环的分母是这个窗口的总词元。',
   },
   provider: {
-    text: '词元从多到少 · 条为占本通道',
-    title: '每个通道路由在该窗口内计费过的模型、词元与金额。卡内占比条的分母是该通道自己的词元，所以它与卡头的合计对得上。',
+    text: '词元从多到少 · 环为占本通道',
+    title: '每个通道路由在该窗口内计费过的模型、词元与金额。卡内占比环的分母是该通道自己的词元，所以它与卡头的合计对得上。',
   },
 }
 
@@ -76,6 +77,15 @@ function cutsOf(view: ProviderUsageView): Slice[] {
     id === 'model' ? view.byModel.length > 0
       : id === 'workspace' ? view.byWorkspace.length > 0
         : view.providers.length > 0)
+}
+
+/** 价表无法计费的 (通道, 模型)：卡头的 unpricedModels 与按模型面的行在此对上键。 */
+function unpricedKeysOf(view: ProviderUsageView): ReadonlySet<string> {
+  const keys = new Set<string>()
+  for (const card of view.providers) {
+    for (const model of card.unpricedModels) keys.add(`${card.provider}|${model}`)
+  }
+  return keys
 }
 
 /** 用量明细 tab 本体；每个已加载的窗口有缓存，切回来不重新拉取。 */
@@ -252,7 +262,7 @@ export function ProviderPanel() {
         {view === undefined
           ? (busy && <PanelSkeleton slice={active} />)
           : active === 'model'
-            ? <ModelRows byModel={view.byModel} totalTokens={view.totalTokens} money={moneyOf} />
+            ? <ModelRows byModel={view.byModel} totalTokens={view.totalTokens} money={moneyOf} unpriced={unpricedKeysOf(view)} />
             : active === 'workspace'
               ? <WorkspaceRows rows={view.byWorkspace} totalTokens={view.totalTokens} money={moneyOf} />
               : <ProviderCards cards={view.providers} labels={view.providerLabels ?? {}} money={moneyOf} />}
@@ -317,7 +327,9 @@ function ProviderCard({ card, money, labels }: {
         <div className="dtpl-provider-nums">
           <span className="dtpl-provider-tokens">{formatTokens(cardTokens)}</span>
           <span className="dtpl-provider-cost">
-            <span className="dtpl-provider-spend">{money(card.spend)}</span>
+            {/* 订阅通道的实际支出是结构性的零（计费是 route 级事实，钱全在价值桶）——
+                报「¥0.00」是同义反复，不是读数；按量卡即使为 0 也报，那是量出来的。 */}
+            {!subscription && <span className="dtpl-provider-spend">{money(card.spend)}</span>}
             {card.subscriptionValue > 0 && (
               <span className="dtpl-provider-value" title="订阅通道：这些用量按量付费本来要花的钱（非实际扣款）">{money(card.subscriptionValue)} 订阅价值</span>
             )}
@@ -325,30 +337,35 @@ function ProviderCard({ card, money, labels }: {
         </div>
       </header>
       <div className="dtpl-provider-models">
-        {card.models.map((m) => (
-          <div className="dtpl-row" key={m.model}>
-            <div className="dtpl-model">
-              <span className="dtpl-model-name">{m.model}</span>
-              <span className="dtpl-model-bar" role="presentation">
-                <span className="dtpl-model-bar-fill" style={{ width: `${share(m.tokens, cardTokens)}%` }} />
-              </span>
+        {card.models.map((m) => {
+          // 与按模型面同一条判据：价表计不了费且这个窗口里没有一段已定价的记录。
+          const noPrice = isNoPrice(m.cost, card.unpricedModels.includes(m.model))
+          return (
+            <div className="dtpl-row" key={m.model}>
+              <div className="dtpl-model">
+                <ShareRing value={m.tokens} total={cardTokens} denom="本通道" />
+                <div className="dtpl-model-txt">
+                  <span className="dtpl-model-name">{m.model}</span>
+                </div>
+              </div>
+              <div className="dtpl-model-nums">
+                {/* 这一面没有列头（见 `COLUMNS` 注释），所以读屏文本自带列名；占比环的
+                    分母是**这张卡**，环心的读屏前缀也这么念。 */}
+                <span className="dtpl-val">
+                  <span className="dtpl-sr">词元 </span>{formatTokens(m.tokens)}
+                </span>
+                <span className="dtpl-provider-model-sub">
+                  {m.totals.requests} 请求 ·{' '}
+                  {noPrice
+                    ? <em className="dtpl-cost-k">价格未知</em>
+                    : m.spend > 0
+                      ? <><span className="dtpl-sr">金额 </span><b className="dtpl-cash-amt">{money(m.spend)}</b></>
+                      : <><span className="dtpl-sr">金额 </span><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-cost-k">订阅价值</em></>}
+                </span>
+              </div>
             </div>
-            <div className="dtpl-model-nums">
-              {/* 这一面没有列头（见 `COLUMNS` 注释），所以读屏文本自带列名；占比条的
-                  分母是**这张卡**，读屏也这么念。 */}
-              <span className="dtpl-val">
-                <span className="dtpl-sr">词元 </span>{formatTokens(m.tokens)}
-                <span className="dtpl-sr">，占本通道 {formatShare(m.tokens, cardTokens)}</span>
-              </span>
-              <span className="dtpl-provider-model-sub">
-                {m.totals.requests} 请求 ·{' '}
-                {m.spend > 0
-                  ? <><span className="dtpl-sr">金额 </span><b className="dtpl-cash-amt">{money(m.spend)}</b></>
-                  : <><span className="dtpl-sr">金额 </span><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-cost-k">订阅价值</em></>}
-              </span>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </article>
   )

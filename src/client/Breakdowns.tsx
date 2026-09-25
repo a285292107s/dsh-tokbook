@@ -5,14 +5,22 @@
 
 import type { CostedModelRow, WorkspaceUsageRow } from '../types.ts'
 import { totalsTokens } from '../types.ts'
-import { formatDateTime, formatRelative, formatShare, formatTokens, share } from './format.ts'
+import { formatDateTime, formatRelative, formatShare, formatTokens } from './format.ts'
+import { ShareRing } from './ShareRing.tsx'
 
-export function ModelRows({ byModel, totalTokens, money }: {
+/** 价表计不了费、且这个窗口里没有任何已定价的段——金额格无读数可报。 */
+export function isNoPrice(cost: number, unpriced: boolean): boolean {
+  return unpriced && cost === 0
+}
+
+export function ModelRows({ byModel, totalTokens, money, unpriced }: {
   byModel: readonly CostedModelRow[]
   totalTokens: number
   money: (value: number) => string
+  /** 价表无法计费（按 ¥0 计）的 (通道, 模型) 键，`${provider}|${model}`。 */
+  unpriced: ReadonlySet<string>
 }) {
-  // 按**显示出来的**量排序：占比条编码的是词元，清单若按别的键排，条长就不是单调的，
+  // 按**显示出来的**量排序：占比环编码的是词元，清单若按别的键排，弧长就不是单调的，
   // 整列读起来像渲染坏了。
   const rows = [...byModel].sort((left, right) =>
     totalsTokens(right.totals) - totalsTokens(left.totals)
@@ -23,43 +31,44 @@ export function ModelRows({ byModel, totalTokens, money }: {
     <div className="dtpl-models">
       {rows.map((m) => {
         // 一行只有一个金额桶（计费是 route 事实，CONTRACTS §2），但**标明是哪一桶**不是可省的。
-        // 各段数额右缘对齐依赖两枚桶名等宽（都是四个汉字）——改名要重量。
+        // 各段数额右缘对齐依赖三枚桶名等宽（都是四个汉字）——改名要重量。
+        const noPrice = isNoPrice(m.cost, unpriced.has(`${m.provider}|${m.model}`))
         const showsSub = m.spend === 0
-        const bucket = showsSub ? '订阅价值' : '实际支出'
-        const costText = `${showsSub ? money(m.subscriptionValue) : money(m.spend)} ${bucket}`
+        const bucket = noPrice ? '价格未知' : showsSub ? '订阅价值' : '实际支出'
+        const costText = noPrice ? '价格未知：按 ¥0 计'
+          : `${showsSub ? money(m.subscriptionValue) : money(m.spend)} ${bucket}`
         const tokens = totalsTokens(m.totals)
         return (
-          <div className="dtpl-row" key={`${m.provider}/${m.model}`} title={modelDetail(m, totalTokens, money)}>
+          <div className="dtpl-row" key={`${m.provider}/${m.model}`} title={modelDetail(m, totalTokens, money, noPrice)}>
             <div className="dtpl-model">
-              <span className="dtpl-model-name">{m.model}</span>
-              {/* 通道由列头命名，行内不重复「通道」两个字；但列头对读屏是 aria-hidden 的，
-                  列的意义得靠格子里这枚只给读屏的「通道」。 */}
-              {m.provider !== '' && (
-                <span className="dtpl-model-provider"><span className="dtpl-sr">通道 </span>{m.provider}</span>
-              )}
+              <ShareRing value={tokens} total={totalTokens} denom="本窗口" />
+              <div className="dtpl-model-txt">
+                <span className="dtpl-model-name">{m.model}</span>
+                {/* 通道由列头命名，行内不重复「通道」两个字；但列头对读屏是 aria-hidden 的，
+                    列的意义得靠格子里这枚只给读屏的「通道」。 */}
+                {m.provider !== '' && (
+                  <span className="dtpl-model-provider"><span className="dtpl-sr">通道 </span>{m.provider}</span>
+                )}
+              </div>
             </div>
             <div className="dtpl-model-nums">
-              {/* 占比条是这一行唯一的形状，而它的分母（本窗口词元合计）不在行里——所以读屏
-                  也在词元后面把比例念出来（只给读屏，不占视觉宽度）。 */}
               <span className="dtpl-val">
                 <span className="dtpl-sr">词元 </span>{formatTokens(tokens)}
-                <span className="dtpl-sr">，占本窗口 {formatShare(tokens, totalTokens)}</span>
               </span>
               <span className="dtpl-cost" title={costText}>
                 <span className="dtpl-cost-seg">
                   <span className="dtpl-cost-main">
                     <span className="dtpl-sr">金额 </span>
-                    {showsSub
-                      ? <b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b>
-                      : <b className="dtpl-cash-amt">{money(m.spend)}</b>}
+                    {noPrice
+                      ? <b className="dtpl-cost-na">—</b>
+                      : showsSub
+                        ? <b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b>
+                        : <b className="dtpl-cash-amt">{money(m.spend)}</b>}
                   </span>
                   <em className="dtpl-cost-k">{bucket}</em>
                 </span>
               </span>
             </div>
-            <span className="dtpl-model-bar" role="presentation">
-              <span className="dtpl-model-bar-fill" style={{ width: `${share(tokens, totalTokens)}%` }} />
-            </span>
           </div>
         )
       })}
@@ -98,27 +107,29 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
             title={workspaceDetail(row, money)}
           >
             <div className="dtpl-model">
-              <span className="dtpl-model-name">{row.title}</span>
-              {/* 目录在压力下截断（省略号）；事实串永不截——被截断的「最近 …」会被读成
-                  坏掉的数字。 */}
-              <span className="dtpl-ws-meta">
-                {row.path !== '' && (
-                  <>
-                    <span className="dtpl-ws-path" title={row.path}><span className="dtpl-sr">目录 </span>{row.path}</span>
-                    <span className="dtpl-ws-sep" aria-hidden="true">·</span>
-                  </>
-                )}
-                <span className="dtpl-ws-facts">
-                  {row.totals.requests} 请求
-                  {failed > 0 && <> · <b className="dtpl-ws-fail">{failed} 失败</b></>}
-                  {' '}· 最近 {formatRelative(row.lastAt)}
+              <ShareRing value={row.tokens} total={totalTokens} denom="本窗口" />
+              <div className="dtpl-model-txt">
+                <span className="dtpl-model-name">{row.title}</span>
+                {/* 目录在压力下截断（省略号）；事实串永不截——被截断的「最近 …」会被读成
+                    坏掉的数字。 */}
+                <span className="dtpl-ws-meta">
+                  {row.path !== '' && (
+                    <>
+                      <span className="dtpl-ws-path" title={row.path}><span className="dtpl-sr">目录 </span>{row.path}</span>
+                      <span className="dtpl-ws-sep" aria-hidden="true">·</span>
+                    </>
+                  )}
+                  <span className="dtpl-ws-facts">
+                    {row.totals.requests} 请求
+                    {failed > 0 && <> · <b className="dtpl-ws-fail">{failed} 失败</b></>}
+                    {' '}· 最近 {formatRelative(row.lastAt)}
+                  </span>
                 </span>
-              </span>
+              </div>
             </div>
             <div className="dtpl-model-nums">
               <span className="dtpl-val">
                 <span className="dtpl-sr">词元 </span>{formatTokens(row.tokens)}
-                <span className="dtpl-sr">，占本窗口 {formatShare(row.tokens, totalTokens)}</span>
               </span>
               {/* 工作区可跨通道、两个金额桶同时非零——不像模型行的单段，这里是两段
                   「数额 + 桶名」；桶名与模型行共用同一条槽位，各段数额的右边缘仍在同一条
@@ -142,9 +153,6 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
                 )}
               </span>
             </div>
-            <span className="dtpl-model-bar" role="presentation">
-              <span className="dtpl-model-bar-fill" style={{ width: `${share(row.tokens, totalTokens)}%` }} />
-            </span>
           </div>
         )
       })}
@@ -168,7 +176,7 @@ function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => strin
 }
 
 /** 模型行的 hover 审计信息：行内只放得下身份、词元与一个金额桶，其余留在这里。 */
-function modelDetail(row: CostedModelRow, totalTokens: number, money: (value: number) => string): string {
+function modelDetail(row: CostedModelRow, totalTokens: number, money: (value: number) => string, noPrice: boolean): string {
   const totals = row.totals
   const tokens = totalsTokens(totals)
   const failed = totals.failures ?? 0
@@ -179,7 +187,8 @@ function modelDetail(row: CostedModelRow, totalTokens: number, money: (value: nu
     ...(row.provider === '' ? [] : [`通道 ${row.provider}`]),
     `窗口 ${formatTokens(tokens)} 词元（占本窗口 ${formatShare(tokens, totalTokens)}）`
     + ` · ${totals.requests} 请求${compactions > 0 ? ` · ${compactions} 压缩` : ''}`
-    + `${failed > 0 ? ` · ${failed} 失败` : ''}${unknown > 0 ? ` · ${unknown} 次没上报用量` : ''}`,
+    + `${failed > 0 ? ` · ${failed} 失败` : ''}${unknown > 0 ? ` · ${unknown} 次没上报用量` : ''}`
+    + `${noPrice ? ' · 价格未知' : ''}`,
     `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
     + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
     `实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`,

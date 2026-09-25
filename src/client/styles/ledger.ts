@@ -121,6 +121,12 @@ export const CSS_LEDGER = `
   font-style:normal;
   font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-weight:400;font-variant-numeric:tabular-nums;
 }
+/* 「—」不是一枚读数，是「没有读数可报」（价格未知，按 ¥0 计）——所以走 fg-3，
+   与零支出的 fg-2 区分：零是量出来的数，未知不是。 */
+[data-plugin="dsh-tokbook"] .dtpl-cost-na{
+  font-style:normal;
+  font-family:var(--dtpl-mono);color:var(--dtpl-fg-3);font-weight:400;font-variant-numeric:tabular-nums;
+}
 [data-plugin="dsh-tokbook"] .dtpl-cost-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-2);margin-left:3px;}
 
 /* 词元构成：**卡内**的一条读数带——工程读数是「框 + 竖分隔」，框由上方的 hero 给，这里只出
@@ -263,8 +269,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-bd-head .dtpl-sec-aside{margin:0 0 0 auto;}
 
 /* 列头 + 行共用同一条网格——两列宽度由网格定死，这一节才是**读数表**而不是一叠段落：
-     ① 占比条横跨整条网格（grid-column:1/-1），长度由**区块**决定、与哪一行无关；
-     ② 金额列每一行都结束在同一条竖线上。
+   金额列每一行都结束在同一条竖线上。
    右列宽 --dtpl-row-nums-w 的定义、挂根的理由与 minmax 取下限的推导都在 tokens 片段。 */
 [data-plugin="dsh-tokbook"] .dtpl-bd-cols,
 [data-plugin="dsh-tokbook"] .dtpl-row{
@@ -282,31 +287,37 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-bd-col-nums{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 [data-plugin="dsh-tokbook"] .dtpl-bd-col-nums{text-align:right;}
 
-/* 行之间不另画分隔线：**轨道本身就是那条线**（一行一条，且它承载分母）。 */
+/* 行之间不画线：占比换成行首的环之后，行距就是唯一的分隔。这是一张读数表，
+   放宽行距之前先数每屏装得下几行。 */
 [data-plugin="dsh-tokbook"] .dtpl-models{display:flex;flex-direction:column;}
 [data-plugin="dsh-tokbook"] .dtpl-row{align-items:start;padding:0;}
-[data-plugin="dsh-tokbook"] .dtpl-row + .dtpl-row{margin-top:16px;}
-[data-plugin="dsh-tokbook"] .dtpl-model{display:flex;flex-direction:column;gap:5px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-row + .dtpl-row{margin-top:10px;}
+/* 环顶格与名字行同一条上缘——右列的读数也以这条上缘成列，垂直居中会把两者错开。 */
+[data-plugin="dsh-tokbook"] .dtpl-model{display:flex;align-items:flex-start;gap:8px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-model-txt{display:flex;flex-direction:column;gap:3px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-model-name{
   color:var(--dtpl-fg);font-size:13px;line-height:20px;font-weight:500;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-model-provider{
-  font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-size:10px;line-height:16px;letter-spacing:.04em;
+  font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-size:11px;line-height:16px;letter-spacing:.04em;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-/* 占比是 3px 的度量线：轨道 + 平色填充。轨道必须留着——去掉它以后占比 0.1%–1% 的行只剩
-   1–5px 的实色碎点，读起来像渲染故障；它是「占谁的多少」这句话里的分母。 */
-[data-plugin="dsh-tokbook"] .dtpl-model-bar{
-  grid-column:1 / -1;
-  display:block;width:100%;height:3px;margin-top:9px;
-  background:color-mix(in srgb,var(--dtpl-fg) 16%,transparent);overflow:hidden;
+/* 占比环：与额度表盘、价格表盘同族的描边环几何——轨道 16% 墨 1、弧主墨 2、12 点起算。
+   整圆就是分母（「占谁的多少」里的 100%），所以环心的数字自带「%」，不留裸百分比。
+   44px 与额度表盘同档：行高由环定（两行身份文字只有 39px），读数一眼可读优先于行数。 */
+[data-plugin="dsh-tokbook"] .dtpl-share-ring{position:relative;flex:none;width:44px;height:44px;}
+[data-plugin="dsh-tokbook"] .dtpl-share-ring svg{display:block;}
+[data-plugin="dsh-tokbook"] .dtpl-share-ring-track{
+  fill:none;stroke:color-mix(in srgb,var(--dtpl-fg) 16%,transparent);stroke-width:1;
 }
-[data-plugin="dsh-tokbook"] .dtpl-model-bar-fill{
-  display:block;height:100%;
-  background:var(--dtpl-fg-2);
-  transition:width .4s ease;
+[data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{fill:none;stroke:var(--dtpl-fg);stroke-width:2;}
+[data-plugin="dsh-tokbook"] .dtpl-share-ring-num{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--dtpl-mono);font-size:11px;line-height:1;color:var(--dtpl-fg);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
 }
+[data-plugin="dsh-tokbook"] .dtpl-share-ring-num i{font-style:normal;font-size:8px;}
 [data-plugin="dsh-tokbook"] .dtpl-model-nums{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-val{
   font-family:var(--dtpl-mono);color:var(--dtpl-fg);font-size:13px;line-height:20px;
@@ -342,7 +353,7 @@ export const CSS_LEDGER = `
   font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-ws-path{
-  font-family:var(--dtpl-mono);font-size:10px;
+  font-family:var(--dtpl-mono);font-size:11px;
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-ws-sep{flex:none;color:var(--dtpl-fg-dim);}
@@ -354,7 +365,7 @@ export const CSS_LEDGER = `
   font-weight:600;color:var(--dtpl-warn-ink);font-variant-numeric:tabular-nums;
 }
 /* 「未归属」是对账行、不是项目：它不参与「最近有操作在前」，所以用一条实线把它从
-   上面的工作区清单里分出来、标题降一档；行内其余排版不动，它照样有词元、金额与占比条。 */
+   上面的工作区清单里分出来、标题降一档；行内其余排版不动，它照样有词元、金额与占比环。 */
 [data-plugin="dsh-tokbook"] .dtpl-row.is-unattributed{
   margin-top:22px;padding-top:14px;
   border-top:1px solid var(--dtpl-border);
@@ -443,7 +454,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-sk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-tile{height:68px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-chart{height:159px;}
-[data-plugin="dsh-tokbook"] .dtpl-sk-row{height:48px;}
+[data-plugin="dsh-tokbook"] .dtpl-sk-row{height:44px;}
 
 /* 空状态：一只方框，不是虚线占位。 */
 [data-plugin="dsh-tokbook"] .dtpl-empty{

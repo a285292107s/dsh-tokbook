@@ -412,7 +412,7 @@ export interface ProviderUsageView {
    * 以「DeepSeek」为题、route key 为副。无人命名时省略，只显示 key。 */
   providerLabels?: Record<string, string>
   /** 窗口内四桶之和——三种切法共用的量纲：页头合计、按模型 / 按工作区两种切法里
-   *  占比条的分母。 */
+   *  占比环的分母。 */
   totalTokens: number
   /** 窗口内的计费调用数（各通道卡 `requests` 之和；失败不计入，与其余 totals 一致）。 */
   totalRequests: number

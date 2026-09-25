@@ -83,7 +83,7 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   /* 通道卡头在窄处改堆叠：合计数字不再和通道名抢同一行。金额两行也跟着改左对齐——
      堆叠之后它们不再与右侧的模型数字成列，右对齐就只剩「缩在后面」这一种效果。 */
   [data-plugin="dsh-tokbook"] .dtpl-provider-head{
-    flex-direction:column;align-items:stretch;gap:8px;
+    grid-template-columns:minmax(0,1fr);row-gap:8px;
   }
   [data-plugin="dsh-tokbook"] .dtpl-provider-nums{align-items:flex-start;}
   [data-plugin="dsh-tokbook"] .dtpl-provider-cost{align-items:flex-start;}
@@ -156,7 +156,7 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   70%{transform:scale(1.12) rotate(4deg)}
   100%{transform:scale(1)}
 }
-/* 常驻类动画在 reduce 分支里逐个关。**三条「量在变」的填充也在内**（占比条、额度条、表盘）：
+/* 常驻类动画在 reduce 分支里逐个关。**两条「量在变」的填充也在内**（额度条、表盘）：
    它们是唯一允许的宽度 / 描边动画，但「量变了」这件事数字本身已经说清，reduce 用户不该看到。 */
 @media (prefers-reduced-motion:reduce){
   [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill,
@@ -165,7 +165,6 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   [data-plugin="dsh-tokbook"] .dtpl-spin,
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions,
   [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost,
-  [data-plugin="dsh-tokbook"] .dtpl-model-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim.dtpl-quota-refresh-pop{animation:none;transition:none;}

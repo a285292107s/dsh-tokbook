@@ -64,9 +64,13 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
   background:var(--dtpl-panel-bg);
   box-shadow:var(--dtpl-metal);
 }
-/* 卡头是一段**铭牌**：一条实线把它与卡身分开。 */
+/* 卡头是一段**铭牌**：一条实线把它与卡身分开。它与卡内行共用同一条两列网格——
+   卡头的读数与下面每一行的读数结束在同一条右缘竖线上。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-head{
-  display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(min-content,var(--dtpl-row-nums-w));
+  column-gap:16px;
+  align-items:end;
   padding:11px 14px 10px;
   border-bottom:1px solid var(--dtpl-border);
 }
@@ -107,7 +111,7 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-nums{
-  display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none;
+  display:flex;flex-direction:column;align-items:flex-end;gap:2px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-tokens{
   font-family:var(--dtpl-mono);
