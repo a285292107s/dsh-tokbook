@@ -99,7 +99,6 @@ function mergeStaged(fresh: PricingView, saved: Staged): { state: PriceState; ba
   return { state, baseline }
 }
 
-/** 还没读到宿主视图之前的空状态。 */
 const EMPTY_STATE: PriceState = { routes: new Map(), calendar: new Map(), holidays: new Set(), fx: '' }
 const EMPTY_BASELINE: PriceBaseline = { models: new Map(), billing: new Map(), currency: new Map(), calendar: '[]', fx: '' }
 
@@ -139,12 +138,6 @@ function rememberPicked(pick: Picked | null): void {
   if (pick === null) localStorage.removeItem(PICKED_KEY)
   else localStorage.setItem(PICKED_KEY, JSON.stringify(pick))
 }
-
-/**
- * 四档价按哪种货币**记**，是**通道**的属性（`$currency`，住在价文件里，与计费性质同一档），
- * 不是这一屏的显示偏好：一条通道的价用什么货币记，决定文件里那些数字是什么。所以它没有
- * 「每台浏览器各自记一份」这回事——localStorage 里只留「上次看的是哪一行」。
- */
 
 function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
   return fetch(ROUTE_PRICING, {

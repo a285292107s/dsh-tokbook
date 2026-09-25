@@ -15,9 +15,6 @@
 
 import type { PriceCurrency } from '../../types.ts'
 
-/** 价格表读写面的两种货币。目前只有这两种。 */
-export type Currency = PriceCurrency
-
 /** 一条通道报价币种的读法。`cnyPerUsd` 为 null = 汇率未设（换算不出来）。 */
 export interface MoneyView {
   /** 这条通道的价用什么货币记——四档价格子里的数就是这个单位。 */
@@ -28,10 +25,7 @@ export interface MoneyView {
 /** 人民币报价、未设汇率：这一屏的默认读法。 */
 export const CNY_VIEW: MoneyView = { route: 'CNY', cnyPerUsd: null }
 
-/**
- * 换算精度：显示与换算共用 6 位小数（1e-6 元/百万词元，远小于计价需要的分辨率）。
- * 换算那一步必须取整，否则浮点噪声会写进文件（0.15 × 6.7 = 1.0050000000000001）。
- */
+/** 显示与换算共用 6 位小数。换算那一步必须取整，否则浮点噪声会写进文件（0.15 × 6.7 = 1.0050000000000001）。 */
 const DECIMALS = 6
 
 /** 6 位小数把**非零**的极小价压成 0 时再放开几位——显示成 0 会是个谎（缓存档那种价）。 */
@@ -52,7 +46,7 @@ export function parseAmount(text: string): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
-/** 可用的汇率（正数）或 null。0 / 负数 / 非数都算「没有」。 */
+/** 可用的汇率（正数）或 null。 */
 export function rateOf(view: MoneyView): number | null {
   const rate = view.cnyPerUsd
   return rate !== null && Number.isFinite(rate) && rate > 0 ? rate : null
@@ -64,13 +58,11 @@ function fixed(value: number, decimals: number): string {
   return text.includes('.') ? text.replace(/0+$/u, '').replace(/\.$/u, '') : text
 }
 
-/** 一个换算出来的数写回文本：6 位小数，被压成 0 而原值非零时放开到 10 位。 */
 function amountText(value: number): string {
   const six = fixed(value, DECIMALS)
   return six === '0' && value !== 0 ? fixed(value, TINY_DECIMALS) : six
 }
 
-/** 这一档在提示里报的单位。 */
 export function unitOf(view: MoneyView): string {
   return view.route === 'USD' ? '$/百万词元' : '¥/百万词元'
 }
@@ -93,10 +85,7 @@ export function counterpartOf(view: MoneyView, text: string): string | null {
 
 /**
  * 把这一格按**另一种货币**重记：切换一条通道的报价币种时，整条通道的价都走这一步。
- *
- * 人民币 → 美元是除以汇率、美元 → 人民币是乘汇率；不可解析的原文原样返回
- * （它本来就红着，换算不了也不该被悄悄抹掉）。换过去的人民币金额不变（6 位小数内），
- * 变的是这条通道以后**按美元报价**——报价是厂商给的那个数，从此不再被汇率改动。
+ * 不可解析的原文原样返回（它本来就红着，换算不了也不该被悄悄抹掉）。
  */
 export function convertText(view: MoneyView, text: string, to: PriceCurrency): string | null {
   if (to === view.route) return text
@@ -106,11 +95,10 @@ export function convertText(view: MoneyView, text: string, to: PriceCurrency): s
   if (amount === null) return null
   const rate = rateOf(view)
   if (rate === null) return null
-  // 往美元记：除以汇率；往人民币记：乘汇率。6 位小数内金额不变。
   return amountText(to === 'USD' ? amount / rate : amount * rate)
 }
 
-/** 汇率行右边那句反向读数：`¥1 ≈ $0.14`。汇率未设时无可说。 */
+/** 汇率行右边那句反向读数；汇率未设时为 null。 */
 export function inverseHint(cnyPerUsd: number | null): string | null {
   if (cnyPerUsd === null || !(cnyPerUsd > 0)) return null
   return `¥1 ≈ $${fixed(1 / cnyPerUsd, 4)}`

@@ -1,6 +1,6 @@
 /**
  * 调价史抽屉里的时间轴（`pricing/Timeline.tsx`）：轨、点、标签的位置由 JS 量出的像素宽度给出——
- * 最小间距是像素值，百分比挡不住两个标签在窄抽屉里叠在一起。排在 pricing 之后。
+ * 最小间距是像素值，百分比挡不住两个标签在窄抽屉里叠在一起。
  */
 export const CSS_PRICING_TIMELINE = `
 [data-plugin="dsh-tokbook"] .dtpl-tl{padding:1px 0 0;}
@@ -9,8 +9,6 @@ export const CSS_PRICING_TIMELINE = `
   position:absolute;left:0;right:0;top:17px;height:3px;
   border-radius:0;background:var(--dtpl-fg-3);
 }
-/* 空轴（这一段还没有调价史）：轨道照旧占位——轴是这一屏的固定构件，不该因为还没价就消失——
-   但整条退到最暗一档，且不画任何节点与标签（没有时刻可说）。 */
 [data-plugin="dsh-tokbook"] .dtpl-tl[data-dim="true"] .dtpl-tl-rail{
   background:color-mix(in srgb,var(--dtpl-fg-3) 42%,transparent);
 }
@@ -48,7 +46,7 @@ export const CSS_PRICING_TIMELINE = `
 [data-plugin="dsh-tokbook"] .dtpl-tl-node[data-active="true"] .dtpl-tl-dot{
   top:15.5px;width:6px;height:6px;background:var(--dtpl-accent);
 }
-/* 焦点给 2px 环 + 2px offset（WCAG 2.2 focus-appearance 的尺寸）。 */
+/* 焦点环的尺寸按 WCAG 2.2 focus-appearance。 */
 [data-plugin="dsh-tokbook"] button.dtpl-tl-node:hover .dtpl-tl-node-k{color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] button.dtpl-tl-node:hover .dtpl-tl-dot{
   box-shadow:0 0 0 2px color-mix(in srgb,var(--dtpl-fg) 18%,transparent);

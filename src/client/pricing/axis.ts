@@ -3,8 +3,7 @@
  *
  * 轴括住一行的**价**：左端是它最早的调价时刻，右端是今天。价定在未来时两端对调，
  * 今天于是成为轴内的一个节点。**没有任何调价史时返回空数组**——那时没有可说的时刻，
- * 由组件画一条暗淡的空轨，而不是把轴藏起来。
- * 相邻标签会被推开直到满足最小间距。纯逻辑：无 React、无 DOM。
+ * 由组件画一条暗淡的空轨，而不是把轴藏起来。纯逻辑：无 React、无 DOM。
  */
 
 import { hourStartMs, instantKey } from '../../price-format.ts'
@@ -24,28 +23,23 @@ export interface AxisNode {
   cap: 'start' | 'today' | null
 }
 
-/** 一个标签的宽度（px），足以用来推开相邻标签。按字符估算而非 DOM 实测，且刻意略偏宽——估宽了多花几像素，估窄了两个日期会叠在一起。 */
+/** 一个标签的宽度（px），按字符估算而非 DOM 实测，且刻意略偏宽——估窄了两个日期会叠在一起。 */
 const LABEL_PX = 9
 const ASCII_EM = 0.52
 /** 两个相邻标签在自身宽度之外保留的空隙。 */
 const LABEL_GAP = 6
 
-/** 一个标签打印出来有多宽（px）。 */
 export function labelWidth(label: string): number {
   let em = 0
   for (const char of label) em += (char.codePointAt(0) ?? 0) > 0x2e7f ? 1 : ASCII_EM
   return em * LABEL_PX
 }
 
-/** 一个段的标签：它的生效时刻（本地日，或日 + 整点）。 */
 function segLabel(at: number): string {
   return instantKey(at).replace('T', ' ')
 }
 
-/**
- * 一行的轴：每一段价一个节点，两端是「最早那一段价」与「今天」。今天不落在任何一端时
- * （价定在未来）它自己也是一个节点，标出此刻在价的时间里落在哪儿。
- */
+/** 每一段价一个节点；「今天」不落在两端时自己也进轴，标出此刻在价的时间里落在哪儿。 */
 export function axisNodes(row: ModelDraft, activeId: number | null, nowMs: number): AxisNode[] {
   const changes = sortedSegments(row)
     .filter(segment => !isBlankSegment(segment))

@@ -3,24 +3,20 @@
  * 与时间轴的取值规则。
  *
  * 两级独立轴决定一个价格：生效时刻（本地日，或本地日 + 整点小时）选定生效段；
- * 日内时段（小时区间 + 覆盖的星期集合）选定段内的例外价。两个半区用同一套规则
- * 校验手写 `pricing.json`，因此 browser 草稿接受的表永远不会被 host writer 拒绝。
- * 独立且无依赖的原因：词表也放这里，因为 client 不能 import `pricing.ts`（它拉了
- * `node:fs`），而这几条字面量一旦两处各写一遍就会静默漂移。
+ * 日内时段（小时区间 + 覆盖的星期集合）选定段内的例外价。词表也放这里，因为
+ * client 不能 import `pricing.ts`（它拉了 `node:fs`），字面量两处各写一遍会静默漂移。
  */
 
 import type { DaySet, HolidayRange } from './types.ts'
 
-/** 一小时（毫秒）。价格轴的最小单位是整点，所以迁移与落点调整都按它算。 */
+/** 价格轴的最小单位是整点，迁移与落点调整都按它算。 */
 export const HOUR_MS = 3_600_000
 
 /** 旧价文件里「没有生效时刻」那一段的 `from`（自始生效）在此取值，使朴素的
- *  `from <= timeMs` 比较直接可用。**新写入不再产生这个形态**：一段价必须有生效时刻，
- *  没有价段覆盖的日期一律按 ¥0 计。它现在只服务两件事——读旧文件时的**迁移**
- *  （视图层把它落成真实日期）与迁移前历史金额的连续性。
- *  在恰与本地 epoch 重合的写法上（如 UTC 时区的 `1970-01-01`），真实日期与这个哨兵
- *  不可分辨，读路径一律按旧形态迁移；迁移落点不越过下一段（`pricing-view.ts` 的
- *  migrationFrom），按记录时刻取价的金额因此不受影响。 */
+ *  `from <= timeMs` 比较直接可用。新写入不接受这个形态；它现在只服务两件事——
+ *  读旧文件时由视图层落成真实日期（`pricing-view.ts` 的 migrationFrom，落点不越过
+ *  下一段）与迁移前历史金额的连续性。在恰与本地 epoch 重合的写法上（如 UTC 时区的
+ *  `1970-01-01`），真实日期与这个哨兵不可分辨，读路径一律按旧形态迁移。 */
 export const EARLIEST = 0
 
 /** 价文件唯一的保留顶层键：route → `"metered" | "subscription"`。 */
@@ -62,7 +58,6 @@ export interface HourRange {
   end: number
 }
 
-/** day set + 小时区间：时段覆盖的完整范围。 */
 export interface SlotScope extends HourRange {
   days: DaySet
 }
@@ -132,7 +127,6 @@ export function instantKey(ms: number): string {
   return hour === 0 ? day : `${day}T${String(hour).padStart(2, '0')}:00`
 }
 
-/** 小时数作时钟标签：9 → `09:00`，24 → `24:00`。 */
 export function clockLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`
 }
@@ -147,7 +141,6 @@ export function dayIndex(date: string): number | null {
   return Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))) / 86_400_000
 }
 
-/** 自 epoch 起的天数 → `YYYY-MM-DD`（UTC 日，与 {@link dayIndex} 互逆）。 */
 export function dayKeyOfIndex(index: number): string {
   const at = new Date(index * 86_400_000)
   const month = String(at.getUTCMonth() + 1).padStart(2, '0')
@@ -155,17 +148,12 @@ export function dayKeyOfIndex(index: number): string {
   return `${String(at.getUTCFullYear())}-${month}-${day}`
 }
 
-/** 一段放假日是否合法：两端都是真实日期，且起不晚于止。 */
 export function isValidHolidayRange(range: HolidayRange): boolean {
   const start = dayIndex(range.start)
   const end = dayIndex(range.end)
   return start !== null && end !== null && start <= end
 }
 
-/**
- * 一段放假日包含哪些天（`YYYY-MM-DD` 日历日）。所有年历都是「一段连续假期」，
- * 但覆盖判定要按天问，所以这里把区间展开成集合。
- */
 export function holidayDates(range: HolidayRange): string[] {
   const start = dayIndex(range.start)
   const end = dayIndex(range.end)
@@ -190,38 +178,32 @@ export function holidaySet(calendar: Readonly<Record<string, readonly HolidayRan
   return dates
 }
 
-/** `YYYY-MM-DD` 的年份；不是那个形状时为 null。 */
 export function yearOfDate(date: string): string | null {
   return DATE_RE.test(date) ? date.slice(0, 4) : null
 }
 
-/** 年份 `YYYY` 是否合法（四位数字）。 */
 export function isYearKey(year: string): boolean {
   return /^\d{4}$/u.test(year)
 }
 
-/** 时段小时区间在各界面上的打印形式：`09:00–12:00`。 */
 export function rangeLabel(range: HourRange): string {
   return `${clockLabel(range.start)}–${clockLabel(range.end)}`
 }
 
-/** 小时区间是否合法：整点且 `0 ≤ start < end ≤ 24`（end 不含，24 收日）。 */
 export function isHourRange(range: HourRange): boolean {
   return Number.isInteger(range.start) && Number.isInteger(range.end)
     && range.start >= 0 && range.start < range.end && range.end <= 24
 }
 
-/** 两个小时区间是否共享某一小时。 */
 export function hourRangesOverlap(left: HourRange, right: HourRange): boolean {
   return left.start < right.end && right.start < left.end
 }
 
-/** 周末日（本地星期 0 或 6）。 */
 function isWeekend(weekday: number): boolean {
   return weekday === 0 || weekday === 6
 }
 
-/** 两个 day set 是否有共同星期。`workdays` ⊂ `weekdays`，两者与 `daily` 都相交。 */
+/** `workdays` ⊂ `weekdays`，两者与 `daily` 都相交；`workdays` 只与 `weekends` 不相交。 */
 function daySetsIntersect(left: DaySet, right: DaySet): boolean {
   if (left === 'daily' || right === 'daily') return true
   if (left === right) return true
@@ -229,11 +211,8 @@ function daySetsIntersect(left: DaySet, right: DaySet): boolean {
   return pair === 'weekdays'
 }
 
-/**
- * day set 是否覆盖某个本地星期 + 日期。`holidays` 只影响 `workdays` / `weekdays`
- * 两档的差别：`workdays` 要求那天不在年历里。年历里没有那一年时按空集读
- * （`workdays` 等于 `weekdays`），这是**安全方向**——宁可多按高峰算，不少算。
- */
+/** day set 是否覆盖某个本地星期 + 日期。`holidays` 只影响 `workdays`：
+ *  它要求那天不在年历里。 */
 export function daySetCovers(days: DaySet, weekday: number, date: string, holidays: ReadonlySet<string>): boolean {
   if (days === 'daily') return true
   if (isWeekend(weekday)) return days === 'weekends'
@@ -241,8 +220,6 @@ export function daySetCovers(days: DaySet, weekday: number, date: string, holida
   return days === 'weekdays' || !holidays.has(date)
 }
 
-/** 一个时段是否覆盖某时刻：时刻的本地星期在时段的 day set 内，且本地小时
- *  落在 `[start, end)` 内。 */
 export function slotCovers(slot: SlotScope, ms: number, holidays: ReadonlySet<string>): boolean {
   const hour = hourOfDay(ms)
   return hour >= slot.start && hour < slot.end && daySetCovers(slot.days, weekdayOf(ms), dayKeyOf(ms), holidays)
@@ -250,13 +227,8 @@ export function slotCovers(slot: SlotScope, ms: number, holidays: ReadonlySet<st
 
 /**
  * 两个时段是否可能同时生效。写路径拒绝这样的对，因此「某时刻生效的时段」
- *  永不歧义；星期集合不相交的一对可以共享同一小时区间（工作日早高峰挨着
- *  周末早高峰）。
- *
- *  `workdays` 是周一至周五里去掉法定节假日的那些天，所以它与 `weekdays` 仍共享
- *  每一个非法定节假日——在同一小时区间上依然重叠；只有与 `weekends` 才不相交。
- *  年历不参与判定：换一年只会让两者更接近（`workdays` ⊂ `weekdays` 恒成立），
- *  所以这里的结论对任何年历都成立。
+ *  永不歧义；星期集合不相交的一对可以共享同一小时区间。年历不参与判定
+ *  （`workdays` ⊂ `weekdays` 恒成立），所以这里的结论对任何年历都成立。
  */
 export function slotsOverlap(left: SlotScope, right: SlotScope): boolean {
   return hourRangesOverlap(left, right) && daySetsIntersect(left.days, right.days)

@@ -1,19 +1,9 @@
 /**
- * 价格表 tab 的纯逻辑：草稿、脏标记签名、保存 wire body。
- *
- * 三条规则让探索不被惩罚：空白段/时段是草稿不写出去；峰谷时段可只重写任意子集，
- * 空着的档继承基准价；**每一段价都必须有生效时刻**，没有被任何段覆盖的日期按 ¥0 计
- * （列为价格未知，不是免费）。时间轴规则与宿主共用 `price-format.ts`。
+ * 价格表 tab 的纯逻辑：草稿、脏标记签名、保存 wire body。空白段/时段只是草稿、不写出去，
+ * 所以探索不被惩罚。时间轴与币种口径与宿主共用 `price-format.ts` 与 `docs/CONTRACTS.md`。
  * 刻意无 React——tab 可测试的那一半。
- *
- * **草稿里的价用它所属通道的报价币种记**（`RouteDraft.currency`）：文件里是什么数、
- * 这一屏就显示什么数、你敲进去就存什么数——没有透镜，也没有「敲美元落人民币」那一步。
- * 想换一种货币记，是切换那条通道的报价币种（一次真正的改价，见 `./currency.ts` 的
- * `convertText`），而不是换一屏的读法。
  */
 
-// 价文件的共享词表（保留键、长度上限）从共享内核取——client 不能 import
-// `src/pricing.ts`（它拉了 `node:fs`），两条字面量各写一遍就会静默漂移。
 import {
   DAY_SETS, DAY_SET_LABELS, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
   PRICING_CURRENCY_KEY, PRICING_FX_KEY,
@@ -26,7 +16,6 @@ import type {
 } from '../../types.ts'
 import { convertText, parseAmount, type MoneyView } from './currency.ts'
 
-/** 一份价格的四个 ¥/M 桶，数字形式，键与草稿字段一致（未填写时桶缺席）。 */
 export interface DraftRates {
   input: number
   output: number
@@ -45,8 +34,7 @@ export const RATE_FIELD_NAMES: ReadonlyArray<readonly [keyof DraftRates, keyof M
   ['cacheWrite', 'cacheWritePerMillion'],
 ]
 
-/** 一份可编辑价格的四个价输入——段的基准价或其中一个峰谷时段。字符串使半输入的数字存活。
- *  单位是**这条通道的报价币种**（段自己不带币种，币种是 route 级事实）。 */
+/** 一份可编辑价格的四个价输入——段的基准价或其中一个峰谷时段。字符串使半输入的数字存活。 */
 export interface RateTexts {
   input: string
   output: string
@@ -54,7 +42,6 @@ export interface RateTexts {
   cacheWrite: string
 }
 
-/** 四个桶，按所有 surface 书写顺序排列，附校验消息用的标签。 */
 const RATE_INPUTS: ReadonlyArray<readonly [keyof RateTexts, string]> = [
   ['input', '输入价'],
   ['output', '输出价'],
@@ -62,7 +49,6 @@ const RATE_INPUTS: ReadonlyArray<readonly [keyof RateTexts, string]> = [
   ['cacheWrite', '缓存写价'],
 ]
 
-/** 一个峰谷时段：覆盖的小时与星期，以及自己的 rate 输入。 */
 export interface SlotDraft extends RateTexts {
   /** 本地 React key；编辑间稳定，输入框不丢焦点。 */
   id: number
@@ -73,7 +59,7 @@ export interface SlotDraft extends RateTexts {
   end: string
 }
 
-/** 一个可编辑价格段。`from` 为 `''` = 最早一段，否则 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:00`。 */
+/** 一个可编辑价格段。`from` 为 `''` = 还没填（写不出去），否则 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:00`。 */
 export interface SegmentDraft extends RateTexts {
   /** 本地 React key；编辑间稳定，输入框不丢焦点。 */
   id: number
@@ -81,12 +67,10 @@ export interface SegmentDraft extends RateTexts {
   /** 叠在基准价上的峰谷时段；空 = 仅基准价。 */
   slots: SlotDraft[]
 }
-/** 一张 route 卡的可编辑模型行。 */
 export interface ModelDraft {
   model: string
   /** settings / 适配器目录给出的展示名；无人命名该串时省略。 */
   name?: string
-  /** 账本记录了该 (route, model) 的次数。 */
   records: number
   /** 账本首/末计费时刻，以及多少条记录没有价段覆盖（¥0）。wire 上的只读事实，都不参与保存；
    *  省略 = 读不到账本透镜，**不等于**零。 */
@@ -96,7 +80,6 @@ export interface ModelDraft {
   segments: SegmentDraft[]
 }
 
-/** 一张可编辑 route 卡。 */
 export interface RouteDraft {
   route: string
   label: string
@@ -107,7 +90,6 @@ export interface RouteDraft {
   models: Map<string, ModelDraft>
 }
 
-/** 整份草稿，按 route key 键控。 */
 export type PriceDraft = Map<string, RouteDraft>
 
 /** 一段可编辑的假期：开始与结束日期（`YYYY-MM-DD`，含两端）。空串 = 那一头还没填。 */
@@ -152,14 +134,12 @@ function takeId(): number {
   return id
 }
 
-/** 今天的本地 `YYYY-MM-DD`。 */
 export function todayKey(now: Date = new Date()): string {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${String(now.getFullYear())}-${month}-${day}`
 }
 
-/** 草稿 `from` 所指的有效时刻；空或不是真实时刻 = null（一段价必须有生效时刻）。 */
 function instantOf(from: string): number | null {
   return instantMs(from.trim())
 }
@@ -168,20 +148,14 @@ function instantOf(from: string): number | null {
 // 法定节假日年历
 // ---------------------------------------------------------------------------
 
-/** 新的一段假期（两头都还没填）。 */
 export function newHoliday(seed: Partial<Omit<CalendarHolidayDraft, 'id'>> = {}): CalendarHolidayDraft {
   return { start: '', end: '', ...seed, id: takeId() }
 }
 
 /**
- * 「不填年份时加哪一年」。
- *
- * 一年都没填过日期 → **今年**：这份数据存在的意义就是把眼下这一年记上，一个新装好的插件不该
- * 默认跳过它。已经填过 → **下一年**：国家的安排是提前一年公布的，年底来补的正是明年那一年。
- * 只建了组、还没填日期的年份不算「填过」。
- *
- * 候选年已经被占（下一年的安排早记好了）就往后找第一个空位——不填年份也要点得动，
- * 而一个已经在上面的年份点了只会报「已经在上面了」。
+ * 「不填年份时加哪一年」：一年都没填过日期 → **今年**（新装的插件不该跳过眼下这一年），
+ * 填过 → **下一年**（国家的安排提前一年公布）。只建了组没填日期不算「填过」；
+ * 候选年被占就往后找第一个空位。
  */
 export function defaultCalendarYear(entries: CalendarEntries, now: Date = new Date()): string {
   const started = [...entries.values()].some(entry => entry.holidays.some(row => row.start !== '' || row.end !== ''))
@@ -190,27 +164,20 @@ export function defaultCalendarYear(entries: CalendarEntries, now: Date = new Da
   return String(year)
 }
 
-/** 一段假期在这一年里的读法：还没写 / 只填了一头 / 可用（含天数）/ 填坏了。 */
 export type HolidayRead =
   | { kind: 'empty' }
   | { kind: 'partial' }
   | { kind: 'ok'; days: number }
   | { kind: 'bad'; error: string }
 
-/** 一段假期在这一年里的日期对：空 / 半填 / 可用（含天数）/ 填坏了。内部读法，比
- *  `HolidayRead` 多带算好的区间——重叠判定要用它。 */
+/** 内部读法，比 {@link HolidayRead} 多带算好的区间——重叠判定要用它。 */
 type HolidaySpan =
   | { kind: 'empty' }
   | { kind: 'partial' }
   | { kind: 'ok'; days: number; span: HolidayRange }
   | { kind: 'bad'; error: string }
 
-/**
- * 一段假期的日期对。
- *
- * 只填了一头**不是错误**：那是「还没写完」。它不落盘，也不挡住别的编辑（见 `composeCalendar`），
- * 判定里跳过它——没被算成假日的日子仍按高峰算，是安全方向。
- */
+/** 只填了一头**不是错误**：那是「还没写完」，是占位。 */
 function holidaySpan(row: CalendarHolidayDraft, year: string): HolidaySpan {
   if (row.start === '' && row.end === '') return { kind: 'empty' }
   if (row.start === '' || row.end === '') return { kind: 'partial' }
@@ -228,9 +195,8 @@ function holidaySpan(row: CalendarHolidayDraft, year: string): HolidaySpan {
  * 一年里每一段假期的读数。天数（含两端）是这份数据的自检：官方通知写的就是「每条假期共 N 天」，
  * 一个一个对过去才查得出抄错；只看全年总数会被两处方向相反的手误抵消。
  *
- * 重叠**算错**：同一年里两段假期按定义不相交。它写出去并不变质（宿主按天并起来），但那是
- * 「你写的两段其实是一段」——静默并掉正是这一轮要消灭的那类。冲突报在后出现的那一段上
- * （与它前面的段比），于是同一份草稿的读法是确定的：先写的那一段照旧生效。
+ * 重叠**算错**：同一年里两段假期按定义不相交。冲突报在后出现的那一段上，
+ * 于是同一份草稿的读法是确定的：先写的那一段照旧生效。
  */
 export function readHolidays(year: string, rows: readonly CalendarHolidayDraft[]): readonly HolidayRead[] {
   const spans = rows.map(row => holidaySpan(row, year))
@@ -267,10 +233,9 @@ export function calendarYearTally(year: string, rows: readonly CalendarHolidayDr
 
 /**
  * 年历草稿 → 送宿主 / 写文件的那份年历；填坏了的那一段即拒绝（连同年份与第几段）。
- *
- * 还没写完的（整组没填 / 只填了一头）**跳过**：它们是「我打算在这儿补一段」的占位，写出去等于
- * 没写。它们因此不挡住同一份文件里的价——年历与价共用一个文件，为一行占位把整张价表冻住
- * 是拿错的代价去罚没错的东西；缺年告警会继续说那一年。
+ * 还没写完的（整组没填 / 只填了一头）**跳过**：写出去等于没写。它们因此不挡住同一份
+ * 文件里的价——年历与价共用一个文件，为一行占位把整张价表冻住是拿错的代价去罚没错的
+ * 东西；缺年告警会继续说那一年。
  */
 export function composeCalendar(entries: CalendarEntries): { ok: true; calendar: PricingCalendarInput } | { ok: false; error: string } {
   const calendar: PricingCalendarInput = {}
@@ -328,10 +293,7 @@ export function withCalendar(state: PriceState, calendar: CalendarEntries): Pric
 // 汇率（$fx）：全表共用的第二份数据
 // ---------------------------------------------------------------------------
 
-/**
- * 汇率文本 → 正数；空、非法、0、负数 → null。null 就是「换不出来」——没有汇率换算不了，
- * 这不是「按 1 算」（按 1 算会静默把美元价当人民币价）。
- */
+/** 汇率文本 → 正数；空、非法、0、负数 → null（「换不出来」）。 */
 export function fxValue(text: string): number | null {
   const parsed = parseAmount(text)
   return parsed === null || parsed === 0 ? null : parsed
@@ -359,13 +321,11 @@ export function fxSetting(text: string): { cnyPerUsd: number } | null {
   return rate === null ? null : { cnyPerUsd: rate }
 }
 
-/** 换汇率文本。它是**唯一的**换算率，而换算只发生在两处：渲染时的悬停读数，与切换
- *  通道报价币种那一次。所以改这个文本本身不动任何一行——它只在计价与切换时被读。 */
+/** 改汇率文本本身不动任何一行——它只在计价与切换时被读。 */
 export function withFx(state: PriceState, fx: string): PriceState {
   return { ...state, fx }
 }
 
-/** 一个 rate 组（段或时段）的四个字段整体换一种货币记；换算不出来的原文原样留着。 */
 function convertedRates(view: MoneyView, holder: RateTexts, to: PriceCurrency): RateTexts {
   const next: RateTexts = { ...holder }
   for (const [field] of RATE_INPUTS) {
@@ -375,12 +335,7 @@ function convertedRates(view: MoneyView, holder: RateTexts, to: PriceCurrency): 
   return next
 }
 
-/**
- * 把一条通道的报价币种换成 `to`：它每一个模型、每一段、每一个时段里可解析的价都按汇率重记。
- *
- * 这是一次**真正的改价**（脏、自动保存）：文件里那些数字的含义变了，人民币金额在 6 位
- * 小数内不变。切不过去时（没有汇率）原样返回——那个状态由 `composePriceBody` 与控件一起挡。
- */
+/** 把一条通道的报价币种换成 `to`：它每一个模型、每一段、每一个时段里可解析的价都按汇率重记。 */
 export function withRouteCurrency(
   state: PriceState,
   route: string,
@@ -409,7 +364,6 @@ export function withRouteCurrency(
   return { ...state, routes }
 }
 
-/** 小时输入的数字；非整点文本时为 NaN。 */
 function hourValue(text: string): number {
   const raw = text.trim()
   return /^\d{1,2}$/u.test(raw) ? Number(raw) : Number.NaN
@@ -429,17 +383,14 @@ function isBlankRates(holder: RateTexts): boolean {
   return RATE_INPUTS.every(([field]) => holder[field].trim() === '')
 }
 
-/** 一个峰谷时段是否还没有价。 */
 export function isBlankSlot(slot: SlotDraft): boolean {
   return isBlankRates(slot)
 }
 
-/** 一个段是否还没有价（时段也为空）。 */
 export function isBlankSegment(segment: SegmentDraft): boolean {
   return isBlankRates(segment) && segment.slots.every(isBlankSlot)
 }
 
-/** 一个段里实际带价的时段。 */
 export function effectiveSlots(segment: SegmentDraft): SlotDraft[] {
   return segment.slots.filter(slot => !isBlankSlot(slot))
 }
@@ -502,7 +453,7 @@ export function withSlotStart(slot: SlotDraft, startText: string): SlotDraft {
   return { ...slot, start: String(start), end: String(nextEnd) }
 }
 
-/** 移动时段的结束小时并保持区间有效（{@link withSlotStart} 的镜像）。 */
+/** {@link withSlotStart} 的镜像。 */
 export function withSlotEnd(slot: SlotDraft, endText: string): SlotDraft {
   const end = hourValue(endText)
   if (!Number.isFinite(end)) return slot
@@ -576,7 +527,6 @@ export function draftFromView(view: PricingView): PriceState {
       holidays: ranges.map(range => newHoliday({ start: range.start, end: range.end })),
     })
   }
-  // 汇率缺席（未设）读作空串：那正是「不用美元面」在草稿里的样子。
   return {
     routes: draft,
     calendar,
@@ -589,7 +539,7 @@ export function draftFromView(view: PricingView): PriceState {
 // 行的阅读顺序
 // ---------------------------------------------------------------------------
 
-/** `from` 的效力排名：`''`（最早一段）排第一，非真实时刻的文本排最后，半输入的日期永远不会跳到顶部。 */
+/** `from` 的效力排名：非真实时刻（含 `''`）排最后，半输入的日期不会跳到顶部。 */
 function forceRank(from: string): number {
   const at = instantOf(from)
   return at === null ? Number.MAX_SAFE_INTEGER : at
@@ -635,7 +585,6 @@ export function priceUnknown(model: ModelDraft): boolean {
   return model.firstAt !== undefined && (at === null || at > model.firstAt)
 }
 
-/** 一个段的四个 ¥/M 桶，作为行的固定列。 */
 export type RateField = keyof RateTexts
 
 /** 此刻在计费的价：生效段的基准价，叠上此刻生效的峰谷时段。 */
@@ -648,8 +597,7 @@ export interface InForceRates {
   values: RateTexts
 }
 
-/** 段里此刻生效的峰谷时段（按时刻自身的本地星期、日期与小时）；null = 基准价。
- *  `holidays` 决定 `workdays` 时段在法定节假日那天不生效。 */
+/** 段里此刻生效的峰谷时段；null = 基准价。`holidays` 决定 `workdays` 在法定节假日那天不生效。 */
 function activeSlot(segment: SegmentDraft, nowMs: number, holidays: ReadonlySet<string>): SlotDraft | null {
   for (const slot of effectiveSlots(segment)) {
     const { start, end } = slotRange(slot)
@@ -718,17 +666,12 @@ export interface InheritedCell {
 }
 
 /**
- * 一个空单元格显示的那个数，以及悬停时对它的解释。
+ * 一个空单元格显示的那个数，以及悬停时对它的解释。全表只有一条规则：**格子里出现数字 =
+ * 留空沿用它；`—` = 还没填**。缓存读 / 写两档没有单独定价时按**输入价**计（宿主 `costOf`
+ * 的同一条规则），所以它们的终点是生效的输入价；输入 / 输出必填，空着就是还没填。
  *
- * 全表只有一条规则：**格子里出现数字 = 留空沿用它；`—` = 还没填**。于是
- *  - 峰谷时段的每一档留空 → 沿用基准价；
- *  - 缓存读 / 缓存写没有单独定价时按**输入价**计（宿主 `costOf` 的同一条规则），所以
- *    这两档的终点是生效的输入价——基准价那一行的这两格因此也报得出一个数，而不是「没有值」；
- *  - 输入 / 输出必填，基准价那一行的这两格空着只是还没填（`—`），行本来就写不出去。
- *
- * `show` 是数字进格子与说明文字之前的最后一道换算（价格表按美元读写时用，
- * 见 `./currency.ts`）：**鬼影与说明里的数一起换**，否则格子里是美元、旁边注解还是人民币。
- * 缺省恒等。
+ * `show` 是数字进格子与说明文字之前的最后一道换算（价格表按美元读写时用，见 `./currency.ts`）：
+ * **鬼影与说明里的数一起换**，否则格子里是美元、旁边注解还是人民币。缺省恒等。
  */
 export function inheritedCell(
   segment: SegmentDraft,
@@ -822,12 +765,11 @@ function slotIssue(slot: SlotDraft, all: readonly SlotDraft[], index: number): s
   return null
 }
 
-/** 一个时段的覆盖读法：`工作日 09:00–12:00`。 */
 export function dayLabel(slot: SlotDraft): string {
   return `${DAY_SET_LABELS[slot.days]} ${rangeLabel(slotRange(slot))}`
 }
 
-/** 阻止这一行写入文件的唯一问题，可写时为 null：显示在行自身字段旁。未完成的草稿不是问题——它们只是不写出去。 */
+/** 阻止这一行写入文件的唯一问题，可写时为 null。未完成的草稿不是问题——它们只是不写出去。 */
 export function rowIssue(model: ModelDraft): string | null {
   const seen = new Set<number>()
   for (const segment of pricedSegments(model)) {
@@ -880,7 +822,6 @@ export function modelSignature(model: ModelDraft): string {
   return JSON.stringify(pricedSegments(model).map(segmentSignature))
 }
 
-/** 一张卡行的组合键。 */
 export function rowKey(route: string, model: string): string {
   return `${route}\u0000${model}`
 }
@@ -925,9 +866,9 @@ function slotBody(slot: SlotDraft): Record<string, unknown> {
   return body
 }
 
-/** 一个 keys 层面的写入障碍，或 null：host 的写路径只接受非空的、不以 `$` 开头
- *  （保留键前缀）、且不超长的 route / model 串。长度上限与保留键同源于
- *  `price-format.ts`，所以草稿这一侧报得出位置与原因，而不是整份文件被拒。 */
+/** 一个 keys 层面的写入障碍，或 null：host 只接受非空、不以 `$` 开头（保留键前缀）、
+ *  且不超长的 route / model 串。上限与保留键同源于 `price-format.ts`，所以草稿这一侧
+ *  报得出位置与原因，而不是整份文件被拒。 */
 function routeIssue(route: string): string | null {
   if (route === '') return '存在空通道路由名'
   if (route.startsWith('$')) return `通道路由名不得以「$」开头（「$」是价文件的保留键前缀）：${route}`
@@ -1078,12 +1019,10 @@ export function stagedChanges(state: PriceState, baseline: PriceBaseline): numbe
   return count
 }
 
-/** 年历是否与磁盘不同（面板据此给它自己的状态标记）。 */
 export function calendarDirty(state: PriceState, baseline: PriceBaseline): boolean {
   return calendarSignature(state.calendar) !== baseline.calendar
 }
 
-/** 一个模型行是否与基线不同。 */
 export function modelDirty(route: string, row: ModelDraft, baseline: ReadonlyMap<string, string>): boolean {
   return (baseline.get(rowKey(route, row.model)) ?? '') !== modelSignature(row)
 }
@@ -1093,11 +1032,8 @@ export function modelDirty(route: string, row: ModelDraft, baseline: ReadonlyMap
 // ---------------------------------------------------------------------------
 
 /**
- * 通道下拉里一项写什么。
- *
- * 两个下拉取代平铺之后，**选项文字自己就是这一屏唯一的摘要面**——它必须回答「这条通道有没有
- * 洞」，否则读者只能一条条点开看（那正是这一版要消灭的成本）。全 0 的那一半不复述 0：选项
- * 列是扫读面，负号（`N 个模型未知`）比 `0 个模型未知` 短一截、也更快认出来。
+ * 通道下拉里一项写什么。选项文字自己就是这一屏唯一的摘要面——它必须回答「这条通道有没有
+ * 洞」，否则读者只能一条条点开看。全 0 的那一半不复述 0：负号（`N 个模型未知`）更短、更快认出来。
  */
 export function routeOptionLabel(card: RouteDraft): string {
   const models = [...card.models.values()]

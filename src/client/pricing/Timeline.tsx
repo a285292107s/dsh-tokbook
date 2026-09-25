@@ -1,7 +1,5 @@
 /**
- * 调价史轴：一行自己的每一段价以带日期的节点呈现，夹在「最早那一段价」与今天之间。
- * 一端都没有价可放时（还没有调价史）画一条暗淡的空轨——轴是这一屏的固定构件，
- * 不该因为这一行还没价就消失。
+ * 调价史轴的组件：一行的每一段价画成带日期的节点，规则在 `./axis.ts`。
  *
  * 最小间距是像素值，所以轨道宽度用 `ResizeObserver` 实测，而不是百分比布局。
  */
@@ -40,7 +38,6 @@ export function PriceTimeline({ row, activeId }: {
     observer.observe(track)
     return () => { observer.disconnect() }
   }, [nodes])
-  // 空轴：轨道照旧（这一屏的构件），只是没有节点、没有标签，颜色退到最暗一档。
   if (nodes.length === 0) {
     return (
       <div className="dtpl-tl" data-dim="true" role="group" aria-label="价段时间轴：这一段还没有调价史">

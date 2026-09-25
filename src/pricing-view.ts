@@ -30,14 +30,12 @@ export interface LedgerModelUsage {
 
 /** 账本计过什么，按 route 与 (route, model)。 */
 export interface LedgerUsage {
-  /** route → 精确 model 串 → 该行计过什么。 */
   byRouteModel: ReadonlyMap<string, ReadonlyMap<string, LedgerModelUsage>>
   byRoute: ReadonlyMap<string, number>
 }
 
 /** 把账本行折成价格视图的用量透镜。失败尝试命名 route 但没有计费调用，故
- *  不进——价格表卡片上的「N 次请求」与通道用量 tab 的请求计数同义。未归属行无法定价，
- *  不进价格表卡片。 */
+ *  不进；未归属行无法定价，也不进。 */
 export function ledgerUsageOf(
   records: readonly UsageRecord[],
   table: PricingTable,
@@ -66,7 +64,6 @@ export function ledgerUsageOf(
   return { byRouteModel, byRoute }
 }
 
-/** 账本透镜里最早的一条记录时刻（无记录为 null）。 */
 function earliestRecordAt(ledger: LedgerUsage): number | null {
   let earliest: number | null = null
   for (const models of ledger.byRouteModel.values()) {
@@ -121,8 +118,7 @@ function migrationFrom(segments: readonly PriceSegment[], firstAt: number | unde
   return at === EARLIEST ? at - HOUR_MS : at
 }
 
-/** 一个价段在 wire 上的形态。旧文件里「没有生效时刻」的那一段（`from === EARLIEST`）
- *  由调用方给出迁入日期：界面与写入形态都不再有「自始生效」这个概念。 */
+/** 旧文件里「没有生效时刻」的那一段（`from === EARLIEST`）由调用方给出迁入日期。 */
 function segmentInput(segment: PriceSegment, inheritedFrom: number): PricingSegmentInput {
   const slots = (segment.slots ?? []).map(slotInput)
   return {
@@ -137,11 +133,6 @@ function segmentInput(segment: PriceSegment, inheritedFrom: number): PricingSegm
   }
 }
 
-/**
- * 装配价格表卡片：每个 provider route 一张卡，route 可计费的每个 model 一行。
- * 一行只带它的价段（与账本透镜）；**行内那个「此刻的价」不在这里算**——它由 client
- * 按当前时刻从段里现算，wire 上不带一份会过期的快照。
- */
 export async function readPricingView(
   dir: string,
   catalog: readonly RouteCatalogEntry[],
@@ -179,8 +170,7 @@ export async function readPricingView(
         continue
       }
       row.configured = true
-      // 配置里的名字优先于稍后适配器目录的名字；账本与价文件从不给串命名，
-      // 故「不在配置」的行不带 name。
+      // 配置里的名字优先于适配器目录的名字；账本与价文件从不给串命名。
       if (row.name === undefined && name !== undefined) row.name = name
     }
   }
@@ -220,10 +210,6 @@ export async function readPricingView(
     const models: PricingModelView[] = []
     for (const [model, acc] of entry.models) {
       const segments = file.table[route]?.[model]
-      // 旧形态（无生效时刻的那一段，自始生效）在**读**里活最后一次：它被落成真实日期——
-      // 该模型的首记整点（没有记录就用今天），但不得越过它的后继段（见 migrationFrom）。
-      // 金额因此一分不变（首记之前本来没有任何记录，越过时落点退回后继段之前），
-      // 而界面与写入形态从此只剩「有生效时刻的段」；下一次保存就把文件写成新形态。
       const inheritedFrom = migrationFrom(segments ?? [], acc.firstAt, now)
       models.push({
         model,
@@ -254,7 +240,6 @@ export async function readPricingView(
     routes: cards,
     calendar: file.calendar,
     calendarMissing: missingCalendarYears(ledger, file.calendar, now),
-    // 汇率原样过 wire（缺席 = 未设）：价格表 tab 的读写面按它换算，计价层不看它。
     ...(file.fx !== undefined ? { fx: file.fx } : {}),
     dataDir: dir,
     updatedAt: now,
