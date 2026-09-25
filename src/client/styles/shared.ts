@@ -115,7 +115,6 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
       var(--dtpl-rail-ink) calc(100% - 20px),transparent);
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{left:4.5px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-stub{left:11.5px;width:0;}
   /* 时段卡上的复制/删除不再靠悬停（触控没有悬停）。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions{opacity:1;}
   /* 段的身份行要折行：右轨现在装着「当前生效」芯片 + 段自己的复制/删除，而左边是序号 +

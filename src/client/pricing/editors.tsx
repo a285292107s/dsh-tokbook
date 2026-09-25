@@ -386,13 +386,14 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   )
 }
 
-/** 表盘几何按**像素尺度**固定：圈多了盘长大，而不是把每圈压小；外圈顶到 DIAL_MAX_R 后间距自己收窄。 */
-const DIAL_BASE_R = 16
-const DIAL_STEP = 4.5
-const DIAL_MAX_R = 30
-const DIAL_PX_PER_UNIT = 1.8
+/** 表盘几何按**像素尺度**固定，并小到能坐在基准价那一行的行首（它是那一行的索引，不是主角）：
+ *  圈多了盘长大，而不是把每圈压小；外圈顶到 DIAL_MAX_R 后间距自己收窄。 */
+const DIAL_BASE_R = 11
+const DIAL_STEP = 3
+const DIAL_MAX_R = 24
+const DIAL_PX_PER_UNIT = 1.25
 /** 弧最粗 2 单位，零点刻钉还要探到外圈之外。 */
-const DIAL_MARGIN = 3.5
+const DIAL_MARGIN = 2.5
 
 /** 盘上的一圈：半径 + 它覆盖的小时（`null` = 时刻还没成段，只剩淡轨）。 */
 interface DialRing {
@@ -463,7 +464,8 @@ function DayDial({ slots }: { slots: readonly SlotDraft[] }) {
   )
 }
 
-/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。费率布局与上方基准价行同一组竖线。
+/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。它与上方的基准价行同构——行首一枚标记，
+ *  四档价从标记右缘起排。
  *  零覆盖的时段与计价无关（`isBlankSlot`），整条降级并直说这一点——空着不写文件是设计，不是待办。 */
 function SlotEditor({ slot, index, canRemove, segment, view, onChange, onRemove, onDuplicate }: {
   slot: SlotDraft
@@ -487,7 +489,6 @@ function SlotEditor({ slot, index, canRemove, segment, view, onChange, onRemove,
     <div className="dtpl-price-slot" data-inert={inert}>
       <span className="dtpl-price-slot-rail" aria-hidden="true">
         <span className="dtpl-price-slot-dot" />
-        <span className="dtpl-price-slot-stub" />
       </span>
       <div className="dtpl-price-slot-card">
         <div className="dtpl-price-slot-head">
@@ -664,11 +665,6 @@ function SegmentEditor({ segment, where, serial, active, view, onChange, onRemov
             })}
           </div>
         </div>
-      </div>
-      <div className="dtpl-price-seg-split">
-        <span className="dtpl-price-seg-split-note">
-          ↑↑↑未被「峰谷时段」改写的小时都按基准价计费↑↑↑
-        </span>
       </div>
       <div className="dtpl-price-seg-detail">
         {slotCount > 0 && (

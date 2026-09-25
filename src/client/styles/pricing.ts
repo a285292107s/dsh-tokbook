@@ -194,9 +194,7 @@ export const CSS_PRICING = `
    数字必须等宽（比例体让同位数字错开，固定列就失去可比性）。80px = 8 字符价 + 两侧内边距。
    --dtpl-cell-pad-x 与单元格的标签共享：标签必须和下面的数字结束在同一边缘。
    整张卡的四处费率带（段卡基准价、每个峰谷时段）共用这一个格宽，于是四档价在整张卡里是同一组
-   读数；基准价那一带在自己的栅格里居中（它头顶只有一枚居中的满弧盘，见 .dtpl-price-seg-allday），
-   峰谷子目仍在卡内容盒的左缘起排——留空的桶报的正是它上面那个数（留空 = 沿用），这件事由
-   占位符与悬停说明说出来，不再由上下对齐说出来。
+   读数；基准价与峰谷子目同构——都是「行首一枚盘/一个点，四档价从它右缘起排」。
    --dtpl-days-w 只由日档那一列用：峰谷时段的日档是下拉，宽度由最长的「工作日」定，
    于是所有子目的钟点落在同一条竖线上。
    --dtpl-slot-indent 是时段卡那一列的左让位（栅栏占掉的那一列）：**两个用户**——时段卡自己的
@@ -434,7 +432,7 @@ export const CSS_PRICING = `
   gap:6px;min-width:0;
 }
 
-/* 详情带不缩进、不画自己的上边线：缩进会让跨行的四档价错开，补上边线会与上一行的刻线相距 7px。 */
+/* 详情带不缩进、不画自己的上边线：缩进会让跨行的四档价错开。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-detail{
   display:flex;flex-direction:column;gap:6px;
   padding:2px 0 1px;
@@ -447,32 +445,16 @@ export const CSS_PRICING = `
   margin-left:var(--dtpl-slot-indent);
 }
 
-/* 基准价行：满弧盘居中打头，四档价落在盘下方——它是这一段价的抬头，所以成一个居中的竖列。
-   四档价在**整宽**的栅格里居中——包着它的那一层不缩到内容宽：窄屏那份配方把它折成 2×2 时
-   需要一条撑满的栅格，缩到内容宽会让两列塌回内容宽度。 */
+/* 基准价是**一行**：满弧盘坐在行首当这一行的索引（它的尺寸随时段数长，见 editors 的 DayDial），
+   四档价从盘右起排——先看见的必须是钱，盘是拿来对时刻的。峰谷子目与这一行同构，
+   整段读成一条账带而不是「大盘 + 价」的两层。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday{
-  display:flex;flex-direction:column;align-items:center;gap:10px;
+  display:flex;align-items:center;gap:10px;min-width:0;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-allday-body{width:100%;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-rates{justify-content:center;}
-/* 分界行：**同时是说明与那条线**——那句话居中，左右各一段等长的发丝线把它托在中间。
-   两段线各留 24px 的底：窄处先折行的永远是那句话（note 是 flex:0 1 auto），线不会被抽干。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-split{
-  display:flex;align-items:center;gap:8px;margin:2px 0 1px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-split::before,
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-split::after{
-  content:"";flex:1 1 24px;height:1px;
-  background:color-mix(in srgb,var(--dtpl-fg) 14%,transparent);
-}
-/* 这句话是要读的，所以走 fg-2 而不是 dim；
-   min-width:0 让它在窄处真的能折行（自动最小宽度是内容宽度，不给 0 就把这张卡顶宽）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-split-note{
-  flex:0 1 auto;min-width:0;text-align:center;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
-}
-/* 峰谷时段是段卡里的**一层卡**：叠在段卡面上再降一档，与「段卡比窗面高一档」同一个方向，
-   两层的远近一读就分得出。左边那一列让给栅栏（--dtpl-slot-indent）。
+[data-plugin="dsh-tokbook"] .dtpl-price-seg-allday-body{flex:1 1 auto;min-width:0;}
+/* 峰谷时段是段卡里的**一层**：直接坐在段卡面上，条目身份由脊线上的圆点说——
+   卡中卡会把两层说成同一种东西（都是圆角盒），层级反而糊掉。
+   左边那一列让给栅栏（--dtpl-slot-indent）。
    竖轨是**一条**、贯穿整组（逐条分段会在每个点上留一处断口），两端渐隐；
    它在圆点那几行被挖掉一个洞——1px 的轨从 7px 的实心点里穿过去会画出深色竖纹；
    洞按点的直径挖，两端各留 1px 抗锯齿。 */
@@ -492,34 +474,20 @@ export const CSS_PRICING = `
   padding:10px 0 0 var(--dtpl-slot-indent);
   position:relative;
 }
-/* 卡片：叠在段卡面上再降一档（内凹的边）。上内边距比下边少 1px：栅栏的桩线要落的那条中线
-   按 5px 算，多出来的 1px 让在下方。 */
+/* 子目没有自己的壳：它是一行内容，身份由脊线上的圆点说。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-card{
-  box-sizing:border-box;display:flex;flex-direction:column;gap:5px;
-  padding:5px 8px 6px;
-  border:1px solid var(--dtpl-border);border-radius:var(--dtpl-radius);
-  background:color-mix(in srgb,var(--dtpl-fg) 6%,var(--dtpl-card));
-  box-shadow:inset 0 1px 0 0 color-mix(in srgb,#000 7%,transparent),
-    inset 0 -1px 0 0 color-mix(in srgb,#fff 5%,transparent);
+  display:flex;flex-direction:column;gap:5px;min-width:0;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-slot-card:hover{
-  background:color-mix(in srgb,var(--dtpl-fg) 9%,var(--dtpl-card));
-}
-/* 栅栏：圆点 + 桩线，都绝对定位（基准是**本槽**，和竖轨同一个坐标系）——点的圆心按算术钉在
-   竖轨上，桩线从点的右缘接到卡片的左边框。栅栏要接的是卡内首行那个下拉盒的中线，不是整行的
-   中心：头行在窄处会折成两行，锚点只能是第一行。z-index 把点压在共用的那条轨之上。 */
+/* 栅栏：圆点绝对定位（基准是**本槽**，和竖轨同一个坐标系）——点的圆心按算术钉在
+   竖轨上，锚点是头行那个下拉盒的中线（头行在窄处会折成两行，所以不能锚整行中心）。
+   z-index 把点压在共用的那条轨之上。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-rail{
   position:absolute;left:0;top:0;bottom:0;width:50px;pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{
-  position:absolute;left:16.5px;top:28px;transform:translateY(-50%);
+  position:absolute;left:16.5px;top:22px;transform:translateY(-50%);
   width:7px;height:7px;border-radius:50%;background:var(--dtpl-fg);
   z-index:1;
-}
-/* 桩线取 27.5px：1px 的线落在半像素上时会被摊成两行，钉在整像素上才是一条实线。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-slot-stub{
-  position:absolute;left:23.5px;top:27.5px;width:26.5px;height:1px;
-  background:var(--dtpl-rail-ink);z-index:1;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-head{
   display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;
