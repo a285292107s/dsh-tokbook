@@ -162,6 +162,22 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-detail[data-dirty="true"]{
   box-shadow:inset 2px 0 0 var(--dtpl-fg);
 }
+/* 只读的「当前生效」读数：纯展示——不带框、不坐刻线；数字与段卡同源（draft 的 ratesInForce）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-live{
+  display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;row-gap:2px;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-k{font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-cell{display:inline-flex;align-items:baseline;gap:5px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-label{font-size:10px;line-height:14px;letter-spacing:.15em;color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-v{
+  font-family:var(--dtpl-mono);font-size:14px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
+  font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-cell[data-bad="true"] .dtpl-price-live-v{color:var(--dtpl-err);}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-when,
+[data-plugin="dsh-tokbook"] .dtpl-price-live-none{
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-detail-head{
   display:flex;align-items:center;gap:10px;flex-wrap:wrap;row-gap:4px;min-width:0;
 }
@@ -195,17 +211,18 @@ export const CSS_PRICING = `
    --dtpl-cell-pad-x 与单元格的标签共享：标签必须和下面的数字结束在同一边缘。
    整张卡的四处费率带（段卡基准价、每个峰谷时段）共用这一个格宽，于是四档价在整张卡里是同一组
    读数；基准价与峰谷子目同构——都是「行首一枚盘/一个点，四档价从它右缘起排」。
-   --dtpl-days-w 只由日档那一列用：峰谷时段的日档是下拉，宽度由最长的「工作日」定，
+   --dtpl-days-w 只由日档那一列用：峰谷时段的日档是下拉，宽度由最长的「法定工作日」定，
    于是所有子目的钟点落在同一条竖线上。
    --dtpl-slot-indent 是时段卡那一列的左让位（栅栏占掉的那一列）：**两个用户**——时段卡自己的
-   左内边距，和「＋ 峰谷时段」那条幽灵行（它占的正是下一张时段卡的位置）。一处改、两处跟，
-   窄屏那份配方（shared 的 29px）也只需要改这一个数。 */
+   左内边距，和「＋ 峰谷时段」那条幽灵行（它占的正是下一张时段卡的位置）。它的值 = 盘列宽 +
+   基准价行间距（40+14），于是子目的四档价与基准价的四档价落在同一组竖线上——改盘列或间距
+   任何一边都要重量这条对齐；窄屏那份配方（shared 的 29px）也只需要改这一个数。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-sec{
   --dtpl-cell-pad-x:7px;
   --dtpl-rate-w:80px;
   --dtpl-rate-gap:8px;
-  --dtpl-days-w:52px;
-  --dtpl-slot-indent:41px;
+  --dtpl-days-w:80px;
+  --dtpl-slot-indent:54px;
 }
 
 /* 硬约束：flex:none + nowrap——折行会撑高一行，截断会丢状态。 */
@@ -260,7 +277,7 @@ export const CSS_PRICING = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cell{display:flex;flex-direction:column;gap:1px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-cell-k{
-  display:none;font-size:9px;line-height:12px;letter-spacing:.2em;color:var(--dtpl-fg-2);
+  display:none;font-size:10px;line-height:14px;letter-spacing:.2em;color:var(--dtpl-fg-2);
 }
 /* 可触物静止就带记：**刻线**给一次性的值、菜单与动作（静止 22% → hover 45% → 聚焦主墨，
    outline 关掉），**框**给四档价那几格——成阵列重复的填数格，闭合的边让「哪儿能填」静止可见；
@@ -312,13 +329,10 @@ export const CSS_PRICING = `
   background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);
 }
 /* 「＋ 加一段价」与「＋ 峰谷时段」是同一样东西：**幽灵行**——它占的是下一张卡的位置
-   （同一个内容列、同一条左缘，一行高 30px，不假装自己是一张卡）。
-   幽灵只住在**盒子**里：边是比卡边更弱的一圈发丝线（8% 对 12%）、底是空的；字走主墨、
-   不吃次级那一档——它上面/下面就是同为 11px 的说明文字，跟说明同一个墨量的话，这颗控件会
-   被读成「还没做完的占位」而不是「能按的东西」。悬停/按下只加**一层透明洗色**（不跟卡面调，
-   段卡自己也在悬停时洗色，跟卡面调会让这一行在洗过的卡上读成一个更亮的洞）+ 一道明显更重的边，
-   于是「这一行能按」用手就能确认，而它仍然不是一张卡。
-   强弱只能靠墨量与填色说：dashed 在本仓库是静态禁令（selfcheck:ui）。 */
+   （同一个内容列、同一条左缘，一行高 30px）。
+   幽灵只住在**盒子**里：边是比卡边更弱的一圈发丝线（8% 对 12%）、底是空的，字走主墨；
+   悬停/按下只加**一层透明洗色**（不跟卡面调——段卡自己也在悬停时洗色）+ 一道明显更重的边。
+   dashed 在本仓库是静态禁令（selfcheck:ui）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost{
   appearance:none;box-sizing:border-box;
   display:flex;align-items:center;justify-content:flex-start;gap:6px;
@@ -344,7 +358,6 @@ export const CSS_PRICING = `
 /* 幽灵行也会被停用（年历「加一年」在年份还没写全时就停着）：停用态不接悬停/按下的洗色，
    只留一个「按不动」的样子。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost:disabled{opacity:.45;cursor:not-allowed;}
-[data-plugin="dsh-tokbook"] .dtpl-price-ghost:disabled{opacity:.45;cursor:not-allowed;}
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost{
   appearance:none;
   border:0;border-bottom:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
@@ -446,14 +459,18 @@ export const CSS_PRICING = `
 }
 
 /* 基准价是**一行**：满弧盘坐在行首当这一行的索引（它的尺寸随时段数长，见 editors 的 DayDial），
-   四档价从盘右起排——先看见的必须是钱，盘是拿来对时刻的。峰谷子目与这一行同构，
-   整段读成一条账带而不是「大盘 + 价」的两层。 */
+   四档价从盘右起排。峰谷子目与这一行同构。
+   间距给到盘的最大右缘（盘心 20 + 半宽 33.5）之外：圈数再多也不压第一格。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday{
-  display:flex;align-items:center;gap:10px;min-width:0;
+  display:flex;align-items:center;gap:14px;min-width:0;
+}
+/* 盘心钉在 x=20——与下方峰谷子目的竖轨（脊线 20px、圆点中心 20px）同一条线。
+   定宽列 + 居中让盘无论几圈都以此为心：超出列宽的大圈对称溢出，中心不随圈数漂移。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-dial-col{
+  flex:none;width:40px;display:flex;align-items:center;justify-content:center;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday-body{flex:1 1 auto;min-width:0;}
-/* 峰谷时段是段卡里的**一层**：直接坐在段卡面上，条目身份由脊线上的圆点说——
-   卡中卡会把两层说成同一种东西（都是圆角盒），层级反而糊掉。
+/* 峰谷时段是段卡里的**一层**：直接坐在段卡面上，条目身份由脊线上的圆点说。
    左边那一列让给栅栏（--dtpl-slot-indent）。
    竖轨是**一条**、贯穿整组（逐条分段会在每个点上留一处断口），两端渐隐；
    它在圆点那几行被挖掉一个洞——1px 的轨从 7px 的实心点里穿过去会画出深色竖纹；
@@ -502,7 +519,7 @@ export const CSS_PRICING = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring-arc{fill:none;stroke:var(--dtpl-fg);stroke-width:2;}
 /* 零点刻钉：一条贯穿整个环带的细索引（1 单位，弧的一半），走 fg 的 30%——它是**索引**不是数据，
-   所以比任何一段弧都轻：圈一多，读角度靠的就是它，而抢眼的仍然是弧。 */
+   所以比任何一段弧都轻。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-ring-zero{
   stroke:color-mix(in srgb,var(--dtpl-fg) 30%,transparent);stroke-width:1;
 }
@@ -531,7 +548,7 @@ export const CSS_PRICING = `
   appearance:none;height:24px;box-sizing:border-box;padding:0 16px 0 2px;
   border:0;border-bottom:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
   background-color:transparent;color:var(--dtpl-fg);
-  font:inherit;font-size:11px;line-height:16px;cursor:pointer;
+  font:inherit;font-size:12px;line-height:18px;cursor:pointer;
   background-image:linear-gradient(45deg,transparent 50%,var(--dtpl-fg-2) 50%),
     linear-gradient(135deg,var(--dtpl-fg-2) 50%,transparent 50%);
   background-position:calc(100% - 8px) 10px,calc(100% - 4px) 10px;
@@ -545,7 +562,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-select option{
   background:var(--dtpl-card);color:var(--dtpl-fg);
 }
-/* 列宽给到「工作日」(33px) + 两侧 2px/8px + 三角 8px；一行里三个下拉的三角到各自值的距离必须一致。 */
+/* 列宽给到「法定工作日」(12px × 5 字) + 左 2px + 右 16px（三角）；一行里三个下拉的三角到各自值的距离必须一致。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-select-days{width:var(--dtpl-days-w);padding-right:8px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates .dtpl-price-cell-k,
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates .dtpl-price-cell-k{display:block;text-align:right;padding-right:var(--dtpl-cell-pad-x);}

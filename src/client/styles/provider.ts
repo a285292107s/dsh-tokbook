@@ -58,13 +58,13 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
 [data-plugin="dsh-tokbook"] .dtpl-providers{display:flex;flex-direction:column;gap:10px;}
 
 /* 一张通道卡 = 一块读数面板，与总览的 hero / 四桶同源：外轮廓由 --dtpl-border 给、
-   材质由 --dtpl-metal 给（无边框 + 内阴影的边是糊的，整屏读起来像一叠卡片）。 */
+   材质由 --dtpl-metal 给。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-card{
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
   box-shadow:var(--dtpl-metal);
 }
-/* 卡头是一段**铭牌**：一条实线把它与卡身分开，通道身份与这张卡的钱因此有明确的归属区。 */
+/* 卡头是一段**铭牌**：一条实线把它与卡身分开。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-head{
   display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
   padding:11px 14px 10px;
@@ -80,7 +80,7 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
   color:var(--dtpl-fg);font-size:14px;line-height:20px;font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-/* 标签下的 route key：账本的计费键，走等宽——它是代码里的标识，不是给人念的词。 */
+/* 标签下的 route key：账本的计费键，走等宽。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-key{
   font-family:var(--dtpl-mono);
   font-size:10px;
@@ -88,8 +88,8 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
 /* 计费性质：**用形区分，不用色相**。按量 = 描边芯片（一条通道的分类），订阅 = 实心墨芯片
    （这个数不是现金）。分类从不该由颜色承担——DSH 皮肤里 accent 本就等于墨色、换个皮肤又会变蓝；
    而这两个桶永远不许被混成一个「支出」。
-   文字取 fg-2 不是 fg-3：它是一枚**要读的词**（这个数是按量还是订阅），10px 不该比同一张卡上的
-   11px 说明句还淡。层级由**形**给（描边 vs 实心），不由墨色深浅给。 */
+   文字取 fg-2 不是 fg-3：它是一枚**要读的词**（这个数是按量还是订阅）。层级由**形**给
+   （描边 vs 实心），不由墨色深浅给。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-bill{
   flex:none;display:inline-flex;align-items:center;
   height:15px;padding:0 5px;

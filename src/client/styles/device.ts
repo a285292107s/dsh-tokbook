@@ -1,10 +1,9 @@
 /**
- * 设备皮（独立悬浮窗口）—— 仪器外壳。色板在 tokens.ts 第八节，这里只引用 `--dtpl-*` 名字。
+ * 设备皮（独立悬浮窗口）。色板在 tokens.ts 第八节，这里只引用 `--dtpl-*` 名字。
  *
  * 全部规则都以根元素 `[data-dtpl-device]` 为前提：宿主里没人挂这个属性，整段静默。
- * 窗口按仪器做：屏幕外是一圈壳（接缝 / 壳厚 / 外缘 / 投影四层 box-shadow 环），
- * 页眉是壳上的控制头（铭牌压铝面），页脚是壳上的状态条。禁令照身：不直连 `--dsw-*`、
- * 不写字面色值、圆角只有 0。
+ * 屏幕外是一圈壳（接缝 / 壳厚 / 外缘 / 投影四层 box-shadow 环），页眉与页脚坐在壳面上。
+ * 禁令照身：不直连 `--dsw-*`、不写字面色值、圆角只有 0。
  */
 
 const D = '[data-dtpl-device][data-plugin="dsh-tokbook"]'
@@ -26,13 +25,12 @@ ${D} .dtpl-card{
 ${D} .dtpl-card::before,
 ${D} .dtpl-card::after{display:none;}
 
-/* 控制头：页眉属于壳，不属于屏幕。 */
+/* 页眉坐在壳面上：属于壳，不属于屏幕。 */
 ${D} .dtpl-head{
   background:var(--dtpl-casing);color:var(--dtpl-casing-ink);
   box-shadow:inset 0 -1px 0 var(--dtpl-seam);
 }
-/* 铭牌：黄换到铝壳上形态不变（tokens 第五节的「料」）；徽记反成墨底黄图，
-   两块并排就是机身上的商标区。 */
+/* 铭牌：黄换到铝壳上形态不变（tokens 第五节）；徽记反成墨底黄图。 */
 ${D} .dtpl-title>span:last-child{
   background:var(--dtpl-brand);color:var(--dtpl-on-brand);
   padding:2px 7px;box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
@@ -41,7 +39,7 @@ ${D} .dtpl-title-ico-chip{background:var(--dtpl-casing-ink);color:var(--dtpl-bra
 ${D} .dtpl-close{color:var(--dtpl-casing-ink-2);}
 ${D} .dtpl-close:hover{background:var(--dtpl-casing-hover);color:var(--dtpl-casing-ink);}
 
-/* 状态条：「最新记录」这类读数理应刻在机身而非屏幕里。 */
+/* 页脚坐在壳面上：「最新记录」这类读数在壳上，不在屏幕里。 */
 ${D} .dtpl-foot{
   background:var(--dtpl-casing);
   border-top:1px solid var(--dtpl-seam);

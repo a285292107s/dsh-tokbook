@@ -45,11 +45,20 @@ const HOUR_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:00$/u
  *  `workdays` 前面：从宽到窄，依次收窄。 */
 export const DAY_SETS: readonly DaySet[] = ['daily', 'weekdays', 'workdays', 'weekends']
 
+/** 下拉静止时显示的短名——判定本身要一眼读全，完整口径在 `DAY_SET_HINTS`（悬停）。 */
 export const DAY_SET_LABELS: Record<DaySet, string> = {
   daily: '每天',
-  weekdays: '周一至周五（含节假日）',
-  workdays: '工作日（不含节假日）',
+  weekdays: '周一至周五',
+  workdays: '法定工作日',
   weekends: '周末',
+}
+
+/** 每一档日期的完整口径，悬停在下拉上时给出。 */
+export const DAY_SET_HINTS: Record<DaySet, string> = {
+  daily: '每天 00:00–24:00，含周末与节假日',
+  weekdays: '按星期一到星期五计，法定节假日也算',
+  workdays: '按工作日计；年历收录的法定节假日不生效',
+  weekends: '仅星期六与星期日',
 }
 
 /** 一个时段覆盖的小时：`[start, end)`，故全天时段为 0 → 24。 */

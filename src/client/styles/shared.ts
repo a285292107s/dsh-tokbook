@@ -6,7 +6,7 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0;
 }
 
-/* 选中态：品牌黄。它是"料"——选中本身就带墨色文字压在上面，所以恒定黄在这里成立。 */
+/* 选中态：品牌黄——选中本身就带墨色文字压在上面，所以恒定黄在这里成立。 */
 [data-plugin="dsh-tokbook"] .dtpl-body ::selection{
   background:color-mix(in srgb,var(--dtpl-brand) 55%,transparent);
 }
@@ -59,7 +59,7 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   }
   [data-plugin="dsh-tokbook"] .dtpl-val{margin-right:auto;}
   /* 明细的两个子 tab：窄 sheet 是触控形态，而这一行是切换这一节视图的**唯一**入口，
-     所以给足 44px——与价格表展开钮同一条规矩，同一张面板里不该有两种标准。 */
+     所以给足 44px——与价格表展开钮同一条规矩。 */
   [data-plugin="dsh-tokbook"] .dtpl-bd-tab{
     min-height:44px;padding:13px 16px;
   }
@@ -115,6 +115,9 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
       var(--dtpl-rail-ink) calc(100% - 20px),transparent);
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{left:4.5px;}
+  /* 基准价盘的盘心跟着窄轨走（圆点中心 8px，见上）；间距躲开盘的最大右缘（8 + 33.5）。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-dial-col{width:16px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday{gap:36px;}
   /* 时段卡上的复制/删除不再靠悬停（触控没有悬停）。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions{opacity:1;}
   /* 段的身份行要折行：右轨现在装着「当前生效」芯片 + 段自己的复制/删除，而左边是序号 +

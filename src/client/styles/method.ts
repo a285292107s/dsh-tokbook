@@ -1,6 +1,6 @@
 export const CSS_METHOD = `/* 统计口径文档 */
-/* 阅读层级：导语 → 三事实条 → 编号小节。这是一份**文档**，所以它比别的 tab 更安静：
-   全篇没有一块染色面板，层级由**边框、填充与字重**表达，色相只留给真正的状态（warn / err）。 */
+/* 阅读层级：导语 → 三事实条 → 编号小节。全篇没有一块染色面板，层级由**边框、填充与字重**表达，
+   色相只留给真正的状态（warn / err）。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc{max-width:none;}
 [data-plugin="dsh-tokbook"] .dtpl-doc code{
   font-family:var(--dtpl-mono);font-size:.9em;
@@ -11,7 +11,7 @@ export const CSS_METHOD = `/* 统计口径文档 */
   white-space:nowrap;
 }
 
-/* 导语：两三行短句，先定调再展开细节。 */
+/* 导语：两三行短句。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede{
   display:flex;flex-direction:column;gap:3px;
   margin:0 0 12px;font-size:12px;line-height:20px;color:var(--dtpl-fg-2);
@@ -20,8 +20,7 @@ export const CSS_METHOD = `/* 统计口径文档 */
 /* 导语里的加重点是**这次要读的那句**，靠字重与墨色，不靠色相。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede b{color:var(--dtpl-fg);font-weight:600;}
 
-/* 三事实条：来源 / 精度 / 范围。三条是**同类**的方法事实（都在说「怎么记」），所以三格等权
-   ——任何一格都不该比别人重。 */
+/* 三事实条：来源 / 精度 / 范围。三条是**同类**的方法事实（都在说「怎么记」），所以三格等权。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-facts{
   display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
   margin-bottom:16px;

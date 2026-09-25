@@ -17,8 +17,8 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
     inset 0 0 0 1px var(--dtpl-border);
   overflow:hidden;
 }
-/* 四角括号只画左上与右下两端，其余两角留空（四角都补全会读成相框）；画在 ::before/::after 上
-   而不是用 clip-path 切角——切角会连子元素的焦点环一起裁掉，而 L 形边框不影响控件与焦点环。 */
+/* 四角括号只画左上与右下两端，其余两角留空；画在 ::before/::after 而不是用 clip-path 切角——
+   切角会连子元素的焦点环一起裁掉，而 L 形边框不影响控件与焦点环。 */
 [data-plugin="dsh-tokbook"] .dtpl-card::before,
 [data-plugin="dsh-tokbook"] .dtpl-card::after{
   content:"";position:absolute;width:16px;height:16px;pointer-events:none;z-index:2;
@@ -57,15 +57,14 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
 [data-plugin="dsh-tokbook"] .dtpl-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-close-ico{width:16px;height:16px;}
 
-/* 不做药丸轨道：选择器是一条横排、项与项之间用竖发丝线分隔，当前项由**底部一条实条**标出。
-   轨道底色会把它读成「一组按钮」，而这里表达的是「这台设备当前的页」。 */
+/* 不做药丸轨道：选择器是一条横排、项与项之间用竖发丝线分隔，当前项由**底部一条实条**标出。 */
 [data-plugin="dsh-tokbook"] .dtpl-tabs{
   display:flex;gap:0;flex:none;
   margin:0;padding:0 20px;
   border-bottom:1px solid var(--dtpl-border);
 }
 /* 未选中项走 fg-2 而不是 fg-3：它是**控件的文字**，不是装饰。「当前页」的区别由字重 600 +
-   6% 洗色 + 底部那条 5px 黄块三样一起给——不用把没选中的字洗淡到读不清。 */
+   6% 洗色 + 底部那条 5px 黄块三样一起给。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab{
   position:relative;appearance:none;flex:1;border:0;background:transparent;
   height:30px;padding:0 12px;
@@ -80,7 +79,7 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
 }
 /* 当前页标记：一条 5px 的黄块压在 tab 行的下边界上，**四条边都带 1px 墨边**——恒定黄在白底上
-   几乎没有边界，靠墨边成立；黄因此以「料」出现，两个主题共用一套形态。 */
+   几乎没有边界，靠墨边成立；两个主题共用一套形态。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab[aria-selected="true"]::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:5px;
   background:var(--dtpl-brand);

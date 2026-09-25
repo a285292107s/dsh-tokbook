@@ -50,7 +50,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
      换皮肤又会变蓝。兜底取墨色而非某个蓝——端出 DSH 里不存在的强调色更糟。 */
   --dtpl-accent:var(--dsw-alias-brand-primary,#1f2328);
 
-  /* ── 五、品牌黄：它是"料"，不是"线" ───────────────────────────────────────
+  /* ── 五、品牌黄 ───────────────────────────────────────────────────────────
      恒定黄无法同时当浅底与深底上的线条色（#FFCD00 压白卡 1.57:1），
      所以只以实心块 + 墨边出现，两个主题共用形态，周围面色随主题翻转。 */
   --dtpl-brand:#ffcd00;    /* 当前页标记、峰值牌、工业徽记、草稿点、选区，以及价表「当前生效」的钉点与芯片 */
@@ -67,8 +67,8 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-panel-bg:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
 
   /* ── 七、几何与字体 ───────────────────────────────────────────────────────
-     直角是这套形态的判据之一，不是当前偏好；状态点、表盘这类真圆写 50%。
-     不做衬线、不做字体文章，只有数字走等宽。 */
+     直角是不变量，不是当前偏好；状态点、表盘这类真圆写 50%。
+     不做衬线，只有数字走等宽。 */
   --dtpl-radius:0px; /* 唯一允许的圆角值（footer 按钮基线在用） */
   --dtpl-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace); /* 全部是数字 */
 
@@ -85,8 +85,8 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
 
 /* ── 八、独立设备皮（独立悬浮窗口）：不走宿主的一整套色板 ──────────────────
    没有宿主就没有 --dsw-alias-* 可借。前提：根元素带 data-dtpl-device="light|dark"
-   （宿主内没人挂这个属性，下面两块永远匹配不上）。窗口按仪器做：casing 是壳面
-   （页眉「控制头」与页脚「状态条」坐上去），card / surface 是屏幕；墨阶、黄、材质照旧。
+   （宿主内没人挂这个属性，下面两块永远匹配不上）。casing 是壳面（页眉与页脚坐上去），
+   card / surface 是屏幕；墨阶、黄、材质照旧。
    造型在 styles/device.ts，它只引用这里的名字——硬编码色值除了本文件没有第二处，
    这条禁令对设备皮同样成立。
    文件头的前提②对本节按面自证：浅色块只压屏幕与铝壳，深色块只压屏面与炮铜壳，
@@ -97,7 +97,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-fg-2:#59636e;
   --dtpl-fg-3:#81858c;
   --dtpl-fg-dim:#a0a4a8;
-  /* surface 在浅皮比 card 亮：输入框是凹进屏面的一口白瓷井（宿主 layer-1 / layer-2 同关系）；
+  /* surface 在浅皮比 card 亮（宿主 layer-1 / layer-2 同关系）；
      不用纯白：#fcfcfd 与壳面才分得开。 */
   --dtpl-card:#f5f6f8;
   --dtpl-surface:#fcfcfd;
@@ -134,7 +134,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-border:rgba(255,255,255,.14);
   --dtpl-hairline:rgba(255,255,255,.10);
   /* 状态色（压屏面）：ok 5.87 · err 5.35。宿主深皮那枚 #f85149 压 #26272b 只有 4.45，
-     设备皮没有宿主可遮羞，换亮一档的 #ff6b61。warn 6.95 仍非文本。 */
+     设备皮没有宿主色板可依赖，换亮一档的 #ff6b61。warn 6.95 仍非文本。 */
   --dtpl-ok:#3fb950;
   --dtpl-warn:#f59e0b;
   --dtpl-err:#ff6b61;

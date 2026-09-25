@@ -52,8 +52,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-id{
   display:flex;align-items:center;gap:10px;min-width:0;
 }
-/* 卡头左列永远是**同一只环**：有分母时是量规，没有读数时只画轨道（见下）。形状不随状态换语言
-   ——方形徽记会在这列里引入第二种形状。 */
+/* 卡头左列永远是**同一只环**：有分母时是量规，没有读数时只画轨道（见下）。形状不随状态换语言。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-id-text{display:flex;flex-direction:column;gap:1px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-name{
   color:var(--dtpl-fg);font-size:14px;line-height:20px;font-weight:600;
@@ -68,8 +67,8 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   display:flex;align-items:center;gap:8px;flex:none;
   min-width:0;
 }
-/* 单卡刷新：紧凑图标钮，请求在飞时禁用。图标取 fg-2 而不是 fg-3——它是这张卡上**唯一的动作**，
-   一枚功能钮不该比它周围的说明句还淡；悬停再升到主墨色给反馈。 */
+/* 单卡刷新：紧凑图标钮，请求在飞时禁用。图标取 fg-2 而不是 fg-3——它是这张卡上**唯一的动作**；
+   悬停再升到主墨色给反馈。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh{
   display:inline-flex;align-items:center;justify-content:center;
   width:28px;height:28px;padding:0;
@@ -87,12 +86,12 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-ico{width:15px;height:15px;display:block;}
 /* 月度预算环形量规：环描边带色调，已用 % 数字居中在环*内*，它所指的预算以小号说明挂在数字
-   下方——环从不静默地换含义。（真圆是这套直角语言里**写明的一处例外**：表盘本来就是个圆。） */
+   下方。（真圆是这套直角语言里**写明的一处例外**：表盘本来就是个圆。） */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge{
   position:relative;flex:none;width:44px;height:44px;
   color:var(--dtpl-fg);
 }
-/* 没有读数的那只环：只画轨道，环心写状态词。词取 fg-2——「没有读数」不该比真读数更响。
+/* 没有读数的那只环：只画轨道，环心写状态词。词取 fg-2。
    **这条必须排在 .dtpl-quota-gauge 之后、色调块之前**：同特异性下靠源码顺序，色相才算数
    （.dtpl-quota-tone-danger 在更后面，故错误态仍是红的）。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-idle{color:var(--dtpl-fg-2);}
@@ -124,8 +123,8 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   font-style:normal;font-size:9px;line-height:1;font-weight:600;
   color:var(--dtpl-fg-2);margin-left:.5px;
 }
-/* 命名这个环所汇总的预算的小号说明。**它是信息，不是装饰**：「这个百分比说的是哪个预算」
-   只由这一行给出，环因此从不静默地换含义（见组件的文档注释），所以取 fg-2 与 10px。 */
+/* 命名这个环所汇总的预算的小号说明：「这个百分比说的是哪个预算」只由这一行给出
+   （见组件的文档注释），所以取 fg-2 与 10px。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-cap{
   font-size:10px;line-height:1;font-weight:600;color:var(--dtpl-fg-2);
 }
@@ -179,8 +178,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   display:block;height:100%;
   transition:width .4s ease,background-color .2s ease;
 }
-/* 健康态**不染色**：条与表盘的默认填充是次要墨色。默认状态就是绿的话，绿只是「条的颜色」、
-   不是信息，三根绿条还会成为整屏最响的东西；收回中性之后，屏幕上每一处色相都意味着「要看一眼」。 */
+/* 健康态**不染色**：条与表盘的默认填充是次要墨色，绿只留给真正的 ok。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-tone-ok{color:var(--dtpl-fg-2);}
 /* 告急 / 超限是**状态数字**：文字一律走 warn-ink（裸 warn 过不了正文对比度）；条体这类
    非文本填充才用裸 warn。 */
