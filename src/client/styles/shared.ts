@@ -93,13 +93,13 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   [data-plugin="dsh-tokbook"] .dtpl-price-pick-row{column-gap:8px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-input{text-align:left;}
   /* 费率列在桌面是四格定宽、紧挨成一簇，窄处折成 2×2：四格并排塞不进窄 sheet 的内容列。
-     这里必须带上 .dtpl-price-seg 这一层，否则压不住 pricing 片段里那条只带 [data-plugin] 的基规则。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-seg .dtpl-price-rates{
+     这里必须带上 .dtpl-price-detail 这一层，否则压不住 pricing 片段里那条只带 [data-plugin] 的基规则。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-rates{
     grid-template-columns:repeat(2,minmax(0,1fr));
   }
   /* 窄处数字改左对齐（上面那条），格名也要跟着左对齐才守在同一条左缘上：桌面那套是
      「格名与数字结束在同一边缘」，在这里两个都反过来。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-seg-rates .dtpl-price-cell-k,
+  [data-plugin="dsh-tokbook"] .dtpl-price-base-rates .dtpl-price-cell-k,
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates .dtpl-price-cell-k{
     text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
   }
@@ -117,12 +117,9 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{left:4.5px;}
   /* 基准价盘的盘心跟着窄轨走（圆点中心 8px，见上）；间距躲开盘的最大右缘（8 + 33.5）。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-dial-col{width:16px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-seg-allday{gap:36px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-allday{gap:36px;}
   /* 时段卡上的复制/删除不再靠悬停（触控没有悬停）。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions{opacity:1;}
-  /* 段的身份行要折行：右轨现在装着「当前生效」芯片 + 段自己的复制/删除，而左边是序号 +
-     最小 150px 的生效时刻——窄 sheet 一行放不下。折行后右轨（margin-left:auto）自己落第二行靠右。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-seg-line{flex-wrap:wrap;row-gap:4px;}
   /* 年历的一段假期在窄处要留在**一行**里：两个日期格与字号收窄、天数那一列也收窄——
      这样「8 天 删除」不必折到第二行去，一年七八段不至于变成十四五行的长条。 */
   [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{width:100px;font-size:12px;}
@@ -131,20 +128,35 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
 
 /* 动效（共享 keyframes；尊重 reduced motion） */
 @media (prefers-reduced-motion:no-preference){
-  [data-plugin="dsh-tokbook"].dtpl-overlay{animation:dtpl-fade .16s ease-out;}
-  [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop .16s ease-out;}
+  [data-plugin="dsh-tokbook"].dtpl-overlay{animation:dtpl-fade .2s ease-out;}
+  [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop .2s cubic-bezier(.22,.68,.24,1);}
   [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transform-origin:bottom;}
   /* 柱子入场：柱高本身就是这张图的读数，所以只让**读数长出来**，数值标签一律不动。
-     .is-anim 由 TrendPlot 挂载时加上、animationend 一到就摘掉——此后重渲染不再有动画
-     （真实数据切换时重播会让「数据变了」和「这一屏刚打开」混成同一件事）。 */
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill{animation:dtpl-bar-grow .18s cubic-bezier(.22,.68,.24,1) both;}
+     .is-anim 静态挂在 TrendPlot 的图区上（数据刷新不重挂元素，CSS 动画不会因重渲染重播；
+     重挂只发生在「这一屏刚打开」，那时重播正是想要的）。错峰由柱上的 --dtpl-i 给出：
+     从左往右按 12ms 一步扫过去，像仪表逐列上电。 */
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill{animation:dtpl-bar-grow .18s cubic-bezier(.22,.68,.24,1) both;animation-delay:calc(var(--dtpl-i,0) * 12ms);}
+  /* 零刻度与自己的柱同拍出现：基线上那一排刻度也是读数的一部分。 */
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar.is-zero::after{animation:dtpl-fade .18s both;animation-delay:calc(var(--dtpl-i,0) * 12ms);}
+  /* 数据变化时柱高滑到新值（rescan 补进来的天、当天数字长大），标签锚点同拍跟住；
+     悬停的明度/墨色反馈也走这条过渡。入场那下靠动画，不靠这条过渡。 */
+  [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transition:height .25s ease,background-color .12s ease;}
+  [data-plugin="dsh-tokbook"] .dtpl-bar-label{transition:bottom .25s ease,color .12s ease;}
+  /* tab 切换 / 数据到达：正文整块升起一层——壳（卡片）弹一下，内容跟着落定，两者错半拍。
+     只在子元素**重挂**时播（tab 切换、骨架换真块）；轮询刷新不重挂，不会重播。 */
+  [data-plugin="dsh-tokbook"] .dtpl-body > *{animation:dtpl-rise .22s cubic-bezier(.22,.68,.24,1) both;}
+  /* 描边环的指针扫入：弧从 12 点起算画到自己的读数，弧长由 TSX 以 --dtpl-arc 随元素给出。 */
+  [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{animation:dtpl-draw .45s cubic-bezier(.3,.6,.3,1) both;}
 }
 @media (prefers-reduced-motion:no-preference) and (max-width:640px){
   /* sheet 习语：居中弹窗的 pop 动画是向上平移 8px，对贴底全宽 sheet 无意义——改为从视口下方滑入。 */
   [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-sheet .22s cubic-bezier(.32,.72,0,1);}
 }
 @keyframes dtpl-fade{from{opacity:0}}
+@keyframes dtpl-rise{from{opacity:0;transform:translateY(6px)}}
 @keyframes dtpl-bar-grow{from{transform:scaleY(0)}}
+@keyframes dtpl-draw{from{stroke-dashoffset:var(--dtpl-arc,0)}}
+@keyframes dtpl-width-in{from{width:0}}
 @keyframes dtpl-pop{from{opacity:0;transform:translateY(8px) scale(.98)}}
 @keyframes dtpl-sheet{from{transform:translateY(100%)}}
 @keyframes dtpl-rotate{to{transform:rotate(360deg)}}
@@ -160,6 +172,11 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
    它们是唯一允许的宽度 / 描边动画，但「量变了」这件事数字本身已经说清，reduce 用户不该看到。 */
 @media (prefers-reduced-motion:reduce){
   [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill,
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar.is-zero::after,
+  [data-plugin="dsh-tokbook"] .dtpl-bar-fill,
+  [data-plugin="dsh-tokbook"] .dtpl-bar-label,
+  [data-plugin="dsh-tokbook"] .dtpl-body > *,
+  [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc,
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
   [data-plugin="dsh-tokbook"] .dtpl-spin,
@@ -169,4 +186,8 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim.dtpl-quota-refresh-pop{animation:none;transition:none;}
 }
+
+/* 触感：所有按钮按下一律沉 1px——机件的手感，不借动画（无过渡，瞬时状态）。
+   停用的按钮不参与。 */
+[data-plugin="dsh-tokbook"] button:not(:disabled):active{transform:translateY(1px);}
 `

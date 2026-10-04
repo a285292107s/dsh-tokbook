@@ -1,5 +1,8 @@
 /**
- * 手工价表：provider route key → 精确 model 串 → 该 pair 的价格时间轴。
+ * 手工价表：provider route key → 精确 model 串 → 该 (route, model) 的**当前价**
+ * （四档基准价 + 可选峰谷时段）。没有生效时刻那一轴——账本里所有记录都用同一份价
+ * 折算（理由与代价见 docs/CONTRACTS.md §2）。旧文件的价段数组仍读得进来：取生效时刻
+ * 最晚的那一段（就是今天仍在生效的价），更早的段按它重算。
  *
  * 读宽松（畸形段/时段丢弃，不致命）；写严格且整文件替换，坏 PUT 不会半落地。
  */
@@ -7,27 +10,29 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  DAY_SETS, EARLIEST, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
+  DAY_SETS, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
   PRICING_CURRENCY_KEY, PRICING_FX_KEY,
-  dayIndex, dayKeyOfIndex, holidayDates, instantKey, instantMs, isHourRange, isValidHolidayRange, isYearKey,
+  dayIndex, dayKeyOfIndex, dayStartMs, holidayDates, isHourRange, isValidHolidayRange, isYearKey,
   slotCovers, slotsOverlap, yearOfDate,
 } from './price-format.ts'
 import type {
   BillingMap, BillingNature, CurrencyMap, FxSetting, HolidayCalendar, HolidayRange, ModelPricing, PriceCurrency,
-  PriceSegment, PriceSlot,
-  PricingSegmentInput, PricingSlotInput, PricingTable, RateKey, SlotRef, UsageTotals,
+  PriceEntry, PriceSlot,
+  PricingEntryInput, PricingSlotInput, PricingTable, RateKey, SlotRef, UsageTotals,
 } from './types.ts'
 import { UNPRICED_KEY } from './types.ts'
 
 export const PRICING_FILE = 'pricing.json'
 
 export {
-  DAY_SETS, EARLIEST, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY, PRICING_FX_KEY,
-  dayKeyOf, dayStartMs, instantKey, instantMs,
+  DAY_SETS, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY, PRICING_FX_KEY,
+  dayKeyOf, dayStartMs,
 } from './price-format.ts'
 
 interface Logger {
   error(...args: unknown[]): void
+  /** 可选：读路径的降级说明（从 `.bak` 恢复、跨年区间被夹取）。 */
+  warn?(...args: unknown[]): void
 }
 
 /** `revision` 是价文件**文本**的内容签名——派生 rollup 记下其 rate 行所折叠的
@@ -45,14 +50,20 @@ function isRate(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
-async function readTextFile(dir: string, name: string, logger: Logger): Promise<string | null> {
+/** 读文件的结果：`text` 为 null 时 `missing` 区分「**确实不存在**（ENOENT）」与
+ *  「存在但读不到（EACCES/EBUSY/…）」。两者的处置不同：只有前者才允许走
+ *  `.bak` 回退——把权限错误当成「文件没了」会拿旧备份盖住一份还在的文件。 */
+type TextFileRead = { text: string } | { text: null; missing: boolean }
+
+async function readTextFile(dir: string, name: string, logger: Logger): Promise<TextFileRead> {
   try {
     const text = await readFile(join(dir, name), 'utf8')
-    return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text
+    return { text: text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-    logger.error(`[tokbook] cannot read ${name}:`, error)
-    return null
+    const missing = (error as NodeJS.ErrnoException).code === 'ENOENT'
+    // 「还没有这个文件」是正常状态（首次安装），不报；读不到已有文件才报。
+    if (!missing) logger.error(`[tokbook] cannot read ${name}:`, error)
+    return { text: null, missing }
   }
 }
 
@@ -124,38 +135,56 @@ function normalizeSlots(slots: readonly PriceSlot[]): PriceSlot[] {
   return out
 }
 
-function coerceSegment(raw: unknown): PriceSegment | null {
+/** 旧文件里 `from` 的两种写法：本地日，或本地日 + 整点。 */
+const LEGACY_FROM_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:00)?$/u
+
+/** 旧文件里的一段价。**读**路径只拿它挑出「今天仍在生效」的那一段——`from` 因此
+ *  只用来排序，不再参与计价；缺 `from`（更旧的兜底段）按最早处理。 */
+function coerceLegacySegment(raw: unknown): { from: string; entry: PriceEntry } | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const segment = raw as Record<string, unknown>
   const rates = coerceRates(segment)
   if (rates === null) return null
-  // 旧形态（省略 / null / 空串 from）读作哨兵，等视图层迁移成真实日期；迁移前成本层照旧按它计价。
-  let from = EARLIEST
-  if (segment.from !== undefined && segment.from !== null && segment.from !== '') {
-    if (typeof segment.from !== 'string') return null
-    const at = instantMs(segment.from)
-    if (at === null) return null
-    from = at
+  const text = segment.from
+  let from = ''
+  if (text !== undefined && text !== null && text !== '') {
+    if (typeof text !== 'string' || !LEGACY_FROM_RE.test(text) || dayStartMs(text.slice(0, 10)) === null) return null
+    from = text
   }
   const slots = Array.isArray(segment.slots)
     ? normalizeSlots(segment.slots.map(coerceSlot).filter((slot): slot is PriceSlot => slot !== null))
     : []
+  return { from, entry: { rates, ...(slots.length > 0 ? { slots } : {}) } }
+}
+
+/** 旧形态的价段数组 → 生效时刻最晚的那一段。日期串是定宽且逐位可比的，所以
+ *  字典序就是时间序（缺 `from` 的兜底段排在最前）。任一段读不懂 → null：我们
+ *  无法知道坏的哪一段是不是最晚的那一段，保守起见整个 (route, model) 读作价格未知。 */
+function coerceLegacySegments(list: readonly unknown[]): PriceEntry | null {
+  let best: { from: string; entry: PriceEntry } | null = null
+  for (const item of list) {
+    const segment = coerceLegacySegment(item)
+    if (segment === null) return null
+    if (best === null || segment.from > best.from) best = segment
+  }
+  return best === null ? null : best.entry
+}
+
+/** 一个 (route, model) 的价：当前形态（四档价 + 可选 slots 的对象），或旧文件的
+ *  价段数组。两者都读不懂 → null（价格未知）。 */
+function coerceEntry(raw: unknown): PriceEntry | null {
+  if (Array.isArray(raw)) return coerceLegacySegments(raw)
+  if (typeof raw !== 'object' || raw === null) return null
+  const entry = raw as Record<string, unknown>
+  const rates = coerceRates(entry)
+  if (rates === null) return null
+  const slots = Array.isArray(entry.slots)
+    ? normalizeSlots(entry.slots.map(coerceSlot).filter((slot): slot is PriceSlot => slot !== null))
+    : []
   return {
-    from,
     rates,
     ...(slots.length > 0 ? { slots } : {}),
   }
-}
-
-/** 按生效时刻升序；同一时刻只留一段——文件中该时刻的首段胜出。 */
-function normalizeSegments(segments: readonly PriceSegment[]): PriceSegment[] {
-  const out: PriceSegment[] = []
-  for (const segment of [...segments].sort((left, right) => left.from - right.from)) {
-    const last = out[out.length - 1]
-    if (last !== undefined && last.from === segment.from) continue
-    out.push(segment)
-  }
-  return out
 }
 
 /** 一年里的一段放假日：两端都是真实日期且起不晚于止。 */
@@ -167,15 +196,39 @@ function coerceHolidayRange(raw: unknown): HolidayRange | null {
   return isValidHolidayRange(parsed) ? parsed : null
 }
 
-/** 读路径的年历：畸形的年 / 区间丢弃（不致命），合法区间合并成不重叠的区间表。 */
-function coerceCalendar(raw: unknown): HolidayCalendar {
+/** 读路径的年历：畸形的年 / 区间丢弃（不致命），合法区间合并成不重叠的区间表。
+ *
+ *  每个区间**夹到它自己的年 key 内**：写路径（{@link parseCalendar}）拒绝跨年区间，
+ *  而 client 把写规则用在读结果上，所以读路径放行一个跨年区间就等于让整份价文件
+ *  存不进去、并让 client 的节假日集合为空（`workdays` 在节假日当天照高峰算，
+ *  显示价与计费价分叉）。夹掉的部分按「年历里查不到这一天」退化——`workdays`
+ *  退成周一至周五，宁可多按高峰算，绝不因此丢掉整年的年历。 */
+function coerceCalendar(raw: unknown, logger: Logger = console): HolidayCalendar {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
   const calendar: HolidayCalendar = {}
   for (const [year, ranges] of Object.entries(raw as Record<string, unknown>)) {
     if (!isYearKey(year) || !Array.isArray(ranges)) continue
-    const kept = mergeHolidayDates(
-      ranges.map(coerceHolidayRange).filter((range): range is HolidayRange => range !== null).flatMap(holidayDates),
-    )
+    const yearStart = dayIndex(`${year}-01-01`)
+    const yearEnd = dayIndex(`${year}-12-31`)
+    if (yearStart === null || yearEnd === null) continue
+    const dates: string[] = []
+    for (const item of ranges) {
+      const range = coerceHolidayRange(item)
+      if (range === null) continue
+      const start = dayIndex(range.start)!
+      const end = dayIndex(range.end)!
+      const from = Math.max(start, yearStart)
+      const to = Math.min(end, yearEnd)
+      if (from > to) {
+        logger.warn?.(`[tokbook] ${PRICING_CALENDAR_KEY} 的「${year}」有一段假期（${range.start} ~ ${range.end}）整段都不在这一年里，读路径丢掉它`)
+        continue
+      }
+      if (from !== start || to !== end) {
+        logger.warn?.(`[tokbook] ${PRICING_CALENDAR_KEY} 的「${year}」有一段假期跨出了这一年（${range.start} ~ ${range.end}），读路径把它夹成 ${dayKeyOfIndex(from)} ~ ${dayKeyOfIndex(to)}`)
+      }
+      dates.push(...holidayDates({ start: dayKeyOfIndex(from), end: dayKeyOfIndex(to) }))
+    }
+    const kept = mergeHolidayDates(dates)
     if (kept.length > 0) calendar[year] = kept
   }
   return calendar
@@ -219,7 +272,7 @@ export function coercePriceFile(value: unknown, logger: Logger = console): Price
   const raw = value as Record<string, unknown>
   const table: PricingTable = {}
   const billing: BillingMap = {}
-  const calendar = coerceCalendar(raw[PRICING_CALENDAR_KEY])
+  const calendar = coerceCalendar(raw[PRICING_CALENDAR_KEY], logger)
   const currency = coerceCurrency(raw[PRICING_CURRENCY_KEY])
   const fx = coerceFx(raw[PRICING_FX_KEY])
   const rawBilling = raw[PRICING_BILLING_KEY]
@@ -232,25 +285,55 @@ export function coercePriceFile(value: unknown, logger: Logger = console): Price
   for (const [route, models] of Object.entries(raw)) {
     if (route === '' || route.startsWith('$')) continue
     if (typeof models !== 'object' || models === null || Array.isArray(models)) continue
-    const priced: Record<string, PriceSegment[]> = {}
-    for (const [model, list] of Object.entries(models as Record<string, unknown>)) {
-      if (model === '' || !Array.isArray(list)) continue
-      const segments = normalizeSegments(
-        list.map(coerceSegment).filter((segment): segment is PriceSegment => segment !== null),
-      )
-      if (segments.length > 0) priced[model] = segments
+    const priced: Record<string, PriceEntry> = {}
+    for (const [model, raw] of Object.entries(models as Record<string, unknown>)) {
+      if (model === '') continue
+      // 读不懂 → 整个 (route, model) 读作价格未知。**不猜**：手写的价要么读得出
+      // 四档价，要么这一行没有价（README 承诺的是「畸形文件只把受影响的
+      //  (路由, 模型) 降级为价格未知(¥0)」）。残留：该 (route, model) 因此在下一次
+      //  整表保存时不再出现在视图里（整表重写的既有语义），手写的坏行会被那个动作
+      //  永久删掉——接受的代价，错钱比丢一条手写价更严重。
+      const entry = coerceEntry(raw)
+      if (entry === null) {
+        logger.error(`[tokbook] ${PRICING_FILE} 的「${route}」/「${model}」读不懂（既不是「四档价 + 可选 slots」的对象，也不是旧的价段数组）；整个 (路由, 模型) 读作价格未知`)
+        continue
+      }
+      priced[model] = entry
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
   return { table, billing, currency, calendar, ...(fx !== undefined ? { fx } : {}), revision: '' }
 }
 
+function emptyPriceFile(): PriceFile {
+  return { table: {}, billing: {}, currency: {}, calendar: {}, revision: '' }
+}
+
+/** 读价文件。主文件**确实不存在**（ENOENT，不是别的读取错误）而 `pricing.json.bak`
+ *  在时从备份恢复：{@link writePriceFile} 先 `rename(target, backup)` 再 `rename(tmp,
+ *  target)`，两步之间崩溃就只剩 `.bak`，而缺失的主文件若读作空表，界面会显示
+ *  「全部价格未知」，用户随手改一格就把空表整表写回、历史价全丢。
+ *
+ *  回退只在 ENOENT 上做（权限 / 占用错误读的是还在的文件，绝不拿备份盖它），
+ *  也不在 JSON 语法错误上做（文件在、内容坏，按 `parseJson` 的既有语义读空表）。 */
 export async function readPriceFile(dir: string, logger: Logger = console): Promise<PriceFile> {
-  const text = await readTextFile(dir, PRICING_FILE, logger)
-  if (text === null) return { table: {}, billing: {}, currency: {}, calendar: {}, revision: '' }
-  const raw = parseJson(text, PRICING_FILE, logger)
-  if (raw === null) return { table: {}, billing: {}, currency: {}, calendar: {}, revision: revisionOf(text) }
-  return { ...coercePriceFile(raw, logger), revision: revisionOf(text) }
+  const read = await readTextFile(dir, PRICING_FILE, logger)
+  if (read.text === null) {
+    if (read.missing) {
+      const backup = await readTextFile(dir, `${PRICING_FILE}.bak`, logger)
+      if (backup.text !== null) {
+        const recovered = parseJson(backup.text, `${PRICING_FILE}.bak`, logger)
+        if (recovered !== null) {
+          logger.warn?.(`[tokbook] ${PRICING_FILE} 不存在；已从 ${PRICING_FILE}.bak 恢复，请确认后重新保存一次`)
+          return { ...coercePriceFile(recovered, logger), revision: revisionOf(backup.text) }
+        }
+      }
+    }
+    return emptyPriceFile()
+  }
+  const raw = parseJson(read.text, PRICING_FILE, logger)
+  if (raw === null) return { ...emptyPriceFile(), revision: revisionOf(read.text) }
+  return { ...coercePriceFile(raw, logger), revision: revisionOf(read.text) }
 }
 
 const SLOT_FIELDS = new Set([
@@ -286,14 +369,18 @@ function parseSlot(value: unknown, where: string): { ok: true; slot: PriceSlot }
   return { ok: true, slot: { days, start: raw.start, end: raw.end, rates } }
 }
 
-function parseSegment(value: unknown, where: string): { ok: true; segment: PriceSegment } | { ok: false; error: string } {
+function parseEntry(value: unknown, where: string): { ok: true; entry: PriceEntry } | { ok: false; error: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { ok: false, error: `${where}必须是对象（from + 四档单价 + slots?）` }
+    return { ok: false, error: `${where}必须是对象（四档单价 + 可选 slots）` }
   }
   const raw = value as Record<string, unknown>
-  const known = new Set(['from', 'inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion', 'slots'])
+  const known = new Set(['inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion', 'slots'])
   const extra = Object.keys(raw).find(key => !known.has(key))
-  if (extra !== undefined) return { ok: false, error: `${where}含未知字段「${extra}」` }
+  if (extra !== undefined) {
+    // 旧文件的 `from` 是这一屏最可能手写回来的字段，所以单独说一句它去哪儿了。
+    const hint = extra === 'from' ? '：价表没有生效时间了，整份价就是当前价' : ''
+    return { ok: false, error: `${where}含未知字段「${extra}」${hint}` }
+  }
   if (!isRate(raw.inputPerMillion) || !isRate(raw.outputPerMillion)) {
     return { ok: false, error: `${where}缺少合法的 inputPerMillion / outputPerMillion（非负数字）` }
   }
@@ -302,13 +389,6 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
   }
   if (raw.cacheWritePerMillion !== undefined && !isRate(raw.cacheWritePerMillion)) {
     return { ok: false, error: `${where}的 cacheWritePerMillion 必须是非负数字` }
-  }
-  if (typeof raw.from !== 'string') {
-    return { ok: false, error: `${where}缺少 from（生效时间）：一段价必须有生效时刻，写 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00` }
-  }
-  const from = instantMs(raw.from)
-  if (from === null) {
-    return { ok: false, error: `${where}的 from 必须是真实存在的 YYYY-MM-DD 或整点 YYYY-MM-DDTHH:00：${raw.from}` }
   }
   const slots: PriceSlot[] = []
   if (raw.slots !== undefined) {
@@ -328,8 +408,7 @@ function parseSegment(value: unknown, where: string): { ok: true; segment: Price
   }
   return {
     ok: true,
-    segment: {
-      from,
+    entry: {
       rates: {
         inputPerMillion: raw.inputPerMillion,
         outputPerMillion: raw.outputPerMillion,
@@ -469,27 +548,16 @@ export function parsePriceInput(value: unknown): PriceParse {
     if (route === '') return { ok: false, error: '存在空通道路由名' }
     if (route.length > MAX_ROUTE_LENGTH) return { ok: false, error: `通道路由名过长：${route.slice(0, 40)}…` }
     if (typeof models !== 'object' || models === null || Array.isArray(models)) {
-      return { ok: false, error: `「${route}」必须是对象（模型串 → 价段数组）` }
+      return { ok: false, error: `「${route}」必须是对象（模型串 → 该模型的价）` }
     }
-    const priced: Record<string, PriceSegment[]> = {}
-    for (const [model, list] of Object.entries(models as Record<string, unknown>)) {
+    const priced: Record<string, PriceEntry> = {}
+    for (const [model, raw] of Object.entries(models as Record<string, unknown>)) {
       const where = `「${route}」的「${model}」`
       if (model === '') return { ok: false, error: `「${route}」下存在空模型串` }
       if (model.length > MAX_MODEL_LENGTH) return { ok: false, error: `模型串过长：${model.slice(0, 40)}…` }
-      if (!Array.isArray(list)) return { ok: false, error: `${where}必须是价段数组` }
-      if (list.length === 0) continue // 空数组 = 这条价不存在（等价于省略）
-      const segments: PriceSegment[] = []
-      const seen = new Set<number>()
-      for (let index = 0; index < list.length; index += 1) {
-        const parsed = parseSegment(list[index], `${where}第 ${String(index + 1)} 段`)
-        if (!parsed.ok) return { ok: false, error: parsed.error }
-        if (seen.has(parsed.segment.from)) {
-          return { ok: false, error: `${where}有两段的生效时间相同（${instantKey(parsed.segment.from)}）：同一时刻只能有一段价` }
-        }
-        seen.add(parsed.segment.from)
-        segments.push(parsed.segment)
-      }
-      priced[model] = segments.sort((left, right) => left.from - right.from)
+      const parsed = parseEntry(raw, where)
+      if (!parsed.ok) return { ok: false, error: parsed.error }
+      priced[model] = parsed.entry
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
@@ -519,7 +587,7 @@ function slotBody(slot: PriceSlot): Record<string, unknown> {
   }
 }
 
-/** 价文件的文件体。键序（保留键在前，route 与 model 排序，段按生效时刻升序）
+/** 价文件的文件体。键序（保留键在前，route 与 model 排序，时段按开始小时升序）
  *  与 client 的 writer 是同一份约定。 */
 function priceFileBody(file: PriceFile): Record<string, unknown> {
   const body: Record<string, unknown> = {}
@@ -546,25 +614,19 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
   if (file.fx !== undefined) body[PRICING_FX_KEY] = { cnyPerUsd: file.fx.cnyPerUsd }
   for (const route of Object.keys(file.table).sort((left, right) => left.localeCompare(right))) {
     const models = file.table[route]!
-    const priced: Record<string, unknown[]> = {}
+    const priced: Record<string, unknown> = {}
     for (const model of Object.keys(models).sort((left, right) => left.localeCompare(right))) {
-      const segments = models[model]!
-      if (segments.length === 0) continue
-      priced[model] = segments.map((segment) => {
-        const slots = segment.slots ?? []
-        return {
-          // 每段都有生效时刻：`from` 一律写出来（1970 前那种更早的时刻也是真实身份，
-          // 必须原样写出去，省掉它会让两段在盘上撞成同一条身份）。
-          from: instantKey(segment.from),
-          inputPerMillion: segment.rates.inputPerMillion,
-          outputPerMillion: segment.rates.outputPerMillion,
-          ...(segment.rates.cacheReadPerMillion !== undefined
-            ? { cacheReadPerMillion: segment.rates.cacheReadPerMillion } : {}),
-          ...(segment.rates.cacheWritePerMillion !== undefined
-            ? { cacheWritePerMillion: segment.rates.cacheWritePerMillion } : {}),
-          ...(slots.length > 0 ? { slots: slots.map(slotBody) } : {}),
-        }
-      })
+      const entry = models[model]!
+      const slots = entry.slots ?? []
+      priced[model] = {
+        inputPerMillion: entry.rates.inputPerMillion,
+        outputPerMillion: entry.rates.outputPerMillion,
+        ...(entry.rates.cacheReadPerMillion !== undefined
+          ? { cacheReadPerMillion: entry.rates.cacheReadPerMillion } : {}),
+        ...(entry.rates.cacheWritePerMillion !== undefined
+          ? { cacheWritePerMillion: entry.rates.cacheWritePerMillion } : {}),
+        ...(slots.length > 0 ? { slots: slots.map(slotBody) } : {}),
+      }
     }
     if (Object.keys(priced).length > 0) body[route] = priced
   }
@@ -588,56 +650,45 @@ export async function writePriceFile(dir: string, file: PriceFile, logger: Logge
   }
 }
 
-/** (route, model) 在 `timeMs` 生效的段；null = 价格未知（无人定价，或时刻早于最早一段）。 */
-export function priceAt(
-  table: PricingTable,
-  route: string | undefined,
-  model: string,
-  timeMs: number,
-): PriceSegment | null {
-  const segments = route === undefined || route === '' ? undefined : table[route]?.[model]
-  if (segments === undefined || segments.length === 0) return null
-  let hit: PriceSegment | null = null
-  for (const segment of segments) {
-    if (segment.from > timeMs) break
-    hit = segment
-  }
-  return hit
+/** (route, model) 的当前价；null = 价格未知（无人定价）。 */
+export function entryAt(table: PricingTable, route: string | undefined, model: string): PriceEntry | null {
+  if (route === undefined || route === '') return null
+  return table[route]?.[model] ?? null
 }
 
 /** 未提供年历时的读法：**空集** = 那一年未知，`workdays` 因此退化为「周一至周五」，
  *  只会把法定节假日多算成高峰，绝不会少算。 */
 const NO_HOLIDAYS: ReadonlySet<string> = new Set()
 
-/** 该段在 `timeMs` 生效的例外时段，或 null = 段的基准价。任一时刻至多一个时段：
+/** 该价在 `timeMs` 生效的例外时段，或 null = 基准价。任一时刻至多一个时段：
  *  写路径拒绝重叠对，读路径丢弃较晚的那个。 */
 export function slotAt(
-  segment: PriceSegment,
+  entry: PriceEntry,
   timeMs: number,
   holidays: ReadonlySet<string> = NO_HOLIDAYS,
 ): PriceSlot | null {
-  for (const slot of segment.slots ?? []) {
+  for (const slot of entry.slots ?? []) {
     if (slotCovers(slot, timeMs, holidays)) return slot
   }
   return null
 }
 
-function slotRefAt(segment: PriceSegment, timeMs: number, holidays: ReadonlySet<string>): SlotRef | null {
-  const slot = slotAt(segment, timeMs, holidays)
+function slotRefAt(entry: PriceEntry, timeMs: number, holidays: ReadonlySet<string>): SlotRef | null {
+  const slot = slotAt(entry, timeMs, holidays)
   return slot === null ? null : { start: slot.start, days: slot.days }
 }
 
 /** 基准价叠上当时生效的例外时段；时段只重述真正变化的档，其余档沿用基准价。 */
-export function ratesOfSegment(
-  segment: PriceSegment,
+export function ratesOfEntry(
+  entry: PriceEntry,
   timeMs: number,
   holidays: ReadonlySet<string> = NO_HOLIDAYS,
 ): ModelPricing {
-  const slot = slotAt(segment, timeMs, holidays)
-  return slot === null ? segment.rates : { ...segment.rates, ...slot.rates }
+  const slot = slotAt(entry, timeMs, holidays)
+  return slot === null ? entry.rates : { ...entry.rates, ...slot.rates }
 }
 
-/** (route, model) 在 `timeMs` 的价格，null = 价格未知。 */
+/** (route, model) 在 `timeMs` 的价，null = 价格未知。 */
 export function ratesAt(
   table: PricingTable,
   route: string | undefined,
@@ -645,13 +696,13 @@ export function ratesAt(
   timeMs: number,
   holidays: ReadonlySet<string> = NO_HOLIDAYS,
 ): ModelPricing | null {
-  const segment = priceAt(table, route, model, timeMs)
-  return segment === null ? null : ratesOfSegment(segment, timeMs, holidays)
+  const entry = entryAt(table, route, model)
+  return entry === null ? null : ratesOfEntry(entry, timeMs, holidays)
 }
 
-/** (route, model) 在 `timeMs` 的 rate 身份——当时生效段的生效时刻 + 段内生效
- *  的例外时段，或 {@link UNPRICED_KEY}。只存身份、不存数字，改价后下次读即
- *  重算历史（年历改了同理：时段身份不变，但重算会按新节假日取价）。 */
+/** (route, model) 在 `timeMs` 的 rate 身份——当时生效的例外时段，或
+ *  {@link UNPRICED_KEY}。只存身份、不存数字，改价后下次读即重算历史
+ *  （年历改了同理：时段身份不变，但重算会按新节假日取价）。 */
 export function rateKeyAt(
   table: PricingTable,
   route: string | undefined,
@@ -659,26 +710,27 @@ export function rateKeyAt(
   timeMs: number,
   holidays: ReadonlySet<string> = NO_HOLIDAYS,
 ): RateKey {
-  const hit = priceAt(table, route, model, timeMs)
-  return hit === null ? UNPRICED_KEY : { from: hit.from, slot: slotRefAt(hit, timeMs, holidays) }
+  const entry = entryAt(table, route, model)
+  return entry === null ? UNPRICED_KEY : { slot: slotRefAt(entry, timeMs, holidays) }
 }
 
-/** 一个 rate 身份的价格：在当前表里回查该段的生效时刻，再找它命名的时段
- *  （rate 行以计费时所依据的段时刻 + 时段为键，故重算历史无需每条记录的时间戳）。
- *  表里不再持有该身份时为 null——这些行读作价格未知。 */
+/** 一个 rate 身份的价格：在当前表里回查它命名的例外时段（rate 行以时段为键，
+ *  故重算历史无需每条记录的时间戳）。定价路径只在一种情况下回查落空：时段被
+ *  移动或删掉且折叠还没作废（价文件任何改动都会让 `pricingRevision` 变化、整份折叠
+ *  重建，见 docs/CONTRACTS.md §2），以及按美元报价却没设汇率的通道（换算表里整条被丢）。 */
 export function priceOfKey(
   table: PricingTable,
   route: string | undefined,
   model: string,
   key: RateKey,
 ): ModelPricing | null {
-  if (key.from < 0) return null
-  const segment = priceAt(table, route, model, key.from)
-  if (segment === null) return null
+  if (key.unpriced === true) return null
+  const entry = entryAt(table, route, model)
+  if (entry === null) return null
   const ref = key.slot
-  if (ref === undefined || ref === null) return segment.rates
-  const slot = (segment.slots ?? []).find(item => item.start === ref.start && item.days === ref.days)
-  return slot === undefined ? null : { ...segment.rates, ...slot.rates }
+  if (ref === undefined || ref === null) return entry.rates
+  const slot = (entry.slots ?? []).find(item => item.start === ref.start && item.days === ref.days)
+  return slot === undefined ? null : { ...entry.rates, ...slot.rates }
 }
 
 export function billingOf(billing: BillingMap, route: string | undefined): BillingNature {
@@ -709,7 +761,7 @@ function scaledRates(rates: ModelPricing, rate: number): ModelPricing {
 /**
  * **计价用的表**：把按美元报价的通道按汇率折成人民币，其余原样。币种只活在这一个缝上，
  * 成本层与折叠都不认识币种；没有汇率时**丢掉那些通道的价**（读作价格未知），绝不把
- * 美元数当人民币数。段身份（`from` + 时段）不受换算影响。取舍见 `docs/CONTRACTS.md` §2。
+ * 美元数当人民币数。时段身份不受换算影响。取舍见 `docs/CONTRACTS.md` §2。
  */
 export function cnyTable(table: PricingTable, currency: CurrencyMap, fx: FxSetting | undefined): PricingTable {
   const usdRoutes = Object.keys(currency).filter(route => currency[route] === 'USD')
@@ -723,15 +775,14 @@ export function cnyTable(table: PricingTable, currency: CurrencyMap, fx: FxSetti
       delete out[route]
       continue
     }
-    const scaled: Record<string, PriceSegment[]> = {}
-    for (const [model, segments] of Object.entries(models)) {
-      scaled[model] = segments.map(segment => ({
-        from: segment.from,
-        rates: scaledRates(segment.rates, rate),
-        ...(segment.slots !== undefined
-          ? { slots: segment.slots.map(slot => ({ ...slot, rates: scaledRates(slot.rates, rate) })) }
+    const scaled: Record<string, PriceEntry> = {}
+    for (const [model, entry] of Object.entries(models)) {
+      scaled[model] = {
+        rates: scaledRates(entry.rates, rate),
+        ...(entry.slots !== undefined
+          ? { slots: entry.slots.map(slot => ({ ...slot, rates: scaledRates(slot.rates, rate) })) }
           : {}),
-      }))
+      }
     }
     out[route] = scaled
   }

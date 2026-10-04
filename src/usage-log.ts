@@ -46,6 +46,9 @@ interface DirState {
   scanned: boolean
   /** 在途的 {@link DirState} 重建；并发调用方 await 它。 */
   scanning: Promise<void> | undefined
+  /** 扫描时尾部没有换行的分日文件名（上个进程写一半崩了）。对这类文件追加时必须
+   *  先补一个换行，否则新行会被拼到那半行后面（见 {@link UsageLog.appendOnce}）。 */
+  torn: Set<string>
 }
 
 const dirs = new Map<string, DirState>()
@@ -59,6 +62,7 @@ function stateOf(dir: string): DirState {
     ready: undefined,
     scanned: false,
     scanning: undefined,
+    torn: new Set(),
   }
   dirs.set(dir, created)
   return created
@@ -119,8 +123,7 @@ export class UsageLog {
   /** 实际扫描；{@link scan} 用在途守卫包一层。 */
   private async doScan(): Promise<void> {
     const state = this.state
-    state.ready ??= mkdir(this.dir, { recursive: true }).then(() => undefined)
-    await state.ready
+    await this.ensureDir()
     let names: string[]
     try {
       names = await readdir(this.dir)
@@ -134,6 +137,11 @@ export class UsageLog {
         this.logger.error(`[tokbook] cannot read ${name}:`, error)
         return ''
       })
+      // 尾部不带换行的文件 = 上个进程写一半崩了留下的半行：记下来，下一次追加先补一个
+      // 换行，免得新行被拼到它后面（见 appendOnce）。反过来，良构的尾巴要清掉标记，
+      // 使这个集合始终等于「尾行撕裂的那些日文件」。
+      if (text !== '' && !text.endsWith('\n')) state.torn.add(name)
+      else state.torn.delete(name)
       for (const line of text.split('\n')) {
         if (line === '') continue
         const record = parseRecord(line)
@@ -209,7 +217,10 @@ export class UsageLog {
     const state = this.state
     const task = state.queue.then(async () => {
       await this.ensureDir()
-      moved = await refileDayFiles(this.dir, this.logger)
+      const result = await refileDayFiles(this.dir, this.logger)
+      // 被重写（或整份搬空而删掉）的文件尾一定是良构的，清掉它们的撕裂标记。
+      for (const name of result.rewritten) state.torn.delete(name)
+      moved = result.moved
     })
     state.queue = task.catch(() => {})
     return task.then(() => moved).catch((error: unknown) => {
@@ -218,22 +229,41 @@ export class UsageLog {
     })
   }
 
+  /** 建好数据目录（成功结果按目录缓存）。失败**不得**被永久记住——缓存的 rejected
+   *  promise 会让本进程之后的每一次写入都失败到重启为止；这里清掉缓存、把拒绝照旧
+   *  抛给调用方，于是障碍解除后的下一次写入自己就能恢复。 */
   private async ensureDir(): Promise<void> {
     const state = this.state
-    state.ready ??= mkdir(this.dir, { recursive: true }).then(() => undefined)
+    if (state.ready === undefined) {
+      const attempt = mkdir(this.dir, { recursive: true }).then(() => undefined)
+      state.ready = attempt
+      try {
+        await attempt
+      } catch (error) {
+        if (state.ready === attempt) state.ready = undefined
+        throw error
+      }
+      return
+    }
     await state.ready
   }
 
   /** 追加一行；ready 缓存后目录消失时自愈一次。 */
   private async appendOnce(record: UsageRecord): Promise<void> {
     const path = dayFilePath(this.dir, record.time)
+    const line = `${serializeRecord(record)}\n`
+    // 该日文件尾部撕裂（上个进程写到一半崩了）时直接追加会把新行拼到那半行后面：两个
+    // 身份合成一条非法 JSON 行，已完整写入的那条记录就从所有聚合里消失。先补一个换行
+    // 把半行封成它自己那一条坏行，新行因此是可解析的独立行——仍然是纯追加、绝不重写。
+    const wasTorn = this.state.torn.delete(dayFileNameOf(record.time))
     try {
-      await appendFile(path, `${serializeRecord(record)}\n`, { flag: 'a' })
+      await appendFile(path, `${wasTorn ? '\n' : ''}${line}`, { flag: 'a' })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      // 目录整个没了：它里面那个撕裂文件也一起没了，重试不必再补换行。
       this.state.ready = undefined
       await this.ensureDir()
-      await appendFile(path, `${serializeRecord(record)}\n`, { flag: 'a' })
+      await appendFile(path, line, { flag: 'a' })
     }
   }
 }
@@ -258,29 +288,40 @@ async function readDayLines(dir: string, name: string, logger: { error(...args: 
   return lines
 }
 
-async function rewriteDayFile(dir: string, name: string, records: UsageRecord[]): Promise<void> {
+/** 原子重写一个分日文件：解析成功的记录在前，`malformed` 里的畸形行原文原样跟在后面
+ *  （日文件平时只追加，只有 refile 这个显式整理动作会重写它）。两者都空 → 删掉该文件。 */
+async function rewriteDayFile(
+  dir: string,
+  name: string,
+  records: UsageRecord[],
+  malformed: string[] = [],
+): Promise<void> {
   const target = join(dir, name)
-  if (records.length === 0) {
+  if (records.length === 0 && malformed.length === 0) {
     await unlink(target).catch(() => undefined)
     return
   }
   const tmp = join(dir, `${name}.tmp`)
-  await writeFile(tmp, `${records.map(serializeRecord).join('\n')}\n`, 'utf8')
+  await writeFile(tmp, `${[...records.map(serializeRecord), ...malformed].join('\n')}\n`, 'utf8')
   await unlink(target).catch(() => undefined)
   await rename(tmp, target)
 }
 
 /** 把已解析的行重新分配到其事件时间命名的分日文件。畸形行留在源文件，坏行
  *  绝不被丢掉。 */
-async function refileDayFiles(dir: string, logger: { error(...args: unknown[]): void }): Promise<number> {
+async function refileDayFiles(
+  dir: string,
+  logger: { error(...args: unknown[]): void },
+): Promise<{ moved: number; rewritten: Set<string> }> {
   let names: string[]
   try {
     names = (await readdir(dir)).filter(name => DAY_FILE.test(name)).sort()
   } catch (error) {
     logger.error('[tokbook] cannot list data dir ' + dir + ':', error)
-    return 0
+    return { moved: 0, rewritten: new Set() }
   }
   let moved = 0
+  const rewritten = new Set<string>()
   for (const source of names) {
     const lines = await readDayLines(dir, source, logger)
     const stay: UsageRecord[] = []
@@ -303,12 +344,17 @@ async function refileDayFiles(dir: string, logger: { error(...args: unknown[]): 
     }
     if (leave.size === 0) continue
     for (const [target, records] of leave) {
-      const existing = (await readDayLines(dir, target, logger))
+      // 接收文件原有的畸形行也要原样带过去：它和源文件里的坏行是同一种事实，
+      // 「坏行绝不被丢掉」对两者同样成立。
+      const targetLines = await readDayLines(dir, target, logger)
+      const existing = targetLines
         .map(line => line.record)
         .filter((record): record is UsageRecord => record !== null)
+      const malformed = targetLines.filter(line => line.record === null).map(line => line.raw)
       const seen = new Set(existing.map(record => record.requestId))
       const appended = records.filter(record => !seen.has(record.requestId))
-      await rewriteDayFile(dir, target, [...existing, ...appended])
+      await rewriteDayFile(dir, target, [...existing, ...appended], malformed)
+      rewritten.add(target)
     }
     if (stray.length > 0) {
       const target = join(dir, source)
@@ -320,6 +366,7 @@ async function refileDayFiles(dir: string, logger: { error(...args: unknown[]): 
     } else {
       await rewriteDayFile(dir, source, stay)
     }
+    rewritten.add(source)
   }
-  return moved
+  return { moved, rewritten }
 }

@@ -35,28 +35,37 @@ function pidIsAlive(pid: number): boolean {
   }
 }
 
-/** 外来存活 pid → 告警（rollup/cache/refile 会竞态；JSONL 逐行追加本身安全）。从不抛。 */
+/**
+ * 检查目录属主标记并告警（rollup/cache/refile 会竞态；JSONL 逐行追加本身安全）。
+ *
+ * 返回**是否存在存活的异进程属主**：`true` 时调用方**不得**写自己的标记——覆盖掉
+ * 活着那个进程的标记，会让它退出后留下的标记被下一进程读成「陈旧」而静默接管，
+ * 这正是守卫要防的双写。`false`（没有标记 / 标记不可读 / 畸形 / 属于本进程 /
+ * pid 已死）意味着本进程可以接管。从不抛。
+ */
 export async function warnIfForeignOwner(
   dir: string,
   logger: { warn?(...args: unknown[]): void; info?(...args: unknown[]): void } = console,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const text = await readFile(join(dir, OWNER_FILE), 'utf8')
     const marker: unknown = JSON.parse(text)
-    if (typeof marker !== 'object' || marker === null) return
+    if (typeof marker !== 'object' || marker === null) return false
     const { pid, startedAt } = marker as OwnerMarker
-    if (typeof pid !== 'number' || pid === process.pid) return
+    if (typeof pid !== 'number' || pid === process.pid) return false
     if (pidIsAlive(pid)) {
       logger.warn?.(
         `[tokbook] data directory ${dir} is owned by live process ${String(pid)} (started ${new Date(startedAt ?? 0).toISOString()}). ` +
         'Two hosts writing one ledger directory are not supported: rollup/cache/refile races can corrupt derived stats. ' +
         'Point the second instance at its own `path`, or stop the first.',
       )
-    } else {
-      logger.info?.(`[tokbook] data directory ${dir} has a stale owner marker (pid ${String(pid)} is gone); this instance takes over.`)
+      return true
     }
+    logger.info?.(`[tokbook] data directory ${dir} has a stale owner marker (pid ${String(pid)} is gone); this instance takes over.`)
+    return false
   } catch {
-    // 无标记（首次运行）或不可读：无可警告。
+    // 无标记（首次运行）或不可读：无可警告，本进程接管。
+    return false
   }
 }
 

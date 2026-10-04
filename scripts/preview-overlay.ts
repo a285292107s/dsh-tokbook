@@ -217,12 +217,12 @@ const syncErrOverview = { ...overview, syncStatus: 'error', syncError: syncError
 
 /* ── pricing-tab fixtures ── */
 /** Pricing-tab fixture: the route cards the 价格表 tab renders. One card per
- *  route, one row per model, each carrying its price segments (生效时间 +
- *  基准价四档 + 例外时段). The states worth looking at are all here: priced
- *  rows with a 调价史, a 峰谷时段 row, 价格未知 (both kinds: 整行没价 and 有记录早于
- *  最早一段价), 「还没有价」的行（轴退成暗淡空轨）, 一段未来价（轴两端对调）,
- *  a configured:false string (the config no longer lists it), a 订阅 route,
- *  and a route that only exists because the price file names it.
+ *  route, one row per model, each carrying its **current price** (基准价四档 +
+ *  例外时段). The states worth looking at are all here: 有价（含峰谷时段）,
+ *  价格未知（整行没有价）, 有价但 host 报出折算不出的记录（按美元报价却没设汇率
+ *  那种，行上带「价格未知」）, a configured:false string (the config no longer
+ *  lists it), a 订阅 route, a 0 价 route, and a route that only exists because
+ *  the price file names it.
  *
  *  每张卡的 `records` 必须**等于该卡各行之和**：host 用同一次折叠同时算出这两个
  *  数（`ledgerUsageOf`），单独编一个总量会端出 host 产不出的形状——卡片头上写着
@@ -232,136 +232,79 @@ const PRICING_FIXTURE = {
     {
       route: 'deepseek-official', label: 'DeepSeek', billing: 'metered', records: 7058,
       models: [
-        { model: 'deepseek-v4-flash', configured: true, records: 322,
-          // 有账本时间跨度,但最早的价从 08-01 起而首记在 07-20:那 40 次没被任何价覆盖
-          // (计 ¥0),所以这一行带「价格未知」徽标。
-          // 轴从最早那段价(08-01)画到今天,节点就是这几段价。
-          firstAt: Date.UTC(2026, 6, 20), lastAt: Date.UTC(2026, 8, 11), unpriced: 40,
-          segments: [
-          { from: '2026-08-01', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheReadPerMillion: 0.15 },
-          { from: '2026-09-01', inputPerMillion: 2, outputPerMillion: 6 },
-          // 带峰谷时段的一段:工作日高峰另定,其余时间按基准价。
-          { from: '2026-09-10T12:00', inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
+        // 带峰谷时段的一条：工作日高峰另定，其余时间按基准价。
+        { model: 'deepseek-v4-flash', configured: true, records: 322, unpriced: 0,
+          price: { inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
             slots: [
               { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
-              { days: 'weekdays', start: 14, end: 18, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
-            ] },
-        ] },
-        // 首记 08-25,最早那段却写 08-21:那个边界落在轴的区间之外,不上轴,
-        // 所以轴上只有 09-10 一个节点(左端仍是首记,不是价段边界);而 08-21 覆盖了
-        // 首记之后的一切,所以这一行没有「价格未知」。
-        { model: 'deepseek-v4-flash-vision-exp', configured: true, records: 3092,
-          firstAt: Date.UTC(2026, 7, 25), lastAt: Date.UTC(2026, 8, 6), unpriced: 0,
-          segments: [
-          { from: '2026-08-21', inputPerMillion: 1.5, outputPerMillion: 4.5, cacheWritePerMillion: 0.05 },
-          { from: '2026-09-10', inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 },
-        ] },
-        // 密集调价史:8 个节点挤在三周内(含同一天两个),用来看"节点之间的最小
-        // 间隔":靠得太近的节点被摊开,8 个仍然排得下(两端钉死,轴不横向滚动)。
-        // 首记 08-18,最早那段却写 08-20:那个边界落在轴的区间之外,所以轴上只有 08-20
-        // 起的节点(左端仍是首记,不是价段边界);而首记那几笔没人定价,于是行上带
-        // 「价格未知 N 次」。
-        { model: 'deepseek-v4.1-flash', configured: true, records: 899,
-          firstAt: Date.UTC(2026, 7, 18, 2), lastAt: Date.UTC(2026, 8, 12, 6), unpriced: 12,
-          segments: [
-          { from: '2026-08-20', inputPerMillion: 1, outputPerMillion: 4 },
-          { from: '2026-08-21', inputPerMillion: 1.2, outputPerMillion: 4.5 },
-          { from: '2026-08-25', inputPerMillion: 1.5, outputPerMillion: 5 },
-          { from: '2026-09-01', inputPerMillion: 1.8, outputPerMillion: 5.5 },
-          { from: '2026-09-02T09:00', inputPerMillion: 2, outputPerMillion: 6 },
-          { from: '2026-09-02T18:00', inputPerMillion: 2.2, outputPerMillion: 6.5 },
-          { from: '2026-09-08', inputPerMillion: 2.5, outputPerMillion: 7 },
-          { from: '2026-09-10', inputPerMillion: 3, outputPerMillion: 8 },
-        ] },
-        // 首记在生效时间之后:轴只从那段价画到今天(账本的首记不再进轴)。这一段从 09-01 起、
-        // 覆盖了全部账本,所以行上没有「价格未知」。
-        // 目录给了展示名:身份行随之走比例体(精确串才走等宽),而且它**没有徽章**——
+              { days: 'workdays', start: 14, end: 18, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
+            ] } },
+        // 只重述输出价的一条时段（留空的档沿用基准价）。
+        { model: 'deepseek-v4-flash-vision-exp', configured: true, records: 3092, unpriced: 0,
+          price: { inputPerMillion: 1.5, outputPerMillion: 4.5, cacheWritePerMillion: 0.05,
+            slots: [{ days: 'weekends', start: 0, end: 24, outputPerMillion: 6 }] } },
+        // **有价、行上仍带「价格未知」**：host 报出这些记录折算不出金额——生产里唯一的来路是
+        // 「按美元报价却没设汇率」的通道（换算表里整条被丢）。价位仍在，读作 ¥0 的那些记录不算在内。
+        { model: 'deepseek-v4.1-flash', configured: true, records: 899, unpriced: 12,
+          price: { inputPerMillion: 3, outputPerMillion: 8 } },
+        // 目录给了展示名:身份行随之走比例体(精确串才走等宽),而且它**没有徽标**——
         // 正是「有没有名字」与「有没有徽章」必须分开判的那一格(见 styles/pricing 的 [data-exact])。
-        { model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', configured: true, records: 2745,
-          firstAt: Date.UTC(2026, 8, 5, 3), lastAt: Date.UTC(2026, 8, 11, 10), unpriced: 0,
-          segments: [
-          { from: '2026-09-01', inputPerMillion: 4.5, outputPerMillion: 13.5, cacheWritePerMillion: 0.15 },
-        ] },
-        // 账本没记过这条串(还没调用过):轴照样画——它只看价,不看账本的首记。
-        { model: 'deepseek-flash', configured: true, records: 0, segments: [
-          { from: '2026-08-01', inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 },
-        ] },
-        // 有价、但账本没记过:轴从左端那段价画到今天。
-        { model: 'deepseek-v4-flash-vision', configured: true, records: 0, segments: [
-          { from: '2026-08-18', inputPerMillion: 1.5, outputPerMillion: 4.5 },
-        ] },
-        // 只写了**未来**的价,而且账本没记过:这一刻没有任何一段在生效 → 行内四格是「—」,
-        // 徽标是「未生效」(不是「价格未知」——没有记录按 ¥0 计);轴的两端这时候对调,
-        // 今天退成中间那个节点。日期刻意写远:写近了,过几天这一行自己就生效了,这个状态就看不见了。
-        { model: 'deepseek-v4.2-flash-preview', configured: true, records: 0, segments: [
-          { from: '2027-01-01', inputPerMillion: 2, outputPerMillion: 8 },
-        ] },
+        { model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', configured: true, records: 2745, unpriced: 0,
+          price: { inputPerMillion: 4.5, outputPerMillion: 13.5, cacheWritePerMillion: 0.15 } },
+        // 账本没记过这条串(还没调用过):有价就有四个数字,记录数为「没记过」。
+        { model: 'deepseek-flash', configured: true, records: 0, unpriced: 0,
+          price: { inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 } },
+        // 有价、但账本没记过。
+        { model: 'deepseek-v4-flash-vision', configured: true, records: 0, unpriced: 0,
+          price: { inputPerMillion: 1.5, outputPerMillion: 4.5 } },
+        // 没有价:四格是「—」,行读作价格未知(它的记录按 ¥0 计)。
+        { model: 'deepseek-v4.2-flash-preview', configured: true, records: 0, unpriced: 0 },
       ],
     },
     {
-      // **按美元报价的通道**（`$currency`）：段里的数就是厂商给的美元价，人民币金额由 `$fx`
+      // **按美元报价的通道**（`$currency`）：价里的数就是厂商给的美元价，人民币金额由 `$fx`
       // 折出来。这一条让「美元报价 + 人民币计价」两件事同时可看、可点。
       route: 'commandcode', label: 'commandcode', billing: 'subscription', currency: 'USD', records: 3240,
       models: [
-        // **最长的一个身份串**（命名空间前缀 + 长版本串）：
-        // 上一版在这种行上会把徽章挤到第二行——实测行高从 48 涨到 60。
+        // **最长的一个身份串**（命名空间前缀 + 长版本串）：上一版在这种行上会把徽章挤到第二行。
         // 现在身份行只有名字（整列宽都归它）；这行本身已无判定可说（峰谷与不在配置都不再上模型行）。
-        // 两段价 + 一段带峰谷的调价：行内四个数字报的是正在生效的那一段。
-        { model: 'deepseek/deepseek-v4-flash', configured: false, records: 2964,
-          firstAt: Date.UTC(2026, 8, 6, 11, 3), lastAt: Date.UTC(2026, 8, 8, 11, 2), unpriced: 0,
-          segments: [
-          { from: '2026-09-01', inputPerMillion: 0.21, outputPerMillion: 0.63 },
-          { from: '2026-09-10T12:00', inputPerMillion: 0.14, outputPerMillion: 0.56, cacheReadPerMillion: 0.0028,
+        { model: 'deepseek/deepseek-v4-flash', configured: false, records: 2964, unpriced: 0,
+          price: { inputPerMillion: 0.14, outputPerMillion: 0.56, cacheReadPerMillion: 0.0028,
             slots: [
               { days: 'weekdays', start: 9, end: 12, inputPerMillion: 0.28, outputPerMillion: 1.12, cacheReadPerMillion: 0.0056 },
-            ] },
-        ] },
-        { model: 'z-ai/glm-5.3-flash', configured: true, records: 276, unpriced: 276, segments: [] },
+            ] } },
+        { model: 'z-ai/glm-5.3-flash', configured: true, records: 276, unpriced: 276 },
       ],
     },
     {
       route: 'dots-ai', label: '小红书', billing: 'metered', records: 644,
       models: [
-        // 一段价覆盖全程(0 价):轴于是只有左端那一个节点 + 今天。
-        { model: 'dots3-note-prev', configured: true, records: 644,
-          firstAt: Date.UTC(2026, 7, 19, 3), lastAt: Date.UTC(2026, 7, 27, 9), unpriced: 0,
-          segments: [
-          { from: '2026-08-01', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
-        ] },
+        // 一条 0 价的价:金额量出来就是 0.00,不是「价格未知」。
+        { model: 'dots3-note-prev', configured: true, records: 644, unpriced: 0,
+          price: { inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 } },
       ],
     },
     {
       route: 'opencode-go', label: 'OpenCode Go', billing: 'subscription', records: 367,
       models: [
-        { model: 'glm-5.3-flash', configured: true, records: 243,
-          firstAt: Date.UTC(2026, 8, 5, 8, 5), lastAt: Date.UTC(2026, 8, 6, 0, 54), unpriced: 0,
-          segments: [
-          { from: '2026-09-01', inputPerMillion: 0.8, outputPerMillion: 2.8 },
-        ] },
-        // 没有价、但有账:整行没有价,轴退成一条暗淡的空轨(不隐藏)——「全部计 ¥0」
-        // 是「价格未知」徽标的事,抽屉里也不该动用警示色。
-        { model: 'mimo-v2.5', configured: true, records: 83,
-          firstAt: Date.UTC(2026, 7, 17, 4), lastAt: Date.UTC(2026, 7, 17, 9), unpriced: 83,
-          segments: [] },
+        { model: 'glm-5.3-flash', configured: true, records: 243, unpriced: 0,
+          price: { inputPerMillion: 0.8, outputPerMillion: 2.8 } },
+        // 没有价、但有账:整行没有价,写不出去的记录按 ¥0 计——「全部计 ¥0」是「价格未知」
+        // 徽标的事,界面里也不该动用警示色。
+        { model: 'mimo-v2.5', configured: true, records: 83, unpriced: 83 },
         // 配置里已经没有这条串了,只有账本记得它:界面上不再播报这个身份事实,照样可定价。
-        { model: 'retired-model', configured: false, records: 41,
-          firstAt: Date.UTC(2026, 8, 1, 6), lastAt: Date.UTC(2026, 8, 1, 7, 30), unpriced: 41,
-          segments: [] },
+        { model: 'retired-model', configured: false, records: 41, unpriced: 41 },
         // 没有价、账本也从没调用过它:刚加进配置、还没定价的一条串。行上四个格子是「—」,
-        // 判定带说的是「还没有价;它还没有被调用过」——而不是「它的请求都按 ¥0 记」
-        // (那些请求不存在,那是一句假话)。
-        { model: 'glm-5.4-air', configured: true, records: 0, segments: [] },
+        // 判定带说的是「还没有价」——而不是「它的请求都按 ¥0 记」(那些请求不存在,那是一句假话)。
+        { model: 'glm-5.4-air', configured: true, records: 0, unpriced: 0 },
       ],
     },
     {
       // 配置里已删掉、但账本/价格文件还记得的路由。
       route: 'private-relay', label: 'private-relay', billing: 'metered', records: 42,
       models: [
-        { model: 'deepseek-v4-flash', configured: false, records: 42,
-          firstAt: Date.UTC(2026, 8, 3, 2), lastAt: Date.UTC(2026, 8, 3, 4), unpriced: 0,
-          segments: [
-          { from: '2026-09-01', inputPerMillion: 1.2, outputPerMillion: 3.6 },
-        ] },
+        { model: 'deepseek-v4-flash', configured: false, records: 42, unpriced: 0,
+          price: { inputPerMillion: 1.2, outputPerMillion: 3.6 } },
       ],
     },
   ],
@@ -419,8 +362,9 @@ function withPricingWrite(body) {
   const seen = new Set()
   for (const card of pricingState.routes) {
     const models = card.models.map((row) => {
-      const segments = body[card.route]?.[row.model]
-      return { ...row, segments: segments === undefined ? [] : segments }
+      const price = body[card.route]?.[row.model]
+      // 没写这份价的那些行在 host 上就是「没有价」——wire 上省略 `price`。
+      return { ...row, price: price === undefined ? undefined : price }
     })
     routes.push({ ...card, billing: billing[card.route] ?? 'metered', currency: usd(card.route), models })
     seen.add(card.route)
@@ -435,7 +379,7 @@ function withPricingWrite(body) {
       billing: billing[route] ?? 'metered',
       currency: usd(route),
       records: 0,
-      models: Object.entries(models).map(([model, segments]) => ({ model, configured: false, records: 0, segments })),
+      models: Object.entries(models).map(([model, price]) => ({ model, configured: false, records: 0, price })),
     })
   }
   pricingState.routes = routes
@@ -899,7 +843,7 @@ const server = createServer((req, res) => {
     --dsw-alias-label-primary-inverted:#ffffff;
     /* 品牌强调色按 **DSH 的真实取值**给：浅色皮肤 = neutral-bluish-1000（等于墨色），
        深色皮肤 = neutral-bluish-50。DSH 里这一档是「身份色」，恰好等于主文字色——预览台此前
-       填的是 #4d6bfe（那只存在于插件自己的 CSS 兜底里），于是焦点环、调价史「当前生效」那枚点
+       填的是 #4d6bfe（那只存在于插件自己的 CSS 兜底里），于是焦点环、侧栏入口那点
        在预览里是蓝的、在真宿主里是墨的：拿预览验颜色会得出相反的结论（accent 不是自由强调色）。
        宿主另有一个还在推的 -new-color 蓝（#4176e6）。 */
     --dsw-alias-brand-primary:#0f1115;

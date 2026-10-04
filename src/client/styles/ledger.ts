@@ -196,6 +196,12 @@ export const CSS_LEDGER = `
   content:"";position:absolute;left:0;right:0;top:0;height:1px;
   background:color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
 }
+/* 悬停是这张图唯一的探索动作：柱体升一档明度、数值升到主墨。只给非峰值那根——峰值已在
+   顶层（70% + 主墨 + 黄牌），悬停不该把它的层级降下来。 */
+[data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-fill:not(.is-peak){
+  background-color:color-mix(in srgb,var(--dtpl-fg) 60%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-label:not(.is-peak){color:var(--dtpl-fg);}
 /* 峰值：**更亮的中性块 + 柱值标签前一枚小黄牌**，柱身上不带任何黄
    （满屏唯一的饱和色不进最大的那块面，见 tokens 第五节）。
    70% 是量出来的：再亮则与黄牌明度接近、黄牌读不出来；再暗则与邻柱糊在一起、峰值认不出。

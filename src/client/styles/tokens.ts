@@ -45,7 +45,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-warn-ink:color-mix(in srgb,var(--dtpl-warn) 55%,var(--dtpl-fg));
 
   /* ── 四、系统信号：跟随宿主，不参与这套视觉语言 ───────────────────────────
-     焦点环、输入框聚焦边框、调价史"当前生效"点走它。
+     焦点环、输入框聚焦边框、额度告急那一点走它。
      它不可当强调色用：DSH 默认皮肤里这档等于墨色，拿它做分类或状态是空操作，
      换皮肤又会变蓝。兜底取墨色而非某个蓝——端出 DSH 里不存在的强调色更糟。 */
   --dtpl-accent:var(--dsw-alias-brand-primary,#1f2328);

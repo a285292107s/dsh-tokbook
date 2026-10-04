@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
-import type { SyncStatusView, TokBookOverview } from '../types.ts'
+import type { SyncStatusView, TokBookOverview, UsageDayRow } from '../types.ts'
 import { ROUTE_OVERVIEW, ROUTE_RESCAN, ROUTE_SYNC } from '../route-paths.ts'
 import type { TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
@@ -27,18 +27,70 @@ export interface LedgerOverlayProps {
 const SYNC_FOLLOW_INTERVAL_MS = 500
 const SYNC_FOLLOW_ATTEMPTS = 60
 
+/** 四桶齐全的 totals——`totalsTokens`（src/types.ts:645-650）与 `LedgerView` 都对它做算术。 */
+function isBucketTotals(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const totals = raw as Partial<UsageDayRow['totals']>
+  return typeof totals.inputTokens === 'number'
+    && typeof totals.cacheReadTokens === 'number'
+    && typeof totals.cacheWriteTokens === 'number'
+    && typeof totals.outputTokens === 'number'
+}
+
+/**
+ * 概览载荷的形状判定：只盖渲染**真正会解引用**的字段——`LedgerView` 的 `byDay`（逐行
+ * `day` / `totals`）与 `records`、`MethodDoc` 的 `dataDir`、页脚的 `syncStatus` / `syncError` /
+ * `lastEventAt`。不合法就走 store 的错误态（错误条 + 重试），绝不把半成品塞进 store：
+ * 渲染期抛错会让这条 list 型 slot 被宿主摘掉，footer 按钮还能开，浮窗却再也打不开。
+ * 判据按 host 现在的组装处与类型：`overview()`（src/index.ts:382-401，按
+ * `TokBookOverview` 直出）与 `TokBookOverview`（src/types.ts:439-463）。
+ */
+function readOverview(raw: unknown): TokBookOverview | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const source = raw as Partial<TokBookOverview>
+  if (!Array.isArray(source.byDay)) return null
+  for (const row of source.byDay) {
+    if (typeof row !== 'object' || row === null) return null
+    const day = row as Partial<UsageDayRow>
+    if (typeof day.day !== 'string' || !isBucketTotals(day.totals)) return null
+  }
+  // host 这两格恒为 string|null（不是可选），缺席也是形状漂移。
+  if (source.lastEventAt !== null && typeof source.lastEventAt !== 'number') return null
+  if (source.syncError !== null && typeof source.syncError !== 'string') return null
+  if (typeof source.records !== 'number' || typeof source.dataDir !== 'string') return null
+  if (source.syncStatus !== 'idle' && source.syncStatus !== 'running'
+    && source.syncStatus !== 'done' && source.syncStatus !== 'error') return null
+  return source as TokBookOverview
+}
+
 export function LedgerOverlay({ view }: LedgerOverlayProps) {
   useEffect(() => injectStyles(), [])
   const { open, overview, error, pricingDirty } = useSyncExternalStore(view.subscribe, view.getSnapshot)
   const [scanning, setScanning] = useState(false)
-  /** 在飞的那一轮「重新扫描」跟随。存 ref 是为了让关窗 / 卸载能中止它——轮询本身没有生命周期。 */
-  const rescanRef = useRef<AbortController | null>(null)
+  /** 在飞的那一条 follow（打开浮窗追一轮 / 重新扫描追一轮）。两条路径**登记同一个 ref**：
+   *  新一轮开始前先中止上一轮，避免两条循环同时每 500ms 打 `/tokbook/sync` 并各自拉全量概览。
+   *  存 ref 也是为了让关窗 / 卸载能中止它——轮询本身没有生命周期。 */
+  const followRef = useRef<AbortController | null>(null)
+
+  /** 开新一轮 follow：先中止上一轮，再登记自己。返回这一轮的 signal。 */
+  const beginFollow = useCallback((): AbortController => {
+    followRef.current?.abort()
+    const controller = new AbortController()
+    followRef.current = controller
+    return controller
+  }, [])
 
   const fetchOverview = useCallback((signal?: AbortSignal): Promise<void> => {
     return fetch(ROUTE_OVERVIEW, { signal })
-      .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() })
-      .then((data: TokBookOverview) => { if (!signal?.aborted) view.setOverview(data) })
-      .catch((err: unknown) => { if (!signal?.aborted) view.setError(err instanceof Error ? err.message : String(err)) })
+      .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<unknown> })
+      .then((raw) => {
+        if (signal?.aborted === true) return
+        const next = readOverview(raw)
+        // 形状不对按一次读失败处理：错误态是重试的入口，而半成品进 store 会让渲染期抛错。
+        if (next === null) throw new Error('响应不是一份账本概览')
+        view.setOverview(next)
+      })
+      .catch((err: unknown) => { if (signal?.aborted !== true) view.setError(err instanceof Error ? err.message : String(err)) })
   }, [view])
 
   /** 只读 host 内存的同步状态探针。追 walk 落定靠它、不靠反复拉概览：概览每次都是全量
@@ -70,41 +122,45 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     await fetchOverview(signal)
   }, [fetchOverview, fetchSyncState, view])
 
-  // 每次打开拉取一次（读到 running 则继续追到落定）。
+  // 每次打开拉取一次（读到 running 则继续追到落定）。这一轮也登记进 `followRef`：它可能还在
+  // 追的时候用户按了「重新扫描」，那时新一轮要先把它中止掉（见 `onRescan`）。
   useEffect(() => {
     if (!open) return
-    const controller = new AbortController()
+    const controller = beginFollow()
     void fetchOverview(controller.signal).then(() => {
       if (view.getSnapshot().overview?.syncStatus === 'running') return followSync(controller.signal)
     })
     return () => { controller.abort() }
-  }, [open, fetchOverview, followSync, view])
+  }, [open, beginFollow, fetchOverview, followSync, view])
 
-  // 关闭浮窗 / 组件卸载即中止这一轮跟随。
+  // 关闭浮窗 / 组件卸载即中止当前这一轮跟随（打开的那一轮与重新扫描的那一轮登记在同一个 ref 上）。
   useEffect(() => {
     if (!open) {
-      rescanRef.current?.abort()
+      followRef.current?.abort()
+      // 被中止不是失败：那一轮已经随着关窗作废，按钮上的「扫描中」也一起作废。
+      setScanning(false)
       return
     }
-    return () => { rescanRef.current?.abort() }
+    return () => { followRef.current?.abort() }
   }, [open])
 
-  // 触发一次权威再同步，然后追到落定。
+  // 触发一次权威再同步，然后追到落定。**开新一轮前先中止上一轮**——被打断的可能是打开浮窗
+  // 那条 follow，不然两条循环会同时追同一场 walk。
   const onRescan = useCallback(async () => {
-    rescanRef.current?.abort()
-    const controller = new AbortController()
-    rescanRef.current = controller
+    const controller = beginFollow()
     setScanning(true)
     try {
-      await fetch(ROUTE_RESCAN, { method: 'POST' }).then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
+      // 带 signal：关窗中止得了这次 POST，不会把「扫描中…」永远挂在按钮上。
+      await fetch(ROUTE_RESCAN, { method: 'POST', signal: controller.signal })
+        .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
       await followSync(controller.signal)
     } catch (err) {
       // 被中止不是失败：那一轮已经随着关窗作废，报错只会把「关掉了」说成「扫不动」。
       if (!controller.signal.aborted) view.setError(err instanceof Error ? err.message : String(err))
     } finally {
-      if (rescanRef.current === controller) setScanning(false)
+      if (followRef.current === controller) setScanning(false)
     }
-  }, [followSync, view])
+  }, [beginFollow, followSync, view])
 
   if (!open) return null
   return (

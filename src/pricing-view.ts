@@ -7,11 +7,10 @@
  * 与拥有价**文件**本身（读、写、解析）的 `./pricing.ts` 分开。
  */
 
-import { HOUR_MS, hourStartMs, instantKey, EARLIEST } from './price-format.ts'
 import { billingOf, rateKeyAt, readPriceFile } from './pricing.ts'
 import type {
-  HolidayCalendar, ModelEntry, PriceSegment, PriceSlot, PricingModelView, PricingRouteView,
-  PricingSegmentInput, PricingSlotInput, PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
+  HolidayCalendar, ModelEntry, PriceEntry, PriceSlot, PricingEntryInput, PricingModelView,
+  PricingRouteView, PricingSlotInput, PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
 } from './types.ts'
 interface Logger {
   error(...args: unknown[]): void
@@ -22,9 +21,8 @@ interface Logger {
 export interface LedgerModelUsage {
   records: number
   firstAt: number
-  lastAt: number
-  /** 按各自时间戳不被任何价格段覆盖的请求。它们计 ¥0，而**有**价的行仍可能
-   *  持有它们：写下的生效时间会静默截断其之前的一切。 */
+  /** 按当前价折算不出金额的请求（整行没有价，或按美元报价却没设汇率）。
+   *  它们计 ¥0，并由价格表的分组摘要报出。 */
   unpriced: number
 }
 
@@ -53,11 +51,10 @@ export function ledgerUsageOf(
       byRouteModel.set(route, models)
     }
     const row = models.get(record.model)
-      ?? { records: 0, firstAt: record.time, lastAt: record.time, unpriced: 0 }
+      ?? { records: 0, firstAt: record.time, unpriced: 0 }
     row.records += 1
     if (record.time < row.firstAt) row.firstAt = record.time
-    if (record.time > row.lastAt) row.lastAt = record.time
-    if (rateKeyAt(table, route, record.model, record.time, holidays).from < 0) row.unpriced += 1
+    if (rateKeyAt(table, route, record.model, record.time, holidays).unpriced === true) row.unpriced += 1
     models.set(record.model, row)
     byRoute.set(route, (byRoute.get(route) ?? 0) + 1)
   }
@@ -105,30 +102,16 @@ function slotInput(slot: PriceSlot): PricingSlotInput {
   }
 }
 
-/** 无 `from` 那一段的迁移落点。段按生效时刻升序，哨兵段（`from = EARLIEST`）的原始
- *  覆盖是 `[0, 其后第一个真实段)`。落点是该模型的首记整点（没有记录用今天），但不得
- *  不早于那一下一段——否则哨兵段会越过后面的真实段、把所有后续记录改成它计价。
- *  越界时落回那一段之前一个整点。 */
-function migrationFrom(segments: readonly PriceSegment[], firstAt: number | undefined, now: number): number {
-  const landing = hourStartMs(firstAt ?? now)
-  const next = segments.find(segment => segment.from > EARLIEST)
-  if (next === undefined || landing < next.from) return landing
-  const at = next.from - HOUR_MS
-  // 落在 0 上会被重新读成「没有生效时刻」，所以再退一个整点。
-  return at === EARLIEST ? at - HOUR_MS : at
-}
-
-/** 旧文件里「没有生效时刻」的那一段（`from === EARLIEST`）由调用方给出迁入日期。 */
-function segmentInput(segment: PriceSegment, inheritedFrom: number): PricingSegmentInput {
-  const slots = (segment.slots ?? []).map(slotInput)
+/** 表里的一份价 → wire 形态（wire 不带任何快照，client 按当前时刻现算生效时段）。 */
+function entryInput(entry: PriceEntry): PricingEntryInput {
+  const slots = (entry.slots ?? []).map(slotInput)
   return {
-    from: instantKey(segment.from === EARLIEST ? inheritedFrom : segment.from),
-    inputPerMillion: segment.rates.inputPerMillion,
-    outputPerMillion: segment.rates.outputPerMillion,
-    ...(segment.rates.cacheReadPerMillion !== undefined
-      ? { cacheReadPerMillion: segment.rates.cacheReadPerMillion } : {}),
-    ...(segment.rates.cacheWritePerMillion !== undefined
-      ? { cacheWritePerMillion: segment.rates.cacheWritePerMillion } : {}),
+    inputPerMillion: entry.rates.inputPerMillion,
+    outputPerMillion: entry.rates.outputPerMillion,
+    ...(entry.rates.cacheReadPerMillion !== undefined
+      ? { cacheReadPerMillion: entry.rates.cacheReadPerMillion } : {}),
+    ...(entry.rates.cacheWritePerMillion !== undefined
+      ? { cacheWritePerMillion: entry.rates.cacheWritePerMillion } : {}),
     ...(slots.length > 0 ? { slots } : {}),
   }
 }
@@ -146,7 +129,6 @@ export async function readPricingView(
     name?: string
     /** 账本自身的事实，行有一条记录后在场。 */
     firstAt?: number
-    lastAt?: number
     unpriced?: number
   }
   const routes = new Map<string, { label: string; models: Map<string, ModelAcc> }>()
@@ -183,14 +165,12 @@ export async function readPricingView(
           configured: false,
           records: usage.records,
           firstAt: usage.firstAt,
-          lastAt: usage.lastAt,
           unpriced: usage.unpriced,
         })
         continue
       }
       row.records = usage.records
       row.firstAt = usage.firstAt
-      row.lastAt = usage.lastAt
       row.unpriced = usage.unpriced
     }
   }
@@ -209,17 +189,14 @@ export async function readPricingView(
   for (const [route, entry] of routes) {
     const models: PricingModelView[] = []
     for (const [model, acc] of entry.models) {
-      const segments = file.table[route]?.[model]
-      const inheritedFrom = migrationFrom(segments ?? [], acc.firstAt, now)
+      const price = file.table[route]?.[model]
       models.push({
         model,
         ...(acc.name !== undefined ? { name: acc.name } : {}),
         configured: acc.configured,
         records: acc.records,
-        ...(acc.firstAt !== undefined ? { firstAt: acc.firstAt } : {}),
-        ...(acc.lastAt !== undefined ? { lastAt: acc.lastAt } : {}),
         ...(acc.unpriced !== undefined ? { unpriced: acc.unpriced } : {}),
-        segments: (segments ?? []).map(segment => segmentInput(segment, inheritedFrom)),
+        ...(price !== undefined ? { price: entryInput(price) } : {}),
       })
     }
     models.sort((left, right) =>

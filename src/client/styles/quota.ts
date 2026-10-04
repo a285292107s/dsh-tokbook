@@ -175,8 +175,13 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   background:color-mix(in srgb,var(--dtpl-fg) 12%,transparent);overflow:hidden;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill{
-  display:block;height:100%;
+  display:block;position:relative;height:100%;
   transition:width .4s ease,background-color .2s ease;
+}
+/* 条顶 1px 受光边：与趋势图柱顶那道同一手法（见 ledger 片段），量条于是和柱子是同一种材质。 */
+[data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill::before{
+  content:"";position:absolute;left:0;right:0;top:0;height:1px;
+  background:color-mix(in srgb,#fff 22%,transparent);
 }
 /* 健康态**不染色**：条与表盘的默认填充是次要墨色，绿只留给真正的 ok。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-tone-ok{color:var(--dtpl-fg-2);}
@@ -259,5 +264,13 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-bar{height:7px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-note{
   margin:10px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+}
+
+/* 入场动效（只在重挂时播；reduce 见 shared 的关断表）：
+   表盘的弧从 12 点扫到自己的读数（弧长由 QuotaCard 以 --dtpl-arc 随元素给出），
+   额度条从 0 填到自己的宽度——两只「量具」上电时都走一遍自己的量程。 */
+@media (prefers-reduced-motion:no-preference){
+  [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill{animation:dtpl-draw .5s cubic-bezier(.3,.6,.3,1) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill{animation:dtpl-width-in .45s cubic-bezier(.3,.6,.3,1) both;}
 }
 `

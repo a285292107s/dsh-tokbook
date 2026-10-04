@@ -18,6 +18,8 @@
 | [`docs/HMR.md`](HMR.md) | lessons(教训)/ reference(参考) | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
 | [`docs/LESSONS.md`](LESSONS.md) | lessons(教训) | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
 | [`docs/COMMENTS.md`](COMMENTS.md) | reference(参考,注释规范) | current | **写或改 `src/**` 的注释前读这一份**(约 45 行):一条尺子(代码里读不出来 + 改了必须同步改)、四不写(改动史 / 代码已说的 / 数值推导 / 规则的第二份副本)、形态(一句话优先、文件头只写前提、解释名字=改名信号)与落笔前三问。一次全库注释审核的产物 |
+| [`docs/CONTEXT.md`](CONTEXT.md) | reference(参考,词汇表) | current | 用到本插件的词汇、或要新增术语时。**只收新词**——既有词(通道 / 未上报用量 / 价格未知 …)一律指向 CONTRACTS,不在这里重复 |
+| [`docs/adr/`](adr/) | reason(推理,决策记录) | current | 改**难逆转**的决定前(读路径 / 数据归属 / 归属口径)。ADR 只收「难逆转 + 没有上下文会令人惊讶 + 真权衡」三项同时成立的决策,其余理由进 DESIGN.md |
 
 ## Doc meta 约定
 
@@ -46,5 +48,5 @@
 
 ## 文档生命周期规则
 
-改接口的代码与 `docs/CONTRACTS.md` **同 commit**;推理与取舍进 `docs/DESIGN.md`。唯一的原则:
+改接口的代码与 `docs/CONTRACTS.md` **同 commit**;推理与取舍进 `docs/DESIGN.md`,只有满足 ADR 三项判据的决定才单开一份 `docs/adr/NNNN-*.md`。唯一的原则:
 **没有文档可以默默滞后于代码**:一份文档无法保持真实,就删除或归档它,而不是让它日后毒化上下文。

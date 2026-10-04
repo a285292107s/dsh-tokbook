@@ -155,7 +155,13 @@ export function recordFromRetry(
 }
 
 /** 把一条会话事件投影成日志行；不是已记录的来源时为 null。`lastModel` 是会话
- *  最近已知的 route（失败行不自带 model）。 */
+ *  最近已知的 route（失败行不自带 model）。
+ *
+ *  **已知缺口（故意不实现）**：`assistant/attempt` 这一形态当前不投影。所以「只把 usage
+ *  放在 attempt 的 stream 上报」的那种**失败尝试不会入账**；一次 attempt 既没有安排重试
+ *  （没有 `llm/retry`）也没有以 error 收尾（没有 `reason.kind === 'error'` 的 `turn/end`）
+ *  时，当前一行都不写。正确实现需要按 retry 生命周期折叠尝试（把 attempt 与它的重试 /
+ *  终止事件配对），不是在这里补一个 case 就够，故留作后续——别把这条注释读成「已支持」。 */
 export function recordOfEvent(
   event: SessionEventLike,
   sessionId: string,

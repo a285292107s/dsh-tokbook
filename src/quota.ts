@@ -152,6 +152,12 @@ export function clampPercent(value: unknown): number {
   return Math.max(0, Math.min(100, value))
 }
 
+/** 「小数字是倒计时秒数」这条既有口径的上限：一年（秒）。更大的数字一律按
+ *  epoch ms 原样读。不设上限时，`1760000000`（2025 年的秒级 epoch）会被当成
+ *  「距重置 1.76e9 秒」外推到 2081 年，`planInfoFromSubscriptions` →
+ *  `quotaGate` 于是把**已经过期**的订阅报成生效中。 */
+const RESET_COUNTDOWN_MAX_SEC = 31_536_000
+
 /** 从原始 reset 值得到 epoch ms：*距重置的秒数*、毫秒数，或 ISO 日期。
  *  缺席/非法时为 null。 */
 export function resetEpoch(value: unknown, now: number = Date.now()): number | null {
@@ -160,9 +166,10 @@ export function resetEpoch(value: unknown, now: number = Date.now()): number | n
     return Number.isNaN(parsed) ? null : parsed
   }
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  // 启发式：落在合理*秒级倒计时*范围内的值（< 2^32 且远「于以 ms 表示的 now」）
-  // 视为倒计时。
-  if (value > 0 && value < 4_294_967_296 && Math.abs(value - now) > 4_294_967_296) {
+  // 启发式：只有落在真正的*秒级倒计时*量级内（不超过
+  // {@link RESET_COUNTDOWN_MAX_SEC}）且远小于以 ms 表示的 now 的值才当倒计时；
+  // 其余数字原样当 epoch ms——远端 API 也可能直接给 ms。
+  if (value > 0 && value <= RESET_COUNTDOWN_MAX_SEC && Math.abs(value - now) > 4_294_967_296) {
     return now + value * 1000
   }
   return value
@@ -229,13 +236,17 @@ export function planInfoFromSubscriptions(raw: { planId?: unknown; status?: unkn
   return info
 }
 
-/** 原始额度卡可用（有窗口/数据）当且仅当官方拉取返回了值得展示的东西。 */
+/** 原始额度卡可用（有窗口/数据）当且仅当官方拉取返回了值得展示的东西。
+ *
+ *  `account` **不算**内容：它只是 `/alpha/whoami` 成功的产物，是标题性信息而不是
+ *  额度事实。把它算进去，whoami 200 而其余端点全失败时会得到一张既没有窗口也没有
+ *  余额的 `ok` 空卡，还会按「最近已知」落盘（`fetchCommandCodeQuota` 的收尾只有
+ *  这条判据；`noSubscriptionCard` 是答复出来的事实，不受影响）。 */
 export function hasQuotaContent(card: QuotaCard): boolean {
   return card.windows.length > 0
     || card.planInfo !== undefined
     || card.usage !== undefined
     || card.credits !== undefined
-    || card.account !== undefined
 }
 
 export function unconfiguredCard(provider: string, hint?: string): QuotaCard {

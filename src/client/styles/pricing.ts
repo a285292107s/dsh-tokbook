@@ -70,6 +70,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{
   width:118px;text-align:left;
   border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
+  transition:border-color .12s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -97,6 +98,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-newyear{
   width:72px;text-align:center;
   border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
+  transition:border-color .12s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-newyear:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -121,12 +123,12 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-row{
   display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:10px;
 }
-/* 字段名是要读的文本，走 fg-2（fg-3 只承载装饰）；与调价史里同名的格子同一档。 */
+/* 字段名是要读的文本，走 fg-2（fg-3 只承载装饰）；与下面四档价格子里的格名同一档。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-k{font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
 /* 下拉占满余量：选择带只有这两行，值得把宽度给足。26px 高与体积里的下拉同档，
    但文字走 12px 而不是 11px——它承载的是整条 route key，不是「工作日」。
    字体刻意**不**改成等宽：模型串与 route key 是身份不是数字，这两个盒子的宽度由余量决定，
-   不需要数字对齐；原生 select 的字体在这里正合适。 */
+   不需要数字对齐；外观走 .dtpl-price-select 那条语言（同文件在后面，同权重下它赢）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-sel{
   width:100%;height:26px;font-size:12px;
 }
@@ -141,6 +143,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in{
   width:72px;flex:none;text-align:center;
   border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
+  transition:border-color .12s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -162,7 +165,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-detail[data-dirty="true"]{
   box-shadow:inset 2px 0 0 var(--dtpl-fg);
 }
-/* 只读的「当前生效」读数：纯展示——不带框、不坐刻线；数字与段卡同源（draft 的 ratesInForce）。 */
+/* 只读的「当前生效」读数：纯展示——不带框、不坐刻线；数字与格子里的编辑面同源（draft 的 ratesInForce）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-live{
   display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;row-gap:2px;min-width:0;
 }
@@ -174,9 +177,8 @@ export const CSS_PRICING = `
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-cell[data-bad="true"] .dtpl-price-live-v{color:var(--dtpl-err);}
-[data-plugin="dsh-tokbook"] .dtpl-price-live-when,
 [data-plugin="dsh-tokbook"] .dtpl-price-live-none{
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-detail-head{
   display:flex;align-items:center;gap:10px;flex-wrap:wrap;row-gap:4px;min-width:0;
@@ -206,10 +208,10 @@ export const CSS_PRICING = `
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 
-/* 费率格的度量。宽度由费率能是什么决定，不是今天的数字：要装下最长的那种历史价（8 字符），
+/* 费率格的度量。宽度由费率能是什么决定，不是今天的数字：要装下最长的价（8 字符），
    数字必须等宽（比例体让同位数字错开，固定列就失去可比性）。80px = 8 字符价 + 两侧内边距。
    --dtpl-cell-pad-x 与单元格的标签共享：标签必须和下面的数字结束在同一边缘。
-   整张卡的四处费率带（段卡基准价、每个峰谷时段）共用这一个格宽，于是四档价在整张卡里是同一组
+   两处费率带（基准价、每个峰谷时段）共用这一个格宽，于是四档价在这一屏里是同一组
    读数；基准价与峰谷子目同构——都是「行首一枚盘/一个点，四档价从它右缘起排」。
    --dtpl-days-w 只由日档那一列用：峰谷时段的日档是下拉，宽度由最长的「法定工作日」定，
    于是所有子目的钟点落在同一条竖线上。
@@ -225,14 +227,6 @@ export const CSS_PRICING = `
   --dtpl-slot-indent:54px;
 }
 
-/* 硬约束：flex:none + nowrap——折行会撑高一行，截断会丢状态。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-badge{
-  flex:none;
-  display:inline-flex;align-items:center;height:15px;padding:0 5px;
-  border:1px solid var(--dtpl-border);
-  font-size:10px;line-height:13px;font-weight:600;white-space:nowrap;
-  color:var(--dtpl-fg-2);
-}
 [data-plugin="dsh-tokbook"] .dtpl-price-issue{
   margin:0;padding:2px 10px 6px 10px;
   font-size:10px;line-height:15px;color:var(--dtpl-err);
@@ -289,6 +283,7 @@ export const CSS_PRICING = `
   background:transparent;color:var(--dtpl-fg);
   font-family:var(--dtpl-mono);font-size:14px;line-height:18px;font-weight:500;
   font-variant-numeric:tabular-nums;text-align:right;
+  transition:border-color .12s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-input:hover{
   border-bottom-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -323,6 +318,7 @@ export const CSS_PRICING = `
   min-height:24px;padding:1px 2px;
   border:0;border-bottom:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
   color:var(--dtpl-fg);font:inherit;font-size:11px;letter-spacing:.08em;cursor:pointer;white-space:nowrap;
+  transition:border-color .12s ease,background-color .12s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-add:hover{
   border-bottom-color:var(--dtpl-fg);
@@ -364,6 +360,7 @@ export const CSS_PRICING = `
   background:transparent;box-sizing:border-box;
   height:24px;padding:0 8px;
   color:var(--dtpl-fg-2);font:inherit;font-size:11px;cursor:pointer;
+  transition:color .12s ease,border-color .12s ease,background-color .12s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost:hover{
   color:var(--dtpl-fg);border-bottom-color:var(--dtpl-fg);
@@ -376,92 +373,26 @@ export const CSS_PRICING = `
 
 /* 读面的洗色阶梯（一律以 --dtpl-card 为底，不逐层叠乘）：
      0%   窗面
-     6%   选择带 / 段卡面
-     11%   —— 这一档留作「比段卡再高一档」的余量。 */
-/* 调价史那一叠：竖轨画在这一层上，左内缩 30px 把段卡放在轨的右边。
-   **这一层只为一件事存在**：给轨一个与段卡同宽的坐标原点。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-rail{
-  position:relative;
-  display:flex;flex-direction:column;gap:8px;
-  padding:0 0 6px 30px;
-}
-/* 竖轨：调价史从头贯到尾（首记 → 今天），段卡的钉与孔落在它上面。左端 12px、内缩 30px
-   与轴上的钉（段卡左缘 -21.5px）是同一组几何——改一处就要一起改。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-rail::before{
-  content:"";position:absolute;left:12px;top:6px;bottom:6px;width:1px;
-  background:color-mix(in srgb,var(--dtpl-fg) 14%,transparent);
-}
-/* 一张价 = 一张卡：面与选择带同档（6% 洗色），于是段与段的分隔不再要发丝线，由 8px 间隙说。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg{
-  position:relative;
-  display:flex;flex-direction:column;gap:5px;
-  padding:6px 8px;
-  border:1px solid var(--dtpl-border);border-radius:var(--dtpl-radius);
-  background:color-mix(in srgb,var(--dtpl-fg) 6%,var(--dtpl-card));
-  /* 同一块「金属」材质（受光边 / 背光边），不另立一种卡。 */
-  box-shadow:var(--dtpl-metal);
-}
-/* 钉的圆心钉在**整条身份区块**的竖中线上（每张的身份行都是同一个 28px 的日期盒），
-   不是它的底线——钉属于这一张卡，报的是「这一段」。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg::before{
-  content:"";position:absolute;left:-21.5px;top:17px;width:8px;height:8px;border-radius:50%;
-  background:color-mix(in srgb,#000 35%,transparent);
-  box-shadow:0 0 0 1px color-mix(in srgb,var(--dtpl-fg) 16%,transparent);
-  pointer-events:none;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-seg:hover{
-  background:color-mix(in srgb,var(--dtpl-fg) 9%,var(--dtpl-card));
-}
-/* 钉与孔同径同形同位（改 ::before 的几何要一起改）；这是全抽屉唯一允许色相的地方。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg[data-active="true"]::after{
-  content:"";position:absolute;left:-21.5px;top:17px;width:8px;height:8px;z-index:1;border-radius:50%;
-  background:var(--dtpl-brand);box-shadow:0 0 0 1px var(--dtpl-on-brand);
-  pointer-events:none;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-badge-live{
-  background:var(--dtpl-brand);color:var(--dtpl-on-brand);
-  border-color:var(--dtpl-on-brand);letter-spacing:.1em;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-line{
-  display:flex;align-items:center;gap:10px;min-width:0;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-id{display:flex;align-items:center;gap:8px;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-serial{
-  flex:none;width:1.5em;font-family:var(--dtpl-mono);font-size:10px;line-height:16px;
-  letter-spacing:.12em;font-variant-numeric:tabular-nums;color:var(--dtpl-fg-2);
-}
-/* 生效时刻是这一块的标题：等宽、左对齐、比读数大一档；刻线只铺到戳的宽度。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-date{display:flex;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-price-input-date{
-  flex:0 1 auto;min-width:160px;text-align:left;padding:0 6px 0 0;
-  font-size:15px;letter-spacing:.05em;font-weight:600;
-}
-/* 原生日历按钮是全窗口唯一的浏览器控件，收掉；键入与方向键路径写进字段的 title。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-input-date::-webkit-calendar-picker-indicator{display:none;}
-/* 右轨 = 段自己的复制/删除（常显）；峰谷时段那一对挂在时段卡的头行（.dtpl-price-slot-actions，聚焦时现身）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-tools{
-  margin-left:auto;flex:none;
-  display:flex;align-items:center;justify-content:flex-end;
-  gap:6px;min-width:0;
-}
+     6%   选择带
+     11%   —— 这一档留作「比选择带再高一档」的余量。 */
 
-/* 详情带不缩进、不画自己的上边线：缩进会让跨行的四档价错开。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-detail{
+/* 价的主体：基准价一行 + 它下面的峰谷时段。与详情头隔开 8px（.dtpl-price-detail 的 gap）。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-body{
   display:flex;flex-direction:column;gap:6px;
   padding:2px 0 1px;
 }
-/* 「＋ 加一段价」与「＋ 峰谷时段」是同一样东西：**幽灵行**，见 .dtpl-price-add-ghost。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-band{display:flex;min-width:0;margin-top:4px;}
+/* 「＋ 峰谷时段」是**幽灵行**，见 .dtpl-price-add-ghost。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-band{display:flex;min-width:0;margin-top:4px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-add-slot{flex:1 1 auto;min-width:0;}
 /* 上面有时段组时让位到时段卡那一列（它占的正是下一张时段卡的位置）。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-slots + .dtpl-price-seg-band .dtpl-price-add-slot{
+[data-plugin="dsh-tokbook"] .dtpl-price-slots + .dtpl-price-band .dtpl-price-add-slot{
   margin-left:var(--dtpl-slot-indent);
 }
 
 /* 基准价是**一行**：满弧盘坐在行首当这一行的索引（它的尺寸随时段数长，见 editors 的 DayDial），
    四档价从盘右起排。峰谷子目与这一行同构。
    间距给到盘的最大右缘（盘心 20 + 半宽 33.5）之外：圈数再多也不压第一格。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-allday{
+[data-plugin="dsh-tokbook"] .dtpl-price-allday{
   display:flex;align-items:center;gap:14px;min-width:0;
 }
 /* 盘心钉在 x=20——与下方峰谷子目的竖轨（脊线 20px、圆点中心 20px）同一条线。
@@ -469,7 +400,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-dial-col{
   flex:none;width:40px;display:flex;align-items:center;justify-content:center;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-allday-body{flex:1 1 auto;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-allday-body{flex:1 1 auto;min-width:0;}
 /* 峰谷时段是段卡里的**一层**：直接坐在段卡面上，条目身份由脊线上的圆点说。
    左边那一列让给栅栏（--dtpl-slot-indent）。
    竖轨是**一条**、贯穿整组（逐条分段会在每个点上留一处断口），两端渐隐；
@@ -554,6 +485,7 @@ export const CSS_PRICING = `
   background-position:calc(100% - 8px) 10px,calc(100% - 4px) 10px;
   background-size:4px 4px,4px 4px;background-repeat:no-repeat;
   font-variant-numeric:tabular-nums;
+  transition:border-color .12s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-select:hover{border-bottom-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);}
 [data-plugin="dsh-tokbook"] .dtpl-price-select:focus{outline:none;border-bottom-color:var(--dtpl-fg);}
@@ -564,15 +496,12 @@ export const CSS_PRICING = `
 }
 /* 列宽给到「法定工作日」(12px × 5 字) + 左 2px + 右 16px（三角）；一行里三个下拉的三角到各自值的距离必须一致。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-select-days{width:var(--dtpl-days-w);padding-right:8px;}
-[data-plugin="dsh-tokbook"] .dtpl-price-seg-rates .dtpl-price-cell-k,
+[data-plugin="dsh-tokbook"] .dtpl-price-base-rates .dtpl-price-cell-k,
 [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates .dtpl-price-cell-k{display:block;text-align:right;padding-right:var(--dtpl-cell-pad-x);}
 [data-plugin="dsh-tokbook"] .dtpl-price-slot:hover .dtpl-price-slot-actions,
 [data-plugin="dsh-tokbook"] .dtpl-price-slot:focus-within .dtpl-price-slot-actions{opacity:1;}
-/* 段列表的页脚：幽灵行独占一行（它得站满段卡那一个内容列），口径说明退到它下面。 */
-[data-plugin="dsh-tokbook"] .dtpl-price-history-foot{
-  display:flex;flex-direction:column;align-items:stretch;gap:6px;margin-top:2px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-history-hint{margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
+/* 这一屏的口径说明：它要读，所以走 fg-2；不缩进，与上面那行基准价的四档价左缘对齐。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-note{margin:0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);}
 
 /* 状态文字出现/换文案/消失都不许推动别的东西：它独占一行（选择带下面那条窄带），
    出现时只把下面的详情推下去一点点；max-width 是长句的保险（在自己盒子里折行）。 */

@@ -5,7 +5,7 @@
  * 时候（半输入的数字）不写也不报，等这个字段交代完才说。磁盘上的内容是
  * 唯一状态，状态栏只报告它。
  *
- * 一屏只面对**一个模型**：两个下拉选通道与模型，下面是它的调价史（直接铺开，没有折叠）。
+ * 一屏只面对**一个模型**：两个下拉选通道与模型，下面是它的价（直接铺开，没有折叠）。
  * 下拉的选项文字自己带路标——多少个模型没价、这一行多少次请求、有没有没落盘的改动——
  * 使「这张表有没有洞」不必点到才看得见。
  */
@@ -119,15 +119,16 @@ const PICKED_KEY = 'dsh-tokbook.pricing-picked'
 /** 读回上次选的那一行。只认形状对的值，坏值一律当作「没选过」——一个记不住的选择回落到
  *  列表第一个，比让下拉显示一个不存在的选择要好。 */
 function readPicked(): Picked | null {
-  const saved = localStorage.getItem(PICKED_KEY)
-  if (saved === null) return null
   try {
+    const saved = localStorage.getItem(PICKED_KEY)
+    if (saved === null) return null
     const parsed = JSON.parse(saved) as unknown
     if (typeof parsed !== 'object' || parsed === null) return null
     const { route, model } = parsed as Partial<Picked>
     if (typeof route !== 'string' || route === '' || typeof model !== 'string') return null
     return { route, model }
   } catch {
+    // 隐私模式等拿不到存储：这一屏照常画，只是不记得上次看的是哪一行。
     return null
   }
 }
@@ -135,8 +136,31 @@ function readPicked(): Picked | null {
 /** 记下当前的选择。`null`（「看第一条通道」）抹掉它：那时用户要的正是列表的第一个，不该留一个
  *  下次回来还会生效的旧选择。 */
 function rememberPicked(pick: Picked | null): void {
-  if (pick === null) localStorage.removeItem(PICKED_KEY)
-  else localStorage.setItem(PICKED_KEY, JSON.stringify(pick))
+  try {
+    if (pick === null) localStorage.removeItem(PICKED_KEY)
+    else localStorage.setItem(PICKED_KEY, JSON.stringify(pick))
+  } catch {
+    // 存不下不影响这一次选择，只是下次打开回到列表第一个。
+  }
+}
+
+/**
+ * 价格表载荷的形状判定：只盖渲染期**无条件解引用**的那三样——`routes`（`draftFromView`
+ * 逐个遍历，draft.ts:498）、`calendar`（同处 `Object.entries(view.calendar ?? {})`，
+ * draft.ts:524）、`calendarMissing`（`CalendarEditor` 的 `filter`/`join`，editors.tsx:64/127）。
+ * 不合法按一次读失败处理（下方 `loadError` 分支 + 重试），绝不交给 `seed` / `mergeStaged`：
+ * 半成品进 state 会让渲染期抛错，而宿主会为一次渲染期异常把这条 slot 摘掉（浮窗从此打不开）。
+ * 可选字段（`fx`、模型行的 `name` / `unpriced` / `price`…）一律不收紧。
+ * 判据按 host 现在的组装处与类型：`readPricingView`（src/pricing-view.ts:239-246）、
+ * `PricingView`（src/types.ts:264-278）。
+ */
+function readPricingView(raw: unknown): PricingView | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const source = raw as Partial<PricingView>
+  if (!Array.isArray(source.routes)) return null
+  if (typeof source.calendar !== 'object' || source.calendar === null) return null
+  if (!Array.isArray(source.calendarMissing)) return null
+  return source as PricingView
 }
 
 function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -189,6 +213,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const writingRef = useRef(false)
   const againRef = useRef(false)
   const aliveRef = useRef(true)
+  /** 成功写入的代数。读路径在发起前记下它、响应落地时对不上就整份丢弃（理由见 `loadView`）。 */
+  const writeGenRef = useRef(0)
   /** 用户是否已经「交代过」某个字段（失焦 / 重新回到面板）。打字途中的失败保持沉默——
    *  半输入的数字不是错误，只有离开这个字段之后它才是。 */
   const committedRef = useRef(false)
@@ -203,22 +229,34 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     }, REFRESH_MERGE_MS)
   }, [onChanged])
 
-  /** 把新视图同时采纳为渲染源和基线。 */
+  /** 把新视图同时采纳为渲染源和基线。**先算完再落 state**：`draftFromView` 万一在这份载荷上抛
+   *  （判定没盖到的形状漂移，比如某张卡少了 `models`），异常要在任何 setState 之前发生——
+   *  否则会留下「view 已换成新的、state 还是旧的」这种半成品屏。 */
   const seed = useCallback((next: PricingView) => {
+    const nextState = draftFromView(next)
+    const nextBaseline = baselineOfDraft(nextState)
     setView(next)
-    setState(draftFromView(next))
-    setBaseline(baselinesOf(next))
+    setState(nextState)
+    setBaseline(nextBaseline)
   }, [])
 
   /** 读一次宿主的价格表视图。**读失败是一个可重试的状态**，不是「这张表是空的」——所以它自己
    *  带一次重新读取（与用量明细 / 额度两个 tab 同一形状：错误条 + 重试）。 */
   const loadView = useCallback(async (): Promise<void> => {
     setLoadError(null)
+    // 发起这一次读时的写入代数。响应落地时若已经变过，说明这一份读的是**写入之前**的磁盘
+    // （GET 在 PUT 之前被处理、却在 PUT 之后才 resolve）——采纳它会把刚写进去的价从屏上抹掉、
+    // 让 `changes` 归零（tab 脏点跟着灭），而磁盘其实是新值。所以整份丢弃：不 seed、不 merge、
+    // 也不碰 `save` 状态。对账点仍只有重新挂载（会重新 GET 并重新播种，见 docs/CONTRACTS.md:96）。
+    const gen = writeGenRef.current
     try {
       const res = await fetch(ROUTE_PRICING)
       if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
-      const body = await res.json() as PricingView
-      if (!aliveRef.current) return
+      const raw = await res.json() as unknown
+      if (!aliveRef.current || writeGenRef.current !== gen) return
+      // 形状判定在**任何 setState 之前**：不合法就当一次读失败，绝不把半成品交给 seed / mergeStaged。
+      const body = readPricingView(raw)
+      if (body === null) throw new Error('响应不是一份价格表视图')
       // 未落盘的草稿只把它真正 dirty 的那几处压上去（见 `mergeStaged`）——于是重读既刷新了
       // 磁盘上的变化，也没有把草稿整份写回去。
       if (staged === null) {
@@ -230,7 +268,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       setState(merged.state)
       setBaseline(merged.baseline)
     } catch (err) {
-      if (aliveRef.current) setLoadError(err instanceof Error ? err.message : String(err))
+      // 这一次读同样属于被写入取代的那个旧世界：它的失败不该在画着新值的屏上报错。
+      if (aliveRef.current && writeGenRef.current === gen) setLoadError(err instanceof Error ? err.message : String(err))
     }
   }, [seed])
 
@@ -272,6 +311,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     // 基线始终推进到刚写入的内容，即使已 unmount——离场前的 flush 写入必须让 `staged` 保持干净。
     const nextBaseline = baselineOfDraft(snapshot)
     baselineRef.current = nextBaseline
+    // 写成功了：从这一刻起，任何在它之前发起的读都是旧世界（见 `loadView`）。
+    writeGenRef.current += 1
     // 写成功了：下一次编辑重新从「安静」开始，直到它自己被交代出去。
     committedRef.current = false
     if (staged !== null) {
@@ -429,7 +470,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const rate = fxValue(state.fx)
   const fxProblem = fxIssue(state.fx)
   // 什么都没选过、也没有任何待写的改动：状态栏没有话要说。常驻一个空盒子会在选择带与
-  // 调价史之间撑出一道什么也不说的空隙。
+  // 那份价之间撑出一道什么也不说的空隙。
   const veiled = picked === null && save.kind === 'clean' && changes === 0
 
   return (
@@ -532,7 +573,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         </div>
       )}
 
-      {/* 状态栏在没话要说时让位（见 `veiled`）：常驻一个空盒子会在选择带与调价史之间撑出空隙。 */}
+      {/* 状态栏在没话要说时让位（见 `veiled`）：常驻一个空盒子会在选择带与那份价之间撑出空隙。 */}
       {(state.routes.size > 0 || loadError !== null) && !veiled && (
         <div className="dtpl-price-bar">
           <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">

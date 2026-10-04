@@ -11,7 +11,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  BillingMap, HolidayCalendar, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
+  BillingMap, HolidayCalendar, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SessionUsageView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
 } from './types.ts'
 import { totalsTokens } from './types.ts'
 import { coercePlansConfig, validateConfig } from './config.ts'
@@ -30,11 +30,12 @@ import {
   cnyTable, parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
   type PriceParse,
 } from './pricing.ts'
-import { holidaySet } from './price-format.ts'
+import { dayKeyOf, holidaySet } from './price-format.ts'
 import { ledgerUsageOf, readPricingView, type LedgerUsage } from './pricing-view.ts'
 import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'
 import { modelRowsOf, providerCards } from './by-provider.ts'
-import { registerTokBookPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
+import { registerTokBookPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookSessionRoute, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
+import { buildSessionUsageView, readSessionJoinEvents } from './session-usage.ts'
 import { errorCard, isBuiltinQuotaPlan, isQuotaAlert, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
 import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
 import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
@@ -134,9 +135,17 @@ export class TokenUsageBook extends Service {
     this.planConfig = coercePlansConfig(config.plans)
 
     // 单写者守卫（docs/CONTRACTS.md §3）：别的存活 host 拥有本目录时只告警、
-    // 绝不致命——双写者会竞争 rollup/cache。
-    void warnIfForeignOwner(this.dir, this.logger).then(() => writeOwnerMarker(this.dir))
-    void warmRecordCache(this.dir, this.logger)
+    // 绝不致命——双写者会竞争 rollup/cache。此时**不写**本进程的标记：覆盖掉
+    // 活属主的标记，会让它退出后留下的标记被下一进程读成「陈旧」而静默接管。
+    void warnIfForeignOwner(this.dir, this.logger).then((foreign) => {
+      if (!foreign) return writeOwnerMarker(this.dir)
+    })
+    // 预热只是优化：数据目录不可读（`path` 指向一个已存在的文件 → readdir 报
+    // ENOTDIR）时按需读照样工作，但这条未处理的 rejection 会被 DSH 启动器的
+    // `unhandledRejection` 处理接住并 exit(1) —— 插件的一个坏路径不该带走整个宿主。
+    void warmRecordCache(this.dir, this.logger).catch((error: unknown) => {
+      this.logger.warn?.('[tokbook] cannot warm the ledger record cache (data directory unreadable); reads will load day files on demand:', error)
+    })
 
     // 继承上一进程的同步基线。缺失/撕裂读作 null：探针随后走一遍全量（幂等）并重写。
     this.baselineReady = readSyncProgress(this.dir)
@@ -228,6 +237,10 @@ export class TokenUsageBook extends Service {
         webServer,
         (range) => this.usageByRange(range),
       ))
+      injectedCtx.effect(() => registerTokBookSessionRoute(
+        webServer,
+        (sessionId) => this.sessionUsage(sessionId),
+      ))
       injectedCtx.effect(() => registerTokBookQuotaRoute(
         webServer,
         () => this.quota(),
@@ -301,6 +314,8 @@ export class TokenUsageBook extends Service {
       persistence,
       log: this.log,
       recordCompaction: this.recordCompaction,
+      // 单事件折叠失败的诊断走 ctx logger，而不是 sync.ts 里缺省的回落 console。
+      logger: this.logger,
       onSessionFailure: (id, error) => {
         failed.add(id)
         this.logger.error(`[tokbook] cannot fold session ${id}:`, error)
@@ -453,6 +468,32 @@ export class TokenUsageBook extends Service {
     }
   }
 
+  /**
+   * 单个会话的账本视图：token 与钱只取账本（`readCachedRecords` 按 sessionId 过滤），
+   * 轮次 / 步骤在请求时 join 该会话的持久化日志——日志读不到时那些行进「轮次未知」，
+   * 口径与理由见 docs/adr/0001-turn-attribution-read-time-join.md。
+   *
+   * `todaySpend` 不再做一份聚合：它直接取概览同一条路径的今日一行，抬头那个参照系
+   * 因此与浮窗逐分一致。
+   */
+  async sessionUsage(sessionId: string): Promise<SessionUsageView> {
+    const overview = await this.overview()
+    const { table, billing, resolve } = await this.rateContext()
+    const records = await readCachedRecords(this.dir, this.logger)
+    const events = await readSessionJoinEvents(this.persistence, sessionId, this.logger)
+    const now = Date.now()
+    return buildSessionUsageView({
+      sessionId,
+      records,
+      events,
+      pricing: table,
+      billing,
+      resolve,
+      todaySpend: overview.byDay.find(row => row.day === dayKeyOf(now))?.spend ?? 0,
+      updatedAt: now,
+    })
+  }
+
   /** host settings 缝（`ctx.settings`），未挂载时 undefined。`ctx.get` 是反射式
    *  访问器：以属性方式读未挂载服务会抛错（without inject），只读视图不得这样做。
    *  读值走 `describe()`——`settings` 服务没有按命名空间的 `get`。 */
@@ -541,7 +582,9 @@ export class TokenUsageBook extends Service {
     // 禁用/未知的 provider 是终态：绝不端出过期快照，也不去刷新它。
     if (!enabled || !isBuiltinQuotaPlan(provider)) {
       const card = errorCard(provider, '该 provider 已禁用或没有内置的官方额度查询。')
-      this.quotaCardCache.set(provider, { at: now, card })
+      // 只为内置计划缓存：`provider` 是调用方给的任意字符串，非内置的集合没有上界，
+      // 而这个 Map 从不清理。内置（含被禁用的）计划集合有界，可以缓存。
+      if (isBuiltinQuotaPlan(provider)) this.quotaCardCache.set(provider, { at: now, card })
       return card
     }
 
@@ -642,8 +685,8 @@ export class TokenUsageBook extends Service {
 
   /**
    * 从价格表 tab 校验并持久化一份完整价表。body 是完整的期望文件（`$billing` +
-   * route → model → 价格段），因此写路径整体替换 `pricing.json`，被省略的
-   * (route, model) 停止定价（其记录落到价格未知；历史金额在下次读时重算，见
+   * route → model → 该模型的当前价），因此写路径整体替换 `pricing.json`，被省略的
+   * (route, model) 停止定价（其记录落到价格未知；金额在下次读时重算，见
    * docs/CONTRACTS.md §2）。
    *
    * **不回视图**：自动保存是全程最热的写路径（每次停止输入一拍、或字段失焦就写

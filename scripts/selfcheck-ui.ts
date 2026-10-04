@@ -97,10 +97,18 @@ for (const m of tsText.matchAll(/(?:id|aria-controls|aria-labelledby|htmlFor)=\{
 // 静态全名互为镜像：一个 token 只要**是某条样式规则名字的前缀**，它就有人用。
 // （例外表曾在这里，只剩一个「结构性钩子」条目；两个下拉取代模型行网格之后那个钩子也没了，
 // 所以整张表跟着删——留一张空表只会让人觉得还有例外。）
+//
+// 自定义属性（`style={{ '--dtpl-slots': … }}`）也不是类：它挂在 `--` 之后，样式侧写在
+// `calc(var(--dtpl-slots,4) * 92px)` 里、从来不带 `.`，所以跟锚点一样**按上下文**排除，
+// 不往例外表里塞名字。
+const cssVarNames = new Set(
+  [...tsText.matchAll(/--(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)/g)].map((m) => m[1]),
+)
 const unstyledInTs = [...tsTokens]
   .filter((t) => !cssClasses.has(t)
     && ![...cssClasses].some((c) => c.startsWith(`${t}-`))
-    && !anchorNames.has(t))
+    && !anchorNames.has(t)
+    && !cssVarNames.has(t))
   .sort()
 
 check('样式表里没有无人使用的 dtpl-* 类', deadInCss.length === 0, { deadInCss })

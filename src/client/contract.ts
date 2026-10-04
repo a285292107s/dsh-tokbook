@@ -16,8 +16,10 @@ export interface SlotRegisterOptions {
   order?: number
   /** `t` prop 的 locale 命名空间占位（scaffold 尚未接线）。 */
   locale?: string
-  /** 注册方私有、由组件消费的注入份额。 */
-  inject?: (...args: never[]) => Record<string, unknown>
+  /** 列表 slot 的显示名（`conversation.view` 的 tab 文字从这里取；可以是函数以跟随语言切换）。 */
+  label?: string | (() => string)
+  /** 注册方私有、由组件消费的注入份额。视图环的注册拿到 sessionId（见 `inject` 的调用点）。 */
+  inject?: (...args: string[]) => Record<string, unknown>
   /** 声明的子 slot（本插件不声明）。 */
   children?: Record<string, unknown>
 }

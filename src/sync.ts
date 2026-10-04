@@ -136,6 +136,8 @@ export interface SyncDeps {
   log: UsageLog
   recordCompaction?: boolean
   onSessionFailure?: (id: string, error: unknown) => void
+  /** 单事件折不动时记 error 的去处；缺省 console（与 {@link listPersistenceSnapshots} 同口径）。 */
+  logger?: { error(...args: unknown[]): void }
 }
 
 export interface SyncOptions {
@@ -171,11 +173,20 @@ export async function syncHistory(
   const total = sessions.length
   let processed = 0
   options.onTick?.({ processed, total, added, skipped, failedSessions })
+  const logger: { error(...args: unknown[]): void } = deps.logger ?? console
   for (const session of sessions) {
     const id = session.header.id
-    // 一份读不了的会话日志（当前 dsh 拒绝的格式、撕裂文件……）或一条折不动的事件
-    // 都不得中止整轮 walk：跳过该会话、报出，让其余历史落盘。异常穿出本函数时
-    // 调用方记 error 而不推进同步基线，该会话会被每个探针反复重走。
+    // 每个会话**最多**算一份失败：无论是整份日志读不动，还是它中间某条事件折不动。
+    let sessionFailed = false
+    const fail = (error: unknown): void => {
+      if (sessionFailed) return
+      sessionFailed = true
+      failedSessions += 1
+      deps.onSessionFailure?.(id, error)
+    }
+    // 一份读不了的会话日志（当前 dsh 拒绝的格式、撕裂文件……）不得中止整轮 walk：
+    // 跳过该会话、报出，让其余历史落盘。异常穿出本函数时调用方记 error 而不推进同步
+    // 基线，该会话会被每个探针反复重走。
     try {
       // 当前持久化面按句柄读：`read()` 返回校验过的逻辑事件日志；进行中会话
       // 的未关 turn 可能出现在日志中部，在此无害——只有计费调用事件投影行。
@@ -186,22 +197,29 @@ export async function syncHistory(
       let model = ''
       let provider: string | undefined
       for (const event of events) {
-        const revealedModel = modelOfEvent(event)
-        if (revealedModel !== undefined) model = revealedModel
-        const revealedProvider = providerOfEvent(event)
-        if (revealedProvider !== undefined) provider = revealedProvider
-        const record = recordOfEvent(event, id, model, deps.recordCompaction !== false)
-        if (record === null) continue
-        if (provider !== undefined && record.provider === undefined) record.provider = provider
-        if (await deps.log.record(record)) added += 1
-        else skipped += 1
+        // try 只包单条事件的投影 + 落盘这两步：一条折不动的事件只作废它自己。包在
+        // 整个会话外面会让它之后的所有计费行都折不出来，而调用方从不推进该会话的
+        // 同步基线——那份大日志于是每次读都全量重走，尾部还永远补不上。
+        try {
+          const revealedModel = modelOfEvent(event)
+          if (revealedModel !== undefined) model = revealedModel
+          const revealedProvider = providerOfEvent(event)
+          if (revealedProvider !== undefined) provider = revealedProvider
+          const record = recordOfEvent(event, id, model, deps.recordCompaction !== false)
+          if (record === null) continue
+          if (provider !== undefined && record.provider === undefined) record.provider = provider
+          if (await deps.log.record(record)) added += 1
+          else skipped += 1
+        } catch (error) {
+          logger.error(`[tokbook] cannot fold ${event.type} (seq ${String(event.seq)}) in session ${id}:`, error)
+          fail(error)
+          continue
+        }
       }
     } catch (error) {
-      failedSessions += 1
-      processed += 1
-      deps.onSessionFailure?.(id, error)
-      options.onTick?.({ processed, total, added, skipped, failedSessions })
-      continue
+      // 走到这里的只有「整份会话日志读不动」：单事件的投影 / 落盘失败已在上面的
+      // 内层 catch 就地兜住，不再穿到这里。
+      fail(error)
     }
     processed += 1
     options.onTick?.({ processed, total, added, skipped, failedSessions })

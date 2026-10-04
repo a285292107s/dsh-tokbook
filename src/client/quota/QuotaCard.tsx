@@ -7,6 +7,7 @@
  */
 
 import { useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { QuotaCard, QuotaWindowView } from '../../types.ts'
 import { formatTokens } from '../format.ts'
 import { RefreshGlyph } from '../icons.tsx'
@@ -254,13 +255,20 @@ function ActivityStrip({ usage }: { usage: NonNullable<QuotaCard['usage']> }) {
 const GAUGE_R = 15.5
 const GAUGE_C = 2 * Math.PI * GAUGE_R
 
-/** 环本体：外圈轨道 + 可选弧。两种形态共用，几何常量在上面。 */
-function GaugeRing({ dash }: { dash?: string }) {
+/** 环本体：外圈轨道 + 可选弧。两种形态共用，几何常量在上面。弧长经 --dtpl-arc 交给入场动效（shared 片段的描边扫入 keyframe）。 */
+function GaugeRing({ arc }: { arc?: number }) {
   return (
     <svg viewBox="0 0 40 40" aria-hidden="true" className="dtpl-quota-gauge-svg">
       <circle className="dtpl-quota-gauge-track" cx="20" cy="20" r={GAUGE_R} />
-      {dash !== undefined && (
-        <circle className="dtpl-quota-gauge-fill" cx="20" cy="20" r={GAUGE_R} strokeDasharray={dash} />
+      {arc !== undefined && (
+        <circle
+          className="dtpl-quota-gauge-fill"
+          cx="20"
+          cy="20"
+          r={GAUGE_R}
+          strokeDasharray={`${arc} ${GAUGE_C}`}
+          style={{ '--dtpl-arc': `${arc}px` } as CSSProperties}
+        />
       )}
     </svg>
   )
@@ -290,7 +298,7 @@ function QuotaGauge({ pct, tone, cap }: { pct: number; tone: QuotaTone; cap: str
       aria-label={`${cap} 已用 ${Math.round(p)}%`}
       title={`${cap} 已用 ${Math.round(p)}%`}
     >
-      <GaugeRing dash={`${(p / 100) * GAUGE_C} ${GAUGE_C}`} />
+      <GaugeRing arc={(p / 100) * GAUGE_C} />
       <span className="dtpl-quota-gauge-n" aria-hidden="true">
         <span>{Math.round(p)}<i>%</i></span>
         <span className="dtpl-quota-gauge-cap">{cap}</span>

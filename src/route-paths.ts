@@ -22,6 +22,11 @@ export const ROUTE_USAGE = '/tokbook/usage'
 export const ROUTE_QUOTA = '/tokbook/quota'
 /** `GET` 价表只读视图；`PUT` 写整份价表。 */
 export const ROUTE_PRICING = '/tokbook/pricing'
+/** `GET` 单个会话的账本视图（按轮次/步骤分组）；需带 `?session=`。 */
+export const ROUTE_SESSION = '/tokbook/session'
+
+/** `ROUTE_SESSION` 的会话 id 键。 */
+export const QUERY_SESSION = 'session'
 
 /** `ROUTE_USAGE` 的回看窗口键（取值见 `PROVIDER_RANGES`）。 */
 export const QUERY_RANGE = 'range'

@@ -1,6 +1,6 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-16 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-04 · supersedes: —
 
 > 本文件整理本次「UI 优化 + 全中文 + 对齐 DSH 官方设置按钮样式」迭代中踩过的坑与结论，
 > 供后续维护 / 继续开发时对照。结构统一按 **现象 → 根因 → 修复 / 正确做法** 组织。
@@ -76,7 +76,7 @@
 
 - CSS 拆在 `src/client/styles/*.ts`，由 `styles.ts` 的 `injectStyles()` 按**固定顺序**拼接后
   在运行时注入 `<style>`——**级联顺序是契约**，顺序以 `styles.ts` 的 import 为准(不在此处抄
-  一份清单:抄的那份漏过 `pricing-timeline`)。
+  一份清单:抄的那份会漏)。
 - esbuild 会把这些字符串**编译进 `lib/client.js`**。
 - 因此「改一行样式」= 改变了 lazy-CJS bundle 的字节内容，跟改逻辑**没有区别**，同样受下方 `rev`
   不可变缓存约束。**没有"只改样式就自动热更"这回事。**
@@ -90,8 +90,8 @@ CSS 变成 JS 语法错误，`pnpm typecheck` / `pnpm build` 当场红。
 - **现象**：`src/client/styles/quota.ts(152,62): error TS1005: ',' expected`、`TS1121: Octal
   literals are not allowed` 之类，报的行号指向**注释那一行**，看代码却毫无问题。
 - **正确做法**：分片里的注释用中文引号（『』「」），或干脆不加反引号；模板串里也不要出现 `${`。
-- **快速自检**：每个分片应恰好 4 个反引号（JSDoc 里一对 + 模板串首尾一对；
-  `pricing-timeline.ts` 是 6 个——它的 JSDoc 里另有一对）：
+- **快速自检**：每个分片应恰好 4 个反引号（JSDoc 里一对 + 模板串首尾一对；JSDoc 里另有一对的
+  分片是 6 个）：
 
   ```powershell
   Get-ChildItem src/client/styles/*.ts | ForEach-Object {

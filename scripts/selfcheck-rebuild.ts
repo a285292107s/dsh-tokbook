@@ -5,15 +5,17 @@
  *     聚合」逐字段相等;`schemaVersion` 不符一律读作缺失;用量未知这类计数必须活过折叠往返。
  *  2. **单写者与去重**:去重身份按数据目录共享——同一目录上的第二个 `UsageLog` 立刻去重,
  *     进程重启后也要能从磁盘行**重新推出**去重集;`refileByEventDay()` 把行搬回它事件的日文件、
- *     幂等、绝不丢畸形行。
+ *     幂等、绝不丢畸形行(源文件与接收文件同样);上个进程留下的**撕裂尾行**不会吞掉下一条完整
+ *     记录;`mkdir` 失败不被永久记住,障碍解除后同一个实例的下一次写入自愈。
  *  3. **价格签名**:`pricing.json` 内容一变签名就变,而费率行身份是从价格表推导的,所以签名
  *     不符 → **整份折叠作废**、由日文件按当前表重建(逐日金额与费率行身份一起跟上)。
  *  4. **重启后的同步基线**:载入 `sync-progress.json` 后未变的会话不该被重走,漂移 / 新增的才走;
  *     缺失或残缺的基线读作 null(调用方退回全量走一遍并重写一份)。
  *  5. **派生态自证有效**:往日被补写之后,折叠(逐文件版本)与解析缓存(逐文件版本)都自己作废,
- *     没有调用方需要「记得」;1970 前的 `from` 写进文件后仍是它自己那一段(每段价都带日期)。
+ *     没有调用方需要「记得」;旧文件的价段数组读成「今天仍在生效的那一段」,写回去只剩一份价。
  *  6. **会话同步**:seeded(fork)子会话只折 `inheritedEventCount` 之后的历史——继承前缀重折会
- *     按子会话 id 再记一行压缩;单个会话的投影抛错只算一份失败,不掀掉整轮 walk。
+ *     按子会话 id 再记一行压缩;单个会话的投影抛错只算一份失败,不掀掉整轮 walk;一条折不动的
+ *     事件只作废它自己,不截断该会话后面的历史。
  *
  * Run: node --experimental-strip-types scripts/selfcheck-rebuild.ts
  *
@@ -24,7 +26,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { UsageLog, dayFileNameOf, resetUsageLogState } from '../src/usage-log.ts'
-import { serializeRecord, type SessionEventLike } from '../src/usage-record.ts'
+import { serializeRecord, parseRecord, type SessionEventLike } from '../src/usage-record.ts'
 import { syncHistory } from '../src/sync.ts'
 import {
   attachCosts, buildSummary, clearRecordCache, readCachedRecords, readRecordsByDayRange, ROLLUP_SCHEMA_VERSION,
@@ -163,6 +165,79 @@ console.log('refile: 走错门的行搬回事件日')
     await rm(dir, { recursive: true, force: true })
     clearRecordCache(dir)
   }
+
+  // 接收文件自己原有的畸形行也属于「坏行绝不被丢掉」:refile 只重写解析成功的记录时
+  // 会把它悄悄抹掉,所以目标分支必须把 raw 行原样带过去。
+  const dirDst = await cleanDir()
+  try {
+    const kept = rec('keep-1', '2026-03-05', 9, 'deepseek-chat', { inputTokens: 30, outputTokens: 30 })
+    const moved = rec('move-1', '2026-03-05', 11, 'deepseek-chat', { inputTokens: 40, outputTokens: 40 })
+    const receiving = dayFileNameOf(moved.time)
+    await writeFile(join(dirDst, receiving), `${serializeRecord(kept)}\nnot json at all\n`, 'utf8')
+    // 源文件挂在 03-06,里面那行的 time 是 03-05 → 该被搬进接收文件。
+    await writeFile(join(dirDst, 'usage-2026-03-06.jsonl'), `${serializeRecord(moved)}\n`, 'utf8')
+    const log = new UsageLog(dirDst, quiet)
+    const movedCount = await log.refileByEventDay()
+    const text = await readFile(join(dirDst, receiving), 'utf8')
+    const rows = await readRecordsByDayRange(dirDst, '0000-01-01', '9999-12-31', quiet)
+    check('refile 回填接收文件时:原有的畸形行原文仍在,好行与搬进来的行都在',
+      movedCount === 1 && text.includes('not json at all')
+      && rows.map(row => row.requestId).sort().join(',') === 'keep-1,move-1',
+      { movedCount, text, rows: rows.map(row => row.requestId) })
+  } finally {
+    await rm(dirDst, { recursive: true, force: true })
+    clearRecordCache(dirDst)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2b. 存储自愈:撕裂尾行不吞下一条记录,mkdir 失败不被永久记忆
+// ---------------------------------------------------------------------------
+console.log('log: 撕裂尾行不吞行 + mkdir 失败不被永久记忆')
+{
+  // 上个进程写到一半崩了:日文件尾是一个没有换行的半行。直接追加会把下一条完整记录拼到
+  // 它后面、合成一条非法 JSON 行,那条已写入的记录就从所有聚合里消失。
+  const dir = await cleanDir()
+  try {
+    const day = '2026-02-20'
+    const name = dayFileNameOf(dayMs(day, 9))
+    await writeFile(join(dir, name), '{"requestId":"torn-half', 'utf8')
+    const log = new UsageLog(dir, quiet)
+    const first = await log.record(rec('torn-a', day, 9, 'deepseek-chat', { inputTokens: 1, outputTokens: 1 }))
+    const second = await log.record(rec('torn-b', day, 10, 'deepseek-chat', { inputTokens: 2, outputTokens: 2 }))
+    const rows = await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', quiet)
+    const malformed = (await readFile(join(dir, name), 'utf8')).split('\n')
+      .filter(line => line !== '' && parseRecord(line) === null)
+    check('撕裂尾行之后的两条实时记录都被读路径看见,半行只成它自己那一条非法行',
+      first === true && second === true
+      && rows.map(row => row.requestId).sort().join(',') === 'torn-a,torn-b'
+      && malformed.length === 1 && malformed[0]!.startsWith('{"requestId":"torn-half'),
+      { rows: rows.map(row => row.requestId), malformed })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+    clearRecordCache(dir)
+    resetUsageLogState(dir)
+  }
+
+  // mkdir 失败(数据目录的父路径是个文件)不得被永久缓存成 rejected promise:否则该实例
+  // 之后每一次 record 都失败,一行也写不进,直到宿主重启。
+  const base = await cleanDir()
+  const blocked = join(base, 'blocker', 'data')
+  try {
+    await writeFile(join(base, 'blocker'), 'a file where a directory must be', 'utf8')
+    const log = new UsageLog(blocked, quiet)
+    const refused = await log.record(rec('mk-1', '2026-02-21', 9, 'deepseek-chat', { inputTokens: 1, outputTokens: 1 }))
+    await rm(join(base, 'blocker'), { force: true })
+    const healed = await log.record(rec('mk-2', '2026-02-21', 10, 'deepseek-chat', { inputTokens: 2, outputTokens: 2 }))
+    const rows = await readRecordsByDayRange(blocked, '0000-01-01', '9999-12-31', quiet)
+    check('mkdir 失败不被永久记忆:第一次 record 失败,障碍解除后同一个实例的下一次写入成功落盘',
+      refused === false && healed === true && rows.map(row => row.requestId).join(',') === 'mk-2',
+      { refused, healed, rows: rows.map(row => row.requestId) })
+  } finally {
+    await rm(base, { recursive: true, force: true })
+    clearRecordCache(blocked)
+    resetUsageLogState(blocked)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -214,21 +289,19 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
     // (start, days) 标识,所以挪动 start 就换了那些键。
     const prices = (slotStart: number, inputPerMillion: number): PricingTable => ({
       'deepseek-official': {
-        'deepseek-chat': [{
-          from: dayMs('2000-01-01', 0),
+        'deepseek-chat': {
           rates: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
           slots: [{ days: 'weekdays', start: slotStart, end: 12, rates: { inputPerMillion: inputPerMillion * 2, outputPerMillion: inputPerMillion * 8 } }],
-        }],
+        },
       },
     })
     const resolverOf = (table: PricingTable) => (row: UsageRecord) => rateKeyAt(table, row.provider, row.model, row.time)
     // 同一张表、同一份基准价，只是**没有时段**——「删掉时段」后的磁盘形状。
     const noSlot = (inputPerMillion: number): PricingTable => ({
       'deepseek-official': {
-        'deepseek-chat': [{
-          from: dayMs('2000-01-01', 0),
+        'deepseek-chat': {
           rates: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
-        }],
+        },
       },
     })
     const foldedRevision = async (): Promise<string> =>
@@ -336,27 +409,26 @@ console.log('fold: 往日被追加后自动重折 + 缓存不再把冻结日当�
 }
 
 // ---------------------------------------------------------------------------
-// 7. 1970 前的生效时刻:写路径必须把每一段都留成一个**有日期**的身份
+// 7. 旧价段数组:读成当前价,写回去只剩一份不带生效时刻的价
 // ---------------------------------------------------------------------------
-console.log('price: 1970 前的生效时刻照样写成一个日期身份')
+console.log('price: 旧价段数组读成当前价,写回一份不带生效时刻的价')
 {
   const dir = await cleanDir()
   try {
-    const ancient = dayMs('1900-01-01', 0)
-    const epoch = dayMs('1970-01-01', 0)
-    const table: PricingTable = {
+    await writeFile(join(dir, PRICING_FILE), JSON.stringify({
       r: { m: [
-        { from: epoch, rates: { inputPerMillion: 1, outputPerMillion: 4 } },
-        { from: ancient, rates: { inputPerMillion: 2, outputPerMillion: 8 } },
+        { from: '1900-01-01', inputPerMillion: 2, outputPerMillion: 8 },
+        { from: '1970-01-01', inputPerMillion: 1, outputPerMillion: 4 },
       ] },
-    }
-    await writePriceFile(dir, { table, billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
-    const text = await readFile(join(dir, PRICING_FILE), 'utf8')
+    }), 'utf8')
     const back = await readPriceFile(dir, quiet)
-    const segments = back.table.r?.m ?? []
-    check('两段价各自带日期落在盘上、读回来还是两段(那三个早期时刻不塌成同一个身份)',
-      ancient < 0 && epoch < 0 && text.includes('"1900-01-01"') && text.includes('"1970-01-01"')
-      && segments.length === 2 && segments[0]!.from === ancient && segments[1]!.from === epoch)
+    check('旧价段数组读成生效时刻最晚的那一段(日期串的字典序即时间序,1970 前的写法也照样)',
+      back.table.r?.m?.rates.inputPerMillion === 1 && back.table.r?.m?.rates.outputPerMillion === 4)
+    await writePriceFile(dir, { table: back.table, billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
+    const text = await readFile(join(dir, PRICING_FILE), 'utf8')
+    const again = await readPriceFile(dir, quiet)
+    check('写回去只剩一份价:盘上不再有 from,读回来还是那个数',
+      !text.includes('"from"') && again.table.r?.m?.rates.inputPerMillion === 1)
   } finally {
     await rm(dir, { recursive: true, force: true })
     clearRecordCache(dir)
@@ -435,7 +507,7 @@ console.log('sync: seeded 会话只折自己的历史 + 投影抛错只算一份
     let threw = false
     let failedSessions = -1
     try {
-      failedSessions = (await syncHistory({ persistence, log, recordCompaction: true, onSessionFailure: (id) => { failedIds.push(id) } })).failedSessions
+      failedSessions = (await syncHistory({ persistence, log, recordCompaction: true, logger: quiet, onSessionFailure: (id) => { failedIds.push(id) } })).failedSessions
     } catch {
       threw = true
     }
@@ -448,6 +520,44 @@ console.log('sync: seeded 会话只折自己的历史 + 投影抛错只算一份
     await rm(dir2, { recursive: true, force: true })
     clearRecordCache(dir2)
     resetUsageLogState(dir2)
+  }
+
+  // 一条折不动的事件只作废它自己:兜底收窄到单事件之后,坏事件**后面**的计费行照样折出来
+  // (包在整个会话外面时它们全丢,而调用方永不推进该会话的同步基线 → 每次读都全量重走)。
+  const dir3 = await cleanDir()
+  try {
+    const log = new UsageLog(dir3, quiet)
+    const events: SessionEventLike[] = [
+      { type: 'request/context', time: dayMs('2026-07-01', 9), seq: 0, data: route },
+      { type: 'assistant/message', time: dayMs('2026-07-01', 9), seq: 1, data: { usage: { inputTokens: 5, outputTokens: 5 } } },
+      { type: 'assistant/message', time: dayMs('2026-07-01', 10), seq: 2, data: { message: { id: 'm-after-bad', source: route }, usage: { inputTokens: 7, outputTokens: 3 } } },
+    ]
+    const failedIds: string[] = []
+    let threw = false
+    let result: { added: number; skipped: number; failedSessions: number } | null = null
+    try {
+      result = await syncHistory({
+        persistence: {
+          list: async () => [snapshot('boom', 'rev-1')],
+          open: async () => ({ read: async () => ({ events }), close: async () => undefined }),
+        },
+        log,
+        recordCompaction: true,
+        logger: quiet,
+        onSessionFailure: (id) => { failedIds.push(id) },
+      })
+    } catch {
+      threw = true
+    }
+    const rows = await readRecordsByDayRange(dir3, '0000-01-01', '9999-12-31', quiet)
+    check('一条畸形事件不截断该会话后面的历史:只算一份失败,它之后的正常记录照样入账',
+      !threw && result !== null && result.added === 1 && result.skipped === 0 && result.failedSessions === 1
+      && failedIds.join(',') === 'boom' && rows.map(row => row.requestId).join(',') === 'm-after-bad',
+      { threw, result, failedIds, rows: rows.map(row => row.requestId) })
+  } finally {
+    await rm(dir3, { recursive: true, force: true })
+    clearRecordCache(dir3)
+    resetUsageLogState(dir3)
   }
 }
 

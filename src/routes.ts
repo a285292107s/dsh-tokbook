@@ -8,10 +8,10 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
-  QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH,
-  ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SYNC, ROUTE_USAGE,
+  QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH, QUERY_SESSION,
+  ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE,
 } from './route-paths.ts'
-import { PROVIDER_RANGES, type PriceVerdict, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SyncStatusView, type TokBookOverview } from './types.ts'
+import { PROVIDER_RANGES, type PriceVerdict, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SessionUsageView, type SyncStatusView, type TokBookOverview } from './types.ts'
 import type { PriceParse } from './pricing.ts'
 
 /** 本插件用到的 host webserver 子集。 */
@@ -148,6 +148,41 @@ export function registerTokBookUsageRoute(
     kind: 'exact',
     path: ROUTE_USAGE,
     handler: handleUsage,
+  })
+}
+
+/** 把会话词元 route 绑到单会话账本视图提供方，返回 disposer；缺 / 空 `?session=`
+ *  按 400 答（与 `ROUTE_USAGE` 对 `range` 的纪律一致），会话没有账本行则是 200 的
+ *  空视图——「这个会话没有任何计费调用」与「请求不合法」不是一回事。 */
+export function registerTokBookSessionRoute(
+  webServer: WebServerLike | undefined,
+  sessionView: (sessionId: string) => SessionUsageView | Promise<SessionUsageView>,
+): () => void {
+  if (webServer === undefined) return () => {}
+
+  const handleSession = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (req.method !== 'GET') return refuse(res, 405, 'method not allowed')
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    const sessionId = new URL(req.url ?? '/', 'http://tokbook.local').searchParams.get(QUERY_SESSION)
+    if (sessionId === null || sessionId === '') {
+      res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: `missing "${QUERY_SESSION}"` }))
+      return
+    }
+    try {
+      const snapshot = await sessionView(sessionId)
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(snapshot))
+    } catch (error) {
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  return webServer.register({
+    kind: 'exact',
+    path: ROUTE_SESSION,
+    handler: handleSession,
   })
 }
 

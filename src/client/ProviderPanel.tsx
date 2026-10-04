@@ -8,7 +8,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { ProviderRange, ProviderUsageCard, ProviderUsageView } from '../types.ts'
+import type {
+  CostedModelRow, ProviderModelUsage, ProviderRange, ProviderUsageCard, ProviderUsageView, UsageTotals, WorkspaceUsageRow,
+} from '../types.ts'
+import { PROVIDER_RANGES, rangeCarriesMoney } from '../types.ts'
 import { QUERY_RANGE, ROUTE_USAGE } from '../route-paths.ts'
 import { UsageGlyph } from './icons.tsx'
 import { formatMoney, formatTokens } from './format.ts'
@@ -88,6 +91,54 @@ function unpricedKeysOf(view: ProviderUsageView): ReadonlySet<string> {
   return keys
 }
 
+/** 四桶齐全的 totals——渲染对它做算术（`totalsTokens`，src/types.ts:645-650），所以四个桶必须在场且是数。 */
+function isBucketTotals(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const totals = raw as Partial<UsageTotals>
+  return typeof totals.inputTokens === 'number'
+    && typeof totals.cacheReadTokens === 'number'
+    && typeof totals.cacheWriteTokens === 'number'
+    && typeof totals.outputTokens === 'number'
+}
+
+/**
+ * 用量明细载荷的形状判定：只盖渲染**真正会解引用**的字段——`cutsOf` / `unpricedKeysOf`
+ * 无条件遍历三个数组与卡内的 `models` / `unpricedModels`，页头读四个合计，`RANGE_WORDS[view.range]`
+ * 读 `range`，两种行清单对 `totals` 做算术并按 `model` / `provider` 排序。
+ * 不合法就走面板已有的错误态（错误条 + 重试），绝不把半成品塞进 state——渲染期抛错会让这一条
+ * list 型 slot 被宿主摘掉（浮窗从此打不开）。
+ * 判据按 host 现在的组装处与类型：`usageByRange`（src/index.ts:434-459）、
+ * `ProviderUsageView`（src/types.ts:404-430，`providerLabels` 缺席由渲染侧 `?? {}` 兜）。
+ */
+function readUsageView(raw: unknown): ProviderUsageView | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const source = raw as Partial<ProviderUsageView>
+  if (typeof source.range !== 'string' || !PROVIDER_RANGES.includes(source.range as ProviderRange)) return null
+  if (typeof source.totalTokens !== 'number' || typeof source.totalRequests !== 'number'
+    || typeof source.totalSpend !== 'number' || typeof source.totalSubscriptionValue !== 'number') return null
+  if (!Array.isArray(source.byModel) || !Array.isArray(source.byWorkspace) || !Array.isArray(source.providers)) return null
+  for (const row of source.byModel) {
+    if (typeof row !== 'object' || row === null) return null
+    const model = row as Partial<CostedModelRow>
+    // `model` / `provider` 是排序键（`localeCompare`），缺席会在渲染期抛。
+    if (typeof model.model !== 'string' || typeof model.provider !== 'string' || !isBucketTotals(model.totals)) return null
+  }
+  for (const row of source.byWorkspace) {
+    if (typeof row !== 'object' || row === null) return null
+    if (!isBucketTotals((row as Partial<WorkspaceUsageRow>).totals)) return null
+  }
+  for (const card of source.providers) {
+    if (typeof card !== 'object' || card === null) return null
+    const item = card as Partial<ProviderUsageCard>
+    if (!Array.isArray(item.models) || !Array.isArray(item.unpricedModels)) return null
+    for (const model of item.models) {
+      if (typeof model !== 'object' || model === null) return null
+      if (!isBucketTotals((model as Partial<ProviderModelUsage>).totals)) return null
+    }
+  }
+  return source as ProviderUsageView
+}
+
 /** 用量明细 tab 本体；每个已加载的窗口有缓存，切回来不重新拉取。 */
 export function ProviderPanel() {
   const [range, setRange] = useState<ProviderRange>('last7')
@@ -114,8 +165,11 @@ export function ProviderPanel() {
     try {
       const res = await fetch(`${ROUTE_USAGE}?${QUERY_RANGE}=${target}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const view = await res.json() as ProviderUsageView
+      const raw = await res.json() as unknown
       if (token !== activeRef.current) return // 被更新的切换取代
+      const view = readUsageView(raw)
+      // 形状不对按一次读失败处理：错误态是重试的入口，而半成品进缓存会让渲染期抛错。
+      if (view === null) throw new Error('响应不是一份用量明细视图')
       setViews((current) => {
         const next = new Map(current)
         next.set(target, view)
@@ -138,6 +192,8 @@ export function ProviderPanel() {
 
   const view = views.get(range)
   const moneyOf = (value: number): string => formatMoney(value)
+  // 金额按现价折算，只在够近的窗口里是有效的刻度（见 types 的 `rangeCarriesMoney`）。
+  const showMoney = rangeCarriesMoney(range)
   const busy = view === undefined && error === null
   const available = view === undefined ? cuts : cutsOf(view)
 
@@ -179,6 +235,16 @@ export function ProviderPanel() {
                 </button>
               ))}
             </div>
+            {/* 金额按当前价折算，所以它只在够近的窗口里是有效的刻度。窗口本身要说出这件事：
+                否则在「全部」里金额列凭空消失，读起来像坏了。 */}
+            {!showMoney && (
+              <span
+                className="dtpl-usage-money-note"
+                title="金额按当前价折算：全部账本里它既不是历史支出、也不是今天的价值（那些 token 是按各时期的价格花的），所以只给词元。近 30 天及更短的窗口里金额照常给。"
+              >
+                全部账本只给词元
+              </span>
+            )}
           </div>
         </div>
         {view !== undefined ? (
@@ -187,12 +253,16 @@ export function ProviderPanel() {
             <span className="dtpl-hero-fact"><b>{view.totalRequests}</b> 请求</span>
             <i aria-hidden="true">·</i>
             <span className="dtpl-hero-fact"><b>{formatTokens(view.totalTokens)}</b> 词元</span>
-            <i aria-hidden="true">·</i>
-            <span className="dtpl-hero-fact"><b>{moneyOf(view.totalSpend)}</b> 实际支出</span>
-            {view.totalSubscriptionValue > 0 && (
+            {showMoney && (
               <>
                 <i aria-hidden="true">·</i>
-                <span className="dtpl-hero-fact"><b>{moneyOf(view.totalSubscriptionValue)}</b> 订阅价值</span>
+                <span className="dtpl-hero-fact"><b>{moneyOf(view.totalSpend)}</b> 实际支出</span>
+                {view.totalSubscriptionValue > 0 && (
+                  <>
+                    <i aria-hidden="true">·</i>
+                    <span className="dtpl-hero-fact"><b>{moneyOf(view.totalSubscriptionValue)}</b> 订阅价值</span>
+                  </>
+                )}
               </>
             )}
           </span>
@@ -247,7 +317,7 @@ export function ProviderPanel() {
       ) : cols !== undefined && view !== undefined ? (
         <div className="dtpl-bd-cols" aria-hidden="true">
           <span className="dtpl-bd-col-id">{cols.id}</span>
-          <span className="dtpl-bd-col-nums">{cols.nums}</span>
+          <span className="dtpl-bd-col-nums">{showMoney ? cols.nums : '词元'}</span>
         </div>
       ) : null}
 
@@ -262,25 +332,27 @@ export function ProviderPanel() {
         {view === undefined
           ? (busy && <PanelSkeleton slice={active} />)
           : active === 'model'
-            ? <ModelRows byModel={view.byModel} totalTokens={view.totalTokens} money={moneyOf} unpriced={unpricedKeysOf(view)} />
+            ? <ModelRows byModel={view.byModel} totalTokens={view.totalTokens} money={moneyOf} unpriced={unpricedKeysOf(view)} showMoney={showMoney} />
             : active === 'workspace'
-              ? <WorkspaceRows rows={view.byWorkspace} totalTokens={view.totalTokens} money={moneyOf} />
-              : <ProviderCards cards={view.providers} labels={view.providerLabels ?? {}} money={moneyOf} />}
+              ? <WorkspaceRows rows={view.byWorkspace} totalTokens={view.totalTokens} money={moneyOf} showMoney={showMoney} />
+              : <ProviderCards cards={view.providers} labels={view.providerLabels ?? {}} money={moneyOf} showMoney={showMoney} />}
       </div>
     </section>
   )
 }
 
 /** 按通道那一面：一张卡一个 provider。 */
-function ProviderCards({ cards, labels, money }: {
+function ProviderCards({ cards, labels, money, showMoney }: {
   cards: readonly ProviderUsageCard[]
   labels: Record<string, string>
   money: (value: number) => string
+  /** 这个窗口给不给金额（判据同 `ModelRows`）。 */
+  showMoney: boolean
 }) {
   return (
     <div className="dtpl-providers">
       {cards.map((card) => (
-        <ProviderCard key={card.provider} card={card} money={money} labels={labels} />
+        <ProviderCard key={card.provider} card={card} money={money} labels={labels} showMoney={showMoney} />
       ))}
     </div>
   )
@@ -291,10 +363,12 @@ function ProviderCards({ cards, labels, money }: {
  * （否则适配器的 provider 名），route key 作为副标题。计费是 route 级事实、两桶口径见
  * CONTRACTS §2。
  */
-function ProviderCard({ card, money, labels }: {
+function ProviderCard({ card, money, labels, showMoney }: {
   card: ProviderUsageCard
   money: (value: number) => string
   labels: Record<string, string>
+  /** 这个窗口给不给金额（判据同 `ModelRows`）。 */
+  showMoney: boolean
 }) {
   const cardTokens = card.tokens
   const label = labels[card.provider]
@@ -326,19 +400,21 @@ function ProviderCard({ card, money, labels }: {
         </div>
         <div className="dtpl-provider-nums">
           <span className="dtpl-provider-tokens">{formatTokens(cardTokens)}</span>
-          <span className="dtpl-provider-cost">
-            {/* 订阅通道的实际支出是结构性的零（计费是 route 级事实，钱全在价值桶）——
-                报「¥0.00」是同义反复，不是读数；按量卡即使为 0 也报，那是量出来的。 */}
-            {!subscription && <span className="dtpl-provider-spend">{money(card.spend)}</span>}
-            {card.subscriptionValue > 0 && (
-              <span className="dtpl-provider-value" title="订阅通道：这些用量按量付费本来要花的钱（非实际扣款）">{money(card.subscriptionValue)} 订阅价值</span>
-            )}
-          </span>
+          {showMoney && (
+            <span className="dtpl-provider-cost">
+              {/* 订阅通道的实际支出是结构性的零（计费是 route 级事实，钱全在价值桶）——
+                  报「¥0.00」是同义反复，不是读数；按量卡即使为 0 也报，那是量出来的。 */}
+              {!subscription && <span className="dtpl-provider-spend">{money(card.spend)}</span>}
+              {card.subscriptionValue > 0 && (
+                <span className="dtpl-provider-value" title="订阅通道：这些用量按量付费本来要花的钱（非实际扣款）">{money(card.subscriptionValue)} 订阅价值</span>
+              )}
+            </span>
+          )}
         </div>
       </header>
       <div className="dtpl-provider-models">
         {card.models.map((m) => {
-          // 与按模型面同一条判据：价表计不了费且这个窗口里没有一段已定价的记录。
+          // 与按模型面同一条判据：价表计不了费且这个窗口里没有一条已定价的记录。
           const noPrice = isNoPrice(m.cost, card.unpricedModels.includes(m.model))
           return (
             <div className="dtpl-row" key={m.model}>
@@ -355,12 +431,17 @@ function ProviderCard({ card, money, labels }: {
                   <span className="dtpl-sr">词元 </span>{formatTokens(m.tokens)}
                 </span>
                 <span className="dtpl-provider-model-sub">
-                  {m.totals.requests} 请求 ·{' '}
-                  {noPrice
-                    ? <em className="dtpl-cost-k">价格未知</em>
-                    : m.spend > 0
-                      ? <><span className="dtpl-sr">金额 </span><b className="dtpl-cash-amt">{money(m.spend)}</b></>
-                      : <><span className="dtpl-sr">金额 </span><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-cost-k">订阅价值</em></>}
+                  {m.totals.requests} 请求
+                  {showMoney && (
+                    <>
+                      {' · '}
+                      {noPrice
+                        ? <em className="dtpl-cost-k">价格未知</em>
+                        : m.spend > 0
+                          ? <><span className="dtpl-sr">金额 </span><b className="dtpl-cash-amt">{money(m.spend)}</b></>
+                          : <><span className="dtpl-sr">金额 </span><b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b><em className="dtpl-cost-k">订阅价值</em></>}
+                    </>
+                  )}
                 </span>
               </div>
             </div>

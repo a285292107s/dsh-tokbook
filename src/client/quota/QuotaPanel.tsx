@@ -32,11 +32,51 @@ const AUTO_MIN_KEY = 'dsh-tokbook.quota-auto-min'
 
 /** 读回上次选的间隔。只认预设值——存储里的旧值或坏值一律回落到默认，不让它决定控件显示什么。 */
 function readAutoMinutes(): number {
-  const saved = localStorage.getItem(AUTO_MIN_KEY)
-  // 先判 null：`Number(null)` 是 0，而 0 是合法预设（关闭）——缺键会静默变成「关闭」。
-  if (saved === null) return DEFAULT_AUTO_MIN
-  const min = Number(saved)
-  return AUTO_PRESETS.some((preset) => preset.min === min) ? min : DEFAULT_AUTO_MIN
+  try {
+    const saved = localStorage.getItem(AUTO_MIN_KEY)
+    // 先判 null：`Number(null)` 是 0，而 0 是合法预设（关闭）——缺键会静默变成「关闭」。
+    if (saved === null) return DEFAULT_AUTO_MIN
+    const min = Number(saved)
+    return AUTO_PRESETS.some((preset) => preset.min === min) ? min : DEFAULT_AUTO_MIN
+  } catch {
+    // 隐私模式等拿不到存储：回落到默认间隔。
+    return DEFAULT_AUTO_MIN
+  }
+}
+
+/**
+ * 额度列表载荷的形状判定：渲染只解引用 `providers`（每项进请求 query、又当 React key），
+ * 所以只认「字符串数组」。不合法就走面板**已有的**错误态（错误条 + 重试），绝不把半成品塞进
+ * state——渲染期抛错会让这一条 list 型 slot 被宿主摘掉（浮窗从此打不开）。
+ * 判据按 host 现在的组装处与类型：`QuotaView.providers`（src/types.ts:575-581）、
+ * 路由原样 JSON 作答（src/routes.ts:211-213）。
+ */
+function readProviderList(raw: unknown): string[] | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const { providers } = raw as Partial<QuotaView>
+  if (!Array.isArray(providers) || !providers.every((item): item is string => typeof item === 'string')) return null
+  return providers
+}
+
+/**
+ * 单张额度卡载荷的形状判定：只覆盖渲染**真正会无条件解引用**的字段——`state`（决定走哪一支正文）
+ * 与 `windows`（`ringPressure` 对它 `find` / `for…of`，metrics.ts:79/88；正文里 `[...card.windows]`，
+ * QuotaCard.tsx:113），以及窗口条目本身与 `credits` / `usage` 这两个**在场就必须是对象**的可选字段
+ * （渲染用 `!== undefined` 判在场、随后直接读属性，QuotaCard.tsx:125/128 与 metrics.ts:26-28、220-236
+ * 都没有可选链，`null` 会过关再抛）。其余可选字段与 `gate` / `title` / `message` 等一律不收紧。
+ * 判据按 host 的卡的组装处与类型：`QuotaCard`（src/types.ts:555-573）。
+ */
+function readQuotaCard(raw: unknown): QuotaCard | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const card = raw as Partial<QuotaCard>
+  if (typeof card.state !== 'string') return null
+  if (!Array.isArray(card.windows)) return null
+  for (const window of card.windows) {
+    if (typeof window !== 'object' || window === null) return null
+  }
+  if (card.credits !== undefined && (typeof card.credits !== 'object' || card.credits === null)) return null
+  if (card.usage !== undefined && (typeof card.usage !== 'object' || card.usage === null)) return null
+  return card as QuotaCard
 }
 
 /** 已服务的 'ok' 数据在进入 tab 触发就地刷新前允许多旧。额度窗口按分钟尺度变化，预算内的数据原样展示。 */
@@ -75,10 +115,14 @@ export function QuotaPanel() {
     fetch(ROUTE_QUOTA)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json() as Promise<QuotaView>
+        return res.json() as Promise<unknown>
       })
-      .then((view) => {
-        if (!cancelled) setProviders(view.providers)
+      .then((raw) => {
+        if (cancelled) return
+        const list = readProviderList(raw)
+        // 形状不对按一次读失败处理：错误态是重试的入口，而半成品进 state 会让渲染期抛错。
+        if (list === null) throw new Error('响应不是一份额度列表')
+        setProviders(list)
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -101,7 +145,11 @@ export function QuotaPanel() {
   // 用户选的档位立刻落盘：面板随 tab 切换/浮窗关闭卸载，组件状态活不过那一刻。
   const chooseAutoMinutes = useCallback((min: number) => {
     setAutoMinutes(min)
-    localStorage.setItem(AUTO_MIN_KEY, String(min))
+    try {
+      localStorage.setItem(AUTO_MIN_KEY, String(min))
+    } catch {
+      // 存不下不影响这一次选择，只是下次打开回到默认间隔。
+    }
   }, [])
 
   const hasProviders = providers !== null && providers.length > 0
@@ -208,7 +256,11 @@ function QuotaCardController({ provider, autoTicker, onGate }: {
     return fetch(`${ROUTE_QUOTA}?${QUERY_PROVIDER}=${encodeURIComponent(provider)}${force ? `&${QUERY_REFRESH}=1` : ''}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return await res.json() as QuotaCard
+        const data = readQuotaCard(await res.json() as unknown)
+        // 形状不对按一次失败的刷新处理：走下面的 catch，保留已渲染的卡（错误以卡内提示浮出），
+        // 绝不把半成品塞进 state——渲染期抛错会让这一条 slot 被宿主摘掉（浮窗从此打不开）。
+        if (data === null) throw new Error('响应不是一份额度卡')
+        return data
       })
       .then((data) => {
         if (token !== inFlight.current) return null

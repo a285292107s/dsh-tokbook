@@ -15,9 +15,9 @@ import { CSS_OVERLAY } from './styles/overlay.ts'
 import { CSS_LEDGER } from './styles/ledger.ts'
 import { CSS_METHOD } from './styles/method.ts'
 import { CSS_PROVIDER } from './styles/provider.ts'
+import { CSS_SESSION } from './styles/session.ts'
 import { CSS_QUOTA } from './styles/quota.ts'
 import { CSS_PRICING } from './styles/pricing.ts'
-import { CSS_PRICING_TIMELINE } from './styles/pricing-timeline.ts'
 import { CSS_SHARED } from './styles/shared.ts'
 import { CSS_DEVICE } from './styles/device.ts'
 
@@ -38,9 +38,11 @@ const CSS = [
   CSS_LEDGER,
   CSS_METHOD,
   CSS_PROVIDER,
+  // 会话词元页由宿主渲染在对话正文里（不经过浮窗）：它只需排在共享片段之前——那些窄屏与
+  // 动效配方得能压住各页自己的默认值。
+  CSS_SESSION,
   CSS_QUOTA,
   CSS_PRICING,
-  CSS_PRICING_TIMELINE,
   CSS_SHARED,
   // 设备皮压轴：只被 `[data-dtpl-device]` 根激活，宿主内整段静默（见 device.ts 文件头）。
   CSS_DEVICE,

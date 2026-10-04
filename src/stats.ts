@@ -144,11 +144,17 @@ export function clearRecordCache(dir?: string): void {
   else dirs.delete(dir)
 }
 
-async function readDayFile(dir: string, name: string, logger: StatsLogger = consoleLogger): Promise<UsageRecord[]> {
-  const text = await readFile(join(dir, name), 'utf8').catch((error: unknown) => {
+/** 读一个分日文件并解析。**读失败返回 null，绝不返回「空」**——两者必须可分：
+ *  「这天没有记录」是事实，「这天读不到」是未知，把后者折叠成前者会让这一天永久
+ *  少算（见 {@link loadFileStamped}）。读失败仍留一条 error 日志。 */
+async function readDayFile(dir: string, name: string, logger: StatsLogger = consoleLogger): Promise<UsageRecord[] | null> {
+  let text: string
+  try {
+    text = await readFile(join(dir, name), 'utf8')
+  } catch (error) {
     logger.error(`[tokbook] cannot read ${name}:`, error)
-    return ''
-  })
+    return null
+  }
   const records: UsageRecord[] = []
   for (const line of text.split('\n')) {
     if (line === '') continue
@@ -187,7 +193,11 @@ async function loadFileCached(cache: DirCache, dir: string, name: string, logger
 }
 
 /** {@link loadFileCached} 的带版本形：版本核对与解码在同一次 `stat` 里做完，所以
- *  折叠要记下自己所依据的文件版本时不必为同一份文件再 `stat` 一遍。 */
+ *  折叠要记下自己所依据的文件版本时不必为同一份文件再 `stat` 一遍。
+ *
+ *  `stamp` 为 null = 这一次**没读到内容**（读失败，或 stat 不到）：记录降级为空，
+ *  但版本戳缺席，折叠因此不会把这一天记进 `files`，下一次读就会因「水位线之内的
+ *  文件不在 files 里」整份作废重折 → 自愈。 */
 async function loadFileStamped(
   cache: DirCache,
   dir: string,
@@ -204,6 +214,13 @@ async function loadFileStamped(
     return { records: cached.records, stamp: stampKey(info) }
   }
   const records = await readDayFile(dir, name, logger)
+  if (records === null) {
+    // 读失败：降级为空（一个被占用的文件不该让整个概览 500），但**不缓存、也不
+    // 返回版本戳**——按文件真实的 size:mtimeMs 缓存这个空结果、再把它记进折叠的
+    // `files`，会让折叠在文件未变时永远自称「最新」，这一天就一直读 0，不会自愈。
+    cache.files.delete(name)
+    return { records: [], stamp: null }
+  }
   cache.files.set(name, { records, size: info.size, mtimeMs: info.mtimeMs })
   return { records, stamp: stampKey(info) }
 }
@@ -268,7 +285,9 @@ export async function warmRecordCache(dir: string, logger?: StatsLogger): Promis
 
 export const ROLLUP_FILE_NAME = 'rollup.json'
 
-export const ROLLUP_SCHEMA_VERSION = 8
+/** 折叠格式版本。10：价表去掉生效时间轴，`RateKey` 不再带 `from`——旧折叠的 rate 行
+ *  按旧身份回查（价格表里已没有那根轴）会整批落空，读成价格未知（¥0），故必须 +1 强制重建。 */
+export const ROLLUP_SCHEMA_VERSION = 10
 
 export interface RollupFile {
   schemaVersion: number
@@ -310,7 +329,8 @@ function isSlotRef(value: unknown): value is SlotRef {
 function isRateKey(value: unknown): value is RateKey {
   if (typeof value !== 'object' || value === null) return false
   const key = value as Record<string, unknown>
-  if (typeof key.from !== 'number' || !Number.isFinite(key.from)) return false
+  // 「无价」的显式身份（types.ts 的 `unpriced`）：只接受 true 或缺席，别的一律不认。
+  if (key.unpriced !== undefined && key.unpriced !== true) return false
   return key.slot === undefined || key.slot === null || isSlotRef(key.slot)
 }
 
@@ -449,7 +469,7 @@ function hourRows(hours: Map<string, UsageTotals>): UsageHourRow[] {
 }
 
 function compareKeys(left: RateKey, right: RateKey): number {
-  return left.from - right.from || (left.slot?.start ?? -1) - (right.slot?.start ?? -1)
+  return (left.slot?.start ?? -1) - (right.slot?.start ?? -1)
 }
 
 function rateRowsSorted(rows: Iterable<UsageRateRow>): UsageRateRow[] {
@@ -470,8 +490,10 @@ function modelMapKey(provider: string | undefined, model: string): string {
 }
 
 function rateRowKey(day: string, model: string, provider: string | undefined, rate: RateKey): string {
-  const slot = rate.slot === undefined || rate.slot === null ? '-' : `${String(rate.slot.start)}:${rate.slot.days}`
-  return `${day}\n${model}\n${providerKey(provider)}\n${String(rate.from)}\n${slot}`
+  const slot = rate.unpriced === true
+    ? 'unpriced'
+    : rate.slot === undefined || rate.slot === null ? '-' : `${String(rate.slot.start)}:${rate.slot.days}`
+  return `${day}\n${model}\n${providerKey(provider)}\n${slot}`
 }
 
 function hourRowKey(hour: string, model: string): string {
@@ -611,9 +633,8 @@ export function mergeSummaries(left: SummaryWithLastEvent, right: SummaryWithLas
 /** 给纯 token summary 叠上成本层：每个 rate 行按 (route, model, rate 身份) 在
  *  当前价表回查定价——身份规则见 docs/CONTRACTS.md §2，改价无需重建即可重算
  *  历史。每行金额落入其 route 计费性质命名的桶（分桶规则同样在 §2）。表无法
- *  定价的行计 ¥0，其 model 串进入 `unpricedModels`——既覆盖无人定价的
- *  (route, model)，也覆盖自身身份（段时刻，或被移动/删除的例外时段）表里已不
- *  存在的行。 */
+ *  定价的行计 ¥0，其 model 串进入 `unpricedModels`——覆盖无人定价的
+ *  (route, model)，以及按美元报价却没设汇率的通道。 */
 export function attachCosts(
   summary: TokenSummary & { dataDir: string },
   pricing: PricingTable,

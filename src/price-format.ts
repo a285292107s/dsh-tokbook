@@ -1,23 +1,14 @@
 /**
  * 价文件的纯规则，host 半区与 browser 半区共享：文件本身的词表（保留键、长度上限）
- * 与时间轴的取值规则。
+ * 与价格的取值规则。
  *
- * 两级独立轴决定一个价格：生效时刻（本地日，或本地日 + 整点小时）选定生效段；
- * 日内时段（小时区间 + 覆盖的星期集合）选定段内的例外价。词表也放这里，因为
+ * 价格分两层：每个 (route, model) 一份**当前价**（基准价），叠上按记录**本地时间**
+ * 生效的日内时段（小时区间 + 覆盖的星期集合）。没有生效时刻那一轴——账本里所有记录
+ * 都用同一份价折算（口径见 docs/CONTRACTS.md §2）。词表也放这里，因为
  * client 不能 import `pricing.ts`（它拉了 `node:fs`），字面量两处各写一遍会静默漂移。
  */
 
 import type { DaySet, HolidayRange } from './types.ts'
-
-/** 价格轴的最小单位是整点，迁移与落点调整都按它算。 */
-export const HOUR_MS = 3_600_000
-
-/** 旧价文件里「没有生效时刻」那一段的 `from`（自始生效）在此取值，使朴素的
- *  `from <= timeMs` 比较直接可用。新写入不接受这个形态；它现在只服务两件事——
- *  读旧文件时由视图层落成真实日期（`pricing-view.ts` 的 migrationFrom，落点不越过
- *  下一段）与迁移前历史金额的连续性。在恰与本地 epoch 重合的写法上（如 UTC 时区的
- *  `1970-01-01`），真实日期与这个哨兵不可分辨，读路径一律按旧形态迁移。 */
-export const EARLIEST = 0
 
 /** 价文件唯一的保留顶层键：route → `"metered" | "subscription"`。 */
 export const PRICING_BILLING_KEY = '$billing'
@@ -39,7 +30,6 @@ export const MAX_ROUTE_LENGTH = 128
 export const MAX_MODEL_LENGTH = 256
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/u
-const HOUR_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:00$/u
 
 /** 时段可携带的全部 day set，展示顺序（也是文件顺序）。`weekdays` 排在
  *  `workdays` 前面：从宽到窄，依次收窄。 */
@@ -83,14 +73,6 @@ export function hourOfDay(ms: number): number {
   return new Date(ms).getHours()
 }
 
-/** 包含 `ms` 的小时的本地起点——价文件自身的时间单位，即 `from` 所命名的时刻。
- *  价格轴按此精度读取，账本时刻必须先 floor 到它才能与之比较。 */
-export function hourStartMs(ms: number): number {
-  const at = new Date(ms)
-  at.setMinutes(0, 0, 0)
-  return at.getTime()
-}
-
 /** 时刻的本地星期（0 = 周日 … 6 = 周六）。 */
 export function weekdayOf(ms: number): number {
   return new Date(ms).getDay()
@@ -107,35 +89,7 @@ export function dayStartMs(date: string): number | null {
   return at.getTime()
 }
 
-/**
- * 文件 / wire 时刻的 epoch ms：`YYYY-MM-DD`（本地零点）或
- * `YYYY-MM-DDTHH:00`（该本地整点）。不是真实日期、不是整点，或命名了本时区
- * 不存在的本地小时（DST 春季跳变）时为 null——无法解析到唯一时刻的表会被拒绝，
- * 而不是静默取整。
- */
-export function instantMs(text: string): number | null {
-  if (DATE_RE.test(text)) return dayStartMs(text)
-  if (!HOUR_RE.test(text)) return null
-  const date = text.slice(0, 10)
-  const year = Number(date.slice(0, 4))
-  const month = Number(date.slice(5, 7))
-  const day = Number(date.slice(8, 10))
-  const hour = Number(text.slice(11, 13))
-  if (dayStartMs(date) === null) return null
-  const at = new Date(year, month - 1, day, hour)
-  if (at.getFullYear() !== year || at.getMonth() !== month - 1 || at.getDate() !== day) return null
-  if (at.getHours() !== hour) return null
-  return at.getTime()
-}
-
-/** 时刻的文件文本：本地零点写短日期，否则 `YYYY-MM-DDTHH:00`。午夜保留短形式，
- *  使常见情形在小时级时刻出现前后读（及 diff）完全一致。 */
-export function instantKey(ms: number): string {
-  const day = dayKeyOf(ms)
-  const hour = hourOfDay(ms)
-  return hour === 0 ? day : `${day}T${String(hour).padStart(2, '0')}:00`
-}
-
+/** 小时 → `HH:00` 的展示写法（峰谷时段的下拉）。 */
 export function clockLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`
 }

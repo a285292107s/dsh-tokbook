@@ -3,6 +3,7 @@
  * 环心是 `formatShare` 的读数。整圆就是分母——「占谁的多少」里百分号由环本身承担。
  */
 
+import type { CSSProperties } from 'react'
 import { formatShare, share } from './format.ts'
 
 /** 环几何按像素尺度固定：44px 与额度表盘同档，行高由它定（两行身份文字只有 39px）。 */
@@ -17,17 +18,20 @@ export function ShareRing({ value, total, denom }: {
   denom: string
 }) {
   const label = formatShare(value, total)
+  const arc = (share(value, total) / 100) * CIRC
   return (
     <span className="dtpl-share-ring">
       <svg viewBox="-13.5 -13.5 27 27" width={PX} height={PX} aria-hidden="true">
         <circle className="dtpl-share-ring-track" cx="0" cy="0" r={R} />
+        {/* --dtpl-arc 是弧长，入场动效（shared 片段的描边扫入 keyframe）从它扫到 0。 */}
         <circle
           className="dtpl-share-ring-arc"
           cx="0"
           cy="0"
           r={R}
           transform="rotate(-90)"
-          strokeDasharray={`${(share(value, total) / 100) * CIRC} ${CIRC}`}
+          strokeDasharray={`${arc} ${CIRC}`}
+          style={{ '--dtpl-arc': `${arc}px` } as CSSProperties}
         />
       </svg>
       <span className="dtpl-share-ring-num">

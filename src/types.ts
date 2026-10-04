@@ -77,7 +77,7 @@ export interface UsageModelRow {
   totals: UsageTotals
 }
 
-/** 单个价格段的每百万 token 价格，用**它所属通道的报价币种**记
+/** 每百万 token 的价格，用**它所属通道的报价币种**记
  *  （见 {@link PriceCurrency}）。cache 桶省略时回落到 input 价。 */
 export interface ModelPricing {
   inputPerMillion: number
@@ -132,9 +132,9 @@ export interface HolidayRange {
   end: string
 }
 
-/** 价格段的例外时段：本地日的小时区间（`[start, end)`，`24` 关日），按星期
+/** 当前价的例外时段：本地日的小时区间（`[start, end)`，`24` 关日），按星期
  *  集合生效，自带四档每百万词元费率（币种随该通道报价，见 {@link ModelPricing}）。
- *  生效时叠在段的基准价之上——省略的档沿用基准价。 */
+ *  生效时叠在基准价之上——省略的档沿用基准价。 */
 export interface PriceSlot {
   days: DaySet
   /** 覆盖的首小时，0–23。 */
@@ -144,12 +144,10 @@ export interface PriceSlot {
   rates: ModelPricing
 }
 
-/** 单个 (route, model) 的一段价格：从 `from`（epoch ms；整点）到同 (route, model)
- * 下一段开始。列表按 `from` 升序，因此「T 时刻的价」= 最后一个 `from ≤ T` 的段；
- * 没有任何段覆盖的时刻 → 价格未知（金额按 ¥0 计）。`from` 取 {@link EARLIEST}
- * 只出现在读旧文件时，视图层会把它迁移成真实日期。 */
-export interface PriceSegment {
-  from: number
+/** 一个 (route, model) 的**当前价**：四档基准价，加上覆盖它的峰谷时段。
+ *  价格表没有历史轴——账本里所有记录都用这一份价折算，所以金额是「按现价折算的
+ *  用量价值」，不是当时那笔账单（口径与取舍见 docs/CONTRACTS.md §2）。 */
+export interface PriceEntry {
   rates: ModelPricing
   /** 例外时段，按开始小时升序；空/缺 = 仅基准价。两时段永不重叠（写路径
    * 拒绝可能同时生效的一对；读路径丢弃较晚的那个），故任一时刻至多一个
@@ -157,17 +155,17 @@ export interface PriceSegment {
   slots?: PriceSlot[]
 }
 
-/** 例外时段的身份：起始小时 + 星期集合。段内唯一——共享两者会在整个公共
- * 区间重叠，写路径拒绝——因此 rate 行可在无价格时仍标明当时计费所依据的
- * 时段。折叠归组与改价重算的语义见 docs/CONTRACTS.md §2。 */
+/** 例外时段的身份：起始小时 + 星期集合。表内唯一——共享两者会在整个公共
+ *  区间重叠，写路径拒绝——因此 rate 行可在无价格时仍标明当时计费所依据的
+ *  时段。折叠归组与改价重算的语义见 docs/CONTRACTS.md §2。 */
 export interface SlotRef {
   start: number
   days: DaySet
 }
 
 /** 手工价表：provider route key → 精确 model 字符串 → 该 (route, model) 的
- * 价格时间轴。空/缺列表 = 价格未知。 */
-export type PricingTable = Record<string, Record<string, PriceSegment[]>>
+ *  当前价。缺席 = 价格未知。 */
+export type PricingTable = Record<string, Record<string, PriceEntry>>
 
 /** route → 计费性质。价表保留键 `$billing`。 */
 export type BillingMap = Record<string, BillingNature>
@@ -175,14 +173,14 @@ export type BillingMap = Record<string, BillingNature>
 /** 价文件里的法定节假日年历形态（保留键 `$calendar`）。 */
 export type PricingCalendarInput = Record<string, HolidayRange[]>
 
-/** 记录计价所依据的费率行身份：生效段的起始时刻 + 段内生效的例外时段
- *  （null/缺 = 该段基准价）。折叠与重算语义见 docs/CONTRACTS.md §2。 */
+/** 记录计价所依据的费率行身份：记录当时生效的峰谷时段（null/缺 = 基准价），
+ *  或显式的「无价」。折叠与重算语义见 docs/CONTRACTS.md §2。 */
 export interface RateKey {
-  from: number
   slot?: SlotRef | null
+  unpriced?: true
 }
 
-export const UNPRICED_KEY: RateKey = { from: -1 }
+export const UNPRICED_KEY: RateKey = { unpriced: true }
 
 /** 例外时段在 wire / `pricing.json` 里的形态。 */
 export interface PricingSlotInput {
@@ -195,12 +193,9 @@ export interface PricingSlotInput {
   cacheWritePerMillion?: number
 }
 
-/** 价格段在 wire / `pricing.json` 里的形态：`from` 是本地日（`YYYY-MM-DD`）
- * 或本地日+整点（`YYYY-MM-DDTHH:00`），**必有**——一段价从某一刻起生效，
- * 没有生效时刻的形态只在旧文件里存在，读路径会把它迁移掉。
- * 刻意扁平——文件手写，段直接带四档基准价（及覆盖它们的例外时段）。 */
-export interface PricingSegmentInput {
-  from: string
+/** 当前价在 wire / `pricing.json` 里的形态。刻意扁平——文件手写，直接带四档
+ *  基准价（及覆盖它们的例外时段）。 */
+export interface PricingEntryInput {
   inputPerMillion: number
   outputPerMillion: number
   cacheReadPerMillion?: number
@@ -236,14 +231,12 @@ export interface PricingModelView {
    * 账本记得、配置已删，或只在价表里手写。UI 不播报它，只作 route 卡内的排序键。 */
   configured: boolean
   records: number
-  firstAt?: number
-  lastAt?: number
-  /** 落在所有价格段之外的记录数（按各自时间戳）——这些记 ¥0。省略 =
-   * 未知（无账本透镜），**不等于** 0：有价的行仍可能有未定价历史。 */
+  /** 账本里**算不出金额**的记录数（整行没有价，或按美元报价却没设汇率）——这些记
+   * ¥0。省略 = 未知（无账本透镜），**不等于** 0。 */
   unpriced?: number
-  /** 按生效序的价格段（空 = 价格未知，计 ¥0）。行内「此刻价」由 client 按当前
-   *  时刻现算，wire 不带快照（口径见 docs/CONTRACTS.md §2）。 */
-  segments: PricingSegmentInput[]
+  /** 这一行的当前价；缺席 = 价格未知（记录按 ¥0 计）。行内「此刻的价」由 client 按
+   *  当前时刻从这份价与年历现算，wire 不带快照（口径见 docs/CONTRACTS.md §2）。 */
+  price?: PricingEntryInput
 }
 
 /** 价格表 tab 的一张 route 卡。 */
@@ -344,9 +337,8 @@ export interface CostedSummary extends TokenSummary {
   spend: number
   /** 订阅价值（¥，非现金）：计费为 `subscription` 的行。 */
   subscriptionValue: number
-  /** 当前价表无法计费的模型：(route, model) 完全无价，或部分 rate 行指向
-   * 已不存在的价格身份（段日期或例外时段被移动/删除）。这些金额计 ¥0——
-   * 是「价格未知」，不是免费。 */
+  /** 当前价表无法计费的 (route, model)：整行没有价，或按美元报价却没设汇率
+   *  （换算表里整条被丢）。这些金额计 ¥0——是「价格未知」，不是免费。 */
   unpricedModels: string[]
   /** 生效价表（手写；无定价时为空）。 */
   pricing: PricingTable
@@ -359,6 +351,17 @@ export type ProviderRange = 'today' | 'yesterday' | 'last7' | 'last30' | 'all'
 
 /** 全部合法 {@link ProviderRange}；路由校验复用。 */
 export const PROVIDER_RANGES: readonly ProviderRange[] = ['today', 'yesterday', 'last7', 'last30', 'all']
+
+/**
+ * 这个窗口给不给金额。
+ *
+ * 金额按**当前价**折算，所以它是「最近用掉的 token 值多少钱」这把刻度，不是历史账单：
+ * 拿今天的价去折算一年前的用量，既不是那笔支出、也不是今天的价值。刻度只在够近的窗口里
+ * 成立，于是「全部账本」只给词元——词元是事实，放多久都成立（口径见 docs/CONTRACTS.md §2）。
+ */
+export function rangeCarriesMoney(range: ProviderRange): boolean {
+  return range !== 'all'
+}
 
 /** provider 卡内的一条模型行。 */
 export interface ProviderModelUsage {
@@ -580,6 +583,66 @@ export interface QuotaView {
   alert?: boolean
 }
 
+
+/**
+ * 会话词元页的一行：一次计费调用（= 一步，见 docs/CONTEXT.md），带**它自己的**钱。
+ * 轮次归属由所在的分组承担，不重复放在行上；`step` 缺席 = 该行没拿到步骤号。
+ */
+export interface SessionStepRow {
+  requestId: string
+  time: number
+  model: string
+  provider: string
+  kind?: UsageRecordKind
+  failureCode?: string
+  usage?: UsageFields
+  /** 四桶之和；`usage` 缺席读作 0（那仍是「用量未知」的一次调用，见每个 totals 的 `usageUnknown`）。 */
+  tokens: number
+  /** 步骤号（事件载荷原样）；拿不到时省略。 */
+  step?: number
+  /** 这一行的金额落在哪一桶；`unpriced` = 价表计不了费，按 ¥0 计。 */
+  bucket: 'spend' | 'subscription' | 'unpriced'
+  /** 该行金额 ¥；`unpriced` 时为 0。 */
+  cost: number
+}
+
+/** 一组调用：一轮，或轮间。 */
+export interface SessionUsageGroup {
+  /** 事件载荷的 `turn` 原样（与轨迹 tab 同号，不做加减）；`null` = 轮间
+   *  （确定不属于任何轮次的调用，目前只有压缩 summarize）。 */
+  turn: number | null
+  /** 组内合计（失败与用量未知的口径同其余 totals）。 */
+  totals: UsageTotals
+  /** 四桶之和。 */
+  tokens: number
+  spend: number
+  subscriptionValue: number
+  rows: SessionStepRow[]
+}
+
+/** 会话词元页的 wire 载荷（`GET /tokbook/session`）。 */
+export interface SessionUsageView {
+  sessionId: string
+  updatedAt: number
+  /** 账本里本会话首 / 末记录时刻；无记录为 0。 */
+  firstAt: number
+  lastAt: number
+  total: UsageTotals
+  /** 四桶之和。 */
+  totalTokens: number
+  spend: number
+  subscriptionValue: number
+  /** 价表无法计费的 (通道, 模型) 键 `${provider}|${model}`。 */
+  unpriced: string[]
+  /** 按轮次升序。 */
+  turns: SessionUsageGroup[]
+  /** 不属于任何轮次的计费调用；无则 null。与下一项**分列**——轮间是「知道」，轮次未知是「不知道」。 */
+  betweenTurns: SessionUsageGroup | null
+  /** 没能拿到轮次的行（会话日志读不到，或行没有对应事件）。 */
+  unattributed: SessionStepRow[]
+  /** 今日实际支出 ¥（全部会话）——抬头那行参照系的分母。 */
+  todaySpend: number
+}
 
 /** 聚合 totals 行的四桶之和。 */
 export function totalsTokens(totals: UsageTotals): number {

@@ -31,6 +31,11 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
 [data-plugin="dsh-tokbook"] .dtpl-usage-scope-k{
   color:var(--dtpl-fg-2);font-size:11px;line-height:16px;white-space:nowrap;
 }
+/* 「全部账本只给词元」这句解释就挂在窗口控件旁边——金额列在那一个窗口里不出现，
+   原因必须与控件同屏，否则读起来像少了一列。它是要读的一句话，所以走 fg-2。 */
+[data-plugin="dsh-tokbook"] .dtpl-usage-money-note{
+  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;white-space:nowrap;
+}
 [data-plugin="dsh-tokbook"] .dtpl-range-tabs{
   display:flex;flex:none;
   border-bottom:1px solid var(--dtpl-border);

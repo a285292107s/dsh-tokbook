@@ -8,17 +8,19 @@ import { totalsTokens } from '../types.ts'
 import { formatDateTime, formatRelative, formatShare, formatTokens } from './format.ts'
 import { ShareRing } from './ShareRing.tsx'
 
-/** 价表计不了费、且这个窗口里没有任何已定价的段——金额格无读数可报。 */
+/** 价表计不了费、且这个窗口里没有任何已定价的记录——金额格无读数可报。 */
 export function isNoPrice(cost: number, unpriced: boolean): boolean {
   return unpriced && cost === 0
 }
 
-export function ModelRows({ byModel, totalTokens, money, unpriced }: {
+export function ModelRows({ byModel, totalTokens, money, unpriced, showMoney }: {
   byModel: readonly CostedModelRow[]
   totalTokens: number
   money: (value: number) => string
   /** 价表无法计费（按 ¥0 计）的 (通道, 模型) 键，`${provider}|${model}`。 */
   unpriced: ReadonlySet<string>
+  /** 这个窗口给不给金额。「全部账本」不给——按现价折算的刻度只对最近的窗口成立。 */
+  showMoney: boolean
 }) {
   // 按**显示出来的**量排序：占比环编码的是词元，清单若按别的键排，弧长就不是单调的，
   // 整列读起来像渲染坏了。
@@ -39,7 +41,7 @@ export function ModelRows({ byModel, totalTokens, money, unpriced }: {
           : `${showsSub ? money(m.subscriptionValue) : money(m.spend)} ${bucket}`
         const tokens = totalsTokens(m.totals)
         return (
-          <div className="dtpl-row" key={`${m.provider}/${m.model}`} title={modelDetail(m, totalTokens, money, noPrice)}>
+          <div className="dtpl-row" key={`${m.provider}/${m.model}`} title={modelDetail(m, totalTokens, money, noPrice, showMoney)}>
             <div className="dtpl-model">
               <ShareRing value={tokens} total={totalTokens} denom="本窗口" />
               <div className="dtpl-model-txt">
@@ -55,19 +57,21 @@ export function ModelRows({ byModel, totalTokens, money, unpriced }: {
               <span className="dtpl-val">
                 <span className="dtpl-sr">词元 </span>{formatTokens(tokens)}
               </span>
-              <span className="dtpl-cost" title={costText}>
-                <span className="dtpl-cost-seg">
-                  <span className="dtpl-cost-main">
-                    <span className="dtpl-sr">金额 </span>
-                    {noPrice
-                      ? <b className="dtpl-cost-na">—</b>
-                      : showsSub
-                        ? <b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b>
-                        : <b className="dtpl-cash-amt">{money(m.spend)}</b>}
+              {showMoney && (
+                <span className="dtpl-cost" title={costText}>
+                  <span className="dtpl-cost-seg">
+                    <span className="dtpl-cost-main">
+                      <span className="dtpl-sr">金额 </span>
+                      {noPrice
+                        ? <b className="dtpl-cost-na">—</b>
+                        : showsSub
+                          ? <b className="dtpl-sub-amt">{money(m.subscriptionValue)}</b>
+                          : <b className="dtpl-cash-amt">{money(m.spend)}</b>}
+                    </span>
+                    <em className="dtpl-cost-k">{bucket}</em>
                   </span>
-                  <em className="dtpl-cost-k">{bucket}</em>
                 </span>
-              </span>
+              )}
             </div>
           </div>
         )
@@ -83,10 +87,12 @@ export function ModelRows({ byModel, totalTokens, money, unpriced }: {
  * 失败数进**行内**而不是只留在 hover 里：它是这一行唯一会改变动作的事实，而 hover
  * 在触屏与键盘上够不着。四桶拆分与精确时刻是补充细节，留在 hover 里没有代价。
  */
-export function WorkspaceRows({ rows, totalTokens, money }: {
+export function WorkspaceRows({ rows, totalTokens, money, showMoney }: {
   rows: readonly WorkspaceUsageRow[]
   totalTokens: number
   money: (value: number) => string
+  /** 这个窗口给不给金额（判据同 `ModelRows`）。 */
+  showMoney: boolean
 }) {
   return (
     <div className="dtpl-models">
@@ -104,7 +110,7 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
           <div
             className={`dtpl-row${row.id === '' ? ' is-unattributed' : ''}`}
             key={row.id === '' ? 'unattributed' : row.id}
-            title={workspaceDetail(row, money)}
+            title={workspaceDetail(row, money, showMoney)}
           >
             <div className="dtpl-model">
               <ShareRing value={row.tokens} total={totalTokens} denom="本窗口" />
@@ -134,24 +140,26 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
               {/* 工作区可跨通道、两个金额桶同时非零——不像模型行的单段，这里是两段
                   「数额 + 桶名」；桶名与模型行共用同一条槽位，各段数额的右边缘仍在同一条
                   竖线上。 */}
-              <span className="dtpl-cost" title={costText}>
-                {(cash || !sub) && (
-                  <span className="dtpl-cost-seg">
-                    <span className="dtpl-cost-main">
-                      <span className="dtpl-sr">金额 </span>
-                      <b className="dtpl-cash-amt">{money(row.spend)}</b>
+              {showMoney && (
+                <span className="dtpl-cost" title={costText}>
+                  {(cash || !sub) && (
+                    <span className="dtpl-cost-seg">
+                      <span className="dtpl-cost-main">
+                        <span className="dtpl-sr">金额 </span>
+                        <b className="dtpl-cash-amt">{money(row.spend)}</b>
+                      </span>
+                      <em className="dtpl-cost-k">实际支出</em>
                     </span>
-                    <em className="dtpl-cost-k">实际支出</em>
-                  </span>
-                )}
-                {cash && sub && <span className="dtpl-cost-sep" aria-hidden="true">·</span>}
-                {sub && (
-                  <span className="dtpl-cost-seg">
-                    <span className="dtpl-cost-main"><b className="dtpl-sub-amt">{money(row.subscriptionValue)}</b></span>
-                    <em className="dtpl-cost-k">订阅价值</em>
-                  </span>
-                )}
-              </span>
+                  )}
+                  {cash && sub && <span className="dtpl-cost-sep" aria-hidden="true">·</span>}
+                  {sub && (
+                    <span className="dtpl-cost-seg">
+                      <span className="dtpl-cost-main"><b className="dtpl-sub-amt">{money(row.subscriptionValue)}</b></span>
+                      <em className="dtpl-cost-k">订阅价值</em>
+                    </span>
+                  )}
+                </span>
+              )}
             </div>
           </div>
         )
@@ -161,7 +169,7 @@ export function WorkspaceRows({ rows, totalTokens, money }: {
 }
 
 /** 工作区行的 hover 审计信息；与模型行的 `modelDetail` 同一套写法——两面的 hover 说的是同一类事实。 */
-function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => string): string {
+function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => string, showMoney: boolean): string {
   const totals = row.totals
   const failed = totals.failures ?? 0
   return [
@@ -170,13 +178,19 @@ function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => strin
     `窗口 ${formatTokens(row.tokens)} 词元 · ${totals.requests} 请求${failed > 0 ? ` · ${failed} 失败` : ''}`,
     `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
     + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
-    `实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`,
+    ...(showMoney ? [`实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`] : []),
     `最近一次 ${formatDateTime(row.lastAt)}`,
   ].join('\n')
 }
 
 /** 模型行的 hover 审计信息：行内只放得下身份、词元与一个金额桶，其余留在这里。 */
-function modelDetail(row: CostedModelRow, totalTokens: number, money: (value: number) => string, noPrice: boolean): string {
+function modelDetail(
+  row: CostedModelRow,
+  totalTokens: number,
+  money: (value: number) => string,
+  noPrice: boolean,
+  showMoney: boolean,
+): string {
   const totals = row.totals
   const tokens = totalsTokens(totals)
   const failed = totals.failures ?? 0
@@ -188,9 +202,9 @@ function modelDetail(row: CostedModelRow, totalTokens: number, money: (value: nu
     `窗口 ${formatTokens(tokens)} 词元（占本窗口 ${formatShare(tokens, totalTokens)}）`
     + ` · ${totals.requests} 请求${compactions > 0 ? ` · ${compactions} 压缩` : ''}`
     + `${failed > 0 ? ` · ${failed} 失败` : ''}${unknown > 0 ? ` · ${unknown} 次没上报用量` : ''}`
-    + `${noPrice ? ' · 价格未知' : ''}`,
+    + `${showMoney && noPrice ? ' · 价格未知' : ''}`,
     `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
     + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
-    `实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`,
+    ...(showMoney ? [`实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`] : []),
   ].join('\n')
 }

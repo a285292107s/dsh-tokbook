@@ -3,7 +3,7 @@
  * 这里**，去处是用量明细的「全部」窗口（`ProviderPanel`）。卡的构成与排版理由在 ledger 片段。
  */
 
-import { useEffect, useRef } from 'react'
+import type { CSSProperties } from 'react'
 import type { TokBookOverview, UsageDayRow, UsageTotals } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import { UsageGlyph } from './icons.tsx'
@@ -128,9 +128,9 @@ function columnHeight(tokens: number, max: number): string {
 }
 
 /**
- * 图区本体。单独成一个组件是为了那支**入场动效**：它要挂一次性的 DOM 监听来撤掉动画类，
- * 而 `DailyTrend` 有三条 early return——在那里挂 hook 会踩条件调用。隔离在这一层之后，
- * 这一层只在真有柱可画时才挂载，规则天然成立。
+ * 图区本体。`is-anim` 静态挂着：错峰入场动画只在元素重挂时播一次，而数据刷新不重挂柱子，
+ * CSS 动画不因重渲染重播——所以不需要「播完摘类」的监听。错峰步长由每根柱的 `--dtpl-i` 给出
+ * （见 shared 片段的动效段）。
  */
 function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
   slots: readonly string[]
@@ -140,19 +140,9 @@ function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
   max: number
   sum: number
 }) {
-  const barsRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const bars = barsRef.current
-    if (bars === null) return
-    bars.classList.add('is-anim')
-    const stop = (): void => { bars.classList.remove('is-anim') }
-    bars.addEventListener('animationend', stop)
-    return () => { bars.removeEventListener('animationend', stop) }
-  }, [])
   return (
     <div
-      className="dtpl-bars"
-      ref={barsRef}
+      className="dtpl-bars is-anim"
       role="img"
       aria-label={`近 ${String(TREND_DAYS)} 天词元柱状图：${shortDay(slots[0]!)} 至 ${shortDay(slots[slots.length - 1]!)} 共 ${String(slots.length)} 天，合计 ${formatTokens(sum)} 词元${peak > 0 ? `，峰值 ${shortDay(slots[peakIndex]!)} 的 ${formatTokens(peak)}` : ''}。`}
     >
@@ -166,6 +156,7 @@ function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
             className={`dtpl-bar${tokens === 0 ? ' is-zero' : ''}`}
             key={slots[index]!}
             title={`${slots[index]!}\n${formatTokens(tokens)}`}
+            style={{ '--dtpl-i': index } as CSSProperties}
           >
             <span
               className={`dtpl-bar-label${isPeak ? ' is-peak' : ''}${tokens === 0 ? ' is-zero' : ''}`}

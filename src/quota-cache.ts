@@ -13,6 +13,7 @@
  */
 
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import type { QuotaCard } from './types.ts'
 
@@ -56,14 +57,45 @@ export async function readQuotaSnapshot(dir: string, provider: string): Promise<
   return isSnapshotFile(value) ? value.card : null
 }
 
+/**
+ * 同一目标路径的在飞写入链（模块级）：每次都排在前一次**落定**之后。调用点是
+ * fire-and-forget（`src/index.ts` 的额度刷新），两个并发刷新若不串行，后一个的
+ * `unlink(target)` 会删掉前一个刚 rename 好的快照。
+ */
+const writeChains = new Map<string, Promise<void>>()
+
+async function writeQuotaSnapshotFile(dir: string, provider: string, card: QuotaCard): Promise<void> {
+  const target = join(dir, snapshotFileName(provider))
+  // 临时名唯一：固定的 `.tmp` 会被并发写者互相覆盖，于是其中一个的 `rename`
+  // 报 ENOENT（被调用方的 catch 吞掉），磁盘上反而**没有**快照——唯一来源丢了。
+  const tmp = `${target}.${String(process.pid)}.${randomUUID()}.tmp`
+  await mkdir(dirname(target), { recursive: true })
+  try {
+    await writeFile(tmp, JSON.stringify({ savedAt: Date.now(), card } satisfies QuotaSnapshotFile), 'utf8')
+    // 先 unlink 目标：Windows 覆盖 rename 间歇失败。
+    await unlink(target).catch(() => undefined)
+    await rename(tmp, target)
+  } catch (error) {
+    // 尽力回收自己的临时文件；失败仍报给调用方（它记日志）。
+    await unlink(tmp).catch(() => undefined)
+    throw error
+  }
+}
+
 /** 原子持久化一个 provider 的额度卡（临时 + rename；先 unlink 目标——
  *  Windows 覆盖 rename 间歇失败）。调用方只持久化 'ok' 卡；快照写失败非致命，
- *  由调用方记日志。 */
-export async function writeQuotaSnapshot(dir: string, provider: string, card: QuotaCard): Promise<void> {
+ *  由调用方记日志。同一目标路径上的写互相串行；前一次失败不会毒化后续。 */
+export function writeQuotaSnapshot(dir: string, provider: string, card: QuotaCard): Promise<void> {
   const target = join(dir, snapshotFileName(provider))
-  const tmp = join(dir, `${snapshotFileName(provider)}.tmp`)
-  await mkdir(dirname(target), { recursive: true })
-  await writeFile(tmp, JSON.stringify({ savedAt: Date.now(), card } satisfies QuotaSnapshotFile), 'utf8')
-  await unlink(target).catch(() => undefined)
-  await rename(tmp, target)
+  const previous = writeChains.get(target) ?? Promise.resolve()
+  const next = previous.then(() => writeQuotaSnapshotFile(dir, provider, card))
+  // 链上只记「已落定」：rejection 由调用方处理，不会顺着链传染给下一位，
+  // 也不会变成第二条未处理的 rejection。
+  const settled = next.then(() => undefined, () => undefined)
+  writeChains.set(target, settled)
+  // 只有自己仍是链尾时才摘除条目，否则会把后来者的链删掉。
+  void settled.then(() => {
+    if (writeChains.get(target) === settled) writeChains.delete(target)
+  })
+  return next
 }
