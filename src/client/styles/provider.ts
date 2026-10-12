@@ -1,4 +1,10 @@
-export const CSS_PROVIDER = `/* 用量明细 tab */
+export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是那一页**往下滚的第二段**——上方是今日仪表卡与近 14 天
+   趋势，这里是选定窗口内的三种切法。一段顶格的分隔把两段分开（趋势节自身 margin-bottom:0，
+   间距只能由这段自己给）。*/
+[data-plugin="dsh-tokbook"] .dtpl-usage-section{
+  margin-top:22px;padding-top:20px;
+  border-top:1px solid var(--dtpl-border);
+}
 /* 这一页有三层，从上到下各管一件事：**分区词**（窗口 + 「用量」）领起并报出该窗口的**合计**；
    **窗口**是贴在分区词右端的作用域控件；**切法**（按模型 / 按工作区 / 按通道）是这一页**唯一**
    那条 tab 条，它下面才是数据。
@@ -24,12 +30,9 @@ export const CSS_PROVIDER = `/* 用量明细 tab */
 [data-plugin="dsh-tokbook"] .dtpl-usage-facts-sk{width:236px;min-height:19px;}
 /* 错误态合计那一行的高度：留空比收掉好——收掉会让下面的错误块与切法条整体上移。 */
 [data-plugin="dsh-tokbook"] .dtpl-usage-facts-empty{min-height:19px;}
-/* 窗口控件：可见标签 + 24px 小选择器，不画自己的底线延伸。 */
+/* 窗口控件：24px 小选择器，不画自己的底线延伸。 */
 [data-plugin="dsh-tokbook"] .dtpl-usage-scope{
   display:flex;align-items:center;gap:8px;flex:none;
-}
-[data-plugin="dsh-tokbook"] .dtpl-usage-scope-k{
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;white-space:nowrap;
 }
 /* 「全部账本只给词元」这句解释就挂在窗口控件旁边——金额列在那一个窗口里不出现，
    原因必须与控件同屏，否则读起来像少了一列。它是要读的一句话，所以走 fg-2。 */

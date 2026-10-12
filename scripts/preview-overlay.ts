@@ -23,7 +23,7 @@
  * **显式 404**——落到页面 HTML 会让 client 报「Unexpected token '<'」，既不说缺的是
  * 哪一路，也不说缺在预览台。这条只在预览模式成立：独立查看器由真 host 作答。
  *
- * Query flags: ?dark=1 dark skin, ?tab=ledger|provider|quota|pricing|method（值就是 tab 的 id
+ * Query flags: ?dark=1 dark skin, ?tab=ledger|quota|pricing|method（值就是 tab 的 id
  * 后缀，见 LedgerOverlay 的 `dtpl-tab-*`）,
  * ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none quota-tab
  * fixture + auto-switch to the quota tab.
@@ -990,7 +990,7 @@ server.listen(port, '127.0.0.1', () => {
     console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}（浮窗带设备皮，?dark=1 换深面）`)
     return
   }
-  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|quota|provider|pricing|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
+  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|quota|pricing|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
   console.log(`  整台的形状由 **环境变量** 选（一个进程 = 一种形状）：TOKBOOK_MODE=empty|err|sync|syncerr（当前：${MODE === '' ? '有数据' : MODE}）。`)
   console.log(`  lib/client.js 按请求读盘：pnpm build 之后刷新页面即可，不用重启本进程。`)
 })

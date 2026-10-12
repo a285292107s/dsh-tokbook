@@ -178,9 +178,9 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
   )
 }
 
-type OverlayTab = 'ledger' | 'provider' | 'quota' | 'pricing' | 'method'
+type OverlayTab = 'ledger' | 'quota' | 'pricing' | 'method'
 
-const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'quota', 'provider', 'pricing', 'method']
+const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'quota', 'pricing', 'method']
 
 function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onClose }: {
   overview: TokBookOverview | null
@@ -272,7 +272,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
         </header>
 
         <div className="dtpl-tabs" role="tablist" aria-label="账本视图" onKeyDown={onTablistKeyDown}>
-          {/* 五个 tab 共指**同一个** tabpanel（`dtpl-panel`）：面板是同一个滚动容器、内容随 tab 换，
+          {/* 四个 tab 共指**同一个** tabpanel（`dtpl-panel`）：面板是同一个滚动容器、内容随 tab 换，
               所以每格写死一个自己的 id 会让四个 `aria-controls` 指向不存在的元素——指向一个不存在的
               id 比不指更糟。 */}
           <button
@@ -298,18 +298,6 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             onClick={() => setTab('quota')}
           >
             订阅额度
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="dtpl-tab-provider"
-            aria-selected={tab === 'provider'}
-            aria-controls="dtpl-panel"
-            tabIndex={tab === 'provider' ? 0 : -1}
-            className="dtpl-tab"
-            onClick={() => setTab('provider')}
-          >
-            用量明细
           </button>
           <button
             type="button"
@@ -347,30 +335,29 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
         >
           {tab === 'method'
             ? <MethodDoc overview={overview} />
-            : tab === 'provider'
-              ? <ProviderPanel />
-              : tab === 'quota'
-                ? <QuotaPanel />
-                : tab === 'pricing'
-                  ? (
-                    <PricingPanel
-                      onChanged={onRefresh}
-                      onDirtyChange={onDirtyChange}
-                    />
-                  )
-                  : (
-                  <>
-                    {error !== null && (
-                      <div className="dtpl-error" role="alert">
-                        <p className="dtpl-error-text">加载失败：{error}</p>
-                        <button type="button" className="dtpl-retry" onClick={onRetry}>重试</button>
-                      </div>
-                    )}
-                    {overview === null
-                      ? <LedgerSkeleton />
-                      : <LedgerView overview={overview} />}
-                  </>
+            : tab === 'quota'
+              ? <QuotaPanel />
+              : tab === 'pricing'
+                ? (
+                  <PricingPanel
+                    onChanged={onRefresh}
+                    onDirtyChange={onDirtyChange}
+                  />
+                )
+                : (
+                <>
+                  {error !== null && (
+                    <div className="dtpl-error" role="alert">
+                      <p className="dtpl-error-text">加载失败：{error}</p>
+                      <button type="button" className="dtpl-retry" onClick={onRetry}>重试</button>
+                    </div>
                   )}
+                  {overview === null
+                    ? <LedgerSkeleton />
+                    : <LedgerView overview={overview} />}
+                  <ProviderPanel />
+                </>
+                )}
         </div>
 
         {overview !== null && tab === 'ledger' && (

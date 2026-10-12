@@ -1,9 +1,9 @@
 /**
- * 用量明细 tab：**选定窗口**内同一批用量的三种切法——按模型 / 按工作区 / 按通道
- * （三层信息形的分法见 provider 片段页头段）。
+ * 用量明细：用量总览页往下滚的第二段——**选定窗口**内同一批用量的三种切法——按模型 / 按工作区 /
+ * 按通道（三层信息形的分法见 provider 片段页头段）。
  *
  * 数据来自 `GET /tokbook/usage?range=…`（一次拉回三种切法 + 窗口合计）。刻意独立于总览
- * store——总览失败时本 tab 仍可用。
+ * store——总览失败时这一段仍可用。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -36,6 +36,29 @@ const RANGE_WORDS: Record<ProviderRange, string> = {
   last7: '近 7 天',
   last30: '近 30 天',
   all: '全部账本',
+}
+
+/** 未选择过时的默认窗口。 */
+const DEFAULT_RANGE: ProviderRange = 'last7'
+
+/**
+ * 时间跨度存放处。这是**视图偏好**（每台浏览器自己决定默认看哪个窗口），不是账本数据，
+ * 所以进 localStorage 而不是宿主配置：无需契约、无需重启、不同浏览器可各选各的
+ * （同一个理由见 `QuotaPanel` 的自动刷新间隔）。
+ */
+const RANGE_KEY = 'dsh-tokbook.usage-range'
+
+/** 读回上次选的窗口。只认合法值——存储里的旧值或坏值一律回落到默认，不让它决定控件显示什么。 */
+function readRange(): ProviderRange {
+  try {
+    const saved = localStorage.getItem(RANGE_KEY)
+    return saved !== null && (RANGE_IDS as readonly string[]).includes(saved)
+      ? saved as ProviderRange
+      : DEFAULT_RANGE
+  } catch {
+    // 隐私模式等拿不到存储：回落到默认窗口。
+    return DEFAULT_RANGE
+  }
 }
 
 /** 切法，按展示顺序（也是子 tab 顺序）。 */
@@ -139,9 +162,9 @@ function readUsageView(raw: unknown): ProviderUsageView | null {
   return source as ProviderUsageView
 }
 
-/** 用量明细 tab 本体；每个已加载的窗口有缓存，切回来不重新拉取。 */
+/** 用量明细那一节本体；每个已加载的窗口有缓存，切回来不重新拉取。 */
 export function ProviderPanel() {
-  const [range, setRange] = useState<ProviderRange>('last7')
+  const [range, setRange] = useState<ProviderRange>(readRange)
   const [slice, setSlice] = useState<Slice>('model')
   const [views, setViews] = useState<ReadonlyMap<ProviderRange, ProviderUsageView>>(() => new Map())
   /** 最近一次**已知**的可用切法。加载中不清空：换窗口时 tab 条因此不闪、也不整块消失。 */
@@ -190,6 +213,16 @@ export function ProviderPanel() {
   // 面板卸载（tab 切换）时推进 active token，防止在飞的响应更新已卸载面板。
   useEffect(() => () => { activeRef.current += 1 }, [])
 
+  // 用户选的窗口立刻落盘：面板随 tab 切换/浮窗关闭卸载，组件状态活不过那一刻。
+  const chooseRange = useCallback((next: ProviderRange) => {
+    setRange(next)
+    try {
+      localStorage.setItem(RANGE_KEY, next)
+    } catch {
+      // 存不下不影响这一次选择，只是下次打开回到默认窗口。
+    }
+  }, [])
+
   const view = views.get(range)
   const moneyOf = (value: number): string => formatMoney(value)
   // 金额按现价折算，只在够近的窗口里是有效的刻度（见 types 的 `rangeCarriesMoney`）。
@@ -216,12 +249,11 @@ export function ProviderPanel() {
   }
 
   return (
-    <section aria-label="用量明细">
+    <section aria-label="用量明细" className="dtpl-usage-section">
       <div className="dtpl-usage-head">
         <div className="dtpl-usage-head-top">
           <h2 className="dtpl-sec-title dtpl-usage-title">{RANGE_WORDS[range]}用量</h2>
           <div className="dtpl-usage-scope">
-            <span className="dtpl-usage-scope-k">窗口</span>
             <div className="dtpl-range-tabs" role="group" aria-label="时间跨度">
               {RANGE_IDS.map((id) => (
                 <button
@@ -229,7 +261,7 @@ export function ProviderPanel() {
                   type="button"
                   className={`dtpl-range-tab${range === id ? ' dtpl-range-active' : ''}`}
                   aria-pressed={range === id}
-                  onClick={() => setRange(id)}
+                  onClick={() => chooseRange(id)}
                 >
                   {RANGE_LABELS[id]}
                 </button>
