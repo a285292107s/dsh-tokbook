@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-10-04 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-10-05 · supersedes: —
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区从**侧边栏
@@ -50,6 +50,9 @@ src/
   price-format.ts     两半区共享的价文件内核:词表(保留键 / 长度上限)+ 取价规则(日内时段 / 星期集合 / 法定节假日年历)
   pricing.ts          价文件唯一真源(路由 → 模型串 → 当前价 + $billing/$calendar/$currency/$fx)+ 取价(基准价叠时段)+ costOf + 折出人民币计价表(cnyTable)
   pricing-view.ts     价格表 tab 的数据装配(路由目录 ∪ 账本 ∪ 价文件;卡带报价币种,视图带 $fx 与年历)
+  models-dev.ts       models.dev 公共目录的拉取 / 归一化 / 采信边界(原厂 slug 清单;分裂价弃采)
+  pricing-sync.ts     补价合并(纯函数):美元通道 × 账本用过 × 缺价格子,手写价永远赢
+  pricing-sync-state.ts 日节流状态(models-dev-sync.json,不进 pricing.json)
   route-catalog.ts    路由目录:本机设置文档(settings)× 运行时适配器注册表(ctx.llm)
   by-provider.ts      纯通道卡片聚合 + 按模型切法(用量明细 tab:摊平卡的模型行)
   workspaces.ts       纯按工作区聚合(会话 cwd ↔ 工作区注册表的读时连接 + 未归属兜底)
@@ -88,7 +91,7 @@ src/
       currency.ts     报价币种纯逻辑:悬停的折算读数 / 切换币种时整条通道的换算(无 React,进 smoke)
       draft.ts        价格表纯逻辑:草稿 ↔ wire body、校验、脏签名(年历 / 汇率 / 报价币种)
       editors.tsx     行原语:四档价输入、峰谷时段编辑器、法定节假日年历编辑器、选中模型的详情面
-      PricingPanel.tsx 价格表 tab 外壳:通道/模型两个下拉 + 年历 + 汇率行 + 自动保存状态
+      PricingPanel.tsx 价格表 tab 外壳:通道/模型两个下拉 + models.dev 补价条 + 年历 + 汇率行 + 自动保存状态
     quota/
       metrics.ts      订阅额度纯规则:占比/语气/口径/文案(无 React)
       QuotaCard.tsx   订阅额度卡:卡壳 + ok 主体 + 余额/无订阅面板 + gauge/骨架
@@ -228,6 +231,20 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 显示什么就存什么——没有「敲美元、落人民币」那一层。切过去会把**已有的**价按汇率换算成另一种货币
 (人民币金额不变,这是一次真正的改价、会弄脏那一行);每格的悬停提示里报另一种货币的读数(美元通道
 报 `= ¥…` 那个计入金额的数,人民币通道报 `≈ $…` 供你核对)。没有汇率时 `$` 是停用的。
+
+**从 models.dev 补价**(价格表 tab 的两个按钮,挂载时每天自动同步一次):
+[models.dev/api.json](https://models.dev/api.json) 是公共的美元目录。
+
+- **「查价」按钮**——把**当前选中的模型名**当关键词,在目录里模糊搜,列出**原厂采信**
+  的相关模型与四档美元价,你挑一条就**一键填进这一行**(只在美元报价的通道上;人民币
+  通道的按钮是停用的,得先在详情头把报价币种切成美元)。候选池与自动补价共用同一份
+  采信目录,所以没有转售价冒充通道成本这回事——挑哪家由你定。关键词可编辑,搜不到
+  时换个词(模型串、或只敲厂商名如 `deepseek` / `qwen`)再搜。
+- **「从 models.dev 补价」按钮**——自动那条路的手动入口:把**账本里计过费**的 (route, model)
+  对着它补进**美元通道**的缺价格子,精确名命中即写,手写的价一格不动,`force` 绕过日节流。
+
+四道门槛与采信边界(转售商不采、分裂价弃采)见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) §2;
+失败不落盘,今天同步过就不再拉。
 
 ## 配置
 

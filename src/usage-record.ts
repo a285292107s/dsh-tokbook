@@ -29,7 +29,7 @@ export interface SessionEventLike {
     model?: string
     message?: {
       id: string
-      source: { provider?: string; model: string }
+      source: { provider?: string; model: string; callId?: string }
     }
     provider?: string
     source?: { provider?: string; model: string }
@@ -42,6 +42,13 @@ export interface SessionEventLike {
     retry?: number
     /** `turn/end` 关闭的回合号——一个回合只关一次。 */
     turn?: number
+    /** 步内定位（`step/start`、`assistant/message`、`tool/call` 等）。 */
+    step?: number
+    /** `tool/call` 的调用身份，与 `tool/result` 的 `message.source.callId` 配对。 */
+    callId?: string
+    name?: string
+    /** 压进这一条事件里的模型输出流；首 token 的时刻只能从这里读（见 session-timing）。 */
+    stream?: readonly unknown[]
   }
 }
 

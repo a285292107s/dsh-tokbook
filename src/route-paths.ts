@@ -22,6 +22,13 @@ export const ROUTE_USAGE = '/tokbook/usage'
 export const ROUTE_QUOTA = '/tokbook/quota'
 /** `GET` 价表只读视图；`PUT` 写整份价表。 */
 export const ROUTE_PRICING = '/tokbook/pricing'
+/** `POST` 从 models.dev 补价：账本出现过的 (route, model) × 美元通道 × 缺价格子。
+ *  `?force=1` 绕过日节流。 */
+export const ROUTE_PRICING_SYNC = '/tokbook/pricing-sync'
+/** `GET` 按关键词在 models.dev 目录里查原厂美元价：`?model=` 是关键词（默认取当前
+ *  模型名），返回按相关性排序的候选与四档价，供「查价」按钮的选用面板用。只在**原厂
+ *  采信条目**里找（同 `parseCatalog` 的边界），不返回转售价。 */
+export const ROUTE_PRICING_LOOKUP = '/tokbook/pricing-lookup'
 /** `GET` 单个会话的账本视图（按轮次/步骤分组）；需带 `?session=`。 */
 export const ROUTE_SESSION = '/tokbook/session'
 
@@ -34,3 +41,7 @@ export const QUERY_RANGE = 'range'
 export const QUERY_PROVIDER = 'provider'
 /** `ROUTE_QUOTA` 的绕过 TTL 缓存标记：值为 `'1'` 时强制轮询 provider。 */
 export const QUERY_REFRESH = 'refresh'
+/** `ROUTE_PRICING_SYNC` 的绕过日节流标记：值为 `'1'` 时立即同步一次。 */
+export const QUERY_FORCE = 'force'
+/** `ROUTE_PRICING_LOOKUP` 的关键词：值就是用户想查的模型串（默认 = 当前选中模型名）。 */
+export const QUERY_MODEL = 'model'

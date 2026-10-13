@@ -38,12 +38,23 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-quota-cards{display:flex;flex-direction:column;gap:12px;}
-/* 一张订阅卡 = 同一块读数面板（与总览 hero / 通道卡同源）。 */
+/* 一张订阅卡 = 同一块读数面板（与总览 hero / 通道卡同源）。悬停时受光边提亮——
+   它是可刷新的活卡，不是静态读数块。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-card{
   padding:13px 15px 12px;
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
-  box-shadow:var(--dtpl-metal);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dtpl-metal),
+    0 4px 14px -6px rgba(0,0,0,.18);
+  transition:box-shadow .18s ease,border-color .18s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-quota-card:hover{
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent),
+    var(--dtpl-metal),
+    0 6px 20px -6px rgba(0,0,0,.24);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-head{
   display:flex;align-items:center;justify-content:space-between;gap:12px;

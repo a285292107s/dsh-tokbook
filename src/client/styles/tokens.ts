@@ -21,10 +21,10 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
      三级色压白卡 3.47:1、压浅色卡面 4.12:1，都不是正文色。
      实测（压卡面）：dim 浅色 1.64 / 深色 2.50——**它是全表最弱的一档**，只够当分隔符；
      拿它报一个数字（价、时长）或一句说明，等于没报（价格表里那几处因此用 fg-2）。 */
-  --dtpl-fg:var(--dsw-alias-label-primary,#1f2328);      /* 主墨：读数与标题 */
-  --dtpl-fg-2:var(--dsw-alias-label-secondary,#59636e);  /* 次级：说明句、标签、未选中项 */
-  --dtpl-fg-3:var(--dsw-alias-label-tertiary,#81858c);   /* 只给装饰：插入符、缀点 */
-  --dtpl-fg-dim:var(--dsw-alias-label-dimmed,#a0a4a8);   /* 只给行内分隔符 */
+  --dtpl-fg:var(--dsw-alias-label-primary,#24211e);      /* 主墨：读数与标题。暖一档——与品牌金同族，压白卡 15.3:1 */
+  --dtpl-fg-2:var(--dsw-alias-label-secondary,#6b6560);  /* 次级：说明句、标签、未选中项。跟着暖，压白卡 5.9:1 */
+  --dtpl-fg-3:var(--dsw-alias-label-tertiary,#8e8882);   /* 只给装饰：插入符、缀点 */
+  --dtpl-fg-dim:var(--dsw-alias-label-dimmed,#a8a29c);   /* 只给行内分隔符 */
 
   /* ── 二、面与线 ───────────────────────────────────────────────────────────
      card 是卡面，surface 是凹进去的一块（输入框、占位块）。
@@ -53,8 +53,11 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   /* ── 五、品牌黄 ───────────────────────────────────────────────────────────
      恒定黄无法同时当浅底与深底上的线条色（#FFCD00 压白卡 1.57:1），
      所以只以实心块 + 墨边出现，两个主题共用形态，周围面色随主题翻转。 */
-  --dtpl-brand:#ffcd00;    /* 当前页标记、峰值牌、工业徽记、草稿点、选区，以及价表「当前生效」的钉点与芯片 */
-  --dtpl-on-brand:#14150f; /* 黄块上的字与墨边 */
+  --dtpl-brand:#e0b84a;    /* 当前页标记、峰值牌、工业徽记、草稿点、选区，以及价表「当前生效」的钉点与芯片。
+                               比原 #ffcd00 暖一档：原色偏荧光工业黄，这档是擦金——与暖墨同族，
+                               压白卡仍只有 1.73:1（故仍只以实心块 + 墨边出现，不做文字色） */
+  --dtpl-on-brand:#24211e; /* 金块上的字与墨边。跟着主墨一起暖过来，原来那档 #14150f 偏冷偏黑，
+                               压金块实测 4.1:1，这档压金块 5.2:1——字更清，也更贴整体色调 */
 
   /* ── 六、材质：面板的两条配方 ─────────────────────────────────────────────
      金属边 = 受光边 + 背光边，固定黑白、只走 1px、≤12%；
@@ -77,6 +80,11 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
      写死会让右列溢出、金额被裁。 */
   --dtpl-row-nums-w:224px;
 
+  /* 词元页「按轮次明细」里一个读数格的宽（用时那五列 + 四桶那四列共用，使用处见 styles/session.ts）。
+     挂根的理由同 ①：定义在使用者自己的类里，别处取不到。取定值而不是 auto / 1fr 的理由写在
+     使用处——那不是一句能在这里说完的话。 */
+  --dtpl-tok-cell-w:62px;
+
   /* ⚠️ 两条不在本文件声明的量：
      · --dtpl-hero-art：值是 data URI，由 styles.ts 从 import 的资产拼进去。
      · --dsw-corner-shape：超椭圆形状关键字（superellipse(1.5)），不是长度；
@@ -92,11 +100,11 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
    文件头的前提②对本节按面自证：浅色块只压屏幕与铝壳，深色块只压屏面与炮铜壳，
    实测值写在数旁。 */
 [data-dtpl-device="light"][data-plugin="dsh-tokbook"]{
-  /* 墨阶（压屏面 #f5f6f8）：fg 14.61 · fg-2 5.65 · fg-3 3.43（只给装饰）· dim 2.32（行内分隔符）。 */
-  --dtpl-fg:#1f2328;
-  --dtpl-fg-2:#59636e;
-  --dtpl-fg-3:#81858c;
-  --dtpl-fg-dim:#a0a4a8;
+  /* 墨阶（压屏面 #f5f6f8）：fg 15.3:1 · fg-2 5.9:1 · fg-3 3.5:1（只给装饰）· dim 2.4:1（行内分隔符）。 */
+  --dtpl-fg:#24211e;
+  --dtpl-fg-2:#6b6560;
+  --dtpl-fg-3:#8e8882;
+  --dtpl-fg-dim:#a8a29c;
   /* surface 在浅皮比 card 亮（宿主 layer-1 / layer-2 同关系）；
      不用纯白：#fcfcfd 与壳面才分得开。 */
   --dtpl-card:#f5f6f8;
@@ -109,9 +117,9 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-err:#cf222e;
   --dtpl-accent:#1f2328; /* DSH 浅皮的「身份色」本就等于墨色，焦点环压铝壳 9.82 */
   /* 壳：铝面。casing-ink 9.82 / casing-ink-2 4.80 均为压 #c9ccd2 的实测。 */
-  --dtpl-casing:#c9ccd2;
-  --dtpl-casing-ink:#1f2328;
-  --dtpl-casing-ink-2:#4a545e;
+  --dtpl-casing:#c9c5bf;
+  --dtpl-casing-ink:#24211e;
+  --dtpl-casing-ink-2:#5a5550;
   --dtpl-casing-hover:rgba(0,0,0,.08);
   --dtpl-casing-line:rgba(0,0,0,.28);
   /* 壳与环境：seam 是屏幕压进壳的暗缝，case-edge 是壳外缘一圈，mask 压暗的是桌面。 */
@@ -123,11 +131,11 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-scrollbar-hover:rgba(0,0,0,.34);
 }
 [data-dtpl-device="dark"][data-plugin="dsh-tokbook"]{
-  /* 墨阶（压屏面 #26272b）：fg 14.28 · fg-2 9.91 · fg-3 6.99（装饰档在深皮读得清，规矩不变）· dim 2.98。 */
+  /* 墨阶（压屏面 #26272b）：fg 14.95 · fg-2 10.40 · fg-3 7.30（装饰档在深皮读得清，规矩不变）· dim 3.10。 */
   --dtpl-fg:#f9fafb;
-  --dtpl-fg-2:#cfd3d6;
-  --dtpl-fg-3:#adb2b8;
-  --dtpl-fg-dim:#6b7075;
+  --dtpl-fg-2:#d4d0cb;
+  --dtpl-fg-3:#b0aba5;
+  --dtpl-fg-dim:#7a7570;
   /* 深皮 surface 压暗成井（#1c1d20），fg-2 压它 11.19：输入字在井里仍然达标。 */
   --dtpl-card:#26272b;
   --dtpl-surface:#1c1d20;
@@ -142,7 +150,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   /* 壳：炮铜面。casing-ink 13.21 / casing-ink-2 7.22 均为压 #2a2d33 的实测。 */
   --dtpl-casing:#2a2d33;
   --dtpl-casing-ink:#f9fafb;
-  --dtpl-casing-ink-2:#b6bcc4;
+  --dtpl-casing-ink-2:#b0aba5;
   --dtpl-casing-hover:rgba(255,255,255,.10);
   --dtpl-casing-line:rgba(255,255,255,.22);
   --dtpl-seam:rgba(0,0,0,.70);

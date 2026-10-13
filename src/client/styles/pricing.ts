@@ -158,12 +158,20 @@ export const CSS_PRICING = `
   font-size:10px;line-height:14px;color:var(--dtpl-err);overflow-wrap:anywhere;
 }
 
-/* 选中模型的详情面。data-dirty 是**面板级**的指示：未落盘的改动只挂这一条墨痕。 */
+/* 选中模型的详情面。data-dirty 是**面板级**的指示：未落盘的改动只挂这一条墨痕。
+   它是这一屏唯一带**框**的块——其余（下拉、年历、基准价）都不带框，因为它们是控件或
+   全局数据；这一块是「选中模型的完整编辑面」，框把它与上面的选择区分开。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-detail{
   display:flex;flex-direction:column;gap:8px;
+  padding:12px 14px 14px;
+  border:1px solid var(--dtpl-border);
+  background:var(--dtpl-panel-bg);
+  box-shadow:var(--dtpl-metal);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-detail[data-dirty="true"]{
-  box-shadow:inset 2px 0 0 var(--dtpl-fg);
+  box-shadow:
+    inset 2px 0 0 var(--dtpl-fg),
+    var(--dtpl-metal);
 }
 /* 只读的「当前生效」读数：纯展示——不带框、不坐刻线；数字与格子里的编辑面同源（draft 的 ratesInForce）。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-live{
@@ -515,9 +523,71 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-invalid{color:var(--dtpl-warn-ink);}
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-error{color:var(--dtpl-err);font-weight:600;}
 
+/* models.dev 补价条：与保存状态条同宽同调，但它是自己的窄带——同步是这一屏自己的事，
+   跟「这次写没写进去」是两句话。文字与按钮两端分开，窄屏折行。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-syncbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+[data-plugin="dsh-tokbook"] .dtpl-price-sync-state{
+  max-width:min(100%,420px);
+  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);overflow-wrap:anywhere;
+}
+
 /* 骨架屏按这一屏真实的排法分段，高度是实测值：任务是首屏别整体下跳，不是预告行数。 */
 [data-plugin="dsh-tokbook"] .dtpl-price-sk-pick{height:78px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-sk-open{height:214px;}
 
 [data-plugin="dsh-tokbook"] .dtpl-price-empty-act{margin-top:12px;}
+
+/* 「查价」面板：挂在补价条之下的一块独立内容——它跟补价是两句话（补价说「自动补
+ *  了多少洞」，这一块说「你选了哪一份价」），所以不挤同一条状态。窄屏下关键词与
+ *  按钮会折行，候选列表跟着走。 */
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup{
+  margin:8px 0 0;
+  border:1px solid var(--dtpl-border);
+  background:var(--dtpl-panel-bg);
+  padding:10px 12px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-head{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-k{
+  font-size:11px;line-height:16px;font-weight:600;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-input{
+  flex:1 1 220px;min-width:0;
+  font-family:var(--dtpl-mono);font-size:12px;line-height:16px;
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
+  padding:0 6px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-input:focus{outline:none;border-color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-list{list-style:none;margin:8px 0 0;padding:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-item{
+  display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;
+  padding:6px 0;border-top:1px solid color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-item.is-exact{background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-id{
+  display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0;
+  font-family:var(--dtpl-mono);font-size:12px;line-height:16px;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-provider{color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-slash{color:var(--dtpl-fg-3);}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-name{
+  grid-column:1;margin:2px 0 0;font-size:11px;line-height:15px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-cost{
+  grid-column:2;font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg);
+  white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-badge{
+  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
+  padding:0 4px;border-radius:var(--dtpl-radius);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-empty{
+  margin:8px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-empty .dtpl-price-ghost{margin-left:4px;}
+[data-plugin="dsh-tokbook"] .dtpl-price-lookup-note{
+  margin:6px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-warn-ink);
+}
 `

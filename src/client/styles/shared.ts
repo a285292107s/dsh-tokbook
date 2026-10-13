@@ -129,22 +129,28 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
 /* 动效（共享 keyframes；尊重 reduced motion） */
 @media (prefers-reduced-motion:no-preference){
   [data-plugin="dsh-tokbook"].dtpl-overlay{animation:dtpl-fade .2s ease-out;}
-  [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop .2s cubic-bezier(.22,.68,.24,1);}
+  /* 卡片弹入：先缩到 96% 再回弹——比纯 translateY 多一层「被按了一下」的质感，
+     与按钮的沉 1px 是同一套机件语言（按下去、弹回来）。 */
+  [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop .24s cubic-bezier(.26,.7,.24,1);}
   [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transform-origin:bottom;}
   /* 柱子入场：柱高本身就是这张图的读数，所以只让**读数长出来**，数值标签一律不动。
-     .is-anim 静态挂在 TrendPlot 的图区上（数据刷新不重挂元素，CSS 动画不会因重渲染重播；
+     .is-anim 静态挂在图区上（数据刷新不重挂元素，CSS 动画不会因重渲染重播；
      重挂只发生在「这一屏刚打开」，那时重播正是想要的）。错峰由柱上的 --dtpl-i 给出：
-     从左往右按 12ms 一步扫过去，像仪表逐列上电。 */
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill{animation:dtpl-bar-grow .18s cubic-bezier(.22,.68,.24,1) both;animation-delay:calc(var(--dtpl-i,0) * 12ms);}
+     从左往右按 12ms 一步扫过去，像仪表逐列上电；--dtpl-offset 是**整格**的起手（词元页的
+     缓存读那格晚半拍，两格不同时长成一条线），没给就是 0。 */
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill{animation:dtpl-bar-grow .2s cubic-bezier(.26,.7,.24,1) both;animation-delay:calc((var(--dtpl-offset,0) + var(--dtpl-i,0)) * 12ms);}
   /* 零刻度与自己的柱同拍出现：基线上那一排刻度也是读数的一部分。 */
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar.is-zero::after{animation:dtpl-fade .18s both;animation-delay:calc(var(--dtpl-i,0) * 12ms);}
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar.is-zero::after{animation:dtpl-fade .2s both;animation-delay:calc((var(--dtpl-offset,0) + var(--dtpl-i,0)) * 12ms);}
   /* 数据变化时柱高滑到新值（rescan 补进来的天、当天数字长大），标签锚点同拍跟住；
      悬停的明度/墨色反馈也走这条过渡。入场那下靠动画，不靠这条过渡。 */
-  [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transition:height .25s ease,background-color .12s ease;}
-  [data-plugin="dsh-tokbook"] .dtpl-bar-label{transition:bottom .25s ease,color .12s ease;}
+  [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transition:height .28s cubic-bezier(.26,.7,.24,1),background-color .12s ease;}
+  [data-plugin="dsh-tokbook"] .dtpl-bar-label{transition:bottom .28s cubic-bezier(.26,.7,.24,1),color .12s ease;}
   /* tab 切换 / 数据到达：正文整块升起一层——壳（卡片）弹一下，内容跟着落定，两者错半拍。
      只在子元素**重挂**时播（tab 切换、骨架换真块）；轮询刷新不重挂，不会重播。 */
-  [data-plugin="dsh-tokbook"] .dtpl-body > *{animation:dtpl-rise .22s cubic-bezier(.22,.68,.24,1) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-body > *{animation:dtpl-rise .24s cubic-bezier(.26,.7,.24,1) both;}
+  /* hero 内容：数字与读数格比壳晚半拍落——壳先弹出来，内容再落定，
+     读的人看到的是「卡片出现了，数据跟着进来」而不是一起闪。 */
+  [data-plugin="dsh-tokbook"] .dtpl-hero > :not(.dtpl-hero-art){animation:dtpl-rise .26s cubic-bezier(.26,.7,.24,1) both;animation-delay:.06s;}
   /* 描边环的指针扫入：弧从 12 点起算画到自己的读数，弧长由 TSX 以 --dtpl-arc 随元素给出。 */
   [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{animation:dtpl-draw .45s cubic-bezier(.3,.6,.3,1) both;}
 }
@@ -157,7 +163,7 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
 @keyframes dtpl-bar-grow{from{transform:scaleY(0)}}
 @keyframes dtpl-draw{from{stroke-dashoffset:var(--dtpl-arc,0)}}
 @keyframes dtpl-width-in{from{width:0}}
-@keyframes dtpl-pop{from{opacity:0;transform:translateY(8px) scale(.98)}}
+@keyframes dtpl-pop{from{opacity:0;transform:translateY(8px) scale(.96)}}
 @keyframes dtpl-sheet{from{transform:translateY(100%)}}
 @keyframes dtpl-rotate{to{transform:rotate(360deg)}}
 @keyframes dtpl-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}

@@ -8,6 +8,7 @@
  */
 
 import { billingOf, rateKeyAt, readPriceFile } from './pricing.ts'
+import { readPricingSyncState } from './pricing-sync-state.ts'
 import type {
   HolidayCalendar, ModelEntry, PriceEntry, PriceSlot, PricingEntryInput, PricingModelView,
   PricingRouteView, PricingSlotInput, PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
@@ -122,7 +123,7 @@ export async function readPricingView(
   ledger: LedgerUsage,
   logger: Logger = console,
 ): Promise<PricingView> {
-  const file = await readPriceFile(dir, logger)
+  const [file, syncState] = await Promise.all([readPriceFile(dir, logger), readPricingSyncState(dir)])
   interface ModelAcc {
     configured: boolean
     records: number
@@ -218,6 +219,7 @@ export async function readPricingView(
     calendar: file.calendar,
     calendarMissing: missingCalendarYears(ledger, file.calendar, now),
     ...(file.fx !== undefined ? { fx: file.fx } : {}),
+    sync: { lastSyncDay: syncState.lastSyncDay, lastError: syncState.lastError },
     dataDir: dir,
     updatedAt: now,
   }

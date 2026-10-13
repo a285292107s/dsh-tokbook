@@ -26,7 +26,11 @@
  * Query flags: ?dark=1 dark skin, ?tab=ledger|quota|pricing|method（值就是 tab 的 id
  * 后缀，见 LedgerOverlay 的 `dtpl-tab-*`）,
  * ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none quota-tab
- * fixture + auto-switch to the quota tab.
+ * fixture + auto-switch to the quota tab,
+ * ?view=tokens 词元页（`conversation.view` 那个视图）：显形一个**宿主式的对话正文容器**
+ * （真宿主给的那两个变量 `--dsh-chat-content-width` / `--dsh-composer-height` 与飘浮输入框
+ * 都按真形状给），把词元页渲染进去。这一页走 `ROUTE_SESSION`，形状由
+ * `TOKBOOK_SESSION_SCENARIO=rich|one|empty` 选（默认 rich）。
  *
  * 无头校验（playwright 等）在导航前设 `window.__PREVIEW_NO_AUTO = true` 可关掉那个
  * auto-open 循环：它每 100ms 点一次，会跟校验脚本自己的点击抢，而且只认 URL 上的 ?tab=，
@@ -42,7 +46,7 @@ import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { QUERY_PROVIDER, QUERY_RANGE, ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SYNC, ROUTE_USAGE } from '../src/route-paths.ts'
+import { QUERY_PROVIDER, QUERY_RANGE, QUERY_SESSION, ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE } from '../src/route-paths.ts'
 import { PROVIDER_RANGES } from '../src/types.ts'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
@@ -643,6 +647,258 @@ function emptyUsageView(range) {
   }
 }
 
+/* ── 会话词元页（`conversation.view` 那个视图）fixtures ───────────────────── */
+/**
+ * `GET /tokbook/session?session=` —— 单会话 · 全生命周期的词元与钱。键集合与
+ * `SessionUsageView`（`src/types.ts`）逐字对齐。
+ *
+ * 形状不是随手编的：这一页只有**真实会话才会同时出现**的那些形态才值得看，所以 fixture
+ * 刻意把它们都摆在一起——
+ *   · 十几轮（两格小图要画满「轮次」这条轴，且峰值不在首轮）；
+ *   · 缓存读取与新增词元量级差几十倍（页面明说两格各自归一，这正是它存在的理由）；
+ *   · 压缩 summarize 落在**轮间**、一次失败行带失败码、一行价格未知（按 ¥0 计）、
+ *     一行用量未知（通道没上报 usage，桶全空）；
+ *   · 两张预览的形状不同（有的轮次有提问/回答、有的没有）——块头那两行预览要能各自消失。
+ *
+ * `TOKBOOK_SESSION_SCENARIO` 选另外两种形状：`empty`（一行都没有 → 空态）、
+ * `one`（只有一轮，最小可读形状）。默认 `rich`。
+ */
+const SESSION_SCENARIO = process.env.TOKBOOK_SESSION_SCENARIO ?? 'rich'
+
+/** 会话 fixture 的时间基准（额度那节另有一个 `now()` 函数，作用域不同，故这里换个名）。 */
+const t0 = Date.now()
+const minute = 60_000
+
+/** 一行账本（= 一步）。四桶 + 钱 + 用时；`usage` 缺席就是「用量未知」这件事本身。 */
+function step(turn, step, model, provider, ageMinutes, usage, extra = {}) {
+  const { timing, ...rest } = extra
+  const base = {
+    requestId: `m${String(turn)}-${String(step)}-${model}`,
+    time: t0 - ageMinutes * minute,
+    model,
+    provider,
+    step,
+    ...rest,
+  }
+  const seed = turn * 10 + step
+  if (usage === null) {
+    // 用量未知：四个桶一个都不加（`tokens` 也照实是 0），但这一行**仍然计一次调用**。
+    // 用时照给：通道没上报 usage 不等于这一段没花时间，两者在真会话里是各自独立的缺口。
+    return {
+      ...base,
+      usage: undefined,
+      tokens: 0,
+      bucket: extra.bucket ?? 'spend',
+      cost: 0,
+      timing: timing !== undefined ? timing : fixtureTiming(300, seed),
+    }
+  }
+  const tokens = usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) + usage.outputTokens
+  return {
+    ...base,
+    usage,
+    tokens,
+    bucket: extra.bucket ?? 'spend',
+    cost: extra.cost ?? Math.round(tokens / 3_000_000 * 100) / 100,
+    timing: timing !== undefined ? timing : fixtureTiming(usage.outputTokens, seed),
+  }
+}
+
+/**
+ * 若干行的引擎工作（= host 的 `settleTiming`，同一加法）。用时**不按组存**——它是各步那两段的
+ * 和，渲染层与这里都现加，块头那个数才不会与展开后逐行加起来对不上。
+ */
+function workOf(rows) {
+  return rows.reduce((sum, row) => sum + (row.timing?.llmMs ?? 0) + (row.timing?.toolMs ?? 0), 0)
+}
+
+/**
+ * 一步的用时（fixture 用）。**从 output tokens 反推**而不是写死：这样「首 token + 生成 = 模型」
+ * 与「速度 = 输出 / 生成」两条关系在预览里就是成立的，看到的形状跟真会话一致。
+ *
+ * `extra.timing` 显式传 `null` 的那一行**没有**用时——那是「未计时」那一档；传一个对象就是
+ * 那一档的替身（比如只有墙钟、没有产出的失败步，见 rich 场景）。
+ */
+function fixtureTiming(outputTokens, seed) {
+  const decodeMs = Math.round(outputTokens / 190 * 1000) + (seed % 7) * 130
+  const ttftMs = 900 + (seed % 11) * 420
+  const toolMs = seed % 3 === 0 ? 0 : 180 + (seed % 9) * 1_450
+  const result = {
+    wallMs: ttftMs + decodeMs + toolMs,
+    llmMs: ttftMs + decodeMs,
+    ttftMs,
+    decodeMs,
+    toolMs: undefined,
+    toolCalls: undefined,
+    slowTool: undefined,
+  }
+  if (toolMs > 0) {
+    result.toolMs = toolMs
+    result.toolCalls = seed % 4 === 0 ? 2 : 1
+    result.slowTool = { name: seed % 4 === 0 ? 'grep' : 'read', ms: toolMs }
+  }
+  return result
+}
+
+/** 一个会话里跨轮次复用的模型串（真实会话几乎总是反复用同一两个模型）。 */
+const M_FAST = 'deepseek-v4-flash'
+const M_DEEP = 'deepseek-v4.1-flash'
+const M_SPEEULESS = 'z-ai/glm-5.3-flash'
+
+const SESSIONS = {
+  empty: {
+    sessionId: 'sess-empty',
+    updatedAt: t0,
+    firstAt: 0,
+    lastAt: 0,
+    total: { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 0, failures: 0, usageUnknown: 0 },
+    totalTokens: 0,
+    spend: 0,
+    subscriptionValue: 0,
+    unpriced: [],
+    turns: [],
+    betweenTurns: null,
+    unattributed: [],
+    todaySpend: 4.99,
+  },
+  one: (() => {
+    const rows = [
+      step(1, 1, M_FAST, 'deepseek', 6, { inputTokens: 2_100, outputTokens: 480, cacheReadTokens: 8_400 }, { cost: 0.04 }),
+      step(1, 2, M_FAST, 'deepseek', 5, { inputTokens: 1_400, outputTokens: 520, cacheReadTokens: 12_600 }, { cost: 0.03 }),
+    ]
+    const total = { requests: 2, inputTokens: 3_500, outputTokens: 1_000, cacheReadTokens: 21_000, cacheWriteTokens: 0, compactions: 0, failures: 0, usageUnknown: 0 }
+    return {
+      sessionId: 'sess-one',
+      updatedAt: t0,
+      firstAt: t0 - 6 * minute,
+      lastAt: t0 - 5 * minute,
+      total,
+      totalTokens: 25_500,
+      spend: 0.07,
+      subscriptionValue: 0,
+      unpriced: [],
+      turns: [groupOf(1, rows)],
+      betweenTurns: null,
+      unattributed: [],
+      todaySpend: 4.99,
+      spanMs: 9 * minute,
+      workMs: workOf(rows),
+    }
+  })(),
+  rich: (() => {
+    // 十几轮 + 一次轮间压缩 + 一次失败 + 两行降级（用量未知 / 价格未知）。
+    const turns = []
+    // 每轮：1–3 步，缓存读的量级压着新增（几十倍），峰值放在第 6 轮（不在首尾）。
+    const shape = [
+      { n: 1, cache: 9_800, fresh: 1_900 },
+      { n: 2, cache: 21_400, fresh: 2_600 },
+      { n: 3, cache: 44_100, fresh: 3_400 },
+      { n: 4, cache: 88_300, fresh: 5_100 },
+      { n: 5, cache: 152_000, fresh: 7_200 },
+      { n: 6, cache: 214_000, fresh: 12_400 }, // 峰值
+      { n: 7, cache: 186_000, fresh: 6_800 },
+      { n: 8, cache: 141_000, fresh: 4_900 },
+      { n: 9, cache: 98_000, fresh: 3_600 },
+      { n: 10, cache: 76_000, fresh: 2_900 },
+      { n: 11, cache: 132_000, fresh: 5_400 },
+      { n: 12, cache: 61_000, fresh: 2_200 },
+    ]
+    for (const turn of shape) {
+      const age = (13 - turn.n) * 11 + 3
+      const rows = [
+        step(turn.n, 1, M_FAST, 'deepseek', age, {
+          inputTokens: Math.round(turn.fresh * 0.32),
+          outputTokens: Math.round(turn.fresh * 0.24),
+          cacheReadTokens: Math.round(turn.cache * 0.62),
+        }),
+        step(turn.n, 2, M_FAST, 'deepseek', age - 1, {
+          inputTokens: Math.round(turn.fresh * 0.18),
+          outputTokens: Math.round(turn.fresh * 0.16),
+          cacheReadTokens: Math.round(turn.cache * 0.38),
+        }),
+      ]
+      // 第 4 轮多一步（一条重读大文件的回复），让「一轮不止一步」看得见。
+      if (turn.n === 4) {
+        rows.push(step(4, 3, M_DEEP, 'deepseek', age - 2, { inputTokens: 1_200, outputTokens: 2_900, cacheReadTokens: 40_000 }, { cost: 0.12 }))
+      }
+      // 第 3 轮夹一条失败行（带失败码）：形状与其他行同源，只是多了芯片与零词元。
+      // 用时只给墙钟——重试耗尽的步**没有产出**，也就没有模型那一段可归属（它耗在重试与退避上）。
+      if (turn.n === 3) {
+        rows.push(step(3, 3, M_FAST, 'deepseek', age - 2, null, {
+          kind: 'failure', failureCode: 'rate_limited', usage: undefined, timing: { wallMs: 42_000 },
+        }))
+      }
+      const group = groupOf(turn.n, rows)
+      turns.push(group)
+    }
+    // 轮间：一次压缩 summarize（确定不属于任何轮次）。它的用时是 compaction/start→summary
+    // 那一段，按写入侧那条 requestId 挂在这一行上；那一段就是这一次 summarize 模型调用
+    // （没有流落盘，所以分不出首 token / 生成），故模型用时与墙钟同值——与 host 同算法。
+    const betweenRows = [step(0, 0, M_FAST, 'deepseek', 6, { inputTokens: 34_000, outputTokens: 1_800, cacheReadTokens: 120_000 }, { kind: 'compaction', cost: 0.08, bucket: 'spend', timing: { llmMs: 20_600 } })]
+    const betweenTurns = groupOf(null, betweenRows)
+    // 轮次未知：一行价格未知（按 ¥0 计，桶名自己说两句）。它读作「不知道属于哪一轮」，
+    // 用时也未知（`null`）——这一行的形状就是「什么都拿不到」那一档。
+    const unattributed = [step(0, 0, M_SPEEULESS, 'opencode-go', 20, { inputTokens: 1_200, outputTokens: 300, cacheReadTokens: 0 }, { bucket: 'unpriced', cost: 0, timing: null })]
+    const total = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 1, failures: 1, usageUnknown: 1 }
+    for (const g of [...turns, betweenTurns]) {
+      total.requests += g.totals.requests
+      total.inputTokens += g.totals.inputTokens
+      total.outputTokens += g.totals.outputTokens
+      total.cacheReadTokens += g.totals.cacheReadTokens
+      total.cacheWriteTokens += g.totals.cacheWriteTokens
+    }
+    total.inputTokens += 1_200
+    total.outputTokens += 300
+    // 首记 / 末记从所有行上量（两端跨整段轴，是抬头「首记 / 末记」那两个数的来源）。
+    const times = [...turns.flatMap((g) => g.rows), ...betweenRows, ...unattributed].map((row) => row.time)
+    // 引擎工作 = 各步模型 + 工具（与 host 同一条加法：settleTiming）；跨度取一个比工作量大得多的
+    // 值——这两个数**并排**才是它们的用处（差额就是没在算的时间），fixture 里也要保持这个关系。
+    const workMs = workOf([...turns.flatMap((g) => g.rows), ...betweenRows])
+    return {
+      sessionId: 'sess-rich',
+      updatedAt: t0,
+      firstAt: Math.min(...times),
+      lastAt: Math.max(...times),
+      total,
+      totalTokens: total.inputTokens + total.outputTokens + total.cacheReadTokens + total.cacheWriteTokens,
+      spend: 1.42,
+      subscriptionValue: 0.86,
+      unpriced: ['opencode-go|z-ai/glm-5.3-flash'],
+      turns,
+      betweenTurns,
+      unattributed,
+      todaySpend: 4.99,
+      spanMs: 14 * 60 * minute,
+      workMs,
+    }
+  })(),
+}
+
+/** 一轮的聚合（tokens / spend / totals）：与 host 的 `groupOf` 同一算法，fixture 自己算。
+ *  用时**不在这里合计**——它是各步那两段的和，渲染层用 `settleTiming` 现加（唯一算法）。 */
+function groupOf(turn, rows) {
+  const totals = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 0, failures: 0, usageUnknown: 0 }
+  let tokens = 0
+  let spend = 0
+  let subscriptionValue = 0
+  for (const row of rows) {
+    totals.requests += 1
+    if (row.usage === undefined) totals.usageUnknown += 1
+    else {
+      totals.inputTokens += row.usage.inputTokens
+      totals.outputTokens += row.usage.outputTokens
+      totals.cacheReadTokens += row.usage.cacheReadTokens ?? 0
+      totals.cacheWriteTokens += row.usage.cacheWriteTokens ?? 0
+    }
+    if (row.kind === 'compaction') totals.compactions += 1
+    if (row.kind === 'failure') totals.failures += 1
+    tokens += row.tokens
+    if (row.bucket === 'subscription') subscriptionValue += row.cost
+    else if (row.bucket !== 'unpriced') spend += row.cost
+  }
+  return { turn, totals, tokens, spend, subscriptionValue, rows }
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x')
   if (url.pathname === '/client.js') {
@@ -762,6 +1018,22 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(MODE === 'empty' ? { ...pricingView(), routes: [] } : pricingView()))
     return
   }
+  // 会话词元页：单会话视图。`?session=` 缺失就照 host 的 400 回（shape 由 env 选，见上）。
+  if (url.pathname === ROUTE_SESSION) {
+    if (url.searchParams.get(QUERY_SESSION) === null) {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'unknown or missing "session"' }))
+      return
+    }
+    if (MODE === 'err') {
+      res.writeHead(500, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'HTTP 500' }))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(SESSIONS[SESSION_SCENARIO]))
+    return
+  }
   // Quota tab: list (no provider) → enabled routes; per-provider → card.
   if (url.pathname === ROUTE_QUOTA) {
     if (MODE === 'err') {
@@ -825,6 +1097,39 @@ const server = createServer((req, res) => {
   .fake-app h1{font-size:18px;margin:0 0 12px;}
   .fake-app p{font-size:14px;line-height:24px;color:#61666b;margin:0 0 8px;}
   body.dark .fake-app p{color:#cfd3d6;}
+  /* ── 宿主式的对话正文（词元页的容器）─────────────────────────────────────
+     高度、列宽、飘浮输入框这三样是词元页真实几何的前提（SessionShell / session.ts
+     都按它们算），所以按真宿主的形状给，而不是把它当一个普通 div。
+     --dsh-chat-content-width：宿主给对话正文的那条列（未调列宽时词元页跟它同宽）。
+     --dsh-composer-height：飘浮输入框的高度（词元页用它给底部留位）。 */
+  .dsh-view-host{position:fixed;inset:0;display:flex;flex-direction:column;z-index:2;}
+  .dsh-view-host[hidden]{display:none;}
+  .dsh-view-ring{
+    display:flex;gap:2px;align-items:center;
+    padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));
+    background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-secondary,#61666b);
+    font-size:13px;
+  }
+  body.dark .dsh-view-ring{background:var(--dsw-alias-bg-base,#151517);}
+  .dsh-view-tab{
+    appearance:none;border:0;background:transparent;cursor:pointer;
+    padding:6px 12px;font:inherit;color:inherit;
+  }
+  .dsh-view-tab[data-active="true"]{color:var(--dsw-alias-label-primary,#0f1115);font-weight:600;box-shadow:inset 0 -2px 0 currentColor;}
+  .dsh-view-body{position:relative;flex:1 1 0;min-height:0;--dsh-chat-content-width:920px;--dsh-composer-height:152px;}
+  /* 视图区 = 宿主给的视图环容器：它的 flex 子项是**视图根**（插件自己那个 .dtpl-tok）。
+     slot 的落点 div 夹在中间，所以它自己得把这一段高度与 flex 关系**传下去**——
+     否则 .dtpl-tok 的 flex:1 1 0 对着一个 auto 高度的块父级解析，整页塌成 0 高再溢出。 */
+  .dsh-view-area{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;}
+  .dsh-view-area > [data-slot="conversation.view"]{flex:1 1 0;min-height:0;display:flex;flex-direction:column;}
+  .dsh-composer{
+    position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
+    width:min(var(--dsh-chat-content-width),calc(100% - 48px));
+    padding:14px 16px;box-sizing:border-box;
+    background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-tertiary,#81858c);
+    border:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));font-size:13px;
+  }
+  body.dark .dsh-composer{background:var(--dsw-alias-bg-layer-1,#1c1d20);}
   /* ── DSH alias tokens, as the theme service would define them ── */
   :root{
     --dsw-alias-bg-base:#ffffff;
@@ -918,6 +1223,21 @@ const server = createServer((req, res) => {
   <div class="fake-app">
     ${backdrop}
   </div>
+  <!-- 宿主式的对话正文容器：词元页（conversation.view）就渲染在这里。
+       这层的几何按真宿主给（见样式里的 .dsh-view-host-*），词元页自己那份
+       SessionShell 才有真实的列宽 / 滚动 / 手柄可量。view=tokens 之外它始终隐藏，
+       所以浮窗那三个面（?tab=…）的预览与之前一模一样。 -->
+  <div class="dsh-view-host" id="view-host" hidden>
+    <div class="dsh-view-ring">
+      <button type="button" class="dsh-view-tab">对话</button>
+      <button type="button" class="dsh-view-tab">轨迹</button>
+      <button type="button" class="dsh-view-tab" data-active="true">词元</button>
+    </div>
+    <div class="dsh-view-body">
+      <div class="dsh-view-area" data-conversation-composer-overlay=""></div>
+      <div class="dsh-composer">按 Enter 发送 · Shift+Enter 换行</div>
+    </div>
+  </div>
   <div id="root"></div>
   <script type="module">
     const params = new URLSearchParams(location.search);
@@ -934,12 +1254,25 @@ const server = createServer((req, res) => {
       effect() { return () => {}; },
     };
     window.__PLUGIN_EXPORTS__.apply(ctx);
+    // 三个 slot 的落点不同：sidebar.footer.action / shell.overlay 落在 #root，
+    // **conversation.view（词元页）落在宿主式的对话正文里**——它有自己的列宽变量、
+    // 自己的滚动容器与飘浮输入框，只挂到 #root 会把这一页的几何整条抽掉。
+    const root = document.getElementById('root');
+    const viewHost = document.getElementById('view-host');
+    // 词元页渲染进**视图区**（.dsh-view-area），不是 #view-host 本身：视图区才是宿主给
+    // 视图根的那个 flex 容器，词元页的 .dtpl-tok 挂进去才拿得到确定高度（见那层 CSS 的注释）。
+    const viewArea = viewHost === null ? null : viewHost.querySelector('.dsh-view-area');
     for (const { options, component } of mounted) {
-      const ownerShare = options.name === 'sidebar.footer.action' ? { wide: true } : {};
-      const share = { ...ownerShare, ...(options.inject ? options.inject(ownerShare) : {}) };
+      const isView = options.name === 'conversation.view';
+      // 视图环的 slot 是**会话作用域**的：宿主解析出 sessionId 再交给 inject，
+      // 组件同时也从 props 拿同一份（这里两处都给，与真宿主一致）。
+      const ownerShare = options.name === 'sidebar.footer.action'
+        ? { wide: true }
+        : isView ? 'preview-session-1' : {};
+      const share = { ...(typeof ownerShare === 'string' ? {} : ownerShare), ...(options.inject ? options.inject(ownerShare) : {}) };
       const host = document.createElement('div');
       host.dataset.slot = options.name;
-      document.getElementById('root').appendChild(host);
+      (isView && viewArea !== null ? viewArea : root).appendChild(host);
       window.__DSH_REQUIRE_CACHE__['react-dom/client'].createRoot(host)
         .render(window.__DSH_REQUIRE_CACHE__['react'].createElement(component, share));
     }
@@ -966,7 +1299,16 @@ const server = createServer((req, res) => {
     // 它每 100ms 点一次，会跟校验脚本自己的点击抢（先开浮窗、再切 tab），
     // 而且它只认 URL 上的 ?tab=——校验要顺序点好几个面时根本对不上。
     // 注意：这是普通 <script>（不是 module），顶层的 return 是语法错误。
-    if (window.__PREVIEW_NO_AUTO !== true) {
+    // 词元页（?view=tokens）：宿主式的对话正文容器显形，浮窗保持收起（不抢同一个触发器）。
+    // 同时把预览台自己的外壳（说明文字 + 侧栏那枚 footer 按钮）收掉——它是**预览台的**东西，
+    // 不是宿主的一部分，留着会混进这一页的版面，量间距时也会算错。
+    if (params.get('view') === 'tokens') {
+      viewHost.hidden = false;
+      for (const el of [document.querySelector('.fake-app'), root]) {
+        if (el !== null) el.style.display = 'none';
+      }
+    }
+    if (window.__PREVIEW_NO_AUTO !== true && params.get('view') !== 'tokens') {
       let tries = 0;
       setTimeout(function open() {
         if (document.querySelector('.dtpl-overlay') === null) {
@@ -991,6 +1333,7 @@ server.listen(port, '127.0.0.1', () => {
     return
   }
   console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|quota|pricing|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
+  console.log(`  词元页：http://127.0.0.1:${port}/?view=tokens（宿主式对话正文容器；形状 TOKBOOK_SESSION_SCENARIO=${SESSION_SCENARIO}）`)
   console.log(`  整台的形状由 **环境变量** 选（一个进程 = 一种形状）：TOKBOOK_MODE=empty|err|sync|syncerr（当前：${MODE === '' ? '有数据' : MODE}）。`)
   console.log(`  lib/client.js 按请求读盘：pnpm build 之后刷新页面即可，不用重启本进程。`)
 })

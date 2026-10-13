@@ -15,7 +15,9 @@
  *     `--dtpl-*`；
  *  6. `prefers-reduced-motion` 分支必须存在；
  *  7. `:focus-visible` 与窄屏 `@media (max-width)` 分支必须存在；
- *  8. 字面量 `aria-controls` / `aria-labelledby` / `aria-describedby` / `htmlFor` 指向的 id 必须已声明。
+ *  8. 字面量 `aria-controls` / `aria-labelledby` / `aria-describedby` / `htmlFor` 指向的 id 必须已声明；
+ *  9. CSS 括号配平：一个多余的 `}` 会让解析器静默吞掉紧随其后的一整条规则，而那条规则里的
+ *     类名、颜色、圆角全都合规——第 1-8 项因此全绿，浏览器里那个元素却拿着全默认值。
  *
  * Run: node --experimental-strip-types scripts/selfcheck-ui.ts
  *
@@ -178,6 +180,54 @@ const referencedIds = [
 ].map((m) => (m[1] ?? m[2]).trim().split(/\s+/)).flat()
 const danglingRefs = [...new Set(referencedIds.filter((id) => !declaredIds.has(id)))].sort()
 check('字面量 aria-controls / labelledby / describedby / htmlFor 都指向已声明的 id', danglingRefs.length === 0, { danglingRefs })
+
+// --- 9. CSS 良构：括号必须配平 ---------------------------------------------
+// 一个多余的 `}` 会让解析器进入错误恢复，**静默吞掉紧随其后的一条规则**：那条规则里的
+// 类名还在 TSX 里、颜色与圆角也都合规，于是第 1-8 项全绿，而浏览器里那个元素拿到的是
+// 全默认值。实测过一次：`.dtpl-tok-scroll` 整条被吞，滚动区退回 `overflow:visible` +
+// `flex-grow:0`，整页从此不能滚 —— 症状是「滚不动」，而所有检查都说没问题。
+//
+// 按 CSS 的括号语义数一遍。注释与字符串不参与计数（`content:"}"` 是合法值，不是括号）。
+// 两个方向都要报：多出来的 `}`（depth 探负）与没闭上的 `{`（收尾非零）。
+// 逐片段判而不是拼起来判：片段在 styles.ts 里是**分别**注入的，拼起来数会把一个片段的
+// 缺口平摊到邻居头上，报出来的位置就是错的。
+function braceFault(css: string): string | null {
+  let depth = 0
+  let stray = -1
+  for (let i = 0; i < css.length; i += 1) {
+    const ch = css[i]
+    if (ch === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2)
+      i = end === -1 ? css.length : end + 1
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      i += 1
+      while (i < css.length && css[i] !== ch) {
+        if (css[i] === '\\') i += 1
+        i += 1
+      }
+      continue
+    }
+    if (ch === '{') depth += 1
+    else if (ch === '}') {
+      depth -= 1
+      if (depth < 0 && stray === -1) stray = i
+    }
+  }
+  const lineAt = (index: number): number => css.slice(0, index).split('\n').length
+  if (stray !== -1) return `第 ${lineAt(stray)} 行多出一个 }`
+  if (depth !== 0) return `结尾有 ${depth} 个 { 没闭上`
+  return null
+}
+
+// 片段里的模板串可能带 `${...}` 插值（样式侧目前没有，但别让将来的一个人踩空）：
+// 插值对括号计数是透明的，原样当文本数即可，这里不额外剥。
+const braceFaults = fragments
+  .map((f) => ({ name: f.name, fault: braceFault(f.text) }))
+  .filter((x) => x.fault !== null)
+  .map((x) => `${x.name}: ${x.fault}`)
+check('CSS 片段括号配平(多余的 } 会静默吞掉后面一整条规则)', braceFaults.length === 0, { braceFaults })
 
 console.log(failures === 0 ? 'ui selfcheck: all good' : `ui selfcheck: ${failures} failure(s)`)
 process.exitCode = failures > 0 ? 1 : 0

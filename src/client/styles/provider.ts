@@ -66,11 +66,21 @@ export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是
 [data-plugin="dsh-tokbook"] .dtpl-providers{display:flex;flex-direction:column;gap:10px;}
 
 /* 一张通道卡 = 一块读数面板，与总览的 hero / 四桶同源：外轮廓由 --dtpl-border 给、
-   材质由 --dtpl-metal 给。 */
+   材质由 --dtpl-metal 给。悬停整卡时受光边提亮——它是可展开的行，不是死块。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-card{
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
-  box-shadow:var(--dtpl-metal);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dtpl-metal),
+    0 4px 14px -6px rgba(0,0,0,.18);
+  transition:box-shadow .18s ease,border-color .18s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-provider-card:hover{
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent),
+    var(--dtpl-metal),
+    0 6px 20px -6px rgba(0,0,0,.24);
 }
 /* 卡头是一段**铭牌**：一条实线把它与卡身分开。它与卡内行共用同一条两列网格——
    卡头的读数与下面每一行的读数结束在同一条右缘竖线上。 */

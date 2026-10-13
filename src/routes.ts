@@ -8,10 +8,10 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
-  QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH, QUERY_SESSION,
-  ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE,
+  QUERY_FORCE, QUERY_MODEL, QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH, QUERY_SESSION,
+  ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_PRICING_LOOKUP, ROUTE_PRICING_SYNC, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE,
 } from './route-paths.ts'
-import { PROVIDER_RANGES, type PriceVerdict, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SessionUsageView, type SyncStatusView, type TokBookOverview } from './types.ts'
+import { PROVIDER_RANGES, type ModelsDevCandidate, type PriceVerdict, type PricingLookupResult, type PricingSyncResult, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SessionUsageView, type SyncStatusView, type TokBookOverview } from './types.ts'
 import type { PriceParse } from './pricing.ts'
 
 /** 本插件用到的 host webserver 子集。 */
@@ -221,6 +221,74 @@ export function registerTokBookQuotaRoute(
     kind: 'exact',
     path: ROUTE_QUOTA,
     handler: handleQuota,
+  })
+}
+
+/** 把 models.dev 价同步 route 绑到同步路径，返回 disposer。POST 落一份判决，
+ *  慢网 15s 超时内一直是这条在飞；同 path 的 GET 按 405 拒——状态（上次成功日
+ *  与失败原因）不单独成路由，它由价表视图的 `sync` 字段一并端出。 */
+export function registerTokBookPricingSyncRoute(
+  webServer: WebServerLike | undefined,
+  syncPricing: (force: boolean) => Promise<PricingSyncResult>,
+): () => void {
+  if (webServer === undefined) return () => {}
+
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (req.method !== 'POST') return refuse(res, 405, 'method not allowed')
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    const force = new URL(req.url ?? '/', 'http://tokbook.local').searchParams.get(QUERY_FORCE) === '1'
+    try {
+      const result = await syncPricing(force)
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(result))
+    } catch (error) {
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  return webServer.register({
+    kind: 'exact',
+    path: ROUTE_PRICING_SYNC,
+    handler: handle,
+  })
+}
+
+/**
+ * 把「按关键词查 models.dev 原厂价」route 绑到查价提供方，返回 disposer。
+ * GET 只读、不触碰价文件；网络失败以 500 JSON 答，面板据此报「搜索失败」。
+ * 关键词缺失按 400 答（与 `ROUTE_USAGE` 对 `range`、`ROUTE_SESSION` 对 `session`
+ * 的纪律一致）——「没填关键词」与「搜不到」不是一回事。
+ */
+export function registerTokBookPricingLookupRoute(
+  webServer: WebServerLike | undefined,
+  lookup: (keyword: string) => Promise<PricingLookupResult>,
+): () => void {
+  if (webServer === undefined) return () => {}
+
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (req.method !== 'GET') return refuse(res, 405, 'method not allowed')
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    const keyword = new URL(req.url ?? '/', 'http://tokbook.local').searchParams.get(QUERY_MODEL)
+    if (keyword === null || keyword.trim() === '') {
+      res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: `missing "${QUERY_MODEL}"` }))
+      return
+    }
+    try {
+      const result = await lookup(keyword)
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(result))
+    } catch (error) {
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  return webServer.register({
+    kind: 'exact',
+    path: ROUTE_PRICING_LOOKUP,
+    handler: handle,
   })
 }
 

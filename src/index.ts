@@ -11,7 +11,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  BillingMap, HolidayCalendar, PlanConfig, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SessionUsageView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
+  BillingMap, HolidayCalendar, PlanConfig, PricingLookupResult, PricingSyncResult, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SessionUsageView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
 } from './types.ts'
 import { totalsTokens } from './types.ts'
 import { coercePlansConfig, validateConfig } from './config.ts'
@@ -22,19 +22,22 @@ import { autoSyncIfNeeded, listPersistenceSnapshots, syncHistory, type SyncDeps,
 import { readSyncProgress, writeSyncProgress } from './sync-state.ts'
 import {
   attachCosts, buildSummary, listDayFiles, rangeDayWindow, readCachedRecords,
-  readRecordsByDayRange, snapshotBaseline, staleSessionIds, warmRecordCache,
+  readRecordsByDayRange, snapshotBaseline, staleSessionIds, summarizeRecords, warmRecordCache,
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import { workspaceRows, type WorkspaceRef } from './workspaces.ts'
 import {
   cnyTable, parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
-  type PriceParse,
+  type PriceFile, type PriceParse,
 } from './pricing.ts'
 import { dayKeyOf, holidaySet } from './price-format.ts'
+import { fetchCatalog, searchCatalog, type ModelsDevCatalog } from './models-dev.ts'
+import { billedRouteModels, mergeCatalogIntoTable, type SyncReport } from './pricing-sync.ts'
+import { readPricingSyncState, writePricingSyncState } from './pricing-sync-state.ts'
 import { ledgerUsageOf, readPricingView, type LedgerUsage } from './pricing-view.ts'
 import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'
 import { modelRowsOf, providerCards } from './by-provider.ts'
-import { registerTokBookPricingRoutes, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookSessionRoute, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
+import { registerTokBookPricingLookupRoute, registerTokBookPricingRoutes, registerTokBookPricingSyncRoute, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookSessionRoute, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
 import { buildSessionUsageView, readSessionJoinEvents } from './session-usage.ts'
 import { errorCard, isBuiltinQuotaPlan, isQuotaAlert, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
 import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
@@ -102,6 +105,10 @@ export class TokenUsageBook extends Service {
   /** 在飞的那轮同步（首装回填或权威 walk），**同步互斥的唯一判据**；占位与归位
    *  都经 {@link startWalk}，冷账本的首次读据它等待。 */
   private walkInFlight: Promise<void> | null = null
+  /** 新鲜度探针的缓存：上次那份会话清单与取到它的时刻（窗口见 {@link probeSnapshots}）。 */
+  private probeCache: { at: number; snapshots: readonly PersistenceSnapshotLike[] } | null = null
+  /** 在飞的那份清单：并发的读共享同一次扫描，不并行扫两遍会话库。 */
+  private probeInFlight: Promise<readonly PersistenceSnapshotLike[]> | null = null
   private syncStatus: 'idle' | 'running' | 'done' | 'error' = 'idle'
   private syncError: string | null = null
   /** 上次同步时各会话的 opaque revision；探针以此对比检出未同步工作。从持久化
@@ -115,6 +122,15 @@ export class TokenUsageBook extends Service {
   /** 本 fiber 已卸载（HMR reload 或依赖 dispose）。fire-and-forget 续体在派生
    *  副作用之前检查它。 */
   private disposed = false
+  /** 在飞的那轮 models.dev 价同步；重入与日节流的合并点。 */
+  private pricingSyncInFlight: Promise<PricingSyncResult> | null = null
+  /**
+   * 「查价」面板用的解析后目录缓存。5 MB 的整包不该每次点按钮都下一次——
+   *  而且同一轮里用户可能改了关键词再搜。TTL 到期才重拉，到期前的命中都来自同一份
+   *  目录，与批量补价读到的没有差异；**缓存不进 `pricing.json`**，它只是省一次
+   *  网络，不是一份持久化的价。
+   */
+  private catalogCache: { catalog: ModelsDevCatalog; at: number } | null = null
 
   constructor(ctx: Context, config: TokBookConfig = {}) {
     super(ctx, 'tokbook')
@@ -251,6 +267,14 @@ export class TokenUsageBook extends Service {
         () => this.pricingView(),
         (body) => this.savePricing(body),
       ))
+      injectedCtx.effect(() => registerTokBookPricingSyncRoute(
+        webServer,
+        (force) => this.syncPricing(force),
+      ))
+      injectedCtx.effect(() => registerTokBookPricingLookupRoute(
+        webServer,
+        (keyword) => this.lookupPricing(keyword),
+      ))
     })
   }
 
@@ -264,28 +288,73 @@ export class TokenUsageBook extends Service {
    * 可达 8.6 MB 压缩 / 数万事件），于是「打开概览 / 通道用量 / 价格表」= 秒级等待。
    * 那些行其实早已由 `session/event` 实时 hook 记进账本，读路径要的是「账本当前
    * 内容」，不是「此刻再走一遍历史」。
+   *
+   * 清单本身按 {@link probeSnapshots} 的窗口缓存——它是这条路径上唯一按**会话
+   * 总数**计费的一步，不该每次读页面都付一遍；窗口过了的重取也排在后台，读路径
+   * 同样不为它让路。
    */
   async ensureFresh(): Promise<readonly PersistenceSnapshotLike[]> {
     const persistence = this.persistence
     if (persistence === undefined) return []
     await this.baselineReady
-    let snapshots: readonly PersistenceSnapshotLike[]
-    try {
-      // snapshot 列表（每会话 header + 变更 token），裸 header 列表可回落。
-      snapshots = await listPersistenceSnapshots(persistence, this.logger)
-    } catch (error) {
-      // 探针失败：新鲜度不可判断，也挑不出漂移会话——本次读照常端出已入账的记录，
-      // 交给下次探针（实时 hook 仍在记账）。
-      this.logger.error('[tokbook] persistence list probe failed:', error)
-      snapshots = []
-    }
-    this.scheduleSync(snapshots, staleSessionIds(this.syncedOnce, this.syncedBySession, snapshots))
+    const snapshots = this.probeSnapshots(persistence)
     // 冷账本（还没有日文件）时等一轮，否则首次安装会把「还没回填完」显示成
     // 「没有记录」；账本一旦有行就不再等（口径见 docs/CONTRACTS.md §2）。
     if (this.walkInFlight !== null && (await listDayFiles(this.dir)).length === 0) {
       await this.walkInFlight
     }
     return snapshots
+  }
+
+  /**
+   * 取会话清单（每会话 header + 变更 token）：窗口内直接用上次那份，窗口过了也
+   * **只起一轮后台重取，本次读照旧端出旧的**。
+   *
+   * 这份清单的唯一用途是判断哪些会话该交给后台自愈 walk，而它本身在宿主侧是
+   * 「枚举全部会话目录 + 逐份打开日志解出 header」——775 个会话实测 0.3–0.5 s。
+   * 让读路径等它就是让四个 tab 共享同一条半秒地板（这正是它先前的问题）；而
+   * walk 本来就按 {@link SYNC_MIN_INTERVAL_MS} 节流，晚一次读的工夫去排它不影响
+   * 任何自愈。新鲜度的主路径是 `session/event` 实时 hook，与这份清单无关。
+   *
+   * 从没取到过时（进程刚起来、刚 HMR 换过模块）这一次读等它：那时没有可端出的
+   * 清单，而按工作区 join 需要它。此后每次读都只读缓存。
+   */
+  private probeSnapshots(persistence: SyncPersistence): Promise<readonly PersistenceSnapshotLike[]> {
+    const cached = this.probeCache
+    if (cached === null) return this.refreshProbe(persistence)
+    if (Date.now() - cached.at >= SYNC_MIN_INTERVAL_MS) {
+      // fire-and-forget：这条路上没有 await 它的人，绝不能让它的 rejection 逃到宿主
+      //（未处理的 rejection 会被启动器接住并 exit(1)）。
+      void this.refreshProbe(persistence).catch((error: unknown) => {
+        this.logger.error('[tokbook] background probe refresh failed:', error)
+      })
+    }
+    this.scheduleSync(cached.snapshots, staleSessionIds(this.syncedOnce, this.syncedBySession, cached.snapshots))
+    return Promise.resolve(cached.snapshots)
+  }
+
+  /**
+   * 重取一次清单（并发的调用共享在飞的那一次），落定后就它排一轮自愈 walk。
+   * 读失败也进缓存：不缓存会让之后每次读都排队等一次卡住的扫描，而重取只隔一个
+   * 窗口；失败时报出并当空清单用，与「探针答不上来」的既有降级一致。
+   */
+  private refreshProbe(persistence: SyncPersistence): Promise<readonly PersistenceSnapshotLike[]> {
+    if (this.probeInFlight !== null) return this.probeInFlight
+    const pending = listPersistenceSnapshots(persistence, this.logger)
+      .catch((error: unknown) => {
+        this.logger.error('[tokbook] persistence list probe failed:', error)
+        return [] as readonly PersistenceSnapshotLike[]
+      })
+      .then((snapshots) => {
+        this.probeCache = { at: Date.now(), snapshots }
+        this.scheduleSync(snapshots, staleSessionIds(this.syncedOnce, this.syncedBySession, snapshots))
+        return snapshots
+      })
+      .finally(() => {
+        if (this.probeInFlight === pending) this.probeInFlight = null
+      })
+    this.probeInFlight = pending
+    return pending
   }
 
   /**
@@ -473,11 +542,13 @@ export class TokenUsageBook extends Service {
    * 轮次 / 步骤在请求时 join 该会话的持久化日志——日志读不到时那些行进「轮次未知」，
    * 口径与理由见 docs/adr/0001-turn-attribution-read-time-join.md。
    *
-   * `todaySpend` 不再做一份聚合：它直接取概览同一条路径的今日一行，抬头那个参照系
-   * 因此与浮窗逐分一致。
+   * `todaySpend` 不再为它跑一份聚合：它从记录缓存里挑出今日那些行，走**同一批**
+   * 计价函数（见 {@link todaySpendOf}），抬头那个参照系因此仍与浮窗逐分一致。
    */
   async sessionUsage(sessionId: string): Promise<SessionUsageView> {
-    const overview = await this.overview()
+    // 新鲜度探针照跑（清单走缓存、窗口过了也只重取到后台），但**不跑整份概览**——
+    // 这一页只要今日一行支出，概览的全量聚合与第二次读价表在这里都是白付的。
+    await this.ensureFresh()
     const { table, billing, resolve } = await this.rateContext()
     const records = await readCachedRecords(this.dir, this.logger)
     const events = await readSessionJoinEvents(this.persistence, sessionId, this.logger)
@@ -489,9 +560,34 @@ export class TokenUsageBook extends Service {
       pricing: table,
       billing,
       resolve,
-      todaySpend: overview.byDay.find(row => row.day === dayKeyOf(now))?.spend ?? 0,
+      todaySpend: this.todaySpendOf(records, now, table, billing, resolve),
       updatedAt: now,
     })
+  }
+
+  /**
+   * 今日实际支出 ¥（全部会话）：与概览的今日行走**同一批函数**——同样的 rate 身份
+   * （`rateContext` 的 `resolve`）、同样的 `summarizeRecords` 分桶与 `attachCosts`
+   * 计价——只是先挑出今日那些记录，不为一个抬头的参照系跑整份聚合。
+   *
+   * 「哪些行属于今日」按事件的本地日判，用的就是 `summarizeRecords` 归日的那一份
+   * `dayKeyOf`：分日文件按事件日命名，但归日从不看它落在哪个文件里，因此 refile
+   * 之前写歪的行也算得对，两边逐分相等。
+   */
+  private todaySpendOf(
+    records: readonly UsageRecord[],
+    now: number,
+    table: PricingTable,
+    billing: BillingMap,
+    resolve: RateResolver,
+  ): number {
+    const today = dayKeyOf(now)
+    const costed = attachCosts(
+      { ...summarizeRecords(records.filter(record => dayKeyOf(record.time) === today), resolve), dataDir: this.dir },
+      table,
+      billing,
+    )
+    return costed.byDay.find(row => row.day === today)?.spend ?? 0
   }
 
   /** host settings 缝（`ctx.settings`），未挂载时 undefined。`ctx.get` 是反射式
@@ -696,9 +792,105 @@ export class TokenUsageBook extends Service {
   async savePricing(body: unknown): Promise<PriceParse> {
     const parsed = parsePriceInput(body)
     if (!parsed.ok) return parsed
-    await writePriceFile(this.dir, parsed.file, this.logger)
-    return parsed
+    return this.withPriceFileLock(async () => {
+      await writePriceFile(this.dir, parsed.file, this.logger)
+      return parsed
+    })
   }
+
+  /**
+   * models.dev 价同步：账本出现过的 (route, model) × 美元通道 × 缺价格子 → 补进
+   * `pricing.json`。四道门槛与"手写价永远赢"的理由见 `pricing-sync.ts` 文件头；
+   * 失败（离线 / 超时）**不落任何盘**，只把原因记进状态文件给状态行报出。
+   *
+   * 日节流按**本地日**判（成功落定当天内不再拉）；`force`（手动按钮）绕过。
+   * 与 {@link savePricing} 共用一把文件锁——两者都是整文件替换，并发会互相覆盖。
+   */
+  async syncPricing(force = false): Promise<PricingSyncResult> {
+    if (this.pricingSyncInFlight !== null) return this.pricingSyncInFlight
+    const started = (async (): Promise<PricingSyncResult> => {
+      const state = await readPricingSyncState(this.dir)
+      const today = dayKeyOf(Date.now())
+      if (!force && state.lastSyncDay === today) {
+        return { added: 0, skipped: 0, syncedAt: Date.now(), throttled: true, reasons: {} }
+      }
+      try {
+        const [catalog, records] = await Promise.all([
+          fetchCatalog(),
+          readCachedRecords(this.dir, this.logger),
+        ])
+        const report = await this.withPriceFileLock(async () => {
+          const file = await readPriceFile(this.dir, this.logger)
+          const { table, report } = mergeCatalogIntoTable(
+            file.table, file.currency, billedRouteModels(records), catalog,
+          )
+          if (report.added > 0) {
+            const next: PriceFile = { ...file, table }
+            await writePriceFile(this.dir, next, this.logger)
+          }
+          return report
+        })
+        await writePricingSyncState(this.dir, { lastSyncDay: today, lastError: null })
+        return { ...report, syncedAt: Date.now() }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        await writePricingSyncState(this.dir, { lastSyncDay: state.lastSyncDay, lastError: message.slice(0, 300) })
+          .catch(() => undefined)
+        throw error
+      }
+    })()
+    this.pricingSyncInFlight = started
+    try {
+      return await started
+    } finally {
+      if (this.pricingSyncInFlight === started) this.pricingSyncInFlight = null
+    }
+  }
+
+  /**
+   * 「查价」：按关键词在 models.dev 的**采信目录**里模糊搜索，返回排序后的候选与
+   * 四档美元价。目录带缓存（见 `catalogCache`），所以改关键词再搜不会每次重下 5 MB。
+   *  网络失败抛给路由层（答 500），面板据此报「搜索失败」并可重试。
+   *
+   *  与 `syncPricing` 的分工：那条是**自动**的（账本用过的 × 精确名 × 缺价的），
+   *  这条是**手动**的（用户自己挑）。两条共用同一份采信目录，所以候选池里没有
+   *  转售价——不存在「便宜的转售价冒充通道成本」这回事，挑哪家由用户定。
+   */
+  async lookupPricing(keyword: string): Promise<PricingLookupResult> {
+    const catalog = await this.loadCatalog()
+    return {
+      keyword,
+      candidates: searchCatalog(catalog, keyword).map((match) => ({
+        provider: match.entry.provider,
+        modelId: match.entry.modelId,
+        name: match.entry.name,
+        key: match.key,
+        cost: match.entry.cost,
+      })),
+    }
+  }
+
+  /** 目录缓存的 TTL：几小时内同一份目录足够新，不必为一次按键重下整包。 */
+  private static readonly CATALOG_TTL_MS = 6 * 60 * 60 * 1000
+
+  private async loadCatalog(): Promise<ModelsDevCatalog> {
+    const now = Date.now()
+    const cached = this.catalogCache
+    if (cached !== null && now - cached.at < TokenUsageBook.CATALOG_TTL_MS) return cached.catalog
+    const catalog = await fetchCatalog()
+    this.catalogCache = { catalog, at: now }
+    return catalog
+  }
+
+  /** `pricing.json` 整文件替换写者的串行锁：自动保存（最热写路径）与价同步
+   *  都走 read-modify-write，交错会让后写者抹掉先写者的格子。 */
+  private async withPriceFileLock<T>(work: () => Promise<T>): Promise<T> {
+    const previous = this.priceFileChain
+    const next = previous.then(work, work)
+    this.priceFileChain = next.then(() => undefined, () => undefined)
+    return next
+  }
+  private priceFileChain: Promise<unknown> = Promise.resolve()
 
 }
 

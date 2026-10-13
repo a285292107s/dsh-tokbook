@@ -16,7 +16,40 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   flex:1 1 0;min-height:0;overflow:hidden;
   position:relative; /* 手柄绝对定位在这个**不滚动**的盒子里 */
   color:var(--dtpl-fg);
+  /* 一页的底色：不走宿主那张平的灰，给一层极淡的暖向渐变——它不参与任何读数，
+     只是让这一页从「嵌在对话里的灰块」变成「一块有自己气质的面」。
+     深色皮下这层会翻成井，浅色皮下是肉眼几乎看不见的暖移（实测 ΔE<1）。 */
+  background:
+    /* 底纸：极淡的暖向渐变 + 点阵，让底色不与任何一块同族 */
+    linear-gradient(180deg,
+      color-mix(in srgb,var(--dtpl-fg) 1.2%,transparent) 0%,
+      color-mix(in srgb,var(--dtpl-fg) 0.4%,transparent) 100%),
+    radial-gradient(color-mix(in srgb,var(--dtpl-fg) 3%,transparent) 1px, transparent 1px);
+  background-size:100%, 3px 3px;
 }
+/* 会话时间那一块：底色再暖一档——它是「时间」不是「钱」，该与用量块有温度差，
+   否则 14 小时的跨度与 1.5M 的词元在视觉上是一个温度。
+   也给它一圈硬边与 18px 的内白：它不再是一串浮在底色上的事实，
+   而是这一页的第二块**有边的面**——与抬头那块、词元构成那块同级。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-timing{
+  display:flex;flex-direction:column;gap:12px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb,var(--dtpl-fg) 1.8%,transparent) 0%,
+      color-mix(in srgb,var(--dtpl-fg) 0.6%,transparent) 100%);
+  border:1px solid var(--dtpl-border);
+  padding:18px 20px 16px;
+}
+/* 引擎工作 / 会话跨度两个主角：与「词元构成」那四格同一个读数规格（标签 + 24px / 700
+   等宽数），时间因此与钱在这一页是同级读数，而不是主读数旁边的一行小字。
+   两格**并排**是内容决定的：单看哪个都不说明问题，差额才是这一页要说的事。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-timing-grid{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px;
+}
+/* 比值尺画的就是上面那两个数之间的关系，压在它们下面：块间距 12px 收回 6px，贴着但不粘上。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-timing .dtpl-tok-hero-bar{margin-top:-6px;}
+/* 首记 / 末记是事件**锚点**，不是用量读数：留在事实带那一档，与两个主角差两级。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-timing .dtpl-hero-facts{margin-top:-2px;}
 /* 这一页自己的滚动区：高度由外面给（根是它的 flex 容器），滚动归自己。底部那块是给飘浮的
    输入框让位——输入框高由宿主发布在滚动容器上（实测 128px），不留的话最后一段内容永远压在
    它下面、滚不出来。轨迹页用的是同一个算式。
@@ -36,7 +69,7 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
    左右各 4px 是给 :focus-visible 那圈描边留的（2px 线 + 2px 偏移，写在 footer.ts 里）：列宽
    等于可用宽度时（窄窗口、嵌入形态）环会被滚动区裁平，留出这 4px 就够。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-col{
-  display:flex;flex-direction:column;gap:18px;
+  display:flex;flex-direction:column;gap:32px;
   width:100%;max-width:var(--dtpl-col-w);
   margin-inline:auto;
   box-sizing:border-box;
@@ -74,11 +107,17 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 [data-plugin="dsh-tokbook"] .dtpl-tok-grip[data-dragging]::after{opacity:1;}
 /* 拖动中要压在滚动区之上（两者都是定位盒，靠层号分先后），但仍在输入框那条飘浮带之下。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-grip[data-dragging]{z-index:2;}
-/* 抬头 = 一块读数面板（1px 硬边框 + 3% 洗色 + 材质，与浮窗那块「读数面」同一配方）。
-   面板里没有分区词：它自己就是这一页的主读数（四桶合计），下面那行才是它的参照带。 */
+/* 抬头 = 一块读数面板（1px 硬边框 + 3% 洗色 + 材质，与浮窗那块「读数面」同一配方），
+   面板里没有分区词：它自己就是这一页的主读数（四桶合计）。
+   它的下半段是「词元构成」（见 .dtpl-tok-mix-band）——合计与它的四桶在同一个框里，
+   一条横贯的分区线把「多少」与「由什么组成」分开。这与浮窗那张「今日词元」卡同一配方。
+   面板的下内白由构成那块收回去（它自带 padding），所以这里的 padding 只管上半区。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-head{
-  display:flex;flex-direction:column;gap:8px;
-  padding:14px 16px;
+  display:flex;flex-direction:column;gap:10px;
+  /* 左右内白发布成一条变量：构成带要靠它的负值把分区线抵到外框，再靠自己的 padding 把
+     文字推回同一条左边缘。窄屏整条边白收窄时，两处才不会各自漂开（见 @media 640px）。 */
+  --dtpl-tok-head-pad:32px;
+  padding:28px var(--dtpl-tok-head-pad) 24px;
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
   box-shadow:var(--dtpl-metal);
@@ -90,48 +129,123 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
   overflow-wrap:anywhere;
 }
+/* 这一页的主角数字：比浮窗那格（38px / 600）大一截、重一档。
+   它是这一页的**第一读数**——四桶合计，不是仪表盘上的一条参照。浮窗那格是「今日总额」，
+   周围还有趋势图与四桶格 competing for attention；这一页它周围没有别的读数，所以它该抢眼。
+   72px / 700 是量出来的：再大就顶到下面那行事实带、再小就退回「又一个读数格」。
+   字重 700 不是标题——它仍是读数，但它是**主角**读数，600 在这个字号下不够撑住场面。
+   letter-spacing 压到 -.06em：等宽数字天生有缝，不压就读成「一串格子」而不是一个数。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-head .dtpl-total-num{
+  font-size:72px;line-height:76px;font-weight:700;letter-spacing:-.06em;
+}
+/* 口径词在主角数字上方，留出呼吸：它不再与数字抢同一行（浮窗那格是并排的），
+   而是整行压在上面，像报表的栏头。字号收到 11px——它是**身份**不是标题，小一号才不与数字争。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-head .dtpl-total-k{
+  font-size:11px;line-height:16px;letter-spacing:.08em;
+}
 [data-plugin="dsh-tokbook"] .dtpl-tok-foot{
-  border-top:1px solid var(--dtpl-hairline);
-  padding-top:10px;
+  /* 页脚不是「底部那串小字」，是这一页的**收口**——与抬头、会话时间、词元构成同级，
+     所以给它一圈硬边 + 内白，而不是一条发丝线就完了。 */
+  border:1px solid var(--dtpl-border);
+  border-top:0;
+  margin-top:4px;
+  padding:16px 20px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-foot .dtpl-tok-note{margin:6px 0 0;}
 
-/* 四桶分段条：**同一条灰的四个明度档**（淡 = 复用，深 = 新产生），分类不借色相——本插件
-   唯一的色相是品牌黄，它不外借给数据（见 tokens 第五节）。四段各自的名字与数就在它下面那
-   四个读数格里，条只承担比例。
-   条的下边框接上读数格的上边框：同一处不叠两条线，所以那一格不再画顶线。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-mix{
-  display:flex;height:12px;
-  border:1px solid var(--dtpl-border);
-  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
+/* 词元构成带 = 抬头面板的**下半段**。它不是浮窗里那种「框内读数带」——同一配方只借形状：
+   这里的分区线**横贯整块面板**，面板于是被切成「读数」与「它的分解」两区，比一条浮在
+   面板里、两头不到边的线清楚。它自己不出边框、也不带分区词：框归抬头那块面板。
+   整块面板因此只说一件事：这个会话用了多少、由什么组成。取舍见 SessionTurns 的 MixBand。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-mix-band{
+  /* 负边距抵掉面板那 32px 内白：分区线因此两边都抵到面板外框；文字边缘再由本块的 padding
+     补回同一档，所以命中率、四个读数格与上面的合计数字共用**同一条左边缘**
+     （改之前是 217 / 202 / 184 三条，量过）。
+     下边那 -24px 收回面板的下内白，改由读数格自己的下内白给这一块呼吸——面板底部因此
+     不是空出 24px，而是收到 20px，与四格那排读数贴得更紧。 */
+  margin:10px calc(var(--dtpl-tok-head-pad) * -1) -24px;
+  padding:0 var(--dtpl-tok-head-pad);
+  border-top:1px solid var(--dtpl-border);
 }
-[data-plugin="dsh-tokbook"] .dtpl-tok-mix + .dtpl-grid{border-top:0;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-mix-seg{height:100%;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-mix-seg[data-bucket="inputTokens"]{background:color-mix(in srgb,var(--dtpl-fg) 84%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-mix-seg[data-bucket="cacheReadTokens"]{background:color-mix(in srgb,var(--dtpl-fg) 26%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-mix-seg[data-bucket="cacheWriteTokens"]{background:color-mix(in srgb,var(--dtpl-fg) 58%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-mix-seg[data-bucket="outputTokens"]{background:var(--dtpl-fg);}
+/* 构成这一行的**读法**：命中率是读数（等宽加粗），计费输入的口径是定义（退到右端）。
+   命中率从抬头的参照带搬到这里——它是「缓存读取占计费输入多少」，与下面那四个格说的
+   正是同一件事；而混在「实际支出 / 订阅价值 / 轮数」那串里，它是一个换了单位的例外。
+   曾经这里下面还有一条四桶分段条，已删（理由见 SessionTurns 的 MixBand）：比例由四个格
+   自己的「占 X%」承担，条只是把同一组百分比换个更响的说法，还把抬头的 72px 数字压了下去。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-mix-band .dtpl-tok-note{
+  display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px;
+  margin:0;padding:14px 0 0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-mix-hit{white-space:nowrap;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-mix-hit b{
+  font-family:var(--dtpl-mono);font-weight:600;color:var(--dtpl-fg);
+  font-variant-numeric:tabular-nums;
+}
 
 /* 每轮两格小图（small multiples）：上格新增词元、下格缓存读取，共用同一列轮次与同一条轴线。
    两格各自归一（理由见 SessionTurns），所以**一格只有一把尺子**——上一版把两根不同刻度的柱并排
    在同一列里，读者会不由自主地比高度。
-   整块图按轮数定宽：3 轮时是一张紧凑的小图，40 轮时铺满并退化成浮窗里那条细柱带。宽度有下限，
-   一轮的会话里格头那句「合计 / 峰值」比图还宽，柱子不该缩到它下面去。
+   整块图按轮数定宽：轮数少时是一张紧凑的小图（每列 92px 是它的自然宽度），轮数多到一列装不下
+   自己的标签（见 --dtpl-slot-w）时**整块图横向滚动**，不再把柱与标签压成一团。滚动区就是这一块，
+   所以上下两格与那条轴线一起走，柱子与它正下方的轮次号永远同屏。宽度有下限，一轮的会话里格头那句
+   「合计 / 峰值」比图还宽，柱子不该缩到它下面去。
    柱形自己有宽度上限（见下 .dtpl-bar-fill）：柱宽不承载数据，轮数少时让它跟着列一起撑开，
    一列就成了 400px 宽的灰砖。整块图靠左——它跟分区词、旁注同一条左边缘，居中会从版面里飘出去。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-plot{
-  display:flex;flex-direction:column;gap:16px;
+  /* 一列**不被邻居压字**的下限：柱值标签最长 5 个等宽字符（12.3M）约 30px，峰值那根前面还挂
+     一枚 4px 黄牌与 5px 间隔（约 39px），同一列里邻柱各让出一半——34.5px 是「刚好不叠」。两枚
+     数字贴在一起仍读不成两个数，所以取 48px。轮数不到这条线时它只是个下限（列跟着列宽摊开，
+     柱宽另有上限）；越过去整块图就横向滚动。 */
+  --dtpl-slot-w:48px;
+  display:flex;flex-direction:column;gap:24px;
   min-width:min(280px,100%);
   max-width:calc(var(--dtpl-slots,4) * 92px + 28px);
+  overflow-x:auto;
+  /* 横向滚动条是这里唯一「还能往右看」的提示，所以给它一条插件自己的墨色配方（宿主那条
+     --dsw-alias-scrollbar-* 不许在这个片段里直连，见 scripts/selfcheck-ui.ts §5）。 */
+  scrollbar-width:thin;
+  scrollbar-color:color-mix(in srgb,var(--dtpl-fg) 30%,transparent) transparent;
 }
-[data-plugin="dsh-tokbook"] .dtpl-tok-plot .dtpl-bars{height:68px;margin-top:20px;}
+/* 三块（上格 / 下格 / 轴线）同宽：柱子是 flex:1 摊开的，只有三块等宽，柱与它的轮次号才不错开。
+   下限写在这三块上而不是柱上——滚动的是这一整块图，不是某一根柱。
+   box-sizing 必须写：轴线自己带 14px 的内边距，不让下限算进边框盒的话它会比两格宽出 28px，
+   越往右越偏（40 轮时最后一列与它的轮次号差 27.6px，量出来的）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-plot > *{
+  box-sizing:border-box;
+  min-width:calc(var(--dtpl-slots,4) * var(--dtpl-slot-w));
+}
+/* 图表外层：只做悬停读数卡的定位父级。卡片必须画在图**之外**——.dtpl-tok-plot 自己是个横向
+   滚动区，画在里面的浮层会被它裁掉，还会被算进它的滚动宽度；挂在这一层就没有这两个问题，
+   按柱子与滚动区的实测矩形摆位（算法见 SessionTurns 的 TurnChart）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-chart{position:relative;}
+/* 悬停读数卡：指着一根柱子，报那一轮的全部读数、四桶与提问 / 回答预览（内容见 TurnChart）。
+   面与线用面板那套配方（硬边框 + 卡面 + 材质），不另投影子——它压在图上，一轮的边界由那圈
+   硬边给出就够了。
+   pointer-events 必须 none：卡片就压在柱子上，吃掉指针的话柱子立刻 mouseleave，卡片自己闪掉。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-hover{
+  position:absolute;z-index:1;pointer-events:none;
+  display:flex;flex-direction:column;gap:5px;
+  box-sizing:border-box;
+  max-width:min(300px,100%);
+  padding:8px 10px;
+  border:1px solid var(--dtpl-border);
+  background:var(--dtpl-card);
+  box-shadow:var(--dtpl-metal);
+}
+/* 卡里那句「柱高是怎么来的」：它是口径说明、不是读数，所以走次级墨色，字号与四桶那行同档。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-hover-basis{
+  margin:0;font-size:10px;line-height:15px;color:var(--dtpl-fg-2);
+}
+/* 四桶在卡里排成一条事实带：卡片只有 300px 宽，字号比页面上的读数带再收一档。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-hover-buckets{font-size:10px;line-height:15px;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-plot .dtpl-bars{height:80px;margin-top:22px;}
 /* 轴线贴着自己上面那格：16px 的格间距对「轴属于谁」太远，收回去 6px。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-plot .dtpl-trend-axis{margin-top:-6px;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-panel{display:flex;flex-direction:column;}
 /* 格头 = 这一格的纵轴：系列名（图例色块 + 名）+ 合计 + 峰值。三个数都在这，柱上不再画刻度。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-panel-k{
-  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;margin:0;
-  font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
+  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;margin:0;
+  font-size:13px;line-height:20px;font-weight:600;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-panel-v,
 [data-plugin="dsh-tokbook"] .dtpl-tok-panel-k i{
@@ -141,7 +255,15 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 /* 柱宽 = 列宽的 48%，并封顶 44px：柱与缝因此始终约 1:1。百分比管住「列被挤窄」（轮数多），
    44px 的硬上限管住「列很宽」——一轮的会话里那列有 250px 宽（图有 280px 的宽度下限），
    只有百分比的话柱会撑成一块 120px 宽的砖。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-plot .dtpl-bar-fill{width:min(48%,44px);margin:0 auto;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-plot .dtpl-bar-fill{
+  width:min(52%,48px);margin:0 auto;
+  /* 柱身给一层极淡的纵向渐变：顶深底浅，是「墨在纸上的落笔」而不是「一块平涂的灰」。
+     两档只差 8%，肉眼看是同一块灰，但光线扫过去的时候它有体积——
+     一屏十几根柱子全是平的，读起来就是一堆栅栏；有体积的柱子读起来是**数据**。 */
+  background:linear-gradient(180deg,
+    color-mix(in srgb,var(--dtpl-fg) 52%,transparent) 0%,
+    color-mix(in srgb,var(--dtpl-fg) 42%,transparent) 100%);
+}
 /* 图例：格头那枚色块与它下面那格的柱子同色，两格**都取浮窗那张图的 45%**（柱高是这张图的正文，
    更淡过不了 3:1 非文本对比度——浅色主题下比 45% 更淡的灰根本到不了 3:1，所以这里不做「缓存那格
    更淡」那套：两格的区分靠格头那句名字，不靠明度）。峰值仍由 ledger 那套的 70% + 黄牌给出。 */
@@ -151,27 +273,65 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 }
 
 /* 一轮一块。块身只给边框与洗色，**不给材质**：材质是页面级面板的配方，一屏几十块叠着上
-   材质就成一片噪声。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-turns{display:flex;flex-direction:column;gap:10px;}
+   材质就成一片噪声。但给一条极淡的底影——它是**面与面之间的分界**，不是装饰：
+   一屏十几块没有影，它们就糊成一片，读者分不出「第 3 轮」与「第 4 轮」的界在哪。
+   1px 的硬边在浅色皮下只有 1.2:1，压不住相邻两块；底影把界线交给光而不是交给线。
+   收起状态：只给顶缘那条 1px 的压光，块与块之间清清楚楚。
+   展开状态：整块浮起——它从「列表里的一项」变成「被选中的那一项」，
+   靠底影加深而不是加边框（那会与已有的 1px 硬边打架）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-turns{display:flex;flex-direction:column;gap:14px;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn{
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
+  box-shadow:0 1px 0 0 color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+  transition:box-shadow .2s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn:hover{
+  box-shadow:0 2px 0 0 color-mix(in srgb,var(--dtpl-fg) 6%,transparent),
+    0 8px 24px -12px color-mix(in srgb,var(--dtpl-fg) 14%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn:has(.dtpl-tok-turn-head[aria-expanded="true"]){
+  box-shadow:0 2px 0 0 color-mix(in srgb,var(--dtpl-fg) 6%,transparent),
+    0 8px 24px -12px color-mix(in srgb,var(--dtpl-fg) 18%,transparent);
+}
+/* 末尾那两块（轮间 / 轮次未知）**不在轮次序列里**：和编号轮次并排、一样宽、一样有边框时，
+   「轮间」「轮次未知」会被读成第 13、14 轮。把它从序列里摘出来：块身去面（不占轮次那条
+   硬边），块头的名字降一档墨色与字重——层级低了，但仍可点、仍可展开、读数一点不减。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn.is-loose{
+  background:transparent;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn.is-loose .dtpl-tok-turn-k{
+  font-weight:500;color:var(--dtpl-fg-2);
 }
 /* 块头整块可点；右端那枚箭头是唯一的开关提示。预览本来就长在块头上，收起时它仍在。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head{
-  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;
-  width:100%;margin:0;padding:9px 12px;
+  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 14px;
+  width:100%;margin:0;padding:14px 18px;
   appearance:none;border:0;background:transparent;
   font:inherit;text-align:left;color:var(--dtpl-fg);cursor:pointer;
   transition:background .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head:hover{background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-turn-k{flex:none;font-size:13px;line-height:20px;font-weight:600;}
+  /* 展开那一轮：整块浮起一层——它从「列表里的一项」变成「被选中的那一项」。
+     不是加边框（那会与已有的 1px 硬边打架），是交给底影：影加深 = 面抬高。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn:has(.dtpl-tok-turn-head[aria-expanded="true"]){
+  box-shadow:0 2px 0 0 color-mix(in srgb,var(--dtpl-fg) 6%,transparent),
+    0 8px 24px -12px color-mix(in srgb,var(--dtpl-fg) 18%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn-k{flex:none;font-size:15px;line-height:22px;font-weight:600;}
+/* 块头那串事实在这一页比浮窗那档（11px）大一档：它是这一节的**摘要**，而展开后每一步的读数
+   是 13px——摘要比明细还小，层级就反了（理由同 .dtpl-tok-col .dtpl-sec-title）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn-head .dtpl-hero-facts{
+  font-size:12px;line-height:19px;
+}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-cue{
   flex:none;margin-left:auto;align-self:center;
   font-size:10px;line-height:16px;color:var(--dtpl-fg-3);
-  transition:transform .15s ease;
+  transition:transform .3s cubic-bezier(.22,.68,.24,1);
 }
+/* 展开时箭头转 180°：它不只是一个状态指示，是「这块翻开了」的形态语言。
+   0.3s 与步骤区的 0fr 过渡同拍，转与展开同时落定，不先转后展。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn-head[aria-expanded="true"] .dtpl-tok-turn-cue{transform:rotate(180deg);}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head[aria-expanded="true"] .dtpl-tok-turn-cue{transform:rotate(180deg);}
 /* 预览占满块头的第二行：提问一行、回答一行，都是单行省略（全文在 title 里）。
    颜色分档：预览文本是读数走 fg-2，只有回答前面那枚「↳」是装饰，走 fg-dim。 */
@@ -184,21 +344,88 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-reply{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-reply::before{content:"↳ ";color:var(--dtpl-fg-dim);}
 
-/* 步骤行沿用浮窗明细那条两列网格（左身份、右读数，金额各行的右缘落在同一条竖线上），
-   只在行间补一条发丝线：一轮几十步时，光靠间距分行读不出「一步一行」。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-steps{padding:2px 12px 11px;}
+/* 展开后的步骤区：默认 0 高度，收起时整块不占位。
+   用 grid-template-rows 而不是 max-height：max-height 需要一个猜的「够大」值，
+   轮次多时猜不够会截断；0fr → 1fr 是**内容自己决定高度**，几轮还是几十步都装得下，
+   而且过渡的是同一个属性（rows），不会出现「先撑到一个假高度再弹回来」的错觉。
+   缓动用 ease-out：展开时开头快（内容一下涌出来）、末尾减速（停稳）；
+   收起时也是末尾减速（不是戛然而止），否则读者会觉得「被切了一刀」。
+
+   overflow:hidden **必须写在内层那个格子上**（.dtpl-tok-steps-inner），只写在容器上不够：
+   格子的自动最小尺寸取的是它**内容**的高度，而格子 overflow 为 visible 时那个下限就是内容的
+   min-content 高度——实测容器已拿到 grid/overflow:hidden，14 块收起后仍各占 166~259px。
+   格子自己裁切之后内容不再计入，166 掉到 22（只剩内白）。
+
+   所以**竖向内白不能挂在这个格子上**：格子自身的 padding 不算「内容」，overflow:hidden 裁不掉
+   它，22px 会一直留着。竖向那点呼吸改由首尾两行的外边距给（那是内容，收起时被裁掉），
+   横向内白留在格子上（它不参与高度）。这样收起才真的是 0 高度。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-steps{
+  display:grid;grid-template-rows:0fr;overflow:hidden;
+  transition:grid-template-rows .3s cubic-bezier(.22,.68,.24,1);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-steps[data-open="true"]{grid-template-rows:1fr;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-steps-inner{padding:0 18px;overflow:hidden;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-steps-inner > .dtpl-row:first-child{margin-top:6px;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-steps-inner > .dtpl-row:last-child{margin-bottom:16px;}
+/* 步骤与步骤之间：一条规则线，线上下共 32px 的空白（下 24px、上 8px，所以线**贴着下一步**，
+   它是「这一步从这开始」的记号，不是「上一步到这就完了」）。
+   从前是 13px 内白 + 一条 .5px 发丝线，而**步内**的带间距是 8px——步间只有步内的 1.75 倍。
+   人眼靠「靠近的东西是一组」分组，这条通道要 2.5~3 倍才稳；1.75 倍时眼睛算不出哪边更近，
+   一屏读下来就是「一片均匀的读数，分不出哪几行属于同一步」。
+   现在整条阶梯是 10 / 18 / 32（都按「内容到内容」量）：同一簇内的列间 10px → 两簇之间 18px
+   → 步与步之间 32px，两跳各是上一跳的 1.8 倍。
+   **步与步之间那一跳必须是整条阶梯里最大的一跳**：它承载的正是「这是另一步」这条判断。
+   旧版恰恰反过来——行中间那条 32px 的缝比步与步之间的 14px 大一倍多，读者先把一行读成两半，
+   步的界限就更没戏了。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-steps .dtpl-row + .dtpl-row{
-  margin-top:0;padding-top:9px;
+  margin-top:24px;padding-top:8px;
   border-top:.5px solid var(--dtpl-hairline);
 }
+/* 步骤行是**三段带**，每段各占整行：身份与钱 ｜ 尺 ｜ 读数（见 session-detail 的 StepRow）。
+   三段纵向排开，所以它不再借用浮窗明细那条两列网格，只要一列。
+
+   尺独占一行而不是只占左列：它要说清三段时间，车道越短越读不出比例（实测最窄的一段会落到
+   4.4px——「等首 token 占一成」画成一根发丝）；铺满整行之后每一条尺都占同一组横坐标，竖着扫
+   一列步骤就是趋势。尺上不去压金额：钱在第一段，不在读数里。
+
+   读数那一段里两簇并排：用时（等宽列）｜四桶。两簇各自成网格、各自按内容摊开，中间那条缝让
+   「时间」与「词元」在版面上是两件事，而不是十个并列的量。
+
+   左脊：每一步一条 2px 的竖线，从身份行顶到读数带底，外加 12px 的内白。
+   二十步的读数里，九个标签-值对长得一模一样，读者没有一个「这一步从哪开始」的锚；脊线就是那个
+   锚——它把一步圈成一个竖块，步号挂在它的上端。有了它之后，步与步之间那条 1.2:1 的发丝线
+   不必再独自承担「这是另一步」的全部责任（那条线按本仓库自己的门槛根本不达标，见上一条注释）。
+   用 ::before 而不是加一层 DOM：这条线是**版面上的记号**、不承载数据（步号才是），
+   不该进无障碍树，也不该多一个节点。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-step{
+  position:relative;
+  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-areas:"id cost" "bar bar" "read read";
+  row-gap:10px;
+  padding-left:12px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step::before{
+  content:"";position:absolute;left:0;top:1px;bottom:0;width:2px;
+  background:var(--dtpl-fg-3);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step > .dtpl-tok-step-id{grid-area:id;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step > .dtpl-tok-step-cost{grid-area:cost;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step > .dtpl-tok-step-read{grid-area:read;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-bar{
+  display:block;min-width:0;grid-area:bar;
+}
+/* 一行里两段都没有时（未计时 / 只量到墙钟）尺不出，这一段就空着——它本来也是空的。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn-bar{
+  flex:1 1 100%;display:block;min-width:0;margin-top:6px;
+}
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-id{
-  display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 8px;min-width:0;
+  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-no{
-  font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);white-space:nowrap;
+  font-size:14px;line-height:21px;font-weight:600;color:var(--dtpl-fg);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-time{
-  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-family:var(--dtpl-mono);font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-model{
@@ -207,35 +434,300 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 }
 /* 失败 / 压缩芯片：用**形**（描边小片）区分它们，色相只给真要看一眼的那一种（失败）。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-chip{
-  flex:none;font-style:normal;font-size:10px;line-height:14px;font-weight:600;
-  padding:0 4px;
+  flex:none;font-style:normal;font-size:11px;line-height:16px;font-weight:600;
+  padding:0 5px;
   border:1px solid var(--dtpl-border);
   color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-chip[data-kind="failure"]{border-color:var(--dtpl-err);color:var(--dtpl-err);}
-/* 「价格未知」的桶名是两行：「按 ¥0 计」压在名位里（同一个四字宽），所以它不吃金额列的对齐。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-step .dtpl-cost-k i{
-  display:block;font-style:normal;font-size:9px;line-height:12px;
+/* 这一行的钱：桶名 + 数额，排在身份那一段的右端（词序与块头那串事实一致），右缘每行成列。
+   三档主次与浮窗 is-cash / is-zero 同一口径：字重 + 墨色分档，色相不参与。
+   「价格未知」后面缀的「按 ¥0 计」是口径说明、不是数额，所以小一档走 fg-3。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost{
+  display:flex;align-items:baseline;gap:7px;white-space:nowrap;
 }
-/* 一行的四桶：右列里的一条事实带（与块头那句同源，字号再收一档），允许折行。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-buckets{justify-content:flex-end;font-size:10px;line-height:15px;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost-k{
+  font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost-k i{
+  font-style:normal;font-size:10px;color:var(--dtpl-fg-3);margin-left:4px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-cash-amt,
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-sub-amt,
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-cost-na{
+  font-family:var(--dtpl-mono);font-size:13px;line-height:18px;font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-cash-amt{color:var(--dtpl-fg);font-weight:600;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-sub-amt{color:var(--dtpl-fg-2);font-weight:400;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-cost-na{color:var(--dtpl-fg-3);font-weight:400;}
+
+/* 读数那一段：两簇并排——用时 ｜ 四桶。两簇各自是网格，**各自按内容定宽**（不摊满整行）：
+   摊满的话五个用时格与四个桶格会被拉到相隔几百像素，两组读数在版面上就散了——而它们是一句话
+   的两半（这段时间、这些词元）。中间那条 32px 的缝是这两半之间唯一的界。
+   计时那簇的宽度按它自己的列数给：只量到模型那一段时不至于把一格撑成半行宽。 */
+/* 两簇之间 18px：缝要清楚，但**不能大过步与步之间的距离**——旧版这里是 32px，比步间隔大一倍多，
+   读者先把一行读成两半，步的界限就无从谈起（见 .dtpl-tok-step 那条注释里的阶梯）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-read{
+  display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:flex-start;
+  gap:8px 18px;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-metrics{
+  display:grid;
+  /* 列宽是**定值**（--dtpl-tok-cell-w），不是 1fr 也不是 auto：
+     · 1fr 会让这一簇摊满整行，五个用时格被拉到与四桶相隔几百像素——两组读数在版面上就散了；
+     · auto 让列宽跟着这一行的内容走，「3.8秒」那行与「10.3秒」那行的列边界对不上，
+       而「竖着扫一列就是趋势」正是这张表存在的理由（见 TIMING_METRICS）。
+     62px 装得下最宽的标签与值（「首 token」11px 约 46px、「10.3秒」13px 等宽约 45px）。
+     列数由**整块**决定（缺读数的格子报「—」而不是抽掉那一列），故走 --dtpl-tok-cells。 */
+  grid-template-columns:repeat(var(--dtpl-tok-cells,5),var(--dtpl-tok-cell-w));
+  gap:0 10px;
+  min-width:0;
+}
+/* 四桶那簇：**一桶一列**，与计时那簇同一套「标签在上、值在下」的语法，列宽同一条常数。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-tokens{
+  display:grid;grid-template-columns:repeat(4,var(--dtpl-tok-cell-w));
+  gap:0 10px;
+  min-width:0;
+}
+/* 非表形态（未计时 / 无产出）：没有数可以对齐，整段让给这一条读数 + 那句口径说明。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-metrics.is-flat{
+  display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;
+  flex:1 1 100%;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-metric{
+  display:flex;flex-direction:column;min-width:0;
+}
+/* 标签那一行是这一档的最小字号，值那行是等宽数字——两行一起把「哪个量」与「多少」分开。
+   字号从 11px 收到 10px：标签在二十步里要重复二十遍，它**是底噪**，读者看的是下面那行值；
+   一行里只有「值」这一种质地的，步与步之间的比较才立得住。
+   退的是**字号，不是墨色**：这里仍走 fg-2。fg-2 在 tokens 里写明的职责就是「标签」（fg-3 那档
+   是「只给装饰」，浅皮实测 3.5:1，给 10px 的正文标签用会掉到 AA 以下）——「首 token」是要读的
+   字，不是装饰。层级靠 10px : 13px 与 fg-2 : fg 这两条拉开，不靠把字调淡。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-metric-k{
+  font-size:10px;line-height:15px;color:var(--dtpl-fg-2);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-metric-v{
+  font-family:var(--dtpl-mono);font-size:13px;line-height:19px;color:var(--dtpl-fg);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+/* 没有读数的格子（「—」）与「未计时」同档：都是**没有数**，不是 0。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-untimed{
+  font-size:13px;line-height:19px;color:var(--dtpl-fg-3);
+}
+/* 「无产出」那句口径说明是解释、不是读数：整句独占一行，走次级墨色。
+   它**不能**跟着 .dtpl-tok-untimed 走 fg-3——那一档是「这里没有数」的记号，而这是一句要读
+   的话（解释这一步为什么没有模型那段）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-metrics.is-flat .dtpl-tok-untimed.is-note{
+  flex:1 1 100%;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+}
+
+/* ── 构成尺：一页里唯一的「比例」语言 ──────────────────────────────────────────
+   用时那几条尺共用同一套灰阶词汇：**同一页里只有一套比例尺**，读者不必学第二遍。
+   区别只在高度、长度与位置——步骤尺 / 块头尺都是 16px 高（都是「一条里分成几段」，
+   同一族），抬头那条 8px（它是两段之比，不是组成）。
+   这里曾经还有一条四桶分段条（也是 16px），已删：它的比例四个格里的「占 X%」已经说完，
+   而它横贯 912px 的实心黑条压在抬头的 72px 数字下面，读者先看到的是条不是数
+   （理由见 SessionTurns 的 MixBand）。
+   段与段之间不画缝：缝要靠 margin 或 border 占宽度，而最低 2px 的那一段会被它吃掉；相邻两档
+   同色的问题在这里不存在（相邻的相位明度差约 2:1，分得开）。
+   尺自身**不画轨道**——除了带长度通道的那两条（turn / hero）：几段之和就是整条宽度，画轨道等于
+   给一个并不存在的分母留位。步骤尺没有长度通道，所以它是唯一不画轨道的一条。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar{
+  display:flex;min-width:0;
+  /* 三段**平齐**：高度不再编码相位（旧版让 wait 矮、generate 满、tool 中，底对齐，实机里读出来是
+     「三根长短不齐的柱子拼在一起」）。相位改由明度与段间断开认，见下面各 data-kind 与
+     .dtpl-tok-bar-seg 的 inset 描边。 */
+  align-items:stretch;
+  /* 宽度由调用方给出：turn / hero 按量级算（行内 style），step 就是 100%（它没有长度通道）。
+     这条兜底是给内联值缺席时（旧载荷 / 手写 fixture）留的，免得条塌成 0 宽。 */
+  width:100%;
+}
+/* 三段尺**一律满高**：16px 装得下 1px 的断开，也让三段各有足够的面积承载明度差。
+   块头那条与步骤尺同族（分解与整体的关系），所以同高、同灰阶、同断开配方。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar[data-tone="step"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar[data-tone="turn"]{height:16px;}
+/* 抬头那条（hero）是另一族：「引擎工作 vs 没在算」，两段等高、只有长度。
+   它的**长度不能说谎**——「14 小时里只算了 5 分钟」正是这一条要说的事，把那一段加宽到看得见
+   就等于把它说长了。所以看得见的责任交给**厚度**：8px 高的一小块在 870px 的车道上是一段
+   明确的实心记号。比率仍然逐像素是真值，只是这一段的横截面从 6×6 变成 6×8。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar[data-tone="hero"]{height:8px;}
+/* 带长度通道的两条尺**画轨道**：不画的话，一段 145ms 的工作与一段 5 分钟的工作都只是一小截灰，
+   读者读不出「它只占这么一点」，而那正是这两条尺存在的理由（步骤尺没有这条通道，所以也没有轨道）。
+   轨道得**看得出是条凹槽**：底取 10% 洗色（压面板实测约 1.6:1，一眼能看见这是一条槽），
+   再压 1px 内描边把上缘勾出来。旧版给的 5% 压 3% 的面板只差两个百分点，实机里读成一片空白——
+   于是轻的那几轮又是一块**没有参照的浮块**，量级那件事等于没说。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar[data-tone="turn"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar[data-tone="hero"]{
+  --dtpl-tok-track:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
+  background:var(--dtpl-tok-track);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dtpl-fg) 16%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg{
+  height:100%;flex:none;
+  /* 段之间的**断开**走内描边、不吃宽度——那条 2px 的下限是「占比再小也看得见」的全部依据。
+     断开色取**轨道色**：带轨道的那两条尺里，缝读作「轨道露出来的一条」；步骤尺没有轨道，
+     取同一档洗色（它落在面板上，效果就是「这里被切开了」）。取 --dtpl-panel-bg 是错的——
+     那是个 3% 的透明色，压在段上等于没画，相邻两段会糊成一块（实测 generate→tool 就是这么糊的）。 */
+  box-shadow:inset -1px 0 0 0 var(--dtpl-tok-track,color-mix(in srgb,var(--dtpl-fg) 10%,transparent));
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg:last-child{box-shadow:none;}
+/* 相位（用于步骤尺与轮块头尺，见 SessionTurns 的 stepSegments）。三段是**真实先后**：
+   等首 token → 生成 → 工具。明度由这里给，且**三档都要压得过面板 3:1**（非文本对比度）。
+   52 / 72 / 100 是量出来的**唯一解**：浅色主题里最浅那档要到 52% 才够 3:1（50% 是 3.11，
+   再浅就不达标），最深那档已经贴着满墨，所以三档能拉开的全部空间只有中间那一段——
+   实测 3.29 / 6.06 / 14.63（浅色）、5.14 / 8.53 / 15.28（深色）。
+   注意**不要**为了「拉开明度」把最浅那档往下压：旧版曾取 30/62/96，相邻确实更开（约 2.4:1），
+   但 wait 掉到 1.87:1（浅色）——它就从「一档数据」变成了「一条看不见的轨道」，
+   而这一页的口径是「量不到 ≠ 0」，最浅那档必须仍然看得见。 */
+
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="generate"]{background:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="tool"]{background:color-mix(in srgb,var(--dtpl-fg) 72%,transparent);}
+/* 等待那一段最浅：它的语义是「**还没轮到生成**」，不该与真正在吐字的那段同重。
+   52% 是「还能压过面板 3:1」的下限附近（50% 实测 3.11，取 52% 留出余量）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="wait"]{background:color-mix(in srgb,var(--dtpl-fg) 52%,transparent);}
+/* 拆不开的模型段（通道没上报流，量不到首 token）：**最深 + 斜纹**。
+   它整段都是模型时间、只是分不出等与生成；若只靠明度，读者会把它读成「生成」——而「生成」
+   断言了「没有等待」。斜纹是**形状**这条独立通道上的一个记号：「这里有一件事我不知道」。
+   斜纹是本页唯一一处，只给这一种含义（静态检查禁的是 dashed/dotted 描边，不是渐变填充）。
+   两条纹的**浅的那条也必须压过面板 3:1**：它是这一段的一部分，不是缝隙。34% 实测只有
+   2.19:1（浅色主题）——那一条几乎看不见，整段就读成「比生成浅一点的灰」，而本页的浅灰
+   已经被「等首 token」占了。55% 是最低能过线的档，两条纹之间仍有约 4:1，纹理看得清。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="model"]{
+  background:
+    repeating-linear-gradient(45deg,
+      var(--dtpl-fg) 0 1.5px,
+      color-mix(in srgb,var(--dtpl-fg) 55%,transparent) 1.5px 3.5px);
+}
+/* 抬头那条：实心那段是「引擎工作」，浅的那段是没在算的时间（等输入、等外部、会话挂起）。
+   浅档是**轨道里的一档数据**、不是轨道本身——它的职责是标出「工作之外那段时间有多长」，
+   所以照占比环那枚轨道（16%）的先例取一档看得见的浅灰，而不按「数据段」的 3:1 要求它
+   （那会让它重到与实心段抢眼）。12% 压面板只有 1.23:1，实测下来读成一条空白——
+   「工作只占这么一点」这句话也就没了。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="work"]{background:color-mix(in srgb,var(--dtpl-fg) 84%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="idle"]{background:color-mix(in srgb,var(--dtpl-fg) 26%,transparent);}
+/* 抬头那条：**没有**自己的标签与刻度——它只是上面那两个数之间的关系，读数已在上面那串事实里。
+   上边距把它与那串事实分开（贴着会读成某个数的下划线）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-bar{margin-top:2px;}
+/* 三段尺的图例。形状编码没有图例就不是信息、是花纹，所以它必须挨着尺。
+   它画的是一条**真的示例尺**——直接复用 TimeBar 那个组件，于是灰阶与段间断开不可能与真尺脱节；
+   三枚标签摊在各自那一段下面（flexGrow = 那一段的份额），顺序 / 明度 / 断开三件事一次说完。
+   「模型（拆不开）」单列一行、带斜纹：它**不是第四种相位**，是「相位分不出来」。同一个
+   最深的样子若不给记号，读者会把它读成「生成」。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-legend{
+  display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 10px;margin:0 0 10px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-legend-figure{
+  display:flex;flex-direction:column;gap:4px;
+  /* 示例尺自己一个宽度：它不表达量级（份额之和就是分母），只表达形状与顺序。
+     宽度是**按最长的那个标签反推**出来的：标签要落在各自那一段正下方（见下），
+     所以最窄的一段也得容得下「等首 token」。占比 30/114 的列在 232px 下是 61px，
+     而那个标签实测约 48px——留出余量；再窄就只能截断标签，那就白标了。 */
+  width:232px;flex:none;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-legend-keys{
+  display:flex;font-size:10px;line-height:12px;color:var(--dtpl-fg-2);
+}
+/* flex-basis:0 是**承重的**：只给 flexGrow 的话，摊的是**剩余**空间，而各标签的文字
+   宽度本来就不一样，于是列宽不等于段宽——实测「生成」那个标签会偏到 15px 外，正好压在
+   等首 token 与生成的分界线上，读起来像在说前一段。basis 归零后列宽就只由份额决定，
+   标签中心才真的落在它那一段的下面。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-legend-keys > span{
+  flex-basis:0;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* 「模型（拆不开）」：最深 + 斜纹。它与「生成」同明度，只靠**形状**分开——若不给记号，
+   读者会把它读成「生成」，而「生成」断言了「没有等待」。斜纹的两档与真尺逐字一致
+   （否则图例教的样子与真尺不是一回事）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-legend-model{
+  display:inline-flex;align-items:center;gap:5px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-legend-key{
+  display:inline-block;width:9px;height:12px;flex:none;
+  background:
+    repeating-linear-gradient(45deg,
+      var(--dtpl-fg) 0 1.5px,
+      color-mix(in srgb,var(--dtpl-fg) 55%,transparent) 1.5px 3.5px);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-legend-say{
+  margin-left:auto;color:var(--dtpl-fg-3);
+}
 /* 末尾两块分列：「轮间」与「轮次未知」是两件不同的事实（知道 vs 不知道），绝不并成一块；
    只剩一块时 auto-fit 让那一块占满整行。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-tail{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-top:10px;
 }
+/* 版面上的一层（SessionTokens 的 <Block>）：它就是 .dtpl-tok-col 的一个 flex 子项，自己不带
+   任何盒模型——存在的理由是给整块一个落点，入场错峰的序号挂在这上面（见下面的 .dtpl-tok-col > *）。
+   min-width:0 让里面的长模型名能折行，而不是把这条 flex 子项撑宽。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-block{display:block;min-width:0;}
+/* 这一页的分区词：比浮窗那档（13px / 600）大一号、重一档。
+   浮窗里它是卡片内部的小标题，周围有卡面与趋势图；这一页里它是**整块的名**，
+   上下都是空白，该撑住场面。15px / 700 是量出来的：再大就与主角数字抢，
+   再小就退回「又一个标签」。字重从 600 提到 700——分区词不是正文，是题，题该重。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-col .dtpl-sec-title{
+  font-size:15px;line-height:22px;font-weight:700;letter-spacing:.02em;
+  margin:0 0 14px;
+}
+/* 这一页的四桶读数格：比浮窗那格（10px 14px 11px + 竖发丝分隔）宽松一档，
+   且**去掉格与格之间的竖线**——四格是并排的四个独立读数（各自有标签 / 值 / 份额），
+   被线连成一条带反而读成一组连续的量。去掉线之后靠间距分格（16px 的 gap）。
+   它们仍住在抬头面板里，但**不是靠竖线连着面板**：把它们与上面的合计数字连起来的是
+   那条横贯的分区线（见 .dtpl-tok-mix-band）。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-col .dtpl-grid{
+  gap:0 16px;
+  border-top:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-col .dtpl-stat + .dtpl-stat{border-left:0;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-col .dtpl-stat{
+  padding:16px 18px 14px;
+}
+/* 构成带里那四格的上下白另算：它们在面板内，上边接着命中率那一行（10px 就够），下边撑起
+   面板的底缘，所以比通用那档再厚一点。会话时间那两个格不在面板里，维持上面那档。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-mix-band .dtpl-stat{
+  padding:10px 18px 20px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-col .dtpl-stat:hover{
+  background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
+  border-left:0;
+}
 /* 首次拉取的占位：与真内容同域（一页读数），高度给够，数据到达时页面不整体上跳。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-sk{height:220px;}
+
+/* 入场：这一页的每个顶层块（抬头 / 构成 / 图表 / 明细 / 末尾两块）依次升起，错开半拍。
+   配方就是浮窗正文用的那支 dtpl-rise，节奏统一；每块自己带 --dtpl-tok-i（见 SessionTokens 装配），
+   块**重挂**才播（切会话 / 骨架换真块），15s 轮询刷新不重挂，所以不会反复重播。
+   柱子另有自己的错峰（shared.ts 的 .dtpl-bars.is-anim），两支错峰叠起来是「先铺版、再上柱」。 */
+@media (prefers-reduced-motion:no-preference){
+  [data-plugin="dsh-tokbook"] .dtpl-tok-col > *{
+    animation:dtpl-rise .26s cubic-bezier(.22,.68,.24,1) both;
+    animation-delay:calc(var(--dtpl-tok-i,0) * 40ms);
+  }
+}
 
 @media (max-width:640px){
   /* 窄屏：末尾两块改上下排列——并排时每块只剩半屏，四桶读数会折成一团。 */
   [data-plugin="dsh-tokbook"] .dtpl-tok-tail{grid-template-columns:minmax(0,1fr);}
-  [data-plugin="dsh-tokbook"] .dtpl-tok-head,
   [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head{padding-left:10px;padding-right:10px;}
-  [data-plugin="dsh-tokbook"] .dtpl-tok-steps{padding-left:10px;padding-right:10px;}
+  /* 抬头不改 padding（它从变量算），只把变量本身收窄——构成带那两条负边距跟着一起收。 */
+  [data-plugin="dsh-tokbook"] .dtpl-tok-head{--dtpl-tok-head-pad:10px;}
+  /* 内白住在 inner 上（见上面那条注释：竖向内白不能挂在格子上），所以窄屏也要改在它上面——
+     写在外层 .dtpl-tok-steps 上只会再加 10px，两边合起来 28px。 */
+  [data-plugin="dsh-tokbook"] .dtpl-tok-steps-inner{padding-left:10px;padding-right:10px;}
+  /* 步骤行的第一段改单列：身份一行、钱另起一行靠左。「第 N 步 + 时间 + 模型 + 金额」在窄处
+     排不进一行，硬排的结果是身份被挤着折行、钱压在它上面。 */
+  [data-plugin="dsh-tokbook"] .dtpl-tok-step{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-areas:"id" "cost" "bar" "read";
+  }
+  [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost{justify-content:flex-start;}
+  /* 读数那两簇在窄处自然上下堆叠（两簇加起来 660px，放不进窄屏那一行，flex 自己会折）。
+     折了之后两簇各占整行、各自靠左，中间那条缝从 32px 收到 10px——竖着排的时候它与行距同义。 */
+  [data-plugin="dsh-tokbook"] .dtpl-tok-step-read{gap:10px 0;}
 }
-/* 箭头翻转只是状态指示，reduce 下不要那 0.15s 的转动。 */
+/* 箭头翻转只是状态指示，reduce 下不要那 0.15s 的转动；整页的入场升起同理。 */
 @media (prefers-reduced-motion:reduce){
   [data-plugin="dsh-tokbook"] .dtpl-tok-turn-cue{transition:none;}
+  [data-plugin="dsh-tokbook"] .dtpl-tok-col > *{animation:none;}
 }
 `

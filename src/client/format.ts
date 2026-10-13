@@ -66,6 +66,25 @@ export function formatMoney(value: number): string {
   return `¥${value.toFixed(2)}`
 }
 
+/**
+ * 时长的读法，档位与宿主 `dsh-client-ui-chat` 的 `formatDuration` 一致——同一个用时在
+ * 对话页的统计里与这里读出来是同一个数，不然读者会以为两个数在说两件事。
+ *
+ * 一小时以上是这里多出的一档：会话级的「引擎工作总时长」动辄十几个小时，`180分0秒`
+ * 那种读法没人能一眼读出来。
+ */
+export function formatDuration(ms: number): string {
+  const seconds = ms / 1000
+  if (seconds < 60) return `${String(Math.round(seconds * 10) / 10)}秒`
+  if (seconds < 3600) {
+    const whole = Math.round(seconds)
+    return `${String(Math.floor(whole / 60))}分${String(whole % 60)}秒`
+  }
+  const whole = Math.round(seconds / 60)
+  const minutes = whole % 60
+  return `${String(Math.floor(whole / 60))}时${String(minutes).padStart(2, '0')}分`
+}
+
 /** 本地化的 MM-DD HH:mm，用于最新事件行。 */
 export function formatDateTime(epochMs: number): string {
   const d = new Date(epochMs)

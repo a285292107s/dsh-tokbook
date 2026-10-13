@@ -20,7 +20,8 @@ export const CSS_METHOD = `/* 统计口径文档 */
 /* 导语里的加重点是**这次要读的那句**，靠字重与墨色，不靠色相。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede b{color:var(--dtpl-fg);font-weight:600;}
 
-/* 三事实条：来源 / 精度 / 范围。三条是**同类**的方法事实（都在说「怎么记」），所以三格等权。 */
+/* 三事实条：来源 / 精度 / 范围。三条是**同类**的方法事实（都在说「怎么记」），所以三格等权。
+   悬停时受光边提亮——它是可读的说明卡，不是装饰块。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-facts{
   display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
   margin-bottom:16px;
@@ -30,7 +31,16 @@ export const CSS_METHOD = `/* 统计口径文档 */
   padding:10px 12px;min-width:0;
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
-  box-shadow:var(--dtpl-metal);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dtpl-metal);
+  transition:box-shadow .18s ease,border-color .18s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-doc-fact:hover{
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent),
+    var(--dtpl-metal),
+    0 3px 12px -5px rgba(0,0,0,.18);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-fact-k{
   font-size:11px;line-height:16px;color:var(--dtpl-fg-2);font-weight:500;
@@ -68,6 +78,16 @@ export const CSS_METHOD = `/* 统计口径文档 */
   padding:10px 12px;min-width:0;
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dtpl-metal);
+  transition:box-shadow .18s ease,border-color .18s ease;
+}
+[data-plugin="dsh-tokbook"] .dtpl-doc-bucket:hover{
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent),
+    var(--dtpl-metal),
+    0 3px 12px -5px rgba(0,0,0,.18);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-bucket-name{
   font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);

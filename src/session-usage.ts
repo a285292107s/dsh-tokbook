@@ -10,12 +10,13 @@
  */
 
 import { billingOf, costOf, priceOfKey } from './pricing.ts'
+import { countOf, timingIndexOf, type SessionTimingIndex } from './session-timing.ts'
 import { summarizeRecords, type RateResolver, type StatsLogger } from './stats.ts'
 import { recordFromRetry, type SessionEventLike } from './usage-record.ts'
 import type { SyncPersistence } from './sync.ts'
 import {
-  totalsTokens, type BillingMap, type PricingTable, type SessionStepRow, type SessionUsageGroup, type SessionUsageView,
-  type UsageFields, type UsageRecord, type UsageTotals,
+  settleTiming, totalsTokens, type BillingMap, type PricingTable, type SessionStepRow, type SessionUsageGroup,
+  type SessionUsageView, type StepTiming, type UsageFields, type UsageRecord, type UsageTotals,
 } from './types.ts'
 
 /** {@link buildSessionUsageView} 的输入：账本行 + 计价上下文 + 该会话日志。 */
@@ -46,17 +47,10 @@ interface Entry {
   row: SessionStepRow
 }
 
-function countOf(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined
-}
-
-/** 事件的 `step` 载荷。`SessionEventLike.data` 没有这个字段（账本侧不读它），
- *  但 `assistant/message` 与 `llm/retry` 都带——字段名以 DSH 的事件载荷为准，
+/** 事件的 `step` 载荷。`SessionEventLike.data` 里的字段名以 DSH 的事件载荷为准，
  *  宿主改了名这里必须跟着改。 */
 function stepOf(event: SessionEventLike): number | undefined {
-  const data: unknown = event.data
-  if (typeof data !== 'object' || data === null) return undefined
-  return countOf((data as Record<string, unknown>)['step'])
+  return countOf(event.data?.step)
 }
 
 /** `assistant/message` 的账本身份：与写入侧取的是同一个 `message.id`。 */
@@ -158,9 +152,12 @@ function stepRowOf(
   record: UsageRecord,
   input: SessionUsageInput,
   unpriced: Set<string>,
-  step: number | undefined,
+  at: Attribution | undefined,
+  timing: SessionTimingIndex | null,
+  owners: ReadonlyMap<string, string>,
 ): SessionStepRow {
   const priced = priceOfRecord(record, input.pricing, input.billing, input.resolve, unpriced)
+  const own = timingOfRow(record, at, timing, owners)
   return {
     requestId: record.requestId,
     time: record.time,
@@ -170,7 +167,8 @@ function stepRowOf(
     ...(record.failureCode !== undefined ? { failureCode: record.failureCode } : {}),
     ...(record.usage !== undefined ? { usage: record.usage } : {}),
     tokens: tokensOf(record.usage),
-    ...(step !== undefined ? { step } : {}),
+    ...(at?.step !== undefined ? { step: at.step } : {}),
+    ...(own !== undefined ? { timing: own } : {}),
     bucket: priced.bucket,
     cost: priced.cost,
   }
@@ -193,7 +191,10 @@ function groupOf(turn: number | null, entries: readonly Entry[], resolve: RateRe
     if (entry.row.bucket === 'spend') spend += entry.row.cost
     else if (entry.row.bucket === 'subscription') subscriptionValue += entry.row.cost
   }
-  return { turn, totals, tokens: totalsTokens(totals), spend, subscriptionValue, rows: ordered.map(entry => entry.row) }
+  return {
+    turn, totals, tokens: totalsTokens(totals), spend, subscriptionValue,
+    rows: ordered.map(entry => entry.row),
+  }
 }
 
 /** 读该会话的日志供 join：`open(id,'read')` 不取写所有权，与在写的宿主并行安全；
@@ -229,6 +230,8 @@ export async function readSessionJoinEvents(
  *  ——「轮次未知」与「轮间」分列。 */
 export function buildSessionUsageView(input: SessionUsageInput): SessionUsageView {
   const index = input.events === null ? null : turnIndexOf(input.sessionId, input.events)
+  const timing = input.events === null ? null : timingIndexOf(input.sessionId, input.events)
+  const owners = input.events === null ? new Map<string, string>() : timingOwners(input.records, index, input.sessionId)
   const all: Entry[] = []
   const turns = new Map<number, Entry[]>()
   const between: Entry[] = []
@@ -236,7 +239,7 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
   const unpriced = new Set<string>()
 
   const place = (record: UsageRecord, at: Attribution | undefined, bucket: Entry[]): void => {
-    const entry: Entry = { record, row: stepRowOf(record, input, unpriced, at?.step) }
+    const entry: Entry = { record, row: stepRowOf(record, input, unpriced, at, timing, owners) }
     all.push(entry)
     bucket.push(entry)
   }
@@ -272,6 +275,10 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
     if (entry.row.bucket === 'spend') spend += entry.row.cost
     else if (entry.row.bucket === 'subscription') subscriptionValue += entry.row.cost
   }
+  const groups = [...turns.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([turn, entries]) => groupOf(turn, entries, input.resolve))
+  const tail = between.length === 0 ? null : groupOf(null, between, input.resolve)
 
   return {
     sessionId: input.sessionId,
@@ -283,11 +290,90 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
     spend,
     subscriptionValue,
     unpriced: [...unpriced].sort(),
-    turns: [...turns.entries()]
-      .sort((left, right) => left[0] - right[0])
-      .map(([turn, entries]) => groupOf(turn, entries, input.resolve)),
-    betweenTurns: between.length === 0 ? null : groupOf(null, between, input.resolve),
+    turns: groups,
+    betweenTurns: tail,
     unattributed: sortEntries(unattributed).map(entry => entry.row),
     todaySpend: input.todaySpend,
+    ...spanOf(input.events, all.map(entry => entry.row)),
   }
+}
+
+/**
+ * 这一步的用时归**哪一行**报。
+ *
+ * 一步可能落不止一行账本：重试过的步既有那次重试的失败行、又有最终产出的那行，而
+ * `(turn, step)` 只有一个、`step/start → step/end` 也只有一个区间。若按行各报一次，
+ * 同一步的用时会被加两遍——本机 760 个会话里 163 个有这种重复行，「引擎工作总时长」
+ * 就会超过会话跨度（实测 27 个会话如此）。
+ *
+ * 所以按步定一个报时用的行：**有产出的那行**（`usage` 在）优先，其次是**非失败行**，
+ * 再不然取最早落盘的那行。其余同步行读到「未计时」——它们确实分不出自己那一段的
+ * 起止，报 0 或报整步都是假话。
+ */
+function timingOwners(records: readonly UsageRecord[], index: ReadonlyMap<string, Attribution> | null, sessionId: string): Map<string, string> {
+  const best = new Map<string, { requestId: string; rank: number; time: number }>()
+  for (const record of records) {
+    if (record.sessionId !== sessionId || record.kind === 'compaction') continue
+    const at = locate(record, index, sessionId)
+    if (at?.step === undefined) continue
+    const rank = record.usage !== undefined ? 0 : record.kind === 'failure' ? 2 : 1
+    const key = `${String(at.turn)}:${String(at.step)}`
+    const seen = best.get(key)
+    if (seen === undefined || rank < seen.rank || (rank === seen.rank && record.time < seen.time)) {
+      best.set(key, { requestId: record.requestId, rank, time: record.time })
+    }
+  }
+  return new Map([...best].map(([key, value]) => [key, value.requestId]))
+}
+
+/**
+ * 这一步的用时，只由 `owners` 指定的那一行报出（见 `timingOwners`）。压缩行没有步骤号，
+ * 走自己那条 requestId——`compaction/start` → `compaction/summary` 那一段**就是**这次
+ * summarize 的模型调用（summary 事件带 usage 与正文，是调用完成时落盘的），所以报成模型
+ * 用时，不再另记墙钟：同一段墙钟报两次就成了两个数。
+ */
+function timingOfRow(
+  record: UsageRecord,
+  at: Attribution | undefined,
+  timing: SessionTimingIndex | null,
+  owners: ReadonlyMap<string, string>,
+): StepTiming | undefined {
+  if (timing === null) return undefined
+  if (record.kind === 'compaction') {
+    const llmMs = timing.compactions.get(record.requestId)
+    return llmMs === undefined ? undefined : { llmMs }
+  }
+  if (at?.step === undefined) return undefined
+  const key = `${String(at.turn)}:${String(at.step)}`
+  if (owners.get(key) !== record.requestId) return undefined
+  return timing.steps.get(key)
+}
+
+/**
+ * 会话跨度与引擎工作总时长。这两个数**并排放**才是它们存在的理由：跨度和工作量的差额
+ * 就是这一步没在算的时间（等用户输入、等外部、会话挂起）。
+ *
+ * 跨度取日志的首末事件时刻，不是账本的首末记录——账本只在有计费调用时才落行，用它算
+ * 跨度会把「最后一句话之后挂了几小时」全丢掉。
+ *
+ * 日志读不到时**两个都缺席**：那时候一行都没计时，工作量会是 0，而「0秒」在此正是
+ * 「不知道」被印成了「没花时间」（同「用量未知 ≠ 0」，见 docs/CONTRACTS.md §2）。
+ */
+function spanOf(
+  events: readonly SessionEventLike[] | null,
+  rows: readonly SessionStepRow[],
+): { spanMs?: number; workMs?: number } {
+  if (events === null || events.length === 0) return {}
+  let first = Number.POSITIVE_INFINITY
+  let last = Number.NEGATIVE_INFINITY
+  for (const event of events) {
+    if (!Number.isFinite(event.time)) continue
+    if (event.time < first) first = event.time
+    if (event.time > last) last = event.time
+  }
+  const { llmMs, toolMs } = settleTiming(rows)
+  const timed = rows.some((row) => row.timing !== undefined)
+  const span = Number.isFinite(first) && last >= first ? { spanMs: last - first } : {}
+  // 一行都没计时就不报工作量：那 0 是「量不到」，不是「没花时间」。
+  return timed ? { ...span, workMs: llmMs + toolMs } : span
 }

@@ -9,29 +9,40 @@ export const CSS_LEDGER = `
   padding:16px;margin:0 0 20px;
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
-  box-shadow:var(--dtpl-metal);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 8%,transparent),
+    var(--dtpl-metal),
+    0 10px 30px -10px rgba(0,0,0,.22);
   overflow:hidden;
 }
 /* 左上那一枚**永远压在卡首那条图上**，故单独取浅墨——墨色在浅色皮肤上落在深色图上就等于没有
-   （实测只剩 1px 卡边框）；右下那一枚底下恒为卡面，随 fg 走。两端画法与焦点环那条见 overlay 片段。 */
+   （实测只剩 1px 卡边框）；右下那一枚底下恒为卡面，随 fg 走。两端画法与焦点环那条见 overlay 片段。
+   悬停整卡时两枚都提亮：卡是可读的面，不是死的画框——光标落在上面就该感到它是活的。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero::before,
 [data-plugin="dsh-tokbook"] .dtpl-hero::after{
   content:"";position:absolute;width:14px;height:14px;pointer-events:none;z-index:2;
   border-color:color-mix(in srgb,var(--dtpl-fg) 55%,transparent);
+  transition:border-color .2s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero::before{
   top:0;left:0;border-top:2px solid;border-left:2px solid;
   border-color:color-mix(in srgb,#fff 62%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero::after{right:0;bottom:0;border-right:2px solid;border-bottom:2px solid;}
+[data-plugin="dsh-tokbook"] .dtpl-hero:hover::before,
+[data-plugin="dsh-tokbook"] .dtpl-hero:hover::after{
+  border-color:color-mix(in srgb,var(--dtpl-fg) 78%,transparent);
+}
 
 /* 卡首那条图：hero 的第一行，也是这张卡上唯一的图。
    图**不做任何一层的背景**——独立成行，字才落在干净的卡面上（当背景用会让 36px 的主角数字
    压在图上读不出来）；下缘是一条**直边**，渐隐（mask）在浅色皮肤下会把图的下半糊成灰雾。
    **高度戴一顶帽子（max-height:140px），这个值不是审美数字，是首屏预算算出来的**：这张卡
-   存在的理由是「今日读数与近 14 天趋势一屏读完」，改大就会把趋势图挤出可视高度。 */
+   存在的理由是「今日读数与近 14 天趋势一屏读完」，改大就会把趋势图挤出可视高度。
+   图底那道渐隐是**叠在图上**的：图是图、卡面是卡面，靠它把两者接住——
+   不是把图裁掉，是让图的下缘融进卡面，读的人一眼仍是「一张图 + 一串读数」。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-art{
-  flex:none;
+  position:relative;flex:none;
   /* 左右上三面抵掉 hero 的内边距，图与卡的边框齐平（图因此**是卡的首面**）；下边不留空隙，
      hero 的 flex 间距就是图与下面那行数字之间的距离。 */
   margin:-16px -16px 0;
@@ -41,6 +52,11 @@ export const CSS_LEDGER = `
   background-position:center 40%;
   background-size:cover;
   background-repeat:no-repeat;
+}
+[data-plugin="dsh-tokbook"] .dtpl-hero-art::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;
+  height:36px;pointer-events:none;z-index:1;
+  background:linear-gradient(to bottom, transparent, var(--dtpl-panel-bg));
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-hero-top{
@@ -63,11 +79,13 @@ export const CSS_LEDGER = `
   background:var(--dtpl-brand);
   box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
-/* 主角数字走等宽体：位数变化时整块不抖。 */
+/* 主角数字走等宽体：位数变化时整块不抖。字号与字距是量出来的——再大就顶到参照行、
+   再小读起来就不像「今日总额」。字重 600 是刻意的：它不是标题，是读数，600 以上会抢
+   下面那行口径词的身份。 */
 [data-plugin="dsh-tokbook"] .dtpl-total-num{
   font-family:var(--dtpl-mono);
-  font-size:36px;line-height:42px;font-weight:600;color:var(--dtpl-fg);
-  font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+  font-size:38px;line-height:44px;font-weight:600;color:var(--dtpl-fg);
+  font-variant-numeric:tabular-nums;letter-spacing:-.03em;
 }
 /* 参照行与主角数字同行、紧贴其后。
    涨跌刻意中性：方向只由 ↑/↓ 字形与字重表达，品牌黄留给身份，语义色留给告警。
@@ -81,10 +99,15 @@ export const CSS_LEDGER = `
   font-size:13px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;
 }
-/* 今日金额：标签左、金额右的双行块，两行共用 max-content 宽度，所以两端各自成列。 */
+/* 今日金额：标签左、金额右的双行块，两行共用 max-content 宽度，所以两端各自成列。
+   两行之间一条 1px 发丝分隔——现金与订阅价值是两回事，靠一条线分开比靠字重更直觉。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-money{display:flex;flex-direction:column;gap:4px;flex:none;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-row{
   display:flex;align-items:baseline;gap:16px;justify-content:space-between;
+}
+[data-plugin="dsh-tokbook"] .dtpl-hero-money-row + .dtpl-hero-money-row{
+  border-top:1px solid var(--dtpl-hairline);
+  padding-top:2px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-k{font-size:11px;line-height:17px;color:var(--dtpl-fg-2);white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-v{
@@ -140,8 +163,15 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-stat{
   display:flex;flex-direction:column;gap:3px;min-width:0;
   padding:10px 14px 11px;
+  transition:background .15s ease,border-left-color .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-stat + .dtpl-stat{border-left:1px solid var(--dtpl-border);}
+/* 悬停一格：整格洗一层底色，左缘压一道 2px 墨线——不是装饰，是「这一格被选中」的
+   形态提示（与 tab 条的底部实条同一套语言：形状给选择，色相不参与）。 */
+[data-plugin="dsh-tokbook"] .dtpl-stat:hover{
+  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+  border-left:2px solid var(--dtpl-fg);
+}
 [data-plugin="dsh-tokbook"] .dtpl-k{
   font-size:12px;line-height:18px;font-weight:500;letter-spacing:.05em;color:var(--dtpl-fg-2);
   white-space:nowrap;
@@ -154,9 +184,24 @@ export const CSS_LEDGER = `
   font-size:20px;line-height:26px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-stat-pct{font-size:12px;line-height:18px;color:var(--dtpl-fg-2);}
+/* 会话词元页「词元构成」那四个读数格：与用量总览同一套读数（标签 / 读数 / 份额），类名却
+   带 dtpl-stat- 前缀——总览那几个（.dtpl-k / .dtpl-stat .dtpl-v / .dtpl-stat-pct）在
+   LedgerView 里，这一页不跟它们抢名字。三格都是 .dtpl-stat 的直接子级、竖排（标签、读数、份额）。
+   份额那格自己带「占」字——卡上不留裸百分比（一个百分比要么带桶名，要么带「占」字）。 */
+[data-plugin="dsh-tokbook"] .dtpl-stat-k{
+  font-size:12px;line-height:18px;font-weight:500;letter-spacing:.05em;color:var(--dtpl-fg-2);
+  white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-stat-v{
+  font-family:var(--dtpl-mono);
+  font-size:24px;line-height:30px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-stat-p{font-size:12px;line-height:18px;color:var(--dtpl-fg-2);}
 
 /* 节标题 = 工业徽记 + 分区词。徽记是**反复出现**的那枚标记，黄牌 + 墨边——见 tokens 第五节。
-   右端旁注（.dtpl-sec-aside）由它所在那一行的 space-between 推到边上，不画延伸线。 */
+   右端旁注（.dtpl-sec-aside）由它所在那一行的 space-between 推到边上，不画延伸线。
+   字号 13px 是刻意的：它是**分区词**不是正文标题，13 与下面正文 12 只差一档，
+   差两档就会读成「这一页的标题」——而它不是，它只是这一节的名字。 */
 [data-plugin="dsh-tokbook"] .dtpl-sec-title{
   display:flex;align-items:baseline;gap:9px;
   font-size:13px;line-height:20px;font-weight:600;letter-spacing:.04em;color:var(--dtpl-fg);
@@ -184,11 +229,26 @@ export const CSS_LEDGER = `
   padding:0 14px;
   border-bottom:1px solid var(--dtpl-border);
 }
+/* 两条横向参考线（25% / 75%）：不带刻度、不标数字——它们只回答「一半在哪」，
+   读图的人自己拿柱高去比。取 fg-3 的 14%：深底上够亮不消失，浅底上够淡不抢柱子。 */
+[data-plugin="dsh-tokbook"] .dtpl-bars::before,
+[data-plugin="dsh-tokbook"] .dtpl-bars::after{
+  content:"";position:absolute;left:14px;right:14px;height:1px;pointer-events:none;
+  background:color-mix(in srgb,var(--dtpl-fg-3) 14%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-bars::before{top:25%;}
+[data-plugin="dsh-tokbook"] .dtpl-bars::after{top:75%;}
 [data-plugin="dsh-tokbook"] .dtpl-bar{position:relative;flex:1 1 0;min-width:0;height:100%;display:flex;align-items:flex-end;}
-/* 非峰值柱：中性灰取墨色 45%——柱高是这张图的正文，更淡过不了 3:1 非文本对比度。 */
+/* 非峰值柱：中性灰取墨色 45%——柱高是这张图的正文，更淡过不了 3:1 非文本对比度。
+   柱体走**渐变**而非平色：顶亮底暗，让每根柱读起来是「立起来的一块」而不是贴上去的
+   一条色带——同一批柱子，渐变让 tallest 与 shortest 之间多一层明暗关系，
+   读者拿长度当量级读时不会被平色的「等权重」骗到。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill{
   position:relative;width:100%;overflow:hidden;
-  background-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
+  background:linear-gradient(to bottom,
+    color-mix(in srgb,var(--dtpl-fg) 52%,transparent) 0%,
+    color-mix(in srgb,var(--dtpl-fg) 40%,transparent) 60%,
+    color-mix(in srgb,var(--dtpl-fg) 30%,transparent) 100%);
 }
 /* 柱顶 1px 受光边 + 峰值柱内侧的**顶部盖片**：盖片高度与底面都写 %（同一单位），
    所以在任何柱高、柱宽上都按比例成立（2px 柱上被 overflow 裁掉，只剩受光边）。 */
@@ -199,15 +259,22 @@ export const CSS_LEDGER = `
 /* 悬停是这张图唯一的探索动作：柱体升一档明度、数值升到主墨。只给非峰值那根——峰值已在
    顶层（70% + 主墨 + 黄牌），悬停不该把它的层级降下来。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-fill:not(.is-peak){
-  background-color:color-mix(in srgb,var(--dtpl-fg) 60%,transparent);
+  background:linear-gradient(to bottom,
+    color-mix(in srgb,var(--dtpl-fg) 68%,transparent) 0%,
+    color-mix(in srgb,var(--dtpl-fg) 52%,transparent) 60%,
+    color-mix(in srgb,var(--dtpl-fg) 40%,transparent) 100%);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar:hover .dtpl-bar-label:not(.is-peak){color:var(--dtpl-fg);}
 /* 峰值：**更亮的中性块 + 柱值标签前一枚小黄牌**，柱身上不带任何黄
    （满屏唯一的饱和色不进最大的那块面，见 tokens 第五节）。
    70% 是量出来的：再亮则与黄牌明度接近、黄牌读不出来；再暗则与邻柱糊在一起、峰值认不出。
-   墨边让峰值边界在两个主题下分别由「深块 + 更深描边」与「清晰墨框」给出。 */
+   墨边让峰值边界在两个主题下分别由「深块 + 更深描边」与「清晰墨框」给出。
+   峰值柱同样走渐变——顶更亮、底与邻柱同族，整张图的明暗语言是统一的。 */
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak{
-  background-color:color-mix(in srgb,var(--dtpl-fg) 70%,transparent);
+  background:linear-gradient(to bottom,
+    color-mix(in srgb,var(--dtpl-fg) 78%,transparent) 0%,
+    color-mix(in srgb,var(--dtpl-fg) 68%,transparent) 50%,
+    color-mix(in srgb,var(--dtpl-fg) 58%,transparent) 100%);
   box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak::before{
@@ -246,6 +313,9 @@ export const CSS_LEDGER = `
   font-size:10px;line-height:16px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis span{flex:1 1 0;min-width:0;text-align:center;white-space:nowrap;}
+/* 峰值那天的日期：主墨色 + 600，与柱值标签的峰值同族——整张图的峰值语言是统一的
+   （柱亮 / 标签主墨 / 日期主墨 / 黄牌），不是四件事。 */
+[data-plugin="dsh-tokbook"] .dtpl-trend-axis span.is-peak{color:var(--dtpl-fg);font-weight:600;}
 
 /* 明细头部：与其余各节同一套——黄牌 + 分区词，右端旁注；子 tab 挂在这一行上，用「横排 +
    竖分隔 + 底部实条」那套（实条取墨色——「第二层选择器一律墨色」见 provider 片段）。

@@ -7,7 +7,7 @@
 
 import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { DAY_SETS } from './price-format.ts'
+import { DAY_SETS, dayKeyOf } from './price-format.ts'
 import { dayOfFileName } from './usage-log.ts'
 import { parseRecord } from './usage-record.ts'
 import {
@@ -79,17 +79,12 @@ export type StatsLogger = { error(...args: unknown[]): void; info?(...args: unkn
 
 const consoleLogger: StatsLogger = console
 
-function dayKey(time: number): string {
-  const date = new Date(time)
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${date.getFullYear()}-${month}-${day}`
-}
-
+/** 归日一律走共享的那一份 `dayKeyOf`（`price-format.ts`）：读路径别处也按本地日
+ *  挑行（如会话页的今日支出），两份实现漂移就是同一笔金额在两张脸上对不上。 */
 function hourKey(time: number): string {
   const date = new Date(time)
   const hour = String(date.getHours()).padStart(2, '0')
-  return `${dayKey(time)}T${hour}`
+  return `${dayKeyOf(time)}T${hour}`
 }
 
 function dayStart(day: string): number {
@@ -99,7 +94,7 @@ function dayStart(day: string): number {
 
 function dayKeyOffset(day: string, back: number): string {
   const [year, month, date] = day.split('-').map(Number)
-  return dayKey(new Date(year!, month! - 1, date! - back).getTime())
+  return dayKeyOf(new Date(year!, month! - 1, date! - back).getTime())
 }
 
 /** 用量窗口的本地日闭区间：给定「现在」的本地日期，返回覆盖的首日与末日键。
@@ -107,7 +102,7 @@ function dayKeyOffset(day: string, back: number): string {
  *  （含今日）；`all` = 全账本，`fromDay` 为**空串**（不设下界，`readRecordsByDayRange`
  *  据此读全部日文件）。 */
 export function rangeDayWindow(range: ProviderRange, now: () => Date = () => new Date()): { fromDay: string; toDay: string } {
-  const to = dayKey(now().getTime())
+  const to = dayKeyOf(now().getTime())
   if (range === 'all') return { fromDay: '', toDay: to }
   const back = range === 'yesterday' ? 2 : range === 'last7' ? 7 : range === 'last30' ? 30 : 1
   return { fromDay: dayKeyOffset(to, back - 1), toDay: range === 'yesterday' ? dayKeyOffset(to, 1) : to }
@@ -547,7 +542,7 @@ export function summarizeRecords(records: readonly UsageRecord[], resolve: RateR
   for (const record of records) {
     if (lastEventAt === null || record.time > lastEventAt) lastEventAt = record.time
     addUsage(total, record)
-    const day = dayKey(record.time)
+    const day = dayKeyOf(record.time)
     const dayTotals = days.get(day) ?? emptyTotals()
     addUsage(dayTotals, record)
     days.set(day, dayTotals)
@@ -723,7 +718,7 @@ export async function buildSummary(
   options: { pricingRevision?: string } = {},
 ): Promise<SummaryWithLastEvent & { dataDir: string }> {
   const pricingRevision = options.pricingRevision ?? ''
-  const today = dayKey(now().getTime())
+  const today = dayKeyOf(now().getTime())
   const cache = stateOf(dir)
   const names = await listDayFiles(dir)
   const stored = await readRollup(dir, logger, pricingRevision)

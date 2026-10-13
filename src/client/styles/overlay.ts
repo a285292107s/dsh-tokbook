@@ -13,7 +13,9 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   display:flex;flex-direction:column;
   background:var(--dtpl-card);color:var(--dtpl-fg);
   border-radius:0;
-  box-shadow:var(--dsw-elevation-prominent,0 24px 60px rgba(0,0,0,.28)),
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dsw-elevation-prominent,0 24px 60px rgba(0,0,0,.28)),
     inset 0 0 0 1px var(--dtpl-border);
   overflow:hidden;
 }
@@ -40,11 +42,14 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   display:flex;align-items:center;gap:10px;min-width:0;
   font-size:16px;line-height:24px;font-weight:600;letter-spacing:.02em;
 }
-/* 工业徽记：黄底 + 墨色图形。这是**抽象替身**，不是鹰角商标的复刻。 */[data-plugin="dsh-tokbook"] .dtpl-title-ico-chip{
+/* 工业徽记：黄底 + 墨色图形。这是**抽象替身**，不是鹰角商标的复刻。
+   徽记压一个 1px 墨边——恒定黄在任何底上都没有边界，不压边就糊成一团。 */
+[data-plugin="dsh-tokbook"] .dtpl-title-ico-chip{
   display:inline-flex;align-items:center;justify-content:center;flex:none;
   width:22px;height:22px;
   background:var(--dtpl-brand);
   color:var(--dtpl-on-brand);
+  box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
 [data-plugin="dsh-tokbook"] .dtpl-title-ico{width:14px;height:14px;}
 [data-plugin="dsh-tokbook"] .dtpl-close{
@@ -62,6 +67,7 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   display:flex;gap:0;flex:none;
   margin:0;padding:0 20px;
   border-bottom:1px solid var(--dtpl-border);
+  position:relative;
 }
 /* 未选中项走 fg-2 而不是 fg-3：它是**控件的文字**，不是装饰。「当前页」的区别由字重 600 +
    6% 洗色 + 底部那条 5px 黄块三样一起给。 */

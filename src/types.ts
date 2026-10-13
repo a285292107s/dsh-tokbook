@@ -266,6 +266,9 @@ export interface PricingView {
   /** 价文件的汇率（`$fx` 原样）。缺席 = 未设汇率：美元报价的通道算不出人民币
    *  （那些行按价格未知报出），也切不过去（口径见 docs/CONTRACTS.md §2）。 */
   fx?: FxSetting
+  /** models.dev 价同步的状态：今天同步过了没有、上次失败为什么。client 挂载时
+   *  据它决定要不要自动同步一次，状态行据它报"昨天补了价 / 上次失败：离线"。 */
+  sync: { lastSyncDay: string | null; lastError: string | null }
   dataDir: string
   updatedAt: number
 }
@@ -465,6 +468,47 @@ export interface SyncStatusView {
   lastSyncAt: number | null
 }
 
+/**
+ * 一次 models.dev 价同步的判决（`/tokbook/pricing-sync`）：写了多少格、
+ * 因门槛跳过多少格，以及各跳过格的一句原因（`route/model` → 人话）。
+ */
+export interface PricingSyncResult {
+  added: number
+  skipped: number
+  /** 同步发生的时间（epoch ms）；写 0 格也有——它说明"检查过了"。 */
+  syncedAt: number
+  /** 日节流跳过（今天已成功同步过）时为 true：added/skipped 都是 0，但**没有检查过**。 */
+  throttled?: boolean
+  /** 只回**按数量排序的前几条**原因：报告是给人读的一句话，不是审计日志。 */
+  reasons: Record<string, string>
+}
+
+/**
+ * 「查价」面板里的一条候选：models.dev 上**原厂采信**的一份美元价。
+ *
+ * 与批量补价共用同一份采信目录（`parseCatalog`），所以这里不会出现转售价、
+ *  分裂价或已废弃的条目——候选本身就是可信的，用户只是在其中挑。
+ * `key` 是归一化后的命中键，供面板标出「就是当前这条模型」。
+ */
+export interface ModelsDevCandidate {
+  provider: string
+  modelId: string
+  name: string
+  key: string
+  cost: {
+    input: number
+    output: number
+    cacheRead?: number
+    cacheWrite?: number
+  }
+}
+
+/** `GET /tokbook/pricing-lookup` 的载荷：用户敲的关键词与排序后的候选。 */
+export interface PricingLookupResult {
+  keyword: string
+  candidates: ModelsDevCandidate[]
+}
+
 /** 插件配置（可选旋钮；皆有默认值）。 */
 export interface TokBookConfig {
   /** 数据目录；默认 `$DSH_HOME/tokbook`（`~/.dsh/tokbook`）。 */
@@ -585,7 +629,53 @@ export interface QuotaView {
 
 
 /**
- * 会话词元页的一行：一次计费调用（= 一步，见 docs/CONTEXT.md），带**它自己的**钱。
+ * 一步的用时：每一段都是**直接量出来的**钟点差，不是从一个总数里拆出来的份额
+ * （起止事件与「工具用时取并集」的口径见 docs/CONTRACTS.md §2）。
+ * 缺席一律表示**量不出来**，不是 0——取消的步骤没有产出、崩溃打断的步骤没有收尾，
+ * 它们各自缺哪一段就缺哪一段。
+ */
+export interface StepTiming {
+  /** 步骤墙钟（`step/start` → `step/end`）。缺席 = 这一步没有收尾事件。 */
+  wallMs?: number
+  /** 模型用时（`step/start` → `assistant/message`）。缺席 = 这一步没有产出（取消 / 重试耗尽）。 */
+  llmMs?: number
+  /** 首 token 延迟（`step/start` → 流里第一个 token）。跨过步内重试，所以它是**距步骤开始**。 */
+  ttftMs?: number
+  /** 生成时长（首个 token → `assistant/message`）。 */
+  decodeMs?: number
+  /** 步内工具用时：所有配对的**并集**（一步里多个工具可以并行，逐对相加会超过墙钟）。 */
+  toolMs?: number
+  /** 计入 `toolMs` 的工具调用次数。 */
+  toolCalls?: number
+  /** 计入的那些调用里最慢的一次（名字可能为空——调用事件没带名字）。 */
+  slowTool?: { name: string; ms: number }
+}
+
+/**
+ * 一组（一轮）或一页的用时合计：把**已计时**的那些行加起来。
+ *
+ * 这不是一个另算的读数，而是各步那两段的**和**——{@link settleTiming} 是唯一的算法，
+ * 整页的「引擎工作」与每一块块头那个数都走它（块头必须与展开后逐行加起来一样，否则
+ * 读者当场就能看出两个数在说两件事）。所以分组不另存一份合计，读的时候现加。
+ */
+export interface StepTimingTotals {
+  llmMs: number
+  toolMs: number
+}
+
+/** 把若干行的用时加成合计；一行都没计时时两者都是 0，调用方据此决定报不报这个数。 */
+export function settleTiming(rows: readonly SessionStepRow[]): StepTimingTotals {
+  let llmMs = 0
+  let toolMs = 0
+  for (const row of rows) {
+    llmMs += row.timing?.llmMs ?? 0
+    toolMs += row.timing?.toolMs ?? 0
+  }
+  return { llmMs, toolMs }
+}
+
+/**
+ * 会话词元页的一行：一次计费调用（= 一步，见 docs/CONTEXT.md），带**它自己的**钱与用时。
  * 轮次归属由所在的分组承担，不重复放在行上；`step` 缺席 = 该行没拿到步骤号。
  */
 export interface SessionStepRow {
@@ -600,6 +690,8 @@ export interface SessionStepRow {
   tokens: number
   /** 步骤号（事件载荷原样）；拿不到时省略。 */
   step?: number
+  /** 这一步的用时；会话日志读不到、或那一步没量到任何一段时省略 = 「未计时」，不是 0。 */
+  timing?: StepTiming
   /** 这一行的金额落在哪一桶；`unpriced` = 价表计不了费，按 ¥0 计。 */
   bucket: 'spend' | 'subscription' | 'unpriced'
   /** 该行金额 ¥；`unpriced` 时为 0。 */
@@ -642,6 +734,12 @@ export interface SessionUsageView {
   unattributed: SessionStepRow[]
   /** 今日实际支出 ¥（全部会话）——抬头那行参照系的分母。 */
   todaySpend: number
+  /** 会话跨度：该会话日志首末事件之差（不是账本首末记录——那会漏掉对话结束后挂起的时间）。
+   *  日志读不到时缺席。 */
+  spanMs?: number
+  /** 引擎工作总时长：各步模型用时 + 工具用时之和。与 `spanMs` **并排**才是它的用处——
+   *  两者之差就是没在算的时间。 */
+  workMs?: number
 }
 
 /** 聚合 totals 行的四桶之和。 */

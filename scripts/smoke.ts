@@ -22,6 +22,9 @@ import {
   readPriceFile, slotAt, writePriceFile, type PricingTable,
 } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
+import { normalizeModelId, parseCatalog, searchCatalog } from '../src/models-dev.ts'
+import { mergeCatalogIntoTable } from '../src/pricing-sync.ts'
+import { readPricingSyncState, writePricingSyncState } from '../src/pricing-sync-state.ts'
 import {
   baselinesOf, calendarYearTally, composePriceBody, defaultCalendarYear, draftFromView, duplicateSlot,
   fxSignature, fxValue, inheritedCell, isBlankSlot, isUnpriced, modelDirty, modelSignature,
@@ -36,7 +39,7 @@ import {
 } from '../src/client/pricing/currency.ts'
 import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, dayIndex, dayKeyOfIndex, holidaySet, slotsOverlap } from '../src/price-format.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-catalog.ts'
-import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, type SessionEventLike } from '../src/usage-record.ts'
+import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, recordFromRetry, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
 import { modelRowsOf, providerCards } from '../src/by-provider.ts'
@@ -49,7 +52,8 @@ import {
   resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage,
 } from '../src/quota-official.ts'
 import type { BillingNature, PricingEntryInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
-import { totalsTokens, UNPRICED_KEY } from '../src/types.ts'
+import { settleTiming, totalsTokens, UNPRICED_KEY } from '../src/types.ts'
+import { buildSessionUsageView } from '../src/session-usage.ts'
 
 let failed = 0
 function check(name: string, cond: boolean, detail?: unknown): void {
@@ -1551,6 +1555,266 @@ if (section('双桶金额:spend vs subscriptionValue')) {
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+}
+
+if (section('models.dev 同步:归一化 / 门槛 / 手写价保护')) {
+  // --- 归一化:models.dev 与账本各写各的,落到同一个键 ---
+  check('归一化剥 vendor/ 前缀、:变体、[1m] 与 @,转小写',
+    normalizeModelId('deepseek/deepseek-v4-flash') === 'deepseek-v4-flash'
+    && normalizeModelId('Qwen/Qwen3.8-Max-0902:free') === 'qwen3.8-max-0902'
+    && normalizeModelId('xai/grok-4.6[1m]') === 'grok-4.6'
+    && normalizeModelId('z-ai/glm-5.3@preview') === 'glm-5.3-preview')
+
+  // --- 目录解析:只采信原厂 slug;畸形条目跳过 ---
+  const catalogValue = {
+    deepseek: { models: { 'deepseek-v4-flash': { name: 'DeepSeek V4 Flash', modalities: { input: ['text'], output: ['text'] }, cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
+    'alibaba-cn': { models: { 'deepseek-v4-flash': { name: '转售价', modalities: { output: ['text'] }, cost: { input: 0.14, output: 0.28 } } } },
+    openai: { models: { 'gpt-5.6-luna': { name: 'GPT-5.6 Luna', modalities: { output: ['text'] }, cost: { input: 0.2, output: 1.2, cache_write: 0.25 } }, 'text-embedding-3-small': { modalities: { output: ['text'] }, cost: { input: 0.02, output: 0 } } } },
+    google: { models: { 'gemini-3.8-flash': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } }, 'gemini-old': { modalities: { output: ['text'] }, status: 'deprecated', cost: { input: 1, output: 2 } } } },
+    crossmodel: { models: { 'gemini-3.8-flash': { modalities: { output: ['text'] }, cost: { input: 0.75, output: 3.75 } } } },
+  }
+  const catalog = parseCatalog(catalogValue)
+  check('只采信原厂 slug,转售商条目不进目录;deprecated 与无 cost 的条目不进',
+    catalog.size === 3 && catalog.has('deepseek-v4-flash') && catalog.has('gpt-5.6-luna') && catalog.has('gemini-3.8-flash')
+    && !catalog.has('text-embedding-3-small') && !catalog.has('gemini-old'))
+  check('多原厂条目一致价收一条', parseCatalog({
+    moonshotai: { models: { 'kimi-k3': { modalities: { output: ['text'] }, cost: { input: 3, output: 15 } } } },
+    'moonshotai-cn': { models: { 'kimi-k3': { modalities: { output: ['text'] }, cost: { input: 3, output: 15 } } } },
+  }).get('kimi-k3')?.cost.input === 3)
+  check('多原厂条目分裂价整键弃采(无法替它选边,不猜)', parseCatalog({
+    openai: { models: { 'gpt-x': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } } } },
+    anthropic: { models: { 'gpt-x': { modalities: { output: ['text'] }, cost: { input: 1, output: 3 } } } },
+  }).has('gpt-x') === false)
+
+  // --- 合并:四道门槛 ---
+  const table: PricingTable = {
+    commandcode: { 'gpt-5.6-luna': { rates: { inputPerMillion: 0.2, outputPerMillion: 1.2 } } },
+    zai: { 'glm-5.3-flash': { rates: { inputPerMillion: 1.065, outputPerMillion: 3.55 } } },
+  }
+  const currency = { commandcode: 'USD' as const }
+  const ledger = new Map([
+    ['commandcode', new Set(['deepseek/deepseek-v4-flash', 'gpt-5.6-luna', 'absent-model'])],
+    ['zai', new Set(['glm-5.3-flash'])],
+    ['loneroute', new Set(['kimi-k3'])],
+  ])
+  const { table: merged, report } = mergeCatalogIntoTable(table, currency, ledger, catalog)
+  check('补缺价:归一化命中、美元通道、格子上无价 → 按 6 位小数落盘',
+    merged.commandcode?.['deepseek/deepseek-v4-flash']?.rates.inputPerMillion === 0.15
+    && merged.commandcode?.['deepseek/deepseek-v4-flash']?.rates.cacheReadPerMillion === 0.003
+    && report.added === 1)
+  check('手写价永远赢:已有价的格子(哪怕价不同)一个字不动',
+    merged.commandcode?.['gpt-5.6-luna']?.rates.outputPerMillion === 1.2
+    && merged.zai?.['glm-5.3-flash']?.rates.inputPerMillion === 1.065)
+  check('非美元通道整条跳过(人民币挂牌价不是美元价的函数,换算即估算)',
+    merged.zai !== undefined && merged.zai['glm-5.3-flash'] !== undefined
+    && report.reasons['zai/glm-5.3-flash'] !== undefined)
+  check('目录没有采信条目的模型跳过,继续价格未知', report.reasons['commandcode/absent-model'] !== undefined)
+  check('跳过数 = 非美元 + 无条目 + 空目录通道 = 3,added 只数真写进去的',
+    report.skipped === 3 && report.added === 1)
+
+  // --- 状态文件:日节流的持久化 ---
+  const dir = await mkdtemp(join(tmpdir(), 'tokbook-modelsdev-'))
+  try {
+    check('状态读:缺失/畸形读作「从未同步」(最坏是多同步一次)',
+      (await readPricingSyncState(dir)).lastSyncDay === null)
+    await writePricingSyncState(dir, { lastSyncDay: '2026-10-05', lastError: null })
+    const state = await readPricingSyncState(dir)
+    check('状态写后读回原样', state.lastSyncDay === '2026-10-05' && state.lastError === null)
+    await writeFile(join(dir, 'models-dev-sync.json'), '{broken', 'utf8')
+    check('撕裂的状态文件读作「从未同步」,不抛错', (await readPricingSyncState(dir)).lastSyncDay === null)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+if (section('models.dev 查价:模糊搜索 / 排序 / 采信边界')) {
+  // --- 采信目录(与「同步」一节同一份) ---
+  const catalog = parseCatalog({
+    deepseek: { models: { 'deepseek-v4-flash': { name: 'DeepSeek V4 Flash', modalities: { output: ['text'] }, cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
+    openai: { models: { 'gpt-x': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } } } },
+    anthropic: { models: { 'gpt-x': { modalities: { output: ['text'] }, cost: { input: 1, output: 3 } } } },
+    google: { models: {
+      'gpt-5.6-luna': { name: 'GPT-5.6 Luna', modalities: { output: ['text'] }, cost: { input: 0.2, output: 1.2, cache_write: 0.25 } },
+      'gemini-3.8-flash': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+    } },
+    // 转售商与分裂价:与同步一节同一批,这里应同样搜不到
+    'alibaba-cn': { models: { 'deepseek-v4-flash': { name: '转售价', modalities: { output: ['text'] }, cost: { input: 0.14, output: 0.28 } } } },
+    crossmodel: { models: { 'gemini-3.8-flash': { modalities: { output: ['text'] }, cost: { input: 0.75, output: 3.75 } } } },
+  })
+
+  // --- 关键词同样走 normalizeModelId:vendor/前缀、:变体、[1m]、@ 都能落到候选集 ---
+  check('带 vendor 前缀与长上下文标记的关键词搜到同一条',
+    searchCatalog(catalog, 'deepseek/deepseek-v4-flash[1m]').map((m) => m.key).join(',') === 'deepseek-v4-flash'
+    && searchCatalog(catalog, 'z-ai/glm-5.3@preview').length === 0)
+
+  // --- 排序:精确命中 > 前缀 > 词级包含 > 名字兜底 ---
+  const ranked = searchCatalog(catalog, 'deepseek-v4-flash')
+  check('精确命中排第一', ranked[0]?.key === 'deepseek-v4-flash' && ranked.length === 1)
+  check('候选带四档价与原厂身份', ranked[0]?.entry.provider === 'deepseek'
+    && ranked[0]?.entry.cost.input === 0.15 && ranked[0]?.entry.cost.cacheRead === 0.003)
+
+  const v4 = searchCatalog(catalog, 'v4')
+  check('短词只靠词级命中,不污染无关模型', v4.map((m) => m.key).join(',') === 'deepseek-v4-flash')
+
+  const qwen = searchCatalog(catalog, 'qwen')
+  check('搜不到就返回空(不返回转售价)', qwen.length === 0)
+
+  // --- 采信边界:转售价 / 分裂价 / 已弃用条目同样搜不到 ---
+  const reseller = searchCatalog(catalog, 'deepseek-v4-flash')
+  check('候选池里没有转售价条目', reseller.every((m) => m.entry.provider !== 'alibaba-cn'))
+  const split = searchCatalog(catalog, 'gpt-x')
+  check('分裂价整键弃采,搜不到', split.length === 0)
+
+  // --- 空关键词 / 上限 ---
+  check('空关键词不搜', searchCatalog(catalog, '').length === 0 && searchCatalog(catalog, '   ').length === 0)
+  const many = parseCatalog({
+    openai: { models: {
+      'a-1': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+      'a-2': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+      'a-3': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+      'a-4': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+      'a-5': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+      'a-6': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+      'a-7': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+      'a-8': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+      'a-9': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
+    } },
+  })
+  check('上限截断,不爆屏', searchCatalog(many, 'a-').length === 8)
+}
+
+if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0')) {
+  /** 一条打包的文本流(messages.dev 那种「首段 + 相邻差值」的紧凑形状)。 */
+  const packed = (time0: number, texts: string[], dt: number[]) =>
+    ({ type: 'text-chunks', time0, index: 0, dt, texts })
+
+  /** 三步的会话,每步各压一种形态:
+   *  1) 正常一步 —— 首 token、生成、一次工具调用俱全;
+   *  2) 并行两个工具 —— 逐对相加会超过墙钟,取并集才对;
+   *  3) 重试耗尽 —— 有 step/end 没有 assistant/message,所以只有墙钟,没有模型段。 */
+  const base = dayMillis('2026-03-01', 9)
+  const events: SessionEventLike[] = [
+    { type: 'turn/start', time: base, seq: 0, data: { turn: 1 } },
+    { type: 'step/start', time: base, seq: 1, data: { turn: 1, step: 1 } },
+    // 首个 token 在 +1000ms:stream 里第一条是块起止(不算 token),打包段从 time0 累加 dt。
+    {
+      type: 'assistant/message', time: base + 5_000, seq: 2, data: {
+        turn: 1, step: 1, usage: { inputTokens: 100, outputTokens: 80 },
+        message: { id: 'm1', source: { provider: 'deepseek', model: 'deepseek-chat' } },
+        stream: [{ type: 'chunk', time: base, chunk: { type: 'block-start', index: 0, blockType: 'reasoning' } }, packed(base + 1_000, ['', '你', '好'], [0, 4_000])],
+      },
+    },
+    { type: 'tool/call', time: base + 5_100, seq: 3, data: { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: {} } },
+    { type: 'tool/result', time: base + 6_000, seq: 4, data: { turn: 1, step: 1, message: { source: { kind: 'tool', callId: 'c1' } } } },
+    { type: 'step/end', time: base + 6_000, seq: 5, data: { turn: 1, step: 1 } },
+
+    { type: 'step/start', time: base + 10_000, seq: 6, data: { turn: 1, step: 2 } },
+    { type: 'assistant/message', time: base + 12_000, seq: 7, data: { turn: 1, step: 2, usage: { inputTokens: 50, outputTokens: 20 }, message: { id: 'm2', source: { provider: 'deepseek', model: 'deepseek-chat' } } } },
+    { type: 'tool/call', time: base + 12_100, seq: 8, data: { turn: 1, step: 2, callId: 'c2', name: 'grep', arguments: {} } },
+    { type: 'tool/call', time: base + 12_200, seq: 9, data: { turn: 1, step: 2, callId: 'c3', name: 'glob', arguments: {} } },
+    // 两个调用并行:第一个结束早、第二个结束晚,并集 = 12_100 → 15_000 = 2.9s(逐对相加是 4.9s)。
+    { type: 'tool/result', time: base + 14_000, seq: 10, data: { turn: 1, step: 2, message: { source: { kind: 'tool', callId: 'c2' } } } },
+    { type: 'tool/result', time: base + 15_000, seq: 11, data: { turn: 1, step: 2, message: { source: { kind: 'tool', callId: 'c3' } } } },
+    { type: 'step/end', time: base + 15_000, seq: 12, data: { turn: 1, step: 2 } },
+
+    { type: 'step/start', time: base + 20_000, seq: 13, data: { turn: 1, step: 3 } },
+    { type: 'llm/retry', time: base + 21_000, seq: 14, data: { retryId: 'r1', turn: 1, step: 3, provider: 'deepseek', retry: 1, maxRetries: 3, delayMs: 500, failure: { code: 'TRANSPORT' } } },
+    { type: 'step/end', time: base + 30_000, seq: 15, data: { turn: 1, step: 3 } },
+    { type: 'turn/end', time: base + 31_000, seq: 16, data: { turn: 1, reason: { kind: 'done' } } },
+    // 会话在末事件之后挂起几小时:跨度要含这一段,「引擎工作」不含。
+    { type: 'session/title', time: base + 4 * 3_600_000, seq: 17, data: {} },
+  ]
+  // 账本行由事件投影而来(与写入侧同一条规则):m1 / m2 两次产出 + 一条重试失败行。
+  const records = events
+    .map((event) => recordOfEvent(event, 'sess-t', 'deepseek-chat', false))
+    .filter((record): record is UsageRecord => record !== null)
+  const view = buildSessionUsageView({
+    sessionId: 'sess-t', records, events,
+    pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+  })
+  const rows = view.turns[0]?.rows ?? []
+  const [one, two, three] = rows
+
+  check('一步一行,三步都在同一轮下', rows.length === 3 && view.turns.length === 1)
+  // 墙钟 = step/start → step/end;模型 = step/start → assistant/message。
+  check('步骤 1:墙钟 6s、模型 5s、首 token 1s(块起止不算 token)、生成 4s',
+    one?.timing?.wallMs === 6_000 && one?.timing?.llmMs === 5_000
+    && one?.timing?.ttftMs === 1_000 && one?.timing?.decodeMs === 4_000)
+  check('步骤 1:一次工具调用 0.9s', one?.timing?.toolMs === 900 && one?.timing?.toolCalls === 1)
+  // 并集而不是逐对相加:相加会得到 4.9s,越过了那一步 5s 的墙钟。
+  check('步骤 2:并行两个工具取并集 2.9s(相加会是 4.9s)',
+    two?.timing?.toolMs === 2_900 && two?.timing?.toolCalls === 2)
+  check('步骤 2:最慢的那次是 2.8s 的 glob', two?.timing?.slowTool?.name === 'glob' && two?.timing?.slowTool?.ms === 2_800)
+  // 重试耗尽的步没有产出:墙钟还在,模型那一段**缺席**——它不是 0,是没得可量。
+  check('步骤 3(重试耗尽):只有墙钟 10s,没有模型段、没有首 token',
+    three?.timing?.wallMs === 10_000 && three?.timing?.llmMs === undefined
+    && three?.timing?.ttftMs === undefined && three?.timing?.toolMs === undefined)
+  check('墙钟不小于各段之和(并集 + 不含产出段的步都推不出反例)',
+    rows.every((row) => {
+      const t = row.timing
+      if (t?.wallMs === undefined) return true
+      return t.wallMs >= (t.llmMs ?? 0) + (t.toolMs ?? 0)
+    }))
+
+  // 会话级:跨度取日志首末事件(含挂起那几小时),工作量只数模型 + 工具。
+  check('会话跨度含挂起时间(4 小时)',
+    view.spanMs === 4 * 3_600_000)
+  // 引擎工作只数模型 5s + 2s 与工具 0.9s + 2.9s = 10.8s:第 3 步那 10s 花在重试与退避上,
+  // 没有产出可归属,所以它进跨度、不进工作量——这正是两个数并排要让人看见的差额。
+  check('引擎工作不含重试退避那 10s(5 + 2 + 0.9 + 2.9 = 10.8s)', view.workMs === 10_800)
+  check('分组用时不另存一份,settleTiming 现加等于逐行相加',
+    settleTiming(rows).llmMs + settleTiming(rows).toolMs === view.workMs)
+
+  // 日志读不到:跨度与用时都缺席,但账本读数照出——不猜、不用账本首末记录顶替。
+  const blind = buildSessionUsageView({
+    sessionId: 'sess-t', records, events: null,
+    pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+  })
+  check('日志读不到:用时与跨度都缺席(不报 0——那是「量不到」),行仍进 unattributed',
+    blind.spanMs === undefined && blind.workMs === undefined
+    && blind.unattributed.every((row) => row.timing === undefined))
+
+  // 压缩行的用时取自 compaction/start → summary 那一段,报成模型用时(它就是那次调用)。
+  const compBase = dayMillis('2026-03-02', 9)
+  const compEvents: SessionEventLike[] = [
+    { type: 'compaction/start', time: compBase, seq: 0, data: { compactionId: 'c1', turn: null } },
+    { type: 'compaction/summary', time: compBase + 20_000, seq: 1, data: { compactionId: 'c1', summary: [], provider: 'deepseek', model: 'deepseek-chat', usage: { inputTokens: 9, outputTokens: 3 } } },
+    { type: 'compaction/end', time: compBase + 20_500, seq: 2, data: { compactionId: 'c1', turn: null } },
+  ]
+  const compView = buildSessionUsageView({
+    sessionId: 'sess-c',
+    records: [{ requestId: 'compaction:sess-c:c1', time: compBase + 20_000, sessionId: 'sess-c', model: 'deepseek-chat', kind: 'compaction', usage: { inputTokens: 9, outputTokens: 3 } }],
+    events: compEvents, pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: compBase,
+  })
+  const compRow = compView.betweenTurns?.rows[0]
+  check('压缩归轮间,用时是 start → summary 那 20s(报成模型用时,不另记墙钟)',
+    compView.betweenTurns !== null && compRow?.timing?.llmMs === 20_000 && compRow.timing.wallMs === undefined)
+
+  // 重试过的步在账本里有**两行**(那次重试的失败行 + 最终产出那行),而 (turn, step) 只有一个、
+  // step/start → step/end 也只有一个区间。按行各报一次就会把同一步的用时加两遍,
+  // 「引擎工作」于是可能超过「会话跨度」(本机 163 个会话有这种重复行)。
+  const retryEvents: SessionEventLike[] = [
+    { type: 'turn/start', time: base, seq: 0, data: { turn: 1 } },
+    { type: 'step/start', time: base, seq: 1, data: { turn: 1, step: 1 } },
+    { type: 'llm/retry', time: base + 2_000, seq: 2, data: { retryId: 'r9', turn: 1, step: 1, provider: 'deepseek', retry: 1, maxRetries: 3, delayMs: 500, failure: { code: 'TRANSPORT' } } },
+    { type: 'assistant/message', time: base + 8_000, seq: 3, data: { turn: 1, step: 1, usage: { inputTokens: 10, outputTokens: 5 }, message: { id: 'm9', source: { provider: 'deepseek', model: 'deepseek-chat' } } } },
+    { type: 'step/end', time: base + 9_000, seq: 4, data: { turn: 1, step: 1 } },
+  ]
+  const retryView = buildSessionUsageView({
+    sessionId: 'sess-r',
+    // 两行都 join 到 1:1:失败行(重试投影出来的身份)与产出行(消息 id)。
+    records: [
+      { requestId: recordFromRetry(retryEvents[2]!, 'sess-r', '').requestId, time: base + 2_000, sessionId: 'sess-r', model: 'deepseek-chat', kind: 'failure', failureCode: 'TRANSPORT' },
+      { requestId: 'm9', time: base + 8_000, sessionId: 'sess-r', model: 'deepseek-chat', provider: 'deepseek', usage: { inputTokens: 10, outputTokens: 5 } },
+    ],
+    events: retryEvents, pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+  })
+  const retryRows = retryView.turns[0]?.rows ?? []
+  check('同一步的两行只报一次用时(报在有产出的那行),另行为「未计时」',
+    retryRows.length === 2 && retryRows.filter((row) => row.timing !== undefined).length === 1
+    && retryRows.find((row) => row.usage !== undefined)?.timing?.wallMs === 9_000)
+  check('同一步的用时不被加两遍:引擎工作 8s(模型)≤ 跨度 9s',
+    retryView.workMs === 8_000 && retryView.spanMs === 9_000)
 }
 
 // 过滤后一节都没命中,是这里最坏的一种结果:它一条断言都没跑,却和「全绿」长得一模一样。

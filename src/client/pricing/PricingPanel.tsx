@@ -11,8 +11,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { PriceVerdict, PricingView } from '../../types.ts'
-import { ROUTE_PRICING } from '../../route-paths.ts'
+import type { ModelsDevCandidate, PriceCurrency, PriceVerdict, PricingLookupResult, PricingSyncResult, PricingView } from '../../types.ts'
+import { normalizeModelId } from '../../models-dev.ts'
+import { QUERY_FORCE, QUERY_MODEL, ROUTE_PRICING, ROUTE_PRICING_LOOKUP, ROUTE_PRICING_SYNC } from '../../route-paths.ts'
 import { inverseHint } from './currency.ts'
 import {
   baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxSignature, fxValue, modelDirty,
@@ -182,6 +183,16 @@ function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: str
   }))
 }
 
+/** 触发一次 models.dev 补价。挂载后的自动同步与手动按钮共用：`force` 绕过宿主的日节流。 */
+function postPricingSync(force: boolean): Promise<PricingSyncResult> {
+  const query = force ? `?${QUERY_FORCE}=1` : ''
+  return fetch(`${ROUTE_PRICING_SYNC}${query}`, { method: 'POST' }).then(async (res) => {
+    const payload = await res.json().catch(() => null) as (PricingSyncResult & { error?: string }) | null
+    if (!res.ok || payload === null) throw new Error(payload?.error ?? `HTTP ${String(res.status)}`)
+    return payload
+  })
+}
+
 function clockOf(epochMs: number): string {
   const at = new Date(epochMs)
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}:${String(at.getSeconds()).padStart(2, '0')}`
@@ -193,6 +204,16 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [baseline, setBaseline] = useState<PriceBaseline>(() => staged?.baseline ?? EMPTY_BASELINE)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [save, setSave] = useState<SaveState>({ kind: 'clean' })
+  /** models.dev 补价的状态：在飞的那轮与刚落定的判决。状态行据它报"补了 N 条"。 */
+  const [sync, setSync] = useState<{ running: boolean; result: PricingSyncResult | null; error: string | null }>({ running: false, result: null, error: null })
+  /** 「查价」面板的状态：开关、用户敲的关键词、在飞的那轮与刚落定的候选。 */
+  const [lookup, setLookup] = useState<{
+    open: boolean
+    keyword: string
+    loading: boolean
+    result: PricingLookupResult | null
+    error: string | null
+  }>({ open: false, keyword: '', loading: false, result: null, error: null })
   /** 手动选过的那一份；null = 还没选过，一切走「列表里的第一个」。 */
   const [picked, setPicked] = useState<Picked | null>(readPicked)
 
@@ -228,6 +249,9 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       onChanged()
     }, REFRESH_MERGE_MS)
   }, [onChanged])
+
+  /** 同步补价后要重读视图，但 `loadView` 声明在后面——经 ref 解耦，避免调换顺序。 */
+  const loadViewRef = useRef<(() => Promise<void>) | null>(null)
 
   /** 把新视图同时采纳为渲染源和基线。**先算完再落 state**：`draftFromView` 万一在这份载荷上抛
    *  （判定没盖到的形状漂移，比如某张卡少了 `models`），异常要在任何 setState 之前发生——
@@ -272,6 +296,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       if (aliveRef.current && writeGenRef.current === gen) setLoadError(err instanceof Error ? err.message : String(err))
     }
   }, [seed])
+  loadViewRef.current = loadView
 
   // 每次挂载都重读宿主文件：草稿只在自己 dirty 的那几处胜出，不重读就会让期间新增的
   // route / 模型、账本计数与缺年告警一直停在离开那一刻。
@@ -280,6 +305,69 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     if (staged !== null) committedRef.current = true
     void loadView()
   }, [loadView])
+
+  /**
+   * 触发一轮 models.dev 补价并刷新视图。`force`（手动按钮）绕过日节流；挂载的
+   * 自动同步不带 force——今天同步过就由宿主直接答 0 格，等于免费。
+   */
+  const runSync = useCallback(async (force: boolean): Promise<void> => {
+    setSync({ running: true, result: null, error: null })
+    try {
+      const result = await postPricingSync(force)
+      setSync({ running: false, result, error: null })
+      // 补上的价在磁盘上：重读让下拉的「N 个模型未知」与行内价立即跟上。
+      // 同步写（writeGen）已推进的旧世界丢弃规则在这里自然成立——loadView 自己比对。
+      if (result.added > 0) await loadViewRef.current?.()
+    } catch (err) {
+      setSync({ running: false, result: null, error: err instanceof Error ? err.message : String(err) })
+    }
+  }, [])
+
+  /**
+   * 「查价」：按关键词在 models.dev 的**原厂采信目录**里模糊搜索，返回排序后的候选。
+   *  与 `runSync` 的分工：那条是自动补洞（账本用过的 × 精确名 × 缺价的），这条是
+   *  用户自己挑。候选池里没有转售价，所以不存在「便宜的转售价冒充通道成本」——
+   *  用户要做的只是挑哪一家原厂。
+   */
+  const postLookup = useCallback((keyword: string): Promise<PricingLookupResult> => {
+    const query = `?${new URLSearchParams({ [QUERY_MODEL]: keyword }).toString()}`
+    return fetch(`${ROUTE_PRICING_LOOKUP}${query}`).then(async (res) => {
+      const payload = await res.json().catch(() => null) as (PricingLookupResult & { error?: string }) | null
+      if (!res.ok || payload === null) throw new Error(payload?.error ?? `HTTP ${String(res.status)}`)
+      return payload
+    })
+  }, [])
+
+  /** 用给定的关键词跑一轮搜索，并把结果写进面板。在飞期间面板不接受新的搜索。 */
+  const doSearch = useCallback(async (keyword: string): Promise<void> => {
+    setLookup((current) => ({ ...current, loading: true, error: null }))
+    try {
+      const result = await postLookup(keyword)
+      if (!aliveRef.current) return
+      setLookup((current) => current.open ? { ...current, loading: false, result, error: null } : current)
+    } catch (err) {
+      if (!aliveRef.current) return
+      setLookup((current) => current.open ? { ...current, loading: false, result: null, error: err instanceof Error ? err.message : String(err) } : current)
+    }
+  }, [postLookup])
+
+  /** 改关键词：清掉上一轮的结果，避免旧候选被当成还匹配。真正去搜的是 `doSearch`。 */
+  const changeKeyword = useCallback((text: string) => {
+    setLookup((current) => ({ ...current, keyword: text, result: null, error: null }))
+  }, [])
+
+  const closeLookup = useCallback(() => {
+    setLookup((current) => ({ ...current, open: false }))
+  }, [])
+
+  // 挂载后自动同步一次：每天首次打开价表 tab 时补价（「手动按钮 + 每天首次打开时
+  // 自动同步」）。读先落地再同步，使状态行的"上次同步"有据可依。
+  const autoSyncedRef = useRef(false)
+  useEffect(() => {
+    if (autoSyncedRef.current) return
+    autoSyncedRef.current = true
+    void runSync(false)
+  }, [runSync])
 
   /**
    * 写入整个文件。草稿尚无效时拒绝（不写入），使半输入的数字不能阻塞或破坏其余内容；
@@ -473,6 +561,36 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   // 那份价之间撑出一道什么也不说的空隙。
   const veiled = picked === null && save.kind === 'clean' && changes === 0
 
+  /** 打开面板：关键词默认就是当前选中的模型名，打开即搜一次。 */
+  const openLookup = useCallback(() => {
+    if (card === undefined || row === undefined) return
+    setLookup({ open: true, keyword: row.model, loading: true, result: null, error: null })
+    void doSearch(row.model)
+  }, [card, row, doSearch])
+
+  /**
+   * 采用一条候选：把它的四档美元价填进当前这一行的四个格子。**只在美元报价的
+   *  通道上**做——人民币通道的挂牌价不是美元价的函数（见 CONTRACTS §2），所以那
+   *  时按钮是停用的，面板上另说一句该先切币种。已有峰谷时段原样不动，它是一份
+   *  独立的细化。填入即一次普通改价，自动保存会接着把它写盘。
+   */
+  const adopt = useCallback((candidate: ModelsDevCandidate): void => {
+    if (card === undefined || row === undefined) return
+    if (card.currency !== 'USD') {
+      setLookup((current) => ({ ...current, error: '这条通道按人民币报价，models.dev 的价是美元的。请先在详情头把报价币种切成美元，再回来采用。' }))
+      return
+    }
+    const next: ModelDraft = {
+      ...row,
+      input: String(candidate.cost.input),
+      output: String(candidate.cost.output),
+      cacheRead: candidate.cost.cacheRead !== undefined ? String(candidate.cost.cacheRead) : '',
+      cacheWrite: candidate.cost.cacheWrite !== undefined ? String(candidate.cost.cacheWrite) : '',
+    }
+    updateModel(card.route, row.model, next)
+    closeLookup()
+  }, [card, row, updateModel, closeLookup])
+
   return (
     <section
       className="dtpl-price-sec"
@@ -573,6 +691,47 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         </div>
       )}
 
+      {/* models.dev 补价这一行在状态栏之上常驻（挂载即自动同步一次）：同步是这一屏自己的
+          事，跟「这次写没写进去」是两句话，不挤同一条状态。没话时按钮也留——它是入口。 */}
+      {state.routes.size > 0 && (
+        <div className="dtpl-price-syncbar">
+          <button
+            type="button"
+            className="dtpl-price-ghost"
+            disabled={lookup.loading || card === undefined || row === undefined}
+            title="按当前模型名在 models.dev 上模糊搜索原厂美元价，找到后可一键采用填入；只在美元报价的通道上采用。"
+            onClick={() => void openLookup()}
+          >
+            查价
+          </button>
+          <span className="dtpl-price-sync-state" role="status" aria-live="polite">
+            {syncText(sync, view?.sync.lastError ?? null)}
+          </span>
+          <button
+            type="button"
+            className="dtpl-price-ghost"
+            disabled={sync.running}
+            title="从 models.dev 拉取原厂美元价，补进账本用过的、缺价的美元通道格；手写价不动。"
+            onClick={() => void runSync(true)}
+          >
+            {sync.running ? '同步中…' : '从 models.dev 补价'}
+          </button>
+        </div>
+      )}
+      {/* 「查价」面板：开关时挂在补价条之下、状态栏之上。它跟补价是两件事——
+          补价说「自动补了多少洞」，这一块说「你选了哪一份价」。没打开时什么都不占。 */}
+      {lookup.open && card !== undefined && row !== undefined && (
+        <LookupPanel
+          lookup={lookup}
+          currency={card.currency}
+          currentModel={row.model}
+          onKeywordChange={changeKeyword}
+          onSearch={doSearch}
+          onAdopt={adopt}
+          onClose={closeLookup}
+        />
+      )}
+
       {/* 状态栏在没话要说时让位（见 `veiled`）：常驻一个空盒子会在选择带与那份价之间撑出空隙。 */}
       {(state.routes.size > 0 || loadError !== null) && !veiled && (
         <div className="dtpl-price-bar">
@@ -660,4 +819,156 @@ function saveStateText(save: SaveState): string {
     case 'error': return `保存失败：${save.message}`
     default: return ''
   }
+}
+
+interface SyncUiState {
+  running: boolean
+  result: PricingSyncResult | null
+  error: string | null
+}
+
+/** 补价一行的文字：优先说在飞/刚落定的这轮，其次宿主记下的上次失败；从没有过就说没同步过。
+ *  跳过数不逐条念（那是审计），只说还有多少格没补上——它与「N 个模型未知」是同一个洞。 */
+function syncText(sync: SyncUiState, lastError: string | null): string {
+  if (sync.running) return '正在从 models.dev 拉取价格…'
+  if (sync.error !== null) return `同步失败：${sync.error}`
+  if (sync.result !== null) {
+    if (sync.result.throttled === true) return '今天已同步过 models.dev（按钮可强制再来一次）'
+    if (sync.result.added === 0 && sync.result.skipped === 0) return '已检查 models.dev：没有可补的价'
+    const parts: string[] = []
+    parts.push(sync.result.added > 0 ? `已补 ${String(sync.result.added)} 条` : '没有需要补的价')
+    if (sync.result.skipped > 0) parts.push(`跳过 ${String(sync.result.skipped)} 格（无采信条目或非美元通道）`)
+    return parts.join(' · ')
+  }
+  if (lastError !== null) return `上次同步失败：${lastError}`
+  return '尚未从 models.dev 同步过'
+}
+
+/** 「查价」面板：可编辑的关键词 + 排序后的候选 + 采用按钮。
+ *
+ *  拆成独立组件是为了让主面板的状态树不被这一块污染——它自己的开关、在飞与落定
+ *  都封在这里，主面板只通过 props 关心「有没有打开 / 选了哪条」。候选池是原厂
+ *  采信集（见 `models-dev.ts`），所以每一条都是可信价，不存在转售价冒充通道成本；
+ *  用户要做的只是挑哪一家原厂。只在**美元报价**的通道上开放采用。
+ */
+function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch, onAdopt, onClose }: {
+  lookup: { open: boolean; keyword: string; loading: boolean; result: PricingLookupResult | null; error: string | null }
+  currency: PriceCurrency
+  currentModel: string
+  onKeywordChange: (text: string) => void
+  onSearch: (keyword: string) => void
+  onAdopt: (candidate: ModelsDevCandidate) => void
+  onClose: () => void
+}) {
+  const canSearch = lookup.keyword.trim() !== ''
+  const exactKey = normalizeModelId(lookup.keyword)
+  const isUsd = currency === 'USD'
+  const currentKey = normalizeModelId(currentModel)
+
+  // Esc 关掉面板：它是这一块的对话框，关不掉就得去点 ×。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <div className="dtpl-price-lookup" role="dialog" aria-label="从 models.dev 查模型价">
+      <div className="dtpl-price-lookup-head">
+        <span className="dtpl-price-lookup-k">查 models.dev</span>
+        <input
+          className="dtpl-price-input dtpl-price-lookup-input"
+          type="text"
+          value={lookup.keyword}
+          placeholder="模型名（如 deepseek-v4-flash）"
+          aria-label="搜索关键词"
+          spellCheck={false}
+          autoComplete="off"
+          // 关键词变了就清掉上一轮结果；真正去搜的是下面那个按钮 / Enter。
+          onChange={(event) => onKeywordChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && canSearch) void onSearch(lookup.keyword)
+          }}
+        />
+        <button
+          type="button"
+          className="dtpl-price-ghost"
+          disabled={!canSearch || lookup.loading}
+          onClick={() => void onSearch(lookup.keyword)}
+        >
+          搜索
+        </button>
+        <button type="button" className="dtpl-price-ghost" aria-label="关闭" onClick={onClose}>
+          ×
+        </button>
+      </div>
+      {!isUsd && (
+        <p className="dtpl-price-lookup-note">
+          这条通道按人民币报价，models.dev 的价是美元的——先在详情头把报价币种切成美元，再回来采用。
+        </p>
+      )}
+      {lookup.loading
+        ? <p className="dtpl-price-lookup-empty">搜索中…</p>
+        : lookup.error !== null
+          ? (
+            <p className="dtpl-price-lookup-empty">
+              搜索失败：{lookup.error}
+              <button type="button" className="dtpl-price-ghost" onClick={() => void onSearch(lookup.keyword)}>重试</button>
+            </p>
+          )
+          : lookup.result !== null && lookup.result.candidates.length === 0
+            ? (
+              <p className="dtpl-price-lookup-empty">
+                models.dev 上没有采信的与「{lookup.keyword}」相关的模型。换个关键词试试（模型串、
+                或者只敲厂商名如 deepseek / qwen）。
+              </p>
+            )
+            : lookup.result !== null && (
+              <ul className="dtpl-price-lookup-list">
+                {lookup.result.candidates.map((candidate) => {
+                  const isExact = candidate.key === exactKey
+                  const isCurrent = candidate.key === currentKey
+                  return (
+                    <li
+                      key={`${candidate.provider}/${candidate.modelId}`}
+                      className={`dtpl-price-lookup-item${isExact ? ' is-exact' : ''}`}
+                    >
+                      <div className="dtpl-price-lookup-id">
+                        <span className="dtpl-price-lookup-provider">{candidate.provider}</span>
+                        <span className="dtpl-price-lookup-slash">/</span>
+                        <span>{candidate.modelId}</span>
+                        {isExact && <span className="dtpl-price-lookup-badge" title="与你搜的关键词完全同一模型">就是这条</span>}
+                        {isCurrent && !isExact && <span className="dtpl-price-lookup-badge" title="与当前选中的模型同一模型串">当前这条</span>}
+                      </div>
+                      <div className="dtpl-price-lookup-name">{candidate.name}</div>
+                      <div className="dtpl-price-lookup-cost">{lookupCostText(candidate.cost)}</div>
+                      <button
+                        type="button"
+                        className="dtpl-price-ghost"
+                        disabled={!isUsd}
+                        title={isUsd
+                          ? `把 ${candidate.provider}/${candidate.modelId} 的四档美元价填进这一行`
+                          : '这条通道按人民币报价，models.dev 的价是美元的；先在详情头把报价币种切成美元'}
+                        onClick={() => onAdopt(candidate)}
+                      >
+                        采用
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )
+      }
+    </div>
+  )
+}
+
+/** 一条候选的四档价：美元 / 百万词元，缺的档就不列。 */
+function lookupCostText(cost: ModelsDevCandidate['cost']): string {
+  const parts: string[] = [`$${String(cost.input)}`, `$${String(cost.output)}`]
+  if (cost.cacheRead !== undefined) parts.push(`读 $${String(cost.cacheRead)}`)
+  if (cost.cacheWrite !== undefined) parts.push(`写 $${String(cost.cacheWrite)}`)
+  return `${parts.join(' / ')} / 百万词元`
 }
