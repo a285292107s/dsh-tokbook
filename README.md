@@ -8,8 +8,8 @@ Every billed model call the harness makes is folded into one row in a local, per
 aggregated with costs. A button in the sidebar footer opens an overlay with four tabs: today's usage
 and a 14-day trend, account-level subscription quota, the price table, and a page that states plainly
 what the numbers do not include. The overview continues below the fold into usage detail — the same
-window crossed with three breakdowns. A fourth surface sits in the conversation view ring: a per-session
-token page.
+window crossed with three breakdowns. A separate surface lives in the conversation view ring: a
+per-session token page.
 
 | Light | Dark |
 | --- | --- |
@@ -138,9 +138,10 @@ disk, polling every 15 seconds and stopping entirely while the page is in the ba
    numbers reconcile.
 
 Prices can also be filled from [models.dev](https://models.dev/api.json), a public USD catalogue. The
-**lookup** button fuzzy-searches the currently selected model name and lets you pick one candidate;
-the **sync** button fills gaps for USD-priced routes that the ledger has actually billed. Only
-first-party catalogue entries are trusted, and a hand-written price is never overwritten.
+**查价 / lookup** button fuzzy-searches the currently selected model name and lets you pick one
+candidate; the **从 models.dev 补价 / sync** button fills gaps for USD-priced routes that the ledger has
+actually billed. Only first-party catalogue entries are trusted, and a hand-written price is never
+overwritten.
 
 ## Configuration
 
