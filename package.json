@@ -2,6 +2,15 @@
   "name": "dsh-tokbook",
   "description": "Cross-session token-usage ledger for DeepSeek Harness (DSH). Host half folds provider usage into a durable book; browser half shows it via a sidebar footer button + shell overlay.",
   "version": "0.1.0",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "cordis-plugin",
+    "token-usage",
+    "usage-ledger",
+    "cost-tracking"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -38,9 +47,18 @@
     "smoke": "node --experimental-strip-types scripts/smoke.ts",
     "selfcheck": "node --experimental-strip-types scripts/selfcheck-rebuild.ts",
     "selfcheck:ui": "node --experimental-strip-types scripts/selfcheck-ui.ts",
-    "test": "pnpm smoke && pnpm selfcheck && pnpm selfcheck:ui"
+    "test": "pnpm smoke && pnpm selfcheck && pnpm selfcheck:ui",
+    "prepare": "pnpm build"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/a285292107s/dsh-tokbook.git"
+  },
+  "homepage": "https://github.com/a285292107s/dsh-tokbook#readme",
+  "bugs": {
+    "url": "https://github.com/a285292107s/dsh-tokbook/issues"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"
   },

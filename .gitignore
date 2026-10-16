@@ -5,3 +5,4 @@ lib/
 .dsh/
 .playwright-cli/
 shots/
+output/
