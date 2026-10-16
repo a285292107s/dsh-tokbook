@@ -37,9 +37,10 @@ same reason.
 The repo ships source, not build output: `lib/` is a build artifact, so pnpm builds the package during
 install through its `prepare` script. pnpm refuses to run a dependency's build script until you allow
 it, so the first run stops and prints the exact key it wants. Add that line to the profile's
-`pnpm-workspace.yaml` and run the same command again — or, more simply, re-run first: pnpm sometimes
-appends the key itself as `…: set this to true or false`, and then the only edit is flipping it to
-`true`.
+`pnpm-workspace.yaml` and run the same command again — re-running on its own will just fail the same
+way; the key has to be there. (If you ever find the key already listed with the value
+`set this to true or false`, pnpm added it during an install it had already resolved — just change it
+to `true`.)
 
 ```yaml
 # $DSH_HOME/profiles/web/pnpm-workspace.yaml

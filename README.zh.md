@@ -62,8 +62,9 @@ dsh plugin --profile web add github:a285292107s/dsh-tokbook
 
 本仓库发布的是**源码而不是构建产物**:`lib/` 是 gitignore 的构建产物,所以 pnpm 在安装时通过包的
 `prepare` 脚本现场构建。pnpm 默认不允许依赖跑构建脚本,所以第一次会停下并打印它要的那一行——
-把它加进 profile 的 `pnpm-workspace.yaml` 再跑一次同样的命令;也可以先直接重跑一次:pnpm 有时
-会自己把它追加成 `…: set this to true or false`,那时你只要把它翻成 `true`。
+**必须把它加进** profile 的 `pnpm-workspace.yaml` 再跑一次同样的命令:光重跑一次只会原样再失败
+一次。(如果你发现那个键已经在那儿、值写着 `set this to true or false`,那是之前某次已经解析过的
+安装留下的——把它翻成 `true` 就行。)
 
 ```yaml
 # $DSH_HOME/profiles/web/pnpm-workspace.yaml
