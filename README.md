@@ -5,11 +5,17 @@
 A **cross-session token-usage ledger for DeepSeek Harness (DSH)**.
 
 Every billed model call the harness makes is folded into one row in a local, per-day JSONL ledger, and
-aggregated with costs. A button in the sidebar footer opens an overlay with five tabs: today's usage
-and a 14-day trend, account-level subscription quota, per-window usage detail, the price table, and a
-page that states plainly what the numbers do not include.
+aggregated with costs. A button in the sidebar footer opens an overlay with four tabs: today's usage
+and a 14-day trend, account-level subscription quota, the price table, and a page that states plainly
+what the numbers do not include. The overview continues below the fold into usage detail — the same
+window crossed with three breakdowns. A fourth surface sits in the conversation view ring: a per-session
+token page.
 
-![The tokbook overlay](docs/assets/overlay-overview.png)
+| Light | Dark |
+| --- | --- |
+| ![The tokbook overlay in the light skin](docs/assets/overlay-ledger.png) | ![The tokbook overlay in the dark skin](docs/assets/overlay-ledger-dark.png) |
+
+*Both captured from the preview bench, so the numbers are fixture data rather than a real ledger.*
 
 > **The UI is in Chinese (zh-CN).** The plugin is built by and for a Chinese-speaking DSH user, so tab
 > labels, hints and the method page are not translated. Everything the plugin stores is plain
@@ -25,14 +31,17 @@ dsh plugin --profile web add github:a285292107s/dsh-tokbook
 
 The repo ships source, not build output: `lib/` is a build artifact, so pnpm builds the package during
 install through its `prepare` script. pnpm refuses to run a dependency's build script until you allow
-it, so the first run stops and prints the exact key it wants. Add that key to the profile's
+it, so the first run stops and prints the exact key it wants. Add that line to the profile's
 `pnpm-workspace.yaml` and run the same command again:
 
 ```yaml
-# $DSH_HOME/profiles/web/pnpm-workspace.yaml — use the exact key pnpm printed
+# $DSH_HOME/profiles/web/pnpm-workspace.yaml
 allowBuilds:
-  dsh-tokbook: true
+  dsh-tokbook@https://codeload.github.com/a285292107s/dsh-tokbook/tar.gz/<commit>: true
 ```
+
+That key is **not** a plain package name — it names the package together with the exact commit pnpm
+resolved. Paste what pnpm printed rather than typing it, and expect to re-approve after an upgrade.
 
 Then mount the plugin. It is a plain external plugin, not a `dsh.bundle` layer, so the profile has to
 name it in `cordis.patch.yml`:
@@ -72,19 +81,46 @@ would cost now* — not what the invoice said at the time. That is why money is 
 windows of 30 days or less; the all-time view reports tokens only. Tokens are facts and stay true
 forever; prices do not.
 
-## The five tabs
+## The session token page
 
-1. **用量总览 / Overview** — today's totals, the token composition, and a 14-day trend.
+Besides the footer button and the overlay, the plugin adds a **词元 / Tokens** view to the conversation
+view ring (`conversation.view`, label 词元). It answers what the overlay cannot: one **single session**,
+over its whole lifetime, opened up by turn and by step.
+
+- A header with the session's four-bucket total, its share of today's spend, actual spend and
+  subscription value, the turn and step count, the token composition band, and the cache hit rate.
+- **Session time**: engine work against session span, a bar for the difference between them (the time
+  nothing was running), and the first and last record. When neither can be measured the whole block is
+  omitted rather than rendered as zero.
+- Two small-multiple charts — new tokens and cache reads per turn — each normalised to its own scale and
+  sharing one turn axis. Hovering a bar shows that turn's read-out plus question/answer previews.
+- Per-turn detail, collapsed by default. Expanding a turn lists its steps: one row per billed call, with
+  its identity, its money, a three-phase time bar (first token / generation / tools) and a
+  `model / first token / generation / tools / tok per s` table.
+- A footer summing unknown usage, failures, and unpriced `(route, model)` pairs across the session.
+
+It is **read-only** against the ledger and the config — its only write is a content width kept in the
+browser — and it needs no live session: it reads rows already in the ledger plus the session's log on
+disk, polling every 15 seconds and stopping entirely while the page is in the background.
+
+> **A known degradation:** attributing rows to turns and steps depends on the host's `sessionPersistence`.
+> Without it the numbers still arrive, but every non-compaction row lands in an "unknown turn" block, and
+> the charts and the session-time block do not render at all. Timings are local wall-clock, not billed
+> duration.
+
+## The four tabs
+
+1. **用量总览 / Overview** — today's totals, the token composition, and a 14-day trend. Scrolling past
+   it continues straight into **用量明细 / Usage detail**: the selected window (today / yesterday /
+   last 7 days / last 30 days / all) crossed with three breakdowns — by model, by workspace, by
+   provider route. Money appears only in the windows that carry it.
 2. **订阅额度 / Subscription quota** — account-level official usage, fetched from the provider's own
    account API with your key. This reflects every tool and device sharing the subscription, which a
    local ledger cannot see. Covers Command Code and OpenCode Go.
-3. **用量明细 / Usage detail** — a window (today / yesterday / last 7 days / last 30 days / all) crossed
-   with three breakdowns: by model, by workspace, by provider route. Money appears only in the windows
-   that carry it.
-4. **价格表 / Pricing** — one model per screen: choose a route and a model, then write that model's
+3. **价格表 / Pricing** — one model per screen: choose a route and a model, then write that model's
    current price (four tiers plus optional peak/off-peak slots). The FX rate and the statutory-holiday
    calendar live here too.
-5. **统计口径 / Method** — the reporting method: what is not estimated, what is missing, and how the
+4. **统计口径 / Method** — the reporting method: what is not estimated, what is missing, and how the
    numbers reconcile.
 
 Prices can also be filled from [models.dev](https://models.dev/api.json), a public USD catalogue. The
@@ -158,8 +194,9 @@ pnpm test         # smoke (pure logic) + selfcheck (ledger invariants) + selfche
 `pnpm build` is a product, not a check: you only need it when you want to see a `src/` change inside a
 host or the preview bench. To look at the UI without starting DSH, `pnpm ledger` serves the same page
 shell and client bundle against a real ledger directory; run it without `--ledger` and it degrades into
-a fixture preview bench (`?dark=1`, `?tab=`, `?quota=`), with the whole bench's shape chosen per
-process by `TOKBOOK_MODE=empty|err|sync|syncerr`.
+a fixture preview bench (`?dark=1`, `?tab=`, `?quota=`; `?view=tokens` renders the session token page,
+whose fixture shape is picked per process by `TOKBOOK_SESSION_SCENARIO=rich|one|empty`), with the whole
+bench's shape chosen per process by `TOKBOOK_MODE=empty|err|sync|syncerr`.
 
 The Chinese README ([`README.zh.md`](README.zh.md)) is the maintainer's document: it carries the full
 `src/` layout tree, the build internals, and the development loop. Further reading starts at

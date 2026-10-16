@@ -1,7 +1,7 @@
 export const CSS_LEDGER = `
 /* hero = **今日**那一块卡：卡首一条图，其下是被框住的读数仪表（总额 + 参照 + 金额），
    中间一条 1px 分区线，下半是它拆出来的四桶读数格（每桶自带份额——「多少」与「占多少」同处一格）。
-   这条配方（1px 硬边框 + --dtpl-panel-bg + --dtpl-metal）就是全窗口的**面板**，五个 tab 共用；
+   这条配方（1px 硬边框 + --dtpl-panel-bg + --dtpl-metal）就是全窗口的**面板**，四个 tab 共用；
    卡内的读数格因此**不是**第二块面板（见 .dtpl-grid）。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero{
   position:relative;

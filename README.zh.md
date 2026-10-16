@@ -6,13 +6,24 @@
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区从**侧边栏
-footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含五个 tab(按界面
-从左到右):**用量总览**(今日 + 词元构成 + 近 14 天趋势)、**订阅额度**(用你的 key 向通道查
-账户级官方用量)、**用量明细**(窗口 × 按模型 / 按工作区 / 按通道;金额只在近 30 天及更短的窗口里给)、
-**价格表**(选一个通道 + 模型,填它的**当前价**;峰谷时段、汇率与节假日年历也在这里)、
+footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含四个 tab(按界面
+从左到右):**用量总览**(今日 + 词元构成 + 近 14 天趋势;往下滚接**用量明细**——窗口 ×
+按模型 / 按工作区 / 按通道,金额只在近 30 天及更短的窗口里给)、**订阅额度**(用你的 key 向通道查
+账户级官方用量)、**价格表**(选一个通道 + 模型,填它的**当前价**;峰谷时段、汇率与节假日年历也在这里)、
 **统计口径**(不估算的口径、漏项与对账)。
 
-![浮窗总览](docs/assets/overlay-overview.png)
+另有一格不在浮窗里:插件还在**对话视图环**里加了**词元**页(`conversation.view`)——单会话全生命周期,
+按轮次与步骤摊开,见下文「[会话词元页](#会话词元页conversationview)」。
+
+> **用量明细不是第五个 tab。** 它是**用量总览**页往下滚的第二段(`ProviderPanel`,
+> `section[aria-label="用量明细"]`)。此前这一句写「五个 tab」,是 `用量明细并入总览` 那次改动
+> (f7c7e27)漏掉的:**界面 tab 条上只有四个**,`src/client/LedgerOverlay.tsx` 的 tablist 是唯一真源。
+
+| 浅色 | 深色 |
+| --- | --- |
+| ![浅色皮下的浮窗总览](docs/assets/overlay-ledger.png) | ![深色皮下的浮窗总览](docs/assets/overlay-ledger-dark.png) |
+
+*两张都抓自预览台,所以数字是 fixture 数据,不是真账本。*
 
 两条贯穿全插件的原则:
 
@@ -47,14 +58,17 @@ dsh plugin --profile web add github:a285292107s/dsh-tokbook
 ```
 
 本仓库发布的是**源码而不是构建产物**:`lib/` 是 gitignore 的构建产物,所以 pnpm 在安装时通过包的
-`prepare` 脚本现场构建。pnpm 默认不允许依赖跑构建脚本,所以第一次会停下并打印它要的那个键——
+`prepare` 脚本现场构建。pnpm 默认不允许依赖跑构建脚本,所以第一次会停下并打印它要的那一行——
 把它加进 profile 的 `pnpm-workspace.yaml` 再跑一次同样的命令:
 
 ```yaml
-# $DSH_HOME/profiles/web/pnpm-workspace.yaml —— 用 pnpm 打印出来的那个键
+# $DSH_HOME/profiles/web/pnpm-workspace.yaml
 allowBuilds:
-  dsh-tokbook: true
+  dsh-tokbook@https://codeload.github.com/a285292107s/dsh-tokbook/tar.gz/<commit>: true
 ```
+
+那个键**不是包名**:它是「包名 @ 这次解析到的那个确切 commit」。所以照 pnpm 打印的原样粘贴,
+别自己敲;升级之后也要重新批一次。
 
 然后把这个插件挂进 profile。它是**普通外部插件**(不是 `dsh.bundle` 层),所以 profile 里要按包名点名:
 
@@ -92,6 +106,29 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 账本、折叠、解析缓存与 refile 都假设**单个 host 进程**写给定数据目录:启动写 `owner.json` 标记
 (pid + 启动时间),**检测到存活的异进程已占用时告警**(陈旧标记静默接管)。第二个 host 请指向
 自己的 `path`(见 [配置](#配置));去重与热重载边界见 [`docs/HMR.md`](docs/HMR.md)。
+
+## 会话词元页(`conversation.view`)
+
+除了侧栏按钮与浮窗,插件还在**对话视图环**里加了一格:**词元**(`conversation.view`,id
+`dsh-tokbook-tokens`)。它答的是浮窗答不了的那个问题——**这一个会话**的词元与钱,按轮次、按步骤摊开:
+
+- **抬头**:本会话四桶合计(占今日消费、实际支出 / 订阅价值、共 N 轮 / N 步),以及本会话的
+  **词元构成带**(未缓存输入 / 缓存读取 / 缓存写入 / 输出,每格带占比)与**缓存命中率**。
+- **会话时间**:`引擎工作` 与 `会话跨度` 两格,加上两者差额的比值尺(差额就是**没在算**的那段),
+  以及首记 / 末记。两格都量不到时整块不出——**量不到就不是 0**。
+- **每轮新增 / 缓存读两格图**:两格各自归一到自己的量级,共用一条轮次轴;指针停在柱上出那一轮的
+  读数卡(第 N 轮 / N 步 / 词元 / 支出 / 四桶 + 提问与回答预览)。
+- **按轮次明细**:默认**全部收起**;展开一轮就是它的步骤行——一次计费调用一行,带身份、钱、
+  三段用时尺(等首 token / 生成 / 工具)与 `模型 · 首token · 生成 · 工具 · tok/s` 那张用时表。
+  末尾的「轮间」与「轮次未知」**分列不合并**,不会被读成第 13、14 轮。
+- **脚注**:整会话的 `用量未知 N 次 · 失败 N 次 · 未定价 N 个 (通道, 模型)`。
+
+它**对账本与配置完全只读**(唯一的写入是浏览器本地记的阅读列宽),也**不需要活的会话**:读的是
+已经入账的行 + 该会话已落盘的日志,15 s 轮询一次,页面在后台时整个不发请求。
+
+> **已知降级**:把行归属到轮次 / 步骤要靠宿主的 `sessionPersistence`。它缺席时(独立查看器就不提供)
+> 数字照旧,但非压缩行全部落进「轮次未知」那一块,而且**两格图与会话时间整块不出**。用时量的是
+> **本机墙钟**,不是计费时长。
 
 ## 成本与价格表
 
@@ -196,7 +233,7 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 
 ## 状态
 
-五个 tab 都已落地(界面规格的真源是 `src/client/`)。剩余缺口:
+四个 tab 都已落地(界面规格的真源是 `src/client/`)。剩余缺口:
 
 - 额度计划每个通道路由只收一个 API key(尚无多账户轮换)。
 - `assistant/attempt`(流结束时没产出可见消息的那次尝试)当前不投影,补它得按 retry 生命周期配对
@@ -216,6 +253,8 @@ src/
   ledger.ts           数据目录解析 + owner 标记(单写者守卫)
   usage-record.ts     逐调用记录模型 + 会话事件投影
   usage-log.ts        按日 JSONL 存储(追加/去重/refile;去重状态按数据目录共享)
+  session-usage.ts    会话词元页的 host 侧:把某会话的账本行折成视图,并在请求时 join 会话日志拿轮次/步骤归属与用时
+  session-timing.ts   从会话事件量用时(墙钟 / 模型 / 首 token / 生成 / 工具);工具并行调用取并集,量不出来一律缺席而不是 0
   sync.ts             首次启动 + 手动历史回填(幂等)
   sync-state.ts       首次运行标记 + 持久化同步基线
   stats.ts            聚合(totals/byDay/byHour/(provider,model))+ 折叠 + 缓存
@@ -234,7 +273,7 @@ src/
   route-paths.ts      host 与 browser 共用的 HTTP 路径 / query 键词表(两半区唯一的真源)
   routes.ts           host 精确 Fetch 路由(handler / method 的真源)
   client/
-    index.ts          client: apply(ctx),注册两个 slot
+    index.ts          client: apply(ctx),注册三个 slot(footer 按钮 / 浮窗 / 会话词元页)
     contract.ts       最小 client 契约:插件被授予的 ctx/slots 面
     store.ts          按钮 ↔ 浮窗共享视图 store
     format.ts         纯展示 helper(日键、token/金额/时间格式化)
@@ -247,6 +286,7 @@ src/
       ledger.ts       用量总览
       method.ts       统计口径
       provider.ts     用量明细
+      session.ts      会话词元页(自有滚动区 / 阅读列宽与手柄 / 抬头 / 两格图 / 步骤三段带 / 三段尺与纹路)
       quota.ts        订阅额度
       pricing.ts      价格表(选择带 / 四档价 / 峰谷时段 / 年历 / 汇率)
       shared.ts       跨面共用原语(面板材质 / 只读文本 / 选中态)
@@ -254,11 +294,20 @@ src/
     assets.d.ts       hero 插画的模块声明(构建期内联为 data URI)
     assets/           构建期内联的静态资源(hero-yanagi.jpg)
     FooterButton.tsx  sidebar.footer.action 触发器(额度告急时多一个点)
-    LedgerOverlay.tsx shell.overlay 浮窗外壳(五 tab + 焦点/快捷键)
+    LedgerOverlay.tsx shell.overlay 浮窗外壳(四 tab + 焦点/快捷键)
     LedgerView.tsx    用量总览 tab
     ProviderPanel.tsx 用量明细 tab 外壳(窗口 + 三种切法)
     Breakdowns.tsx    用量明细的两种行清单:按模型 / 按工作区
     MethodDoc.tsx     统计口径 tab
+    SessionTokens.tsx 词元页(conversation.view)本体:单会话全生命周期;取数 + 五态 + 版面装配
+    SessionShell.tsx  词元页外壳:根 / 自有滚动区 / 阅读列宽三层盒子 + 一对列宽手柄(宽度只存这一页)
+    SessionTurns.tsx  词元页的公共导入面(barrel),自己只放本页独有的「词元构成」带 MixBand
+    session-chart.tsx 每轮两格小图(新增词元 / 缓存读取)+ 指着一根柱子时那张轮次读数卡
+    session-detail.tsx 按轮次的步骤行(默认全收起)、轮块头、用时表、轮间与轮次未知两块、三段尺图例
+    session-timing.tsx 本页的用时分段语言:TimeBar 三档 + stepSegments / sumSegments + 图例形状
+    session-shared.ts 图表与明细共用:BUCKETS(四桶顺序与名字)、预览类型、hasPricedRow
+    session-wire.ts   本页的 wire → 视图反序列化(readSessionView:缺字段填中性值、坏字段不炸)
+    ShareRing.tsx     用量明细一行的占比环(与额度表盘 / 价格表盘同族;词元页不用它)
     pricing/
       currency.ts     报价币种纯逻辑:悬停的折算读数 / 切换币种时整条通道的换算(无 React,进 smoke)
       draft.ts        价格表纯逻辑:草稿 ↔ wire body、校验、脏签名(年历 / 汇率 / 报价币种)
@@ -311,9 +360,10 @@ node --experimental-strip-types scripts/preview-overlay.ts --ledger D:/data/tokb
 时生效)——所以不装宿主也能按真实皮肤看。
 
 不带 `--ledger` 时同一个脚本退化成 **fixture 预览台**,用来看 UI 的各个状态与空态:
-`?dark=1` / `?tab=` / `?quota=<模式>` 换皮肤、tab 与额度场景,整台的形状(四路皆空 / 四路皆 500 /
-诊断带的两态)由 `TOKBOOK_MODE=empty|err|sync|syncerr` 按进程选;`lib/client.js` 按请求读盘,
-所以 `pnpm build` 之后刷新页面即可。
+`?dark=1` / `?tab=` / `?quota=<模式>` 换皮肤、tab 与额度场景,`?view=tokens` 显形**词元页**
+(那一页的形状由 `TOKBOOK_SESSION_SCENARIO=rich|one|empty` 按进程选,默认 `rich`);整台的形状
+(四路皆空 / 四路皆 500 / 诊断带的两态)由 `TOKBOOK_MODE=empty|err|sync|syncerr` 按进程选;
+`lib/client.js` 按请求读盘,所以 `pnpm build` 之后刷新页面即可。
 
 ## License
 

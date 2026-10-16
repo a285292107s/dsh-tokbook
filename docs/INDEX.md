@@ -1,6 +1,6 @@
 # 文档索引 — dsh-tokbook
 
-> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-09-20 · supersedes: —
+> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-10-16 · supersedes: —
 
 本仓库所有文档文件的地图。动手前先读你要触及领域的条目,然后**只读那一份**。本文件
 的存在是为了让 [`AGENTS.md`](../AGENTS.md) 与你的第一跳保持精简:根文件只放面包屑,
@@ -11,7 +11,7 @@
 | 文件 | 角色 | 状态 | 何时读 |
 |---|---|---|---|
 | [`AGENTS.md`](../AGENTS.md) | identity(身份) | current | 每个任务——自动载入上下文 |
-| [`README.md`](../README.md) | entry(入口) | current | 公开门面(**英文**):这是什么、装它、配置、五个 tab、已知缺口。给第一次来的访客看,不放开发细节 |
+| [`README.md`](../README.md) | entry(入口) | current | 公开门面(**英文**):这是什么、装它、配置、四个 tab、已知缺口。给第一次来的访客看,不放开发细节 |
 | [`README.zh.md`](../README.zh.md) | entry(入口)+ operations(操作) | current | 维护者的那一份(中文,`README.md` 的镜像):范围、安装、配置,外加 `src/` 布局树、构建与开发回路 |
 | `docs/INDEX.md` | index(地图,本文件) | current | 在文档间导航 |
 | [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts(契约) | current | **改 host 行为前读这一份**(约 100 行):术语与口径、**让数字保持诚实的不变量**、单写者与数据目录、不显然的默认值——只写**代码里读不出来、违反后不会报错但会把钱算错**的规则。路由 / wire 形状 / 配置键 / 数据文件清单都是代码(见它的指针表);路由路径**不得**在这份文档里复述 |
@@ -51,9 +51,9 @@
 | [`README.md`](../README.md) | 英文 | 来 GitHub 仓库页的陌生人:安装、配置、它能报什么数 |
 | [`README.zh.md`](../README.zh.md) | 中文 | 维护者本人:上面那些,外加布局树与开发回路 |
 
-`README.md` 是**门面**,所以它**故意不含** `src/` 布局树与构建细节——那些只活在
-`README.zh.md` 里,一处真源。两边都改的只有「用户会照做的那部分」(安装命令、配置键、
-口径);门面说什么,`README.zh.md` 就得能对上。
+`README.md` 是**门面**,所以它**故意不含** `src/` 布局树;开发那一段也只给命令、不给内部机制
+(预览台的形状开关、设备皮、重载边界都不在门面里)——那些只活在 `README.zh.md` 里,一处真源。
+两边都改的只有「用户会照做的那部分」(安装命令、配置键、口径);门面说什么,`README.zh.md` 就得能对上。
 
 两份文件的 meta 行里 `language` 分别写 `en` 与 `zh-CN`——这是 `role: entry` 的那对
 唯一允许偏离中文的地方。

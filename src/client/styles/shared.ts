@@ -21,7 +21,7 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   }
   [data-plugin="dsh-tokbook"] .dtpl-head{padding:14px 16px 10px;}
   [data-plugin="dsh-tokbook"] .dtpl-tabs{padding:0 16px;}
-  /* 五个 tab 塞不进手机宽度：让行横向滚动，而不是把最后一个裁出卡片。 */
+  /* 四个 tab 塞不进手机宽度：让行横向滚动，而不是把最后一个裁出卡片。 */
   [data-plugin="dsh-tokbook"] .dtpl-tabs{overflow-x:auto;scrollbar-width:none;}
   [data-plugin="dsh-tokbook"] .dtpl-tabs::-webkit-scrollbar{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-tab{flex:0 0 auto;}
