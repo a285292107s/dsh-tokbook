@@ -50,14 +50,21 @@ export const LEGEND_SHAPE: ReadonlyArray<{ kind: 'wait' | 'generate' | 'tool'; s
  * 的段边界都落在同一组横坐标上，竖着扫一眼就是**趋势**；块头那条的长度仍单独承担量级，而它的
  * 段边界正好是下面各步段边界的加权平均（分段同源，见 `sumSegments`）。
  *
- * 它没有轴、没有刻度、不带标签：靠与旁边那串数字的邻近关系说话，所以对读屏隐藏（那些数字
- * 才是给 AT 的版本）。灰阶是这一页唯一的「比例尺」语言，读者不必学第二遍。
+ * 它没有轴、没有刻度：`step` 与 `turn` 也没有自己的标签——靠与旁边那串数字的邻近关系说话，
+ * 所以对读屏隐藏（那些数字才是给 AT 的版本）。**只有 `hero` 那条带段名**（`reads`）：它是整页
+ * 唯一一条**两段都不带读数的**尺——上面那两个格报的是「引擎工作」与「会话跨度」两个端点，而条上
+ * 浅的那一段（两者的差额）既没有名字也没有数，一根大半是浅灰的横条于是被读成**进度条**：进度条
+ * 的全部含义正是「进行到几成」，而这两段都是终值。段名与段值因此必须写在条上，不在别处。
+ * 灰阶是这一页唯一的「比例尺」语言，读者不必学第二遍。
  *
- * **相位靠明度与分隔认，不靠高度**。三段一律满高：高度那条通道要求读者先看出「这一段比那一段
- * 矮」，而 16px 上的 46% / 70% / 100% 在实机里读出来是「三根长短不齐的柱子拼在一起」，不像一条
- * 比例条（旧版实测：wait 7px、tool 11px、generate 16px，底对齐）。相位改由两条**在 8px 上仍然
- * 成立**的通道认：三段明度拉开到 96% / 62% / 30%（相邻实测约 2:1，缩小、灰阶、色觉异常下都在），
- * 段与段之间再压 1px 面板色**断开**——相邻两段即使明度接近，也先是两个各自完整的矩形。
+ * **相位靠明度、纹路与分隔认，不靠高度**。三段一律满高：高度那条通道要求读者先看出「这一段比
+ * 那一段矮」，而 16px 上的 46% / 70% / 100% 在实机里读出来是「三根长短不齐的柱子拼在一起」，
+ * 不像一条比例条。相位由两条**在 8px 上仍然成立**的通道认：三段明度各压过面板 3:1（相邻约
+ * 2:1，缩小、灰阶、色觉异常下都在），段与段之间再压 1px 面板色**断开**。
+ * 明度之外还有**纹路**：真实步骤行里一段常常只有二三十像素宽（实测最窄 24px，而 `max(2px, …)`
+ * 的下限允许 2px 的段存在），跨段比明度需要一个共同参照，单看一段时纹路比明度可靠。四类各一条
+ * 纹路——等首 token 竖细线、生成实心、工具 45° 斜纹、模型（拆不开）交叉网格；两档都过 3:1。
+ * 具体值与理由写在 styles/session.ts 那四条 `data-kind` 规则旁。
  *
  * 一段都量不到时**整条不出**：空轨道会被读成「有分母、只是这一段是 0」，而事实是量不到
  * （同本页其余口径，见 docs/CONTRACTS.md §2）。
@@ -66,10 +73,23 @@ export const LEGEND_SHAPE: ReadonlyArray<{ kind: 'wait' | 'generate' | 'tool'; s
 /** 尺上的一段：`kind` 决定明度与纹样（见 `stepSegments`）。 */
 type TimeSegment = { key: string; value: number; kind: 'model' | 'wait' | 'generate' | 'tool' | 'work' | 'idle' }
 
-/** `step` 那一档**不收** `scale`——它没有分母可用，类型上说清楚，省得调用方以为自己传的是长度。 */
+/** 一段的名字与长度：`kind` 决定那枚记号的明度，与真尺同源。 */
+export interface TimeBarRead {
+  key: string
+  kind: TimeSegment['kind']
+  label: string
+  value: string
+}
+
+/**
+ * 三档尺各要什么：`step` 没有分母可用（不收 `scale`，省得调用方以为自己传的是长度）；
+ * `turn` 有长度、没有段名（它旁边就是那列步骤尺与用时表）；`hero` **必须**带段名
+ * ——名字是承重的（见上），少写一个不会报错，只会把那条尺退回进度条的读法。
+ */
 type TimeBarProps = { segments: readonly TimeSegment[] } & (
   | { tone: 'step' }
-  | { tone: 'turn' | 'hero'; scale: number }
+  | { tone: 'turn'; scale: number }
+  | { tone: 'hero'; scale: number; reads: readonly TimeBarRead[] }
 )
 
 export function TimeBar(props: TimeBarProps) {
@@ -83,7 +103,7 @@ export function TimeBar(props: TimeBarProps) {
   const width = props.tone === 'step'
     ? '100%'
     : `max(2px, ${String(Math.round(Math.min(1, total / props.scale) * 1000) / 10)}%)`
-  return (
+  const bar = (
     <span
       className="dtpl-tok-bar"
       data-tone={props.tone}
@@ -103,6 +123,25 @@ export function TimeBar(props: TimeBarProps) {
           style={{ width: `max(${segment.value > 0 ? 2 : 0}px, ${segPct(segment.value)})` }}
         />
       ))}
+    </span>
+  )
+  // 段名只给 hero（见文件头「hero 那条带段名」）：它两段的比例动辄 1:100，段名挤不进自己那一段
+  // 的正下方——所以摊在整条下面，而不是像图例那样对齐到段上。
+  if (props.tone !== 'hero') return bar
+  return (
+    <span className="dtpl-tok-hero-ratio">
+      {bar}
+      <span className="dtpl-tok-hero-reads">
+        {props.reads.map((read) => (
+          <span className="dtpl-tok-hero-read" key={read.key}>
+            {/* 记号与真尺的段共用 `data-kind` 那套灰阶（样式侧写在同一条选择器里）：改尺就改了
+                记号，两者不可能分家。几何另给——尺上的段是满高的一块，记号是 9×10 的一小枚。 */}
+            <span className="dtpl-tok-hero-mark" data-kind={read.kind} aria-hidden="true" />
+            <span>{read.label}</span>
+            <b>{read.value}</b>
+          </span>
+        ))}
+      </span>
     </span>
   )
 }

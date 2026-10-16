@@ -14,7 +14,7 @@ import { settleTiming } from '../types.ts'
 import type { SessionStepRow, SessionUsageGroup, StepTiming } from '../types.ts'
 import { formatDateTime, formatDuration, formatMoney, formatTokens } from './format.ts'
 import { num } from './session-wire.ts'
-import { BUCKETS, type PreviewMap, type TurnPreview } from './session-shared.ts'
+import { BUCKETS, hasPricedRow, type PreviewMap, type TurnPreview } from './session-shared.ts'
 import { LEGEND_SHAPE, TimeBar, stepSegments, sumSegments } from './session-timing.tsx'
 
 /** 块头那几个数的形状：三轮/轮间/轮次未知共用一套读数，不各自算。 */
@@ -23,6 +23,9 @@ interface BlockTotals {
   tokens: number
   spend: number
   subscriptionValue: number
+  /** 这一块里有没有一行**走到过计价路径**（见 `hasPricedRow`）。整块价格未知时为 false：
+   *  那块的 `spend` 是未知的 ¥0，块头不许把它印成「¥0.00 实际支出」。 */
+  priced: boolean
   /** 这一块的引擎工作总时长 = 各步模型用时 + 工具用时。**块头这个数就是展开后各步那些数
    *  的和**，不是另算一个 turn/start→turn/end 的墙钟——那样两个数会在读者眼皮底下对不上。
    *  一块里**一步都没计时**时为 undefined（不是 0）：那块的用时是「量不到」，不是「没花时间」。 */
@@ -35,6 +38,7 @@ function groupTotals(group: SessionUsageGroup): BlockTotals {
     tokens: group.tokens,
     spend: group.spend,
     subscriptionValue: group.subscriptionValue,
+    priced: hasPricedRow(group.rows),
     ...timedTotal(group.rows),
   }
 }
@@ -49,7 +53,7 @@ function rowsTotals(rows: readonly SessionStepRow[]): BlockTotals {
     if (row.bucket === 'subscription') subscriptionValue += num(row.cost)
     else if (row.bucket !== 'unpriced') spend += num(row.cost)
   }
-  return { steps: rows.length, tokens, spend, subscriptionValue, ...timedTotal(rows) }
+  return { steps: rows.length, tokens, spend, subscriptionValue, priced: hasPricedRow(rows), ...timedTotal(rows) }
 }
 
 /** 这一块的引擎工作（`settleTiming` 是唯一的加法）。一步都没计时时不报这个数——「用时 0秒」
@@ -89,10 +93,10 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
     <section aria-label="按轮次明细">
       <h2 className="dtpl-sec-title">按轮次明细</h2>
       {/* 三段尺的**图例**。它画的是一条**真的示例尺**——直接复用 `TimeBar`，所以灰阶与段间
-          断开不可能与真尺脱节。三枚标签对齐在各自那一段下面，顺序 / 明度 / 断开三件事一次说完。
-          孤立的三枚小方块做不到这件事：读过真尺之后，读者不会知道那三块灰的先后与归属。
-          「模型（拆不开）」单列一行、带斜纹：它**不是第四种相位**，是「相位分不出来」。同一个
-          最深的样子若不给个记号，读者会把它读成「生成」——那正是这一版要修的毛病。 */}
+          断开不可能与真尺脱节。三枚标签对齐在各自那一段下面，顺序 / 明度 / 纹路 / 断开四件事
+          一次说完。孤立的三枚小方块做不到这件事：读过真尺之后，读者不会知道那三块灰的先后与归属。
+          「模型（拆不开）」单列一行、带交叉网格：它**不是第四种相位**，是「相位分不出来」。它与
+          「生成」同明度，不给记号就会被读成「生成」。 */}
       <div className="dtpl-tok-note dtpl-tok-legend">
         <span className="dtpl-tok-legend-figure">
           <TimeBar
@@ -106,7 +110,7 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
           </span>
         </span>
         <span className="dtpl-tok-legend-model">
-          <span className="dtpl-tok-legend-key is-model" aria-hidden="true" />
+          <span className="dtpl-tok-legend-key" data-kind="model" aria-hidden="true" />
           模型（拆不开）：通道没上报流，等与生成分不清
         </span>
         <span className="dtpl-tok-legend-say">步骤尺铺满整行；只有轮块头那条的长度说量级</span>      </div>
@@ -205,12 +209,22 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
               <span className="dtpl-hero-fact">用时 <b>{formatDuration(totals.workMs)}</b></span>
             </>
           )}
-          {(totals.spend > 0 || totals.subscriptionValue === 0) && (
-            <>
-              <i aria-hidden="true">·</i>
-              <span className="dtpl-hero-fact"><b>{formatMoney(totals.spend)}</b> 实际支出</span>
-            </>
-          )}
+          {/* 整块价格未知时**不报这个数**：那一块的 ¥0 是占位不是读数，印成「¥0.00 实际支出」
+              就是替价表宣称「这些调用不要钱」——而契约说的是 ¥0 = 未知（docs/CONTRACTS.md §2）。
+              改报「价格未知」，与展开后每一行那个桶名逐字一致。 */}
+          {totals.priced
+            ? (totals.spend > 0 || totals.subscriptionValue === 0) && (
+              <>
+                <i aria-hidden="true">·</i>
+                <span className="dtpl-hero-fact"><b>{formatMoney(totals.spend)}</b> 实际支出</span>
+              </>
+            )
+            : (
+              <>
+                <i aria-hidden="true">·</i>
+                <span className="dtpl-hero-fact">价格未知</span>
+              </>
+            )}
           {totals.subscriptionValue > 0 && (
             <>
               <i aria-hidden="true">·</i>

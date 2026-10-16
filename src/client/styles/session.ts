@@ -46,8 +46,10 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 [data-plugin="dsh-tokbook"] .dtpl-tok-timing-grid{
   display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px;
 }
-/* 比值尺画的就是上面那两个数之间的关系，压在它们下面：块间距 12px 收回 6px，贴着但不粘上。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-timing .dtpl-tok-hero-bar{margin-top:-6px;}
+/* 比值尺画的就是上面那两个数之间的关系，压在它们下面：块间距 12px 收回 6px，贴着但不粘上。
+   条与它的两枚段名是**一个整块**（.dtpl-tok-hero-ratio 自己带内部间距），所以这条负边距挂在整块上，
+   而不是像从前只挂在条上——否则段名会被推到 12px 那一档去，与它描述的那条尺分家。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-timing .dtpl-tok-hero-ratio{margin-top:-6px;}
 /* 首记 / 末记是事件**锚点**，不是用量读数：留在事实带那一档，与两个主角差两级。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-timing .dtpl-hero-facts{margin-top:-2px;}
 /* 这一页自己的滚动区：高度由外面给（根是它的 flex 容器），滚动归自己。底部那块是给飘浮的
@@ -290,6 +292,9 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   box-shadow:0 2px 0 0 color-mix(in srgb,var(--dtpl-fg) 6%,transparent),
     0 8px 24px -12px color-mix(in srgb,var(--dtpl-fg) 14%,transparent);
 }
+/* 展开那一轮：整块浮起一层——它从「列表里的一项」变成「被选中的那一项」。
+   不是加边框（那会与已有的 1px 硬边打架），是交给底影：影加深 = 面抬高。
+   这条只能出现**一次**：同一条选择器写两遍时后一条赢，改其中一条会静默失效。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn:has(.dtpl-tok-turn-head[aria-expanded="true"]){
   box-shadow:0 2px 0 0 color-mix(in srgb,var(--dtpl-fg) 6%,transparent),
     0 8px 24px -12px color-mix(in srgb,var(--dtpl-fg) 18%,transparent);
@@ -312,12 +317,6 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   transition:background .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head:hover{background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);}
-  /* 展开那一轮：整块浮起一层——它从「列表里的一项」变成「被选中的那一项」。
-     不是加边框（那会与已有的 1px 硬边打架），是交给底影：影加深 = 面抬高。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-turn:has(.dtpl-tok-turn-head[aria-expanded="true"]){
-  box-shadow:0 2px 0 0 color-mix(in srgb,var(--dtpl-fg) 6%,transparent),
-    0 8px 24px -12px color-mix(in srgb,var(--dtpl-fg) 18%,transparent);
-}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-k{flex:none;font-size:15px;line-height:22px;font-weight:600;}
 /* 块头那串事实在这一页比浮窗那档（11px）大一档：它是这一节的**摘要**，而展开后每一步的读数
    是 13px——摘要比明细还小，层级就反了（理由同 .dtpl-tok-col .dtpl-sec-title）。 */
@@ -331,7 +330,6 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 }
 /* 展开时箭头转 180°：它不只是一个状态指示，是「这块翻开了」的形态语言。
    0.3s 与步骤区的 0fr 过渡同拍，转与展开同时落定，不先转后展。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-turn-head[aria-expanded="true"] .dtpl-tok-turn-cue{transform:rotate(180deg);}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head[aria-expanded="true"] .dtpl-tok-turn-cue{transform:rotate(180deg);}
 /* 预览占满块头的第二行：提问一行、回答一行，都是单行省略（全文在 title 里）。
    颜色分档：预览文本是读数走 fg-2，只有回答前面那枚「↳」是装饰，走 fg-dim。 */
@@ -579,41 +577,111 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
    实测 3.29 / 6.06 / 14.63（浅色）、5.14 / 8.53 / 15.28（深色）。
    注意**不要**为了「拉开明度」把最浅那档往下压：旧版曾取 30/62/96，相邻确实更开（约 2.4:1），
    但 wait 掉到 1.87:1（浅色）——它就从「一档数据」变成了「一条看不见的轨道」，
-   而这一页的口径是「量不到 ≠ 0」，最浅那档必须仍然看得见。 */
+   而这一页的口径是「量不到 ≠ 0」，最浅那档必须仍然看得见。
 
-[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="generate"]{background:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="tool"]{background:color-mix(in srgb,var(--dtpl-fg) 72%,transparent);}
-/* 等待那一段最浅：它的语义是「**还没轮到生成**」，不该与真正在吐字的那段同重。
-   52% 是「还能压过面板 3:1」的下限附近（50% 实测 3.11，取 52% 留出余量）。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="wait"]{background:color-mix(in srgb,var(--dtpl-fg) 52%,transparent);}
-/* 拆不开的模型段（通道没上报流，量不到首 token）：**最深 + 斜纹**。
-   它整段都是模型时间、只是分不出等与生成；若只靠明度，读者会把它读成「生成」——而「生成」
-   断言了「没有等待」。斜纹是**形状**这条独立通道上的一个记号：「这里有一件事我不知道」。
-   斜纹是本页唯一一处，只给这一种含义（静态检查禁的是 dashed/dotted 描边，不是渐变填充）。
-   两条纹的**浅的那条也必须压过面板 3:1**：它是这一段的一部分，不是缝隙。34% 实测只有
-   2.19:1（浅色主题）——那一条几乎看不见，整段就读成「比生成浅一点的灰」，而本页的浅灰
-   已经被「等首 token」占了。55% 是最低能过线的档，两条纹之间仍有约 4:1，纹理看得清。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="model"]{
+   **明度之外再加一条纹路通道**：那三档已经挤到极限，而纹路是**局部**的记号——真实步骤行里
+   一段常常只有二三十像素宽，跨段比明度需要一个共同参照，单看一段时纹路比明度可靠。
+   四类各一条纹路，按语义挑而不是按角度轮着来：
+     · 等首 token ——**竖细线**：垂直于时间轴、细而密，读作「空转」；
+     · 生成 ——**实心**：整页唯一一块「满」，它是参考，其余三类都带纹路；
+     · 工具 ——**45° 斜纹**：另一个东西在跑；
+     · 模型（拆不开）——**交叉网格**：竖线与斜纹叠在一起，正是「这两类分不出来」。
+   纹路的两档**都要压过面板 3:1**（同上面那条：它是这一段的一部分，不是缝隙），所以每类
+   只在自己的明度上往上取一档，最浅那条永远不低于该类原本的底色。
+   底色一律走 --dtpl-fg 的透明度，深浅两皮因此自动成立，没有一个写死的灰。
+
+   前三条**同时给抬头那条的段记号**（.dtpl-tok-hero-mark）：段名摊在整条下面、不在段的正下方，
+   记号是它与灰阶之间唯一的桥，两处分家就等于教错。选择器写在一起是这件事的**唯一**保证——
+   记号自己不带任何色值。抬头那条**今天只画 work / idle 两段**（它是「两个时长之比」，不分相位，
+   见 session-timing 的 TimeBar 文件头），所以这三条 hero-mark 眼下没有调用方命中；
+   留着是因为 TimeBarRead.kind 收的就是这套相位词——哪天抬头那条要分相位，记号与尺的灰阶
+   必须已经是同一份，等到那时再补选择器就已经晚了。
+   **模型**那张给的是图例里那枚小方块（抬头那条上没有模型这一段），同源的理由一样。 */
+
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="wait"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-mark[data-kind="wait"]{
+  background:
+    repeating-linear-gradient(90deg,
+      color-mix(in srgb,var(--dtpl-fg) 66%,transparent) 0 1.5px,
+      transparent 1.5px 4px),
+    color-mix(in srgb,var(--dtpl-fg) 52%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="generate"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-mark[data-kind="generate"]{background:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="tool"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-mark[data-kind="tool"]{
   background:
     repeating-linear-gradient(45deg,
+      color-mix(in srgb,var(--dtpl-fg) 88%,transparent) 0 1.5px,
+      transparent 1.5px 6px),
+    color-mix(in srgb,var(--dtpl-fg) 72%,transparent);
+}
+/* 拆不开的模型段（通道没上报流，量不到首 token）：**交叉网格**。
+   它整段都是模型时间、只是分不出等与生成；若只靠明度，读者会把它读成「生成」——而「生成」
+   断言了「没有等待」。网格 = 竖线（等）+ 斜纹（工具）叠在一起，是「这两类分不出来」最直白的
+   画法，而且它**独一份**：四类里只有它两个方向叠加，扫一眼不必比明度就能认出来。
+
+   底色取 55% 而不是最深那档：**这是承重的**。纹路与底色是同一族的墨，若底色也是满墨，
+   66% 的纹路压上去合成出来仍是满墨——整段读成一块实心，与「生成」一模一样（实测过）。
+   底色留浅，深色的网格才画得出来；55% 压面板同样过 3:1。
+     · 竖线与斜纹都取满墨：两向都要看得见，而它们相交处与单向处同色，网格才成其为网格。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="model"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-legend-key[data-kind="model"]{
+  background:
+    repeating-linear-gradient(90deg,
       var(--dtpl-fg) 0 1.5px,
-      color-mix(in srgb,var(--dtpl-fg) 55%,transparent) 1.5px 3.5px);
+      transparent 1.5px 5px),
+    repeating-linear-gradient(45deg,
+      var(--dtpl-fg) 0 1.5px,
+      transparent 1.5px 5px),
+    color-mix(in srgb,var(--dtpl-fg) 55%,transparent);
 }
 /* 抬头那条：实心那段是「引擎工作」，浅的那段是没在算的时间（等输入、等外部、会话挂起）。
    浅档是**轨道里的一档数据**、不是轨道本身——它的职责是标出「工作之外那段时间有多长」，
    所以照占比环那枚轨道（16%）的先例取一档看得见的浅灰，而不按「数据段」的 3:1 要求它
    （那会让它重到与实心段抢眼）。12% 压面板只有 1.23:1，实测下来读成一条空白——
-   「工作只占这么一点」这句话也就没了。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="work"]{background:color-mix(in srgb,var(--dtpl-fg) 84%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="idle"]{background:color-mix(in srgb,var(--dtpl-fg) 26%,transparent);}
-/* 抬头那条：**没有**自己的标签与刻度——它只是上面那两个数之间的关系，读数已在上面那串事实里。
-   上边距把它与那串事实分开（贴着会读成某个数的下划线）。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-hero-bar{margin-top:2px;}
+   「工作只占这么一点」这句话也就没了。
+   **这两段不带纹路**：它们是「两个时长之比」，与上面那四类相位不是一族——抬头这条上没有相位
+   可分，平涂才是它该有的样子。纹路一进来，读者就会去条上找「哪一段是等首 token」。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="work"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-mark[data-kind="work"]{background:color-mix(in srgb,var(--dtpl-fg) 84%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-tok-bar-seg[data-kind="idle"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-mark[data-kind="idle"]{background:color-mix(in srgb,var(--dtpl-fg) 26%,transparent);}
+/* 抬头那条的两枚段名。**这一段是承重的，不是装饰**：没有它，一条横贯整宽、大半是浅灰的条
+   只能读成进度条（「进行到几成」），而这两段都是终值。
+   名字**摊在整条下面**而不是对齐到各自那一段的正下方：两段的比例动辄 1:100（实测工作 6px /
+   没在算 864px），段名塞不进自己那一段下面——图例那条示例尺能对齐，是因为它的份额是手写的
+   3:5:3。左端一项、右端一项：深的那段从左边起，浅的那段到右边止，位置本身也带一点指向。
+   记号（.dtpl-tok-hero-mark）是标签与灰阶之间唯一的桥：段名不在段下面，就得靠这枚小方块说
+   「我说的是哪一条」。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-ratio{
+  display:flex;flex-direction:column;gap:6px;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-reads{
+  display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 16px;
+  font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-read{
+  display:inline-flex;align-items:center;gap:5px;white-space:nowrap;
+}
+/* 段值走等宽 + 主墨：它与这一块其余读数同一个质地（标签 11px / 值等宽加粗），
+   而**不**另起一套——两枚段名说的就是上面那两个数，读者不该在这里学第二种字。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-read b{
+  font-family:var(--dtpl-mono);font-weight:600;color:var(--dtpl-fg);
+  font-variant-numeric:tabular-nums;
+}
+/* 段记号：几何与「一段」无关（尺上的段是满高的一块，记号是 9×10 的一小枚，与图例那枚同尺寸），
+   所以两样都自己给。灰阶不在这里——见上面那四条 data-kind 规则。
+   那条 1px 的段间断开（box-shadow）在 9px 的小块上只有害无益，一并关掉。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-hero-mark{
+  flex:none;width:9px;height:10px;box-shadow:none;
+}
 /* 三段尺的图例。形状编码没有图例就不是信息、是花纹，所以它必须挨着尺。
-   它画的是一条**真的示例尺**——直接复用 TimeBar 那个组件，于是灰阶与段间断开不可能与真尺脱节；
-   三枚标签摊在各自那一段下面（flexGrow = 那一段的份额），顺序 / 明度 / 断开三件事一次说完。
-   「模型（拆不开）」单列一行、带斜纹：它**不是第四种相位**，是「相位分不出来」。同一个
-   最深的样子若不给记号，读者会把它读成「生成」。 */
+   它画的是一条**真的示例尺**——直接复用 TimeBar 那个组件，于是灰阶、纹路与段间断开都不可能与
+   真尺脱节；三枚标签摊在各自那一段下面（flexGrow = 那一段的份额），顺序 / 明度 / 纹路 / 断开
+   四件事一次说完。
+   「模型（拆不开）」单列一行、带交叉网格：它**不是第四种相位**，是「相位分不出来」。它与「生成」
+   同明度那一半若不给记号，读者会把它读成「生成」。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-legend{
   display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 10px;margin:0 0 10px;
 }
@@ -636,18 +704,15 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   flex-basis:0;
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-/* 「模型（拆不开）」：最深 + 斜纹。它与「生成」同明度，只靠**形状**分开——若不给记号，
-   读者会把它读成「生成」，而「生成」断言了「没有等待」。斜纹的两档与真尺逐字一致
-   （否则图例教的样子与真尺不是一回事）。 */
+/* 「模型（拆不开）」那一行。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-legend-model{
   display:inline-flex;align-items:center;gap:5px;color:var(--dtpl-fg-2);
 }
+/* 「模型（拆不开）」那一枚小方块：**几何自己给，纹路不自己写**——它挂 data-kind="model"，
+   取的是上面那条四类纹路里模型那一条（竖线 + 斜纹交叉），与真尺逐字同源。
+   纹路自带底色，所以这里一个 background 都不写：写过一次就有第二份副本，改真尺时会漏掉这枚。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-legend-key{
   display:inline-block;width:9px;height:12px;flex:none;
-  background:
-    repeating-linear-gradient(45deg,
-      var(--dtpl-fg) 0 1.5px,
-      color-mix(in srgb,var(--dtpl-fg) 55%,transparent) 1.5px 3.5px);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-legend-say{
   margin-left:auto;color:var(--dtpl-fg-3);
@@ -708,6 +773,9 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 @media (max-width:640px){
   /* 窄屏：末尾两块改上下排列——并排时每块只剩半屏，四桶读数会折成一团。 */
   [data-plugin="dsh-tokbook"] .dtpl-tok-tail{grid-template-columns:minmax(0,1fr);}
+  /* 两枚段名不再一左一右：窄处那一行放不下「引擎工作 5分55秒 没在算 14时00分」，
+     space-between 会把它们推到两端各自折行，读成四项而不是两项。 */
+  [data-plugin="dsh-tokbook"] .dtpl-tok-hero-reads{justify-content:flex-start;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head{padding-left:10px;padding-right:10px;}
   /* 抬头不改 padding（它从变量算），只把变量本身收窄——构成带那两条负边距跟着一起收。 */
   [data-plugin="dsh-tokbook"] .dtpl-tok-head{--dtpl-tok-head-pad:10px;}

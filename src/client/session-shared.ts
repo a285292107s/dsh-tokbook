@@ -8,7 +8,16 @@
  * 两个文件形成循环导入，所以这里单列一层。
  */
 
-import type { UsageFields } from '../types.ts'
+import type { SessionStepRow, UsageFields } from '../types.ts'
+
+/**
+ * 这一组的 ¥0 是不是**量出来的零**：只要有一行走到计价路径，¥0 就是读数（现价刻度下的零）。
+ * 一行都没走到 = 整组价格未知，那个 ¥0 是未知的占位（见 docs/CONTRACTS.md §2），
+ * 把它报成「¥0.00 实际支出」等于把未知印成读数——行里写的是「价格未知」，两处就打架了。
+ */
+export function hasPricedRow(rows: readonly SessionStepRow[]): boolean {
+  return rows.some((row) => row.bucket !== 'unpriced')
+}
 
 /**
  * 四桶的展示顺序与名字——与浮窗总览的四个读数格逐字同一套词，两处对得上号。

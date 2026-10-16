@@ -171,7 +171,7 @@ function Block({ i, children }: { i: number; children: ReactNode }) {
 }
 
 /**
- * 会话时间：引擎工作 / 会话跨度 / 首记 / 末记，外加那条比值尺。
+ * 会话时间：引擎工作 / 会话跨度 / 首记 / 末记，外加那条比值尺与它的两枚读数。
  *
  * 与「四桶合计」那块**必须分开**：用量块问的是「算了多少钱」，这四个数问的是「时间花在哪、
  * 花了多久」——两种问句并进一串读数，读者会把 3 小时的引擎工作读成第三桶的份额。
@@ -180,6 +180,7 @@ function Block({ i, children }: { i: number; children: ReactNode }) {
  * 缺时间数据时整块不出（老会话 / 宿主没接上计时时长），与本页其余口径一致。
  */
 function SessionTiming({ workMs, spanMs, firstAt, lastAt }: { workMs: number; spanMs: number; firstAt: number; lastAt: number }) {
+  const idleMs = spanMs - workMs
   return (
     <section aria-label="会话时间">
       <h2 className="dtpl-sec-title">会话时间</h2>
@@ -198,20 +199,25 @@ function SessionTiming({ workMs, spanMs, firstAt, lastAt }: { workMs: number; sp
           </div>
         </div>
         {/* 「引擎工作」与「会话跨度」那条比值，画出来才成立：14 小时的跨度里只有 5 分钟在算，
-            这两个数看不出来，一根 0.7% 宽的实心条一眼就是。条**没有**第三个数要报——它只是
-            那两个数之间的关系，所以它自己不配标签，读屏走上面那两个读数格。
-            所以 `scale` 就给跨度本身：分母正是它，两段之和占满整条。 */}
-        {spanMs > workMs && (
-          <span className="dtpl-tok-hero-bar">
-            <TimeBar
-              tone="hero"
-              scale={spanMs}
-              segments={[
-                { key: 'work', value: workMs, kind: 'work' },
-                { key: 'idle', value: spanMs - workMs, kind: 'idle' },
-              ]}
-            />
-          </span>
+            这两个数看不出来，一根 0.7% 宽的实心条一眼就是。所以 `scale` 就给跨度本身：
+            分母正是它，两段之和占满整条。
+            两段**各自带名字与数**（`reads`）。一段没有名字、大半是浅灰的横条会被读成**进度条**
+            ——「进行到几成」正是进度条的全部含义，而这两段都是终值。浅的那一段（两者的差额）
+            在别处没有读数，这两个数就靠这一行落到纸上；深的那一段与上面那格重复，但成对写出来
+            才知道谁对应哪一段。读屏读的正是这一行（条自己 aria-hidden）。 */}
+        {idleMs > 0 && (
+          <TimeBar
+            tone="hero"
+            scale={spanMs}
+            reads={[
+              { key: 'work', kind: 'work', label: '引擎工作', value: formatDuration(workMs) },
+              { key: 'idle', kind: 'idle', label: '没在算', value: formatDuration(idleMs) },
+            ]}
+            segments={[
+              { key: 'work', value: workMs, kind: 'work' },
+              { key: 'idle', value: idleMs, kind: 'idle' },
+            ]}
+          />
         )}
         <span className="dtpl-hero-facts">
           <span className="dtpl-hero-fact">首记 <b>{recordTime(firstAt)}</b></span>

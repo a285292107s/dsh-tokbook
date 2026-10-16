@@ -13,7 +13,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { SessionUsageGroup } from '../types.ts'
 import { formatMoney, formatShare, formatTokens } from './format.ts'
 import { num } from './session-wire.ts'
-import { BUCKETS, type PreviewMap, type TurnPreview } from './session-shared.ts'
+import { BUCKETS, hasPricedRow, type PreviewMap, type TurnPreview } from './session-shared.ts'
 
 /** 一格图插在 style 上的列数——React 的 CSSProperties 不收 `--*`，在这里开一个口子。 */
 type SlotStyle = CSSProperties & Record<'--dtpl-slots', string>
@@ -186,12 +186,21 @@ export function TurnChart({ turns, previews }: {
               <span className="dtpl-tok-panel-v">{hovered.rows.length} 步</span>
               <i aria-hidden="true">·</i>
               <span className="dtpl-tok-panel-v">{formatTokens(hovered.tokens)} 词元</span>
-              {(hovered.spend > 0 || hovered.subscriptionValue === 0) && (
-                <>
-                  <i aria-hidden="true">·</i>
-                  <span className="dtpl-tok-panel-v">{formatMoney(hovered.spend)} 实际支出</span>
-                </>
-              )}
+              {/* 与块头同一条判据（见 session-shared 的 `hasPricedRow`）：整轮价格未知时它的 ¥0
+                  是占位不是读数，报成「¥0.00 实际支出」就是把未知印成读数。 */}
+              {hasPricedRow(hovered.rows)
+                ? (hovered.spend > 0 || hovered.subscriptionValue === 0) && (
+                  <>
+                    <i aria-hidden="true">·</i>
+                    <span className="dtpl-tok-panel-v">{formatMoney(hovered.spend)} 实际支出</span>
+                  </>
+                )
+                : (
+                  <>
+                    <i aria-hidden="true">·</i>
+                    <span className="dtpl-tok-panel-v">价格未知</span>
+                  </>
+                )}
               {hovered.subscriptionValue > 0 && (
                 <>
                   <i aria-hidden="true">·</i>
