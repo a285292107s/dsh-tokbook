@@ -254,7 +254,7 @@ export function unconfiguredCard(provider: string, hint?: string): QuotaCard {
     plan: provider,
     title: BUILTIN_PLAN_TITLES[provider] ?? provider,
     state: 'unconfigured',
-    message: hint ?? '未找到该订阅的 API key（可配置 apiKey / apiKeyEnv / authFile，或登录官方 CLI）。',
+    message: hint ?? '未找到该订阅的 API key（可配置 apiKey / apiKeyEnv，或在本机 Models 页填好该通道的 key）。',
     windows: [],
   }
 }

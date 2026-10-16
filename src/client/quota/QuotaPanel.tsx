@@ -190,7 +190,7 @@ export function QuotaPanel() {
               <div className="dtpl-empty">
                 <UsageGlyph className="dtpl-empty-ico" />
                 <p className="dtpl-empty-title">尚未配置任何订阅额度查询</p>
-                <p className="dtpl-empty-sub">在插件配置的 <code>plans</code> 里为 opencode-go / commandcode 提供 API key（或登录对应官方 CLI），这里就会展示官方账户用量。</p>
+                <p className="dtpl-empty-sub">在插件配置的 <code>plans</code> 里为 opencode-go / commandcode 提供 API key，或在本机 Models 页填好该通道的 key，这里就会展示官方账户用量。</p>
               </div>
             )
             : (

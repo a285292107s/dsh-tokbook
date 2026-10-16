@@ -452,11 +452,11 @@ function quotaCards(mode) {
   }
   const unconfiguredCommand = {
     plan: 'commandcode', title: 'Command Code', state: 'unconfigured',
-    message: '未找到该订阅的 API key（可配置 apiKey / apiKeyEnv，或登录官方 CLI）。',
+    message: '未找到该订阅的 API key（可配置 apiKey / apiKeyEnv，或在本机 Models 页填好该通道的 key）。',
   }
   const unconfiguredOpen = {
     plan: 'opencode-go', title: 'OpenCode Go', state: 'unconfigured',
-    message: '未找到该订阅的 API key（可配置 apiKey / apiKeyEnv，或登录官方 CLI）。',
+    message: '未找到该订阅的 API key（可配置 apiKey / apiKeyEnv，或在本机 Models 页填好该通道的 key）。',
   }
   const errorCommand = {
     plan: 'commandcode', title: 'Command Code', state: 'error',
