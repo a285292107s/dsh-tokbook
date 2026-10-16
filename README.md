@@ -23,16 +23,23 @@ token page.
 
 ## Install
 
-You need DSH (`dsh --version`) and **pnpm** on your `PATH`.
+You need DSH (`dsh --version`) and **pnpm 11** on your `PATH` — the allowlist key below is pnpm 11's
+spelling.
 
 ```sh
 dsh plugin --profile web add github:a285292107s/dsh-tokbook
 ```
 
+`web` there is only the profile you are installing into: **substitute your own profile name.** If that
+profile does not exist yet, this command initializes it. The rest of this document writes `web` for the
+same reason.
+
 The repo ships source, not build output: `lib/` is a build artifact, so pnpm builds the package during
 install through its `prepare` script. pnpm refuses to run a dependency's build script until you allow
 it, so the first run stops and prints the exact key it wants. Add that line to the profile's
-`pnpm-workspace.yaml` and run the same command again:
+`pnpm-workspace.yaml` and run the same command again — or, more simply, re-run first: pnpm sometimes
+appends the key itself as `…: set this to true or false`, and then the only edit is flipping it to
+`true`.
 
 ```yaml
 # $DSH_HOME/profiles/web/pnpm-workspace.yaml
@@ -41,19 +48,25 @@ allowBuilds:
 ```
 
 That key is **not** a plain package name — it names the package together with the exact commit pnpm
-resolved. Paste what pnpm printed rather than typing it, and expect to re-approve after an upgrade.
+resolved, so paste what pnpm printed rather than typing it. It goes stale whenever `main` moves, so
+expect to re-approve after an upgrade.
+
+pnpm also warns that the peer dependency `@deepseek-ai/cordis` is missing. That warning is expected and
+harmless: DSH provides cordis, and the plugin resolves that same instance.
 
 Then mount the plugin. It is a plain external plugin, not a `dsh.bundle` layer, so the profile has to
 name it in `cordis.patch.yml`:
 
 ```yaml
-# $DSH_HOME/profiles/web/cordis.patch.yml
+# $DSH_HOME/profiles/<your profile>/cordis.patch.yml
 - insert:
     - id: tokbook
       name: 'dsh-tokbook'
-      config:                     # every key is optional; see Configuration
-        path: D:/data/tokbook
 ```
+
+That row is all you need: the data directory defaults to `$DSH_HOME/tokbook/`, and the plugin starts
+collecting with no configuration at all. Add a `config:` block only to change something (see
+Configuration).
 
 Restart `dsh web` and refresh the browser. The entry button appears at the bottom of the sidebar
 (`sidebar.footer.action`), and the overlay itself is a shell overlay.

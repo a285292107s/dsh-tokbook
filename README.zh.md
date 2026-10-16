@@ -51,15 +51,19 @@ token 与「什么时候用哪个」在 `src/client/styles/tokens.ts` 的注释�
 
 ## 安装
 
-需要 DSH(`dsh --version`)与 PATH 上的 **pnpm**。
+需要 DSH(`dsh --version`)与 PATH 上的 **pnpm 11**——下面那个白名单键是 pnpm 11 的写法。
 
 ```sh
 dsh plugin --profile web add github:a285292107s/dsh-tokbook
 ```
 
+`web` 只是**你要装进去的那个 profile**:**换成你自己的名字**。该 profile 还不存在时,这条命令会
+顺手初始化它。本文其余地方写 `web` 也是同一个意思。
+
 本仓库发布的是**源码而不是构建产物**:`lib/` 是 gitignore 的构建产物,所以 pnpm 在安装时通过包的
 `prepare` 脚本现场构建。pnpm 默认不允许依赖跑构建脚本,所以第一次会停下并打印它要的那一行——
-把它加进 profile 的 `pnpm-workspace.yaml` 再跑一次同样的命令:
+把它加进 profile 的 `pnpm-workspace.yaml` 再跑一次同样的命令;也可以先直接重跑一次:pnpm 有时
+会自己把它追加成 `…: set this to true or false`,那时你只要把它翻成 `true`。
 
 ```yaml
 # $DSH_HOME/profiles/web/pnpm-workspace.yaml
@@ -68,20 +72,24 @@ allowBuilds:
 ```
 
 那个键**不是包名**:它是「包名 @ 这次解析到的那个确切 commit」。所以照 pnpm 打印的原样粘贴,
-别自己敲;升级之后也要重新批一次。
+别自己敲;`main` 一动它就过期,升级之后要重新批一次。
+
+pnpm 还会报一句 peer dependency `@deepseek-ai/cordis` 缺失的警告。**那是预期的、无害的**:
+cordis 由 DSH 自己提供,插件解析到的就是同一个实例。
 
 然后把这个插件挂进 profile。它是**普通外部插件**(不是 `dsh.bundle` 层),所以 profile 里要按包名点名:
 
 ```yaml
-# $DSH_HOME/profiles/web/cordis.patch.yml
+# $DSH_HOME/profiles/<你的 profile>/cordis.patch.yml
 - insert:
     - id: tokbook
       name: 'dsh-tokbook'
-      config:                                # 逐键类型与校验见 src/types.ts(TokBookConfig);全部可省
-        path: D:/data/tokbook
 ```
 
-重启 `dsh web` 并刷新浏览器。入口按钮在侧边栏底部,浮窗是一个 shell overlay。挂载行的完整示例见
+挂载行就这些就够:数据目录默认 `$DSH_HOME/tokbook/`,这个插件**不配置也会开始记账**。只有要改
+什么才加 `config:` 块(见[配置](#配置))。
+
+重启 `dsh web` 并刷新浏览器。入口按钮在侧边栏底部,浮窗是一个 shell overlay。挂载行的示例见
 [`cordis.patch.example.yml`](cordis.patch.example.yml)。
 
 从本地检出安装则用 `dsh plugin --profile web add .`。
