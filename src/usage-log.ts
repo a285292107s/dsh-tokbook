@@ -49,6 +49,11 @@ interface DirState {
   /** 扫描时尾部没有换行的分日文件名（上个进程写一半崩了）。对这类文件追加时必须
    *  先补一个换行，否则新行会被拼到那半行后面（见 {@link UsageLog.appendOnce}）。 */
   torn: Set<string>
+  /** 这个目录的账本被改过几次（每追加一行 +1，refile 按挪动行数加）。它是「屏上那份
+   *  数据还新不新」的廉价判据：读一页比它自己重算便宜得多，而客户端没有别的办法在
+   *  会话进行时知道自己该刷新。进程内单调，跨进程/HMR 不保证——所以比较只能用
+   *  「变了没有」，不能用大小。 */
+  generation: number
 }
 
 const dirs = new Map<string, DirState>()
@@ -63,9 +68,16 @@ function stateOf(dir: string): DirState {
     scanned: false,
     scanning: undefined,
     torn: new Set(),
+    generation: 0,
   }
   dirs.set(dir, created)
   return created
+}
+
+/** 一个数据目录当前的账本代数。纯内存读，不碰盘——它存在的意义就是让「要不要重算」
+ *  这个判断几乎免费（与 `/tokbook/sync` 那条探针同一角色）。 */
+export function ledgerGeneration(dir: string): number {
+  return stateOf(dir).generation
 }
 
 /** 忘掉一个（或全部）目录的进程内状态。测试 / 重启缝：真实进程重启以空映射
@@ -197,6 +209,8 @@ export class UsageLog {
     const task = state.queue.then(async () => {
       await this.ensureDir()
       await this.appendOnce(record)
+      // 行确实落到盘上（或至少写成功）才推进代数：读页面靠它判断屏上那份要不要重算。
+      state.generation += 1
     })
     // 追加失败不得毒化后续行的链。
     state.queue = task.catch(() => {})
@@ -221,6 +235,8 @@ export class UsageLog {
       // 被重写（或整份搬空而删掉）的文件尾一定是良构的，清掉它们的撕裂标记。
       for (const name of result.rewritten) state.torn.delete(name)
       moved = result.moved
+      // 挪过行 = 账本内容变了（分日归属变了，聚合跟着变）。
+      if (moved > 0) state.generation += 1
     })
     state.queue = task.catch(() => {})
     return task.then(() => moved).catch((error: unknown) => {

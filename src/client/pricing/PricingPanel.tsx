@@ -22,6 +22,7 @@ import {
   type CalendarDraft, type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
 import { CalendarEditor, ModelDetail } from './editors.tsx'
+import { subscribeLedgerChanges } from '../ledger-clock.ts'
 
 export interface PricingPanelProps {
   /** 保存成功后通知父级刷新总览。 */
@@ -56,6 +57,18 @@ interface Staged {
   baseline: PriceBaseline
 }
 let staged: Staged | null = null
+
+/**
+ * 上一次读到的**干净**视图，跨挂载留着。
+ *
+ * 面板随 tab 切换 / 浮窗关闭整块卸载，而这一屏的挂载要等一次宿主往返（读价文件 + 账本
+ * 透镜 + 路由目录，本机约 0.2–0.5 s）。留着上一次那份只为**先把这一屏画出来**——挂载后
+ * 那次读照常把它换成磁盘上的新值（草稿仍然只在 dirty 的那几处胜出，见 `mergeStaged`）。
+ *
+ * 只在视图干净时存：有未落盘草稿时那份 `view` 是「读磁盘那一刻的」快照，拿它当首帧会
+ * 让读者以为磁盘上已经是草稿的样子——草稿本来就由 `staged` 单独管着。
+ */
+let lastView: PricingView | null = null
 
 /**
  * 把一份尚未落盘的草稿合并到刚读回来的宿主视图上：只有**真正 dirty** 的那几处胜出——
@@ -199,9 +212,13 @@ function clockOf(epochMs: number): string {
 }
 
 export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
-  const [view, setView] = useState<PricingView | null>(() => staged?.view ?? null)
-  const [state, setState] = useState<PriceState>(() => staged?.state ?? EMPTY_STATE)
-  const [baseline, setBaseline] = useState<PriceBaseline>(() => staged?.baseline ?? EMPTY_BASELINE)
+  // 首帧：有未落盘草稿就沿用它自己那份（含它 rely 的基线），否则用上一次读到的干净视图
+  // （见 `lastView`）。两者都没有才从骨架屏开始等宿主——「打开这一屏先看见上一次的样子」
+  // 与词元页、用量明细同一处置。
+  const [view, setView] = useState<PricingView | null>(() => staged?.view ?? lastView)
+  const [state, setState] = useState<PriceState>(() => staged?.state ?? (lastView === null ? EMPTY_STATE : draftFromView(lastView)))
+  const [baseline, setBaseline] = useState<PriceBaseline>(() =>
+    staged?.baseline ?? (lastView === null ? EMPTY_BASELINE : baselinesOf(lastView)))
   const [loadError, setLoadError] = useState<string | null>(null)
   const [save, setSave] = useState<SaveState>({ kind: 'clean' })
   /** models.dev 补价的状态：在飞的那轮与刚落定的判决。状态行据它报"补了 N 条"。 */
@@ -306,6 +323,13 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     void loadView()
   }, [loadView])
 
+  // 账本又落行了就重读：这一屏的下拉选项自己带着「N 次请求」「N 个模型未知」，会话还在
+  // 跑时它们该跟着走。重读只把**草稿真正 dirty 的那几处**留住（见 `mergeStaged`），所以
+  // 正在输入的格子不会被冲掉；页面在后台时整段不发。
+  useEffect(() => subscribeLedgerChanges(() => {
+    if (document.hidden) return
+    void loadViewRef.current?.()
+  }), [])
   /**
    * 触发一轮 models.dev 补价并刷新视图。`force`（手动按钮）绕过日节流；挂载的
    * 自动同步不带 force——今天同步过就由宿主直接答 0 格，等于免费。
@@ -458,6 +482,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   useEffect(() => {
     if (view === null) return
     staged = changes > 0 ? { view, state, baseline } : null
+    // 干净的那一份才留作下次挂载的首帧（见 `lastView`）。
+    if (changes === 0) lastView = view
   }, [view, state, baseline, changes])
 
   useEffect(() => { onDirtyChange?.(changes > 0) }, [changes, onDirtyChange])

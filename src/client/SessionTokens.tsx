@@ -11,13 +11,20 @@ import type { SessionUsageView, UsageTotals } from '../types.ts'
 import { QUERY_SESSION, ROUTE_SESSION } from '../route-paths.ts'
 import { formatDateTime, formatDuration, formatMoney, formatShare, formatTokens } from './format.ts'
 import { UsageGlyph } from './icons.tsx'
+import { ledgerClockSupported, subscribeLedgerChanges } from './ledger-clock.ts'
 import { SessionShell } from './SessionShell.tsx'
 import { MixBand, TimeBar, TurnBlocks, TurnChart, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
 import { readSessionView } from './session-wire.ts'
 
-/** 轮询步长。这一页每拉一次，宿主都要读账本并把该会话日志整份读来 join——成本随
- *  该会话日志长度增长（本机小会话实测约 0.1s），所以步长取 15s：切进这一页本来就
- *  立刻拉一次，盯着的会话晚十几秒落屏可以接受，而 5s 只会让同一份数据三倍频地做。 */
+/**
+ * 轮询兜底步长。**新鲜度的主路径不是它**——是共享的账本时钟（`ledger-clock.ts`）：宿主每
+ * 落一行账本就推进一次代数，时钟探到它变了才让这一页重拉。于是会话在跑时数据跟着走、
+ * 停下来时一次请求都不发。
+ *
+ * 这个间隔只在**宿主不提供代数**时真的被用上（旧 host / HMR 只换了一半），此时退回原来的
+ * 盲轮询。仍保留它是因为「读不到」不能当成「没变化」：那样这一页会永久冻住。取 15 s 的
+ * 理由同从前：这一跳宿主要把该会话日志整份读来 join，成本随日志长度增长。
+ */
 const POLL_MS = 15_000
 
 /**
@@ -69,7 +76,7 @@ export function SessionTokens({ sessionId, useProjection }: SessionTokensProps) 
     const controller = new AbortController()
     /** 单调请求号：只有最新一次响应的结果允许落屏。 */
     let latest = 0
-    /** 在飞的那一次请求号（0 = 没有在飞）。一次可能比 15s 步长还慢，所以一轮在飞时跳过该 tick。 */
+    /** 在飞的那一次请求号（0 = 没有在飞）。一次可能比轮询步长还慢，所以一轮在飞时跳过该 tick。 */
     let pending = 0
     // 失败**不清屏**：宿主抖动或一次 404 不该把已经读到的那份账本换成一页空白。
     const load = (): void => {
@@ -106,11 +113,16 @@ export function SessionTokens({ sessionId, useProjection }: SessionTokensProps) 
     // 回到可见补一次：隐藏期间跳过的那个 tick 不能等下下个 15s。
     const onVisibility = (): void => { if (!document.hidden) load() }
     load()
-    const timer = setInterval(load, POLL_MS)
     document.addEventListener('visibilitychange', onVisibility)
+    // 新鲜度：账本又落行了就重拉（时钟探的是宿主的账本代数，几乎免费）。宿主的代数
+    // 读不到时（旧 host / HMR 只换了一半）退回盲轮询——「读不到变化」不能当成「没有
+    // 变化」，否则这一页会永久冻住。两者并存时盲轮询自己失效，不会双拉。
+    const unsubscribe = subscribeLedgerChanges(() => { load() })
+    const timer = setInterval(() => { if (!ledgerClockSupported()) load() }, POLL_MS)
     return () => {
       controller.abort()
       clearInterval(timer)
+      unsubscribe()
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [usable, sessionId, reload])

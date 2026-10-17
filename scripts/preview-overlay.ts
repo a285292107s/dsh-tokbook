@@ -960,11 +960,14 @@ const server = createServer((req, res) => {
   if (url.pathname === ROUTE_SYNC) {
     // 预览台没有真的在跑的 walk：探针照 host 的形状答。`sync` / `syncerr` 让它答
     // running / error——client 的追同步循环（500ms × 60 次后放弃）与诊断带因此可达。
+    // `ledger` 是账本代数：预览台的数据是固定的，所以它恒为 0（面板据此永不重拉，
+    // 正是「没有新行」的样子）。
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({
       status: MODE === 'sync' ? 'running' : MODE === 'syncerr' ? 'error' : 'done',
       error: MODE === 'syncerr' ? syncErrorText : null,
       lastSyncAt: null,
+      ledger: 0,
     }))
     return
   }

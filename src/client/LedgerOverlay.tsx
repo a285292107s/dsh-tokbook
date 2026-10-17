@@ -16,6 +16,7 @@ import { ProviderPanel } from './ProviderPanel.tsx'
 import { MethodDoc } from './MethodDoc.tsx'
 import { CloseGlyph, RefreshGlyph, UsageGlyph } from './icons.tsx'
 import { formatDateTime } from './format.ts'
+import { subscribeLedgerChanges } from './ledger-clock.ts'
 
 export interface LedgerOverlayProps {
   /** 共享 view store（inject 注入）。 */
@@ -26,6 +27,10 @@ export interface LedgerOverlayProps {
  *  在状态真卡住时无限打路由。 */
 const SYNC_FOLLOW_INTERVAL_MS = 500
 const SYNC_FOLLOW_ATTEMPTS = 60
+
+/** 浮窗开着时跟账本的最小间隔。账本时钟每 3 s 探一次，这里再兜一道：概览是一次全量
+ *  聚合（本机 ~0.1 s），一轮对话里落三行不该造成三次全量重算。 */
+const OVERVIEW_REFRESH_MIN_GAP_MS = 2_000
 
 /** 四桶齐全的 totals——`totalsTokens`（`src/types.ts`）与 `LedgerView` 都对它做算术。 */
 function isBucketTotals(raw: unknown): boolean {
@@ -72,6 +77,9 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
    *  存 ref 也是为了让关窗 / 卸载能中止它——轮询本身没有生命周期。 */
   const followRef = useRef<AbortController | null>(null)
 
+  /** 上一次成功拉到概览的时刻。跟账本的变化走时用它做节流（见 {@link OVERVIEW_REFRESH_MIN_GAP_MS}）。 */
+  const lastOverviewAt = useRef(0)
+
   /** 开新一轮 follow：先中止上一轮，再登记自己。返回这一轮的 signal。 */
   const beginFollow = useCallback((): AbortController => {
     followRef.current?.abort()
@@ -88,6 +96,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
         const next = readOverview(raw)
         // 形状不对按一次读失败处理：错误态是重试的入口，而半成品进 store 会让渲染期抛错。
         if (next === null) throw new Error('响应不是一份账本概览')
+        lastOverviewAt.current = Date.now()
         view.setOverview(next)
       })
       .catch((err: unknown) => { if (signal?.aborted !== true) view.setError(err instanceof Error ? err.message : String(err)) })
@@ -144,6 +153,36 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     return () => { followRef.current?.abort() }
   }, [open])
 
+  // 浮窗开着时跟账本：宿主每落一行就推进一次代数，时钟探到它变了就让这一页重拉。
+  // 从前浮窗只在打开那一刻读一次，于是**会话还在跑而数字一直冻着**——这正是「打开后
+  // 不及时更新」的根因（用量明细那一段也一样，它自己订阅同一口时钟）。
+  //
+  // **只在总览那一页跟**：概览是一次全量聚合，而它只为 `LedgerView` 与页脚（最新记录 /
+  // 扫描状态）渲染。用户切到别的 tab 时不再跟着账本跑；切回来那一下立刻补一次（见
+  // `onVisibleTab`），所以看不到一份过时的总览。节流兜住「一轮对话落好几行」。
+  const visibleTab = useRef<OverlayTab>('ledger')
+  useEffect(() => {
+    if (!open) return
+    const unsubscribe = subscribeLedgerChanges(() => {
+      if (visibleTab.current !== 'ledger') return
+      if (view.getSnapshot().overview?.syncStatus === 'running') return // 那一轮自己会 follow 到落定
+      if (Date.now() - lastOverviewAt.current < OVERVIEW_REFRESH_MIN_GAP_MS) return
+      void fetchOverview()
+    })
+    return unsubscribe
+  }, [open, fetchOverview, view])
+
+  /** 切回总览时补一次：别的 tab 期间账本变过的话，屏上那份已经旧了（上面那条订阅
+   *  故意不跟）。节流同一条，避免来回点 tab 时连打概览。 */
+  const onVisibleTab = useCallback((next: OverlayTab) => {
+    const previous = visibleTab.current
+    visibleTab.current = next
+    if (next !== 'ledger' || previous === 'ledger') return
+    if (view.getSnapshot().overview?.syncStatus === 'running') return
+    if (Date.now() - lastOverviewAt.current < OVERVIEW_REFRESH_MIN_GAP_MS) return
+    void fetchOverview()
+  }, [fetchOverview, view])
+
   // 触发一次权威再同步，然后追到落定。**开新一轮前先中止上一轮**——被打断的可能是打开浮窗
   // 那条 follow，不然两条循环会同时追同一场 walk。
   const onRescan = useCallback(async () => {
@@ -173,6 +212,7 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       onRescan={onRescan}
       onRetry={() => { view.setError(null); void fetchOverview() }}
       onRefresh={fetchOverview}
+      onVisibleTab={onVisibleTab}
       onClose={() => view.setOpen(false)}
     />
   )
@@ -182,7 +222,7 @@ type OverlayTab = 'ledger' | 'quota' | 'pricing' | 'method'
 
 const TAB_IDS: ReadonlyArray<OverlayTab> = ['ledger', 'quota', 'pricing', 'method']
 
-function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onClose }: {
+function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onVisibleTab, onClose }: {
   overview: TokBookOverview | null
   error: string | null
   scanning: boolean
@@ -191,11 +231,20 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
   onRescan: () => void
   onRetry: () => void
   onRefresh: () => void
+  /** 可见 tab 变了——父级据此决定要不要补拉总览（切走期间账本变过的话屏上那份已经旧了）。 */
+  onVisibleTab: (tab: OverlayTab) => void
   onClose: () => void
 }) {
   const [tab, setTab] = useState<OverlayTab>('ledger')
   const cardRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+
+  // tab 是父级也要知道的事实（见 `onVisibleTab`）：在这里一处汇报，四个 tab 按钮与方向键
+  // 导航都走这条路，不给每个按钮各挂一次。
+  const selectTab = useCallback((next: OverlayTab) => {
+    setTab(next)
+    onVisibleTab(next)
+  }, [onVisibleTab])
 
   // 打开时聚焦卡片，关闭时焦点回到触发按钮。
   useEffect(() => {
@@ -239,12 +288,10 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
     const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
     if (delta === 0) return
     e.preventDefault()
-    setTab((current) => {
-      const next = TAB_IDS[(TAB_IDS.indexOf(current) + delta + TAB_IDS.length) % TAB_IDS.length]!
-      document.getElementById(`dtpl-tab-${next}`)?.focus()
-      return next
-    })
-  }, [])
+    const next = TAB_IDS[(TAB_IDS.indexOf(tab) + delta + TAB_IDS.length) % TAB_IDS.length]!
+    selectTab(next)
+    document.getElementById(`dtpl-tab-${next}`)?.focus()
+  }, [tab, selectTab])
 
   // 点中背景本身（非卡片）时关闭。
   const onBackdropMouseDown = useCallback((e: ReactMouseEvent) => {
@@ -283,7 +330,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             aria-controls="dtpl-panel"
             tabIndex={tab === 'ledger' ? 0 : -1}
             className="dtpl-tab"
-            onClick={() => setTab('ledger')}
+            onClick={() => selectTab('ledger')}
           >
             用量总览
           </button>
@@ -295,7 +342,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             aria-controls="dtpl-panel"
             tabIndex={tab === 'quota' ? 0 : -1}
             className="dtpl-tab"
-            onClick={() => setTab('quota')}
+            onClick={() => selectTab('quota')}
           >
             订阅额度
           </button>
@@ -307,7 +354,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             aria-controls="dtpl-panel"
             tabIndex={tab === 'pricing' ? 0 : -1}
             className="dtpl-tab"
-            onClick={() => setTab('pricing')}
+            onClick={() => selectTab('pricing')}
           >
             价格表
             {pricingDirty && <i className="dtpl-tab-dot" role="img" aria-label="有未保存的改动" title="有未保存的改动" />}
@@ -320,7 +367,7 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
             aria-controls="dtpl-panel"
             tabIndex={tab === 'method' ? 0 : -1}
             className="dtpl-tab"
-            onClick={() => setTab('method')}
+            onClick={() => selectTab('method')}
           >
             统计口径
           </button>

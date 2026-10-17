@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-10-16 · supersedes: —
+> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-10-17 · supersedes: —
 
 A **cross-session token-usage ledger for DeepSeek Harness (DSH)**.
 
@@ -115,7 +115,9 @@ over its whole lifetime, opened up by turn and by step.
 
 It is **read-only** against the ledger and the config — its only write is a content width kept in the
 browser — and it needs no live session: it reads rows already in the ledger plus the session's log on
-disk, polling every 15 seconds and stopping entirely while the page is in the background.
+disk. It keeps up with a running session: a shared probe reads the host's ledger generation every 3
+seconds (one append = +1) and refetches only when that actually changed, falling back to a 15-second
+poll on hosts that do not report it. Nothing is sent while the page is in the background.
 
 > **A known degradation:** attributing rows to turns and steps depends on the host's `sessionPersistence`.
 > Without it the numbers still arrive, but every non-compaction row lands in an "unknown turn" block, and

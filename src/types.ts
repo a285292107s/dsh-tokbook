@@ -466,6 +466,9 @@ export interface SyncStatusView {
   error: string | null
   /** 最近一次 walk 落定的时刻；本进程从未走过则为 null。 */
   lastSyncAt: number | null
+  /** 这个数据目录的账本代数：每落一行 / 每挪动一行都会变。客户端拿它判断「屏上那份
+   *  数据还算不算新」——**只比较相等，不比大小**（它是进程内计数器，重启归零）。 */
+  ledger: number
 }
 
 /**

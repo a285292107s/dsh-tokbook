@@ -4,6 +4,10 @@
  *
  * 数据来自 `GET /tokbook/usage?range=…`（一次拉回三种切法 + 窗口合计）。刻意独立于总览
  * store——总览失败时这一段仍可用。
+ *
+ * **新鲜度**靠共享的账本时钟（`ledger-clock.ts`）：它每 3 s 探一次宿主的账本代数，只有
+ * 这个数真的变了才重拉当前窗口。从前这一段只在首次挂载时读一次，会话还在跑时数字就一直
+ * 冻在打开那一刻。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -17,6 +21,7 @@ import { UsageGlyph } from './icons.tsx'
 import { formatMoney, formatTokens } from './format.ts'
 import { isNoPrice, ModelRows, WorkspaceRows } from './Breakdowns.tsx'
 import { ShareRing } from './ShareRing.tsx'
+import { subscribeLedgerChanges } from './ledger-clock.ts'
 
 /** 窗口 id，按展示顺序。`all` = 全账本，不收窄下界。 */
 const RANGE_IDS: ReadonlyArray<ProviderRange> = ['today', 'yesterday', 'last7', 'last30', 'all']
@@ -163,10 +168,22 @@ function readUsageView(raw: unknown): ProviderUsageView | null {
 }
 
 /** 用量明细那一节本体；每个已加载的窗口有缓存，切回来不重新拉取。 */
+/**
+ * 上次读到的窗口视图，按窗口留着最近几份。面板随 tab 切换 / 浮窗关闭整块卸载，而
+ * 「打开就是上一次的读数」是这一段该有的手感：留着旧数只为**先画出来**，挂载后的那次
+ * 拉取照常把它换成新的（与词元页的 `lastViews` 同一处置）。
+ *
+ * 上界按窗口数给：一个窗口一份，五种窗口全存也不到 100 KB 的视图。
+ */
+const lastViews = new Map<ProviderRange, ProviderUsageView>()
+
+/** 跨挂载记住切法（按模型 / 按工作区 / 按通道）：同一个理由。 */
+let lastSlice: Slice = 'model'
+
 export function ProviderPanel() {
   const [range, setRange] = useState<ProviderRange>(readRange)
-  const [slice, setSlice] = useState<Slice>('model')
-  const [views, setViews] = useState<ReadonlyMap<ProviderRange, ProviderUsageView>>(() => new Map())
+  const [slice, setSlice] = useState<Slice>(lastSlice)
+  const [views, setViews] = useState<ReadonlyMap<ProviderRange, ProviderUsageView>>(() => new Map(lastViews))
   /** 最近一次**已知**的可用切法。加载中不清空：换窗口时 tab 条因此不闪、也不整块消失。 */
   const [cuts, setCuts] = useState<readonly Slice[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -175,6 +192,9 @@ export function ProviderPanel() {
   // 会重跑 fetch effect）。
   const viewsRef = useRef(views)
   viewsRef.current = views
+  /** 当前选中的窗口（账本变化时重拉的是它，不是闭包里那份可能已过期的）。 */
+  const rangeRef = useRef(range)
+  rangeRef.current = range
 
   const load = useCallback(async (target: ProviderRange, force?: boolean) => {
     // 清错误条在缓存短路之前：命中缓存同样是「这一次读到了」，别的窗口上一轮的失败不该留在屏上。
@@ -196,6 +216,7 @@ export function ProviderPanel() {
       setViews((current) => {
         const next = new Map(current)
         next.set(target, view)
+        lastViews.set(target, view)
         return next
       })
       setCuts(cutsOf(view))
@@ -205,10 +226,17 @@ export function ProviderPanel() {
     }
   }, [])
 
-  // 每个选中的窗口拉取一次。
+  // 每个选中的窗口拉取一次（换窗口时）。`range` 变了就先画缓存里那份（如果留过），
+  // 后台再拉新的：切回来不该从骨架屏开始。
   useEffect(() => {
     void load(range)
   }, [range, load])
+
+  // 账本又落行了：重拉**当前**窗口。`force` 绕过缓存短路——这一跳的意义就是拿新数字。
+  useEffect(() => subscribeLedgerChanges(() => {
+    if (document.hidden) return
+    void load(rangeRef.current, true)
+  }), [load])
 
   // 面板卸载（tab 切换）时推进 active token，防止在飞的响应更新已卸载面板。
   useEffect(() => () => { activeRef.current += 1 }, [])
@@ -221,6 +249,11 @@ export function ProviderPanel() {
     } catch {
       // 存不下不影响这一次选择，只是下次打开回到默认窗口。
     }
+  }, [])
+
+  const chooseSlice = useCallback((next: Slice) => {
+    lastSlice = next
+    setSlice(next)
   }, [])
 
   const view = views.get(range)
@@ -244,7 +277,7 @@ export function ProviderPanel() {
     e.preventDefault()
     const order = available.length > 0 ? available : [active]
     const next = order[(order.indexOf(active) + delta + order.length) % order.length]!
-    setSlice(next)
+    chooseSlice(next)
     document.getElementById(`dtpl-usage-tab-${next}`)?.focus()
   }
 
@@ -326,7 +359,7 @@ export function ProviderPanel() {
                   aria-controls="dtpl-usage-panel"
                   tabIndex={active === id ? 0 : -1}
                   className="dtpl-bd-tab"
-                  onClick={() => setSlice(id)}
+                  onClick={() => chooseSlice(id)}
                 >
                   {SLICE_LABELS[id]}
                 </button>

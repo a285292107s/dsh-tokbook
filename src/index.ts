@@ -16,7 +16,7 @@ import type {
 import { totalsTokens } from './types.ts'
 import { coercePlansConfig, validateConfig } from './config.ts'
 import { defaultDataDir, warnIfForeignOwner, writeOwnerMarker } from './ledger.ts'
-import { UsageLog } from './usage-log.ts'
+import { UsageLog, ledgerGeneration } from './usage-log.ts'
 import { modelOfEvent, providerOfEvent, recordOfEvent, type SessionEventLike } from './usage-record.ts'
 import { autoSyncIfNeeded, listPersistenceSnapshots, syncHistory, type SyncDeps, type SyncPersistence } from './sync.ts'
 import { readSyncProgress, writeSyncProgress } from './sync-state.ts'
@@ -724,15 +724,16 @@ export class TokenUsageBook extends Service {
   }
 
   /**
-   * 同步状态探针的载荷：只读内存里的调度器状态，**不触碰账本**。读路径的廉价观察点
-   * ——client 追一轮 walk 落定时读它（≈0 ms），落定后再拉一次概览；反过来拿概览当探针
-   * 就是每 500 ms 一次全量聚合，而 tick 次数正比于 walk 耗时。
+   * 同步状态探针的载荷：只读内存里的调度器状态与账本代数，**不触碰账本**。读路径的
+   * 廉价观察点——client 用它判断「屏上那份数据要不要重拉」（≈0 ms），落定后再拉一次
+   * 概览；反过来拿概览当探针就是每 500 ms 一次全量聚合。
    */
   syncState(): SyncStatusView {
     return {
       status: this.syncStatus,
       error: this.syncError,
       lastSyncAt: this.lastSyncAt > 0 ? this.lastSyncAt : null,
+      ledger: ledgerGeneration(this.dir),
     }
   }
 
