@@ -37,7 +37,7 @@ import { readPricingSyncState, writePricingSyncState } from './pricing-sync-stat
 import { ledgerUsageOf, readPricingView, type LedgerUsage } from './pricing-view.ts'
 import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'
 import { registerTokBookPricingLookupRoute, registerTokBookPricingRoutes, registerTokBookPricingSyncRoute, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookSessionRoute, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
-import { buildSessionUsageView, readSessionJoinEvents } from './session-usage.ts'
+import { buildSessionUsageView, sessionJoin } from './session-usage.ts'
 import { errorCard, isBuiltinQuotaPlan, isQuotaAlert, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
 import { fetchOfficialQuota, type CredentialResolver } from './quota-official.ts'
 import { readQuotaSnapshot, writeQuotaSnapshot } from './quota-cache.ts'
@@ -553,12 +553,14 @@ export class TokenUsageBook extends Service {
     await this.ensureFresh()
     const { table, billing, resolve } = await this.rateContext()
     const records = await readCachedRecords(this.dir, this.logger)
-    const events = await readSessionJoinEvents(this.persistence, sessionId, this.logger)
+    // join 按该会话日志的 revision 缓存：账本变了而日志没变时（别处落了行、或只是切回
+    // 这一页）不必把整份日志重读重解。见 `session-usage.ts` 的 `sessionJoin`。
+    const join = await sessionJoin(this.persistence, sessionId, this.logger)
     const now = Date.now()
     return buildSessionUsageView({
       sessionId,
       records,
-      events,
+      join,
       pricing: table,
       billing,
       resolve,

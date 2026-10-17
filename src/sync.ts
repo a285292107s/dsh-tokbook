@@ -43,9 +43,9 @@ export interface PersistenceSnapshotLike {
 /**
  * 同步所需的持久化面（为测试鸭子类型），对齐当前 DSH `SessionPersistence`
  * 服务：会话经 `list()` 列出（每会话一个 header + opaque revision），经
- * `open(id, 'read')` 取该会话校验后的逻辑事件日志。两个更早的形状仍接受——
- * `listSnapshots()`（列表的旧名）与 `inspect()`（一次返回整份日志的旧读法），
- * 使本包在新旧宿主上读的是同一份数据。不透传取消选项。
+ * `open(id, 'read')` 取该会话校验后的逻辑事件日志，`stat(id)` 取单会话的变更令牌。
+ * 两个更早的形状仍接受——`listSnapshots()`（列表的旧名）与 `inspect()`（一次返回
+ * 整份日志的旧读法），使本包在新旧宿主上读的是同一份数据。不透传取消选项。
  */
 export interface SyncPersistence {
   /** 列全部已物化会话：当前形状 `{ header, revision }`，更早的后端回裸 header。 */
@@ -56,6 +56,10 @@ export interface SyncPersistence {
   inspect?(id: string): Promise<{ meta: { id: string }; events: readonly SessionEventLike[] }>
   /** 当前读法：开只读句柄。`read` 不取写所有权，故与在写的宿主并行安全。 */
   open?(id: string, access: 'read'): Promise<SessionHandleLike>
+  /** 单会话的廉价观察：只回 header 与不透明变更令牌，不读日志。**`revision` 相等即
+   *  日志未变**是它的契约——会话词元页按它缓存「整份日志 join 出来的归属与用时」，
+   *  没有它就只能每次重读整份日志（见 `session-usage.ts` 的 `sessionJoin`）。 */
+  stat?(id: string): Promise<{ header?: unknown; revision?: unknown } | undefined>
 }
 
 /** 只读句柄上本模块用到的部分：`read()` 默认从 seq 0 读到日志末尾。

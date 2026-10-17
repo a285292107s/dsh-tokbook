@@ -53,7 +53,7 @@ import {
 } from '../src/quota-official.ts'
 import type { BillingNature, PricingEntryInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
 import { settleTiming, totalsTokens, UNPRICED_KEY } from '../src/types.ts'
-import { buildSessionUsageView } from '../src/session-usage.ts'
+import { buildSessionUsageView, joinOfEvents, type SessionJoin } from '../src/session-usage.ts'
 
 let failed = 0
 function check(name: string, cond: boolean, detail?: unknown): void {
@@ -1688,6 +1688,11 @@ if (section('models.dev 查价:模糊搜索 / 排序 / 采信边界')) {
 }
 
 if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0')) {
+  /** 一组事件 → `buildSessionUsageView` 要的 join 资料。生产里它由 `sessionJoin` 按日志
+   *  revision 缓存（读一次日志、算一次索引），这里只有事件、没有持久化面，所以就地算。 */
+  const joinOf = (events: readonly SessionEventLike[] | null, sessionId = 'sess-t'): SessionJoin =>
+    (events === null ? { turn: null, timing: null, span: null } : joinOfEvents(sessionId, events))
+
   /** 一条打包的文本流(messages.dev 那种「首段 + 相邻差值」的紧凑形状)。 */
   const packed = (time0: number, texts: string[], dt: number[]) =>
     ({ type: 'text-chunks', time0, index: 0, dt, texts })
@@ -1733,7 +1738,7 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
     .map((event) => recordOfEvent(event, 'sess-t', 'deepseek-chat', false))
     .filter((record): record is UsageRecord => record !== null)
   const view = buildSessionUsageView({
-    sessionId: 'sess-t', records, events,
+    sessionId: 'sess-t', records, join: joinOf(events),
     pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
   })
   const rows = view.turns[0]?.rows ?? []
@@ -1771,7 +1776,7 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
 
   // 日志读不到:跨度与用时都缺席,但账本读数照出——不猜、不用账本首末记录顶替。
   const blind = buildSessionUsageView({
-    sessionId: 'sess-t', records, events: null,
+    sessionId: 'sess-t', records, join: joinOf(null),
     pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
   })
   check('日志读不到:用时与跨度都缺席(不报 0——那是「量不到」),行仍进 unattributed',
@@ -1788,7 +1793,7 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
   const compView = buildSessionUsageView({
     sessionId: 'sess-c',
     records: [{ requestId: 'compaction:sess-c:c1', time: compBase + 20_000, sessionId: 'sess-c', model: 'deepseek-chat', kind: 'compaction', usage: { inputTokens: 9, outputTokens: 3 } }],
-    events: compEvents, pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: compBase,
+    join: joinOf(compEvents, 'sess-c'), pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: compBase,
   })
   const compRow = compView.betweenTurns?.rows[0]
   check('压缩归轮间,用时是 start → summary 那 20s(报成模型用时,不另记墙钟)',
@@ -1811,7 +1816,7 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
       { requestId: recordFromRetry(retryEvents[2]!, 'sess-r', '').requestId, time: base + 2_000, sessionId: 'sess-r', model: 'deepseek-chat', kind: 'failure', failureCode: 'TRANSPORT' },
       { requestId: 'm9', time: base + 8_000, sessionId: 'sess-r', model: 'deepseek-chat', provider: 'deepseek', usage: { inputTokens: 10, outputTokens: 5 } },
     ],
-    events: retryEvents, pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+    join: joinOf(retryEvents, 'sess-r'), pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
   })
   const retryRows = retryView.turns[0]?.rows ?? []
   check('同一步的两行只报一次用时(报在有产出的那行),另行为「未计时」',

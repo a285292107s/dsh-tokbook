@@ -19,13 +19,14 @@ import {
   type SessionUsageView, type StepTiming, type UsageFields, type UsageRecord, type UsageTotals,
 } from './types.ts'
 
-/** {@link buildSessionUsageView} 的输入：账本行 + 计价上下文 + 该会话日志。 */
+/** {@link buildSessionUsageView} 的输入：账本行 + 计价上下文 + 该会话日志的 join。 */
 export interface SessionUsageInput {
   sessionId: string
   /** 全部会话的账本记录（本函数按 `sessionId` 过滤，调用方不必先筛）。 */
   records: readonly UsageRecord[]
-  /** 该会话用于 join 的事件；读不到为 null = 所有需要 join 的行进 `unattributed`。 */
-  events: readonly SessionEventLike[] | null
+  /** 该会话日志的 join 产物（见 {@link sessionJoinIndex}）。读不到日志时
+   *  `turn` / `timing` 为 null，所有需要 join 的行进 `unattributed`。 */
+  join: SessionJoin
   /** 计价用的价表（已折人民币；口径同 `attachCosts` 的 `table`）。 */
   pricing: PricingTable
   billing: BillingMap
@@ -197,6 +198,98 @@ function groupOf(turn: number | null, entries: readonly Entry[], resolve: RateRe
   }
 }
 
+/** {@link buildSessionUsageView} 需要的 join 资料：归属索引、用时索引、日志首末时刻。 */
+export interface SessionJoin {
+  /** 账本 requestId → (turn, step)；日志读不到为 null。 */
+  turn: ReadonlyMap<string, Attribution> | null
+  /** 每步的用时；日志读不到为 null。 */
+  timing: SessionTimingIndex | null
+  /** 日志首末事件时刻（算会话跨度用）；日志读不到为 null → 跨度与工作量都缺席。 */
+  span: { first: number; last: number } | null
+}
+
+/** 日志读不到时的 join：需要 join 的行全进「轮次未知」，用时与跨度都缺席。 */
+const NO_JOIN: SessionJoin = { turn: null, timing: null, span: null }
+
+/**
+ * 一份日志的 join 资料，按「日志 revision」缓存。
+ *
+ * 这一页每被打开一次、每跟一次账本变化，都要把该会话**整份**日志读来 join——本机最大的
+ * 一份压缩日志 14 MB，解压 + 解析 + 量用时是秒级。而绝大多数重读发生时日志一个字都没变
+ * （账本刚落了别处的行、用户只是切回这一页），所以把 join 资料按持久化的 `revision` 记住：
+ * 变了才重算。`revision` 是宿主 `stat`/`list` 给出的不透明变更令牌，其契约正是「相等即
+ * 日志未变」。
+ *
+ * 三条边界：
+ * - **读不到 `revision` 就每次都重算**（旧宿主没有这个字段）。宁可多算，不可拿一份可能
+ *   已经过时的归属去报数。
+ * - **读不到日志（events === null）不缓存**：那是「这一次没读到」，不是「那里什么都没有」。
+ * - **上界按条数给**：一条 join 资料随会话长度增长，不设界会在长时间开着的 host 里越攒越大。
+ */
+const joinCache = new Map<string, SessionJoin>()
+const JOIN_CACHE_MAX = 8
+
+/** 该会话日志的变更令牌；读不到（旧宿主、stat 不支持）时为 null。 */
+async function revisionOf(persistence: SyncPersistence, sessionId: string): Promise<string | null> {
+  if (typeof persistence.stat !== 'function') return null
+  try {
+    const snapshot = await persistence.stat(sessionId)
+    const revision = snapshot?.revision
+    return typeof revision === 'string' && revision !== '' ? revision : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 一组事件 → join 资料（纯函数，无 I/O）。生产路径由 {@link sessionJoin} 调它并按日志
+ * revision 缓存结果；测试与预览台直接拿事件算，不必假造一个持久化后端。
+ */
+export function joinOfEvents(sessionId: string, events: readonly SessionEventLike[]): SessionJoin {
+  let first = Number.POSITIVE_INFINITY
+  let last = Number.NEGATIVE_INFINITY
+  for (const event of events) {
+    if (!Number.isFinite(event.time)) continue
+    if (event.time < first) first = event.time
+    if (event.time > last) last = event.time
+  }
+  return {
+    turn: turnIndexOf(sessionId, events),
+    timing: timingIndexOf(sessionId, events),
+    span: Number.isFinite(first) && last >= first ? { first, last } : null,
+  }
+}
+
+/** 日志的 join 资料：该会话日志读一次、按 revision 记住。 */
+export async function sessionJoin(
+  persistence: SyncPersistence | undefined,
+  sessionId: string,
+  logger: StatsLogger = console,
+): Promise<SessionJoin> {
+  const revision = persistence === undefined ? null : await revisionOf(persistence, sessionId)
+  const cacheKey = `${sessionId}\u0000${revision ?? ''}`
+  if (revision !== null) {
+    const cached = joinCache.get(cacheKey)
+    if (cached !== undefined) {
+      // 命中即把这一条挪到末尾（Map 的迭代序就是 LRU 序）。
+      joinCache.delete(cacheKey)
+      joinCache.set(cacheKey, cached)
+      return cached
+    }
+  }
+  const events = await readSessionJoinEvents(persistence, sessionId, logger)
+  if (events === null) return NO_JOIN
+  const join = joinOfEvents(sessionId, events)
+  if (revision !== null) {
+    joinCache.set(cacheKey, join)
+    for (const key of joinCache.keys()) {
+      if (joinCache.size <= JOIN_CACHE_MAX) break
+      joinCache.delete(key)
+    }
+  }
+  return join
+}
+
 /** 读该会话的日志供 join：`open(id,'read')` 不取写所有权，与在写的宿主并行安全；
  *  从 `inheritedEventCount` 起读——fork 继承的父前缀不是本会话的计费调用（同
  *  `sync.ts` 的 `readSessionEvents`）。读不到一律答 null，绝不抛给读路径。 */
@@ -227,11 +320,13 @@ export async function readSessionJoinEvents(
 
 /** 把一个会话的账本记录折成视图。分组规则见 docs/CONTEXT.md：压缩归轮间（不硬塞
  *  进某一轮），失败行按自己身份里的回合号进组，join 不上的行进 `unattributed`
- *  ——「轮次未知」与「轮间」分列。 */
+ *  ——「轮次未知」与「轮间」分列。
+ *
+ *  join 资料由调用方经 {@link sessionJoin} 备好（按日志 revision 缓存），这里只做纯折叠：
+ *  同一份日志的第二次读因此不再解压 / 解析整份日志。 */
 export function buildSessionUsageView(input: SessionUsageInput): SessionUsageView {
-  const index = input.events === null ? null : turnIndexOf(input.sessionId, input.events)
-  const timing = input.events === null ? null : timingIndexOf(input.sessionId, input.events)
-  const owners = input.events === null ? new Map<string, string>() : timingOwners(input.records, index, input.sessionId)
+  const { turn: index, timing, span } = input.join
+  const owners = index === null ? new Map<string, string>() : timingOwners(input.records, index, input.sessionId)
   const all: Entry[] = []
   const turns = new Map<number, Entry[]>()
   const between: Entry[] = []
@@ -294,7 +389,7 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
     betweenTurns: tail,
     unattributed: sortEntries(unattributed).map(entry => entry.row),
     todaySpend: input.todaySpend,
-    ...spanOf(input.events, all.map(entry => entry.row)),
+    ...spanOf(span, all.map(entry => entry.row)),
   }
 }
 
@@ -354,26 +449,20 @@ function timingOfRow(
  * 就是这一步没在算的时间（等用户输入、等外部、会话挂起）。
  *
  * 跨度取日志的首末事件时刻，不是账本的首末记录——账本只在有计费调用时才落行，用它算
- * 跨度会把「最后一句话之后挂了几小时」全丢掉。
+ * 跨度会把「最后一句话之后挂了几小时」全丢掉。首末时刻来自 `join.span`（读日志时一并
+ * 量好并按 revision 缓存），所以重读一次这一页不必再扫一遍日志。
  *
  * 日志读不到时**两个都缺席**：那时候一行都没计时，工作量会是 0，而「0秒」在此正是
  * 「不知道」被印成了「没花时间」（同「用量未知 ≠ 0」，见 docs/CONTRACTS.md §2）。
  */
 function spanOf(
-  events: readonly SessionEventLike[] | null,
+  span: { first: number; last: number } | null,
   rows: readonly SessionStepRow[],
 ): { spanMs?: number; workMs?: number } {
-  if (events === null || events.length === 0) return {}
-  let first = Number.POSITIVE_INFINITY
-  let last = Number.NEGATIVE_INFINITY
-  for (const event of events) {
-    if (!Number.isFinite(event.time)) continue
-    if (event.time < first) first = event.time
-    if (event.time > last) last = event.time
-  }
+  if (span === null) return {}
   const { llmMs, toolMs } = settleTiming(rows)
   const timed = rows.some((row) => row.timing !== undefined)
-  const span = Number.isFinite(first) && last >= first ? { spanMs: last - first } : {}
+  const elapsed = span.last >= span.first ? { spanMs: span.last - span.first } : {}
   // 一行都没计时就不报工作量：那 0 是「量不到」，不是「没花时间」。
-  return timed ? { ...span, workMs: llmMs + toolMs } : span
+  return timed ? { ...elapsed, workMs: llmMs + toolMs } : elapsed
 }

@@ -1,6 +1,6 @@
 # ADR 0001 — 会话词元页的轮次归属走读时 join，不写进账本行
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-27 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-10-17 · supersedes: —
 
 - **状态**：已接受（2026-09-27）
 - **决策**：新增的「会话词元」页要按轮次/步骤分组时，**宿主在请求时读该会话的持久化日志**，把账本行按 `requestId` join 上 `(turn, step)`；**不给账本行加 `turn`/`step` 字段**。
@@ -22,5 +22,5 @@
 
 1. **token 与钱都取账本**，轮次/步骤只是 join 出来的归属。不采用 DSH 的 `tokenUsage` 投影来提供 token——它与账本会在边界情况（漏记的行、refile 时序）分叉，而「同一个数字两个来源」是账本这一层的红线。
 2. 会话日志读不到时，那批行显示**轮次未知**，既不猜、也不按时间硬塞进某一轮。这与「用量未知 ≠ 0」同一条思路：未知要**说出口**，不能默默变成 0 或「轮间」。
-3. join 的成本随该会话日志增长；按仓库已有的**「按文件版本判新旧」解析缓存**模式缓存（分日文件解析缓存是同款做法），刷新时不必每次重解。
+3. join 的成本随该会话日志增长；按仓库已有的**「按文件版本判新旧」解析缓存**模式缓存（分日文件解析缓存是同款做法），刷新时不必每次重解。落点是 `session-usage.ts` 的 `sessionJoin`：归属索引、每步用时、日志首末时刻一起按持久化的 `revision` 记住，令牌变过才重算（口径见 [`CONTRACTS.md`](../CONTRACTS.md) §2）。
 4. 账本行格式不变：去重键（`requestId`）、费率行身份、`ROLLUP_SCHEMA_VERSION`、refile 与计价口径**一个都不动**。
