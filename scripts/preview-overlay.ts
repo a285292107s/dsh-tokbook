@@ -604,7 +604,7 @@ const USAGE_LABELS = { deepseek: 'DeepSeek', commandcode: 'Command Code', 'openc
 /** 窗口 → 可见的工作区行数（越短的窗口越少行——与卡片那一面同步收窄）。 */
 const WORKSPACES_BY_RANGE = { today: 2, yesterday: 2, last7: 4, last30: 4, all: 4 }
 
-/** 按模型那一面 = 各卡模型行摊平（与 host 的 `modelRowsOf` 同源），所以三种切法的合计相等。
+/** 按模型那一面 = 各卡模型行摊平（与 host 的 `aggregateWindow` 同源），所以三种切法的合计相等。
  *  **故意倒着摊**（不按任何键排）：模型清单按词元降序是**展示层**的事，这份乱序 fixture 正好
  *  证明排序真的发生在那里。 */
 function modelRows(cards) {

@@ -13,7 +13,7 @@ import {
   summarizeRecords, mergeSummaries, attachCosts, buildSummary, isLedgerStale, staleSessionIds,
   readRecordsByDayRange, rangeDayWindow, readRollup, rollupIsCurrent, ROLLUP_SCHEMA_VERSION, type RollupFile,
 } from '../src/stats.ts'
-import { pathKey, workspaceRows } from '../src/workspaces.ts'
+import { aggregateWindow, pathKey } from '../src/window-usage.ts'
 import {
   billingOf, cnyTable, coercePriceFile, costOf, dayKeyOf, dayStartMs,
   entryAt, parsePriceInput, priceOfKey, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY,
@@ -42,7 +42,7 @@ import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, recordFromRetry, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
 import { syncHistory, listPersistenceSnapshots } from '../src/sync.ts'
-import { modelRowsOf, providerCards } from '../src/by-provider.ts'
+
 import {
   windowFromCreditsBlock, windowFromUsagePercent, resetEpoch, planInfoFromSubscriptions,
   unconfiguredCard, errorCard, noSubscriptionCard, hasQuotaContent, isBuiltinQuotaPlan,
@@ -1076,7 +1076,7 @@ if (section('工作区:按目录累计用量')) {
     { requestId: 'd', time: t(4), sessionId: 's-gone', provider: 'deepseek-official', model: 'deepseek-chat', usage: { inputTokens: 250_000, outputTokens: 0 } },
     { requestId: 'e', time: t(5), sessionId: 's-cold', provider: 'deepseek-official', model: 'deepseek-chat', kind: 'failure', failureCode: 'QUOTA' },
   ]
-  const rows = workspaceRows(recs, workspaces, id => cwd.get(id), pricing, resolveRate, billing)
+  const rows = aggregateWindow(recs, workspaces, id => cwd.get(id), pricing, resolveRate, billing).byWorkspace
   check('行按最近使用降序、未归属收尾,只失败过的工作区不成行;另一种写法的 cwd 归位,跨通道的工作区两个钱桶都在',
     rows.map(r => r.id).join(',') === 'w-harness,w-wiki,'
     && rows[0]?.tokens === 1_500_000 && Math.abs((rows[0]?.spend ?? -1) - 1) < 1e-9 && Math.abs((rows[0]?.subscriptionValue ?? -1) - 2) < 1e-9
@@ -1272,7 +1272,8 @@ if (section('通道卡片与按模型切法')) {
       'glm-5.3-flash': { rates: { inputPerMillion: 3, outputPerMillion: 10, cacheReadPerMillion: 1 } },
     },
   }
-  const cards = providerCards(records, pricing, (r) => rateKeyAt(pricing, r.provider, r.model, r.time))
+  const window = aggregateWindow(records, null, () => undefined, pricing, (r) => rateKeyAt(pricing, r.provider, r.model, r.time))
+  const cards = window.providers
   const deepseek = cards.find(c => c.provider === 'deepseek-official')
   const opencode = cards.find(c => c.provider === 'opencode-go')
   check('两条通道两张卡(不合并),失败不计请求数,按词元降序',
@@ -1280,14 +1281,17 @@ if (section('通道卡片与按模型切法')) {
     && deepseek?.requests === 1 && opencode?.requests === 2 && deepseek?.tokens === 1200 && opencode?.tokens === 1090
     && deepseek?.models.length === 1 && opencode?.models.length === 2 && deepseek?.unpricedModels.length === 0)
   // 按模型切法就是各卡模型行摊平:两种切法同源,同一窗口的两个合计数必然相等。
-  const modelRows = modelRowsOf(cards)
+  const modelRows = window.byModel
   const four = (t: { inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }): number =>
     t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens + t.outputTokens
   check('按模型切法 = 摊平卡片,键与金额逐行保留,合计与卡片那一面相等',
     modelRows.length === 3 && modelRows.some(r => r.provider === 'opencode-go' && r.model === 'glm-5.3-flash' && r.totals.requests === 1)
     && modelRows.reduce((sum, r) => sum + four(r.totals), 0) === cards.reduce((sum, c) => sum + c.tokens, 0))
-  const unpriced = providerCards([{ requestId: 'r5', time: dayMillis('2026-03-01', 11), sessionId: 's3', provider: 'mystery', model: 'brand-new-x', usage: { inputTokens: 10, outputTokens: 10 } }], pricing, (r) => rateKeyAt(pricing, r.provider, r.model, r.time))
+  const unpriced = aggregateWindow([{ requestId: 'r5', time: dayMillis('2026-03-01', 11), sessionId: 's3', provider: 'mystery', model: 'brand-new-x', usage: { inputTokens: 10, outputTokens: 10 } }], null, () => undefined, pricing, (r) => rateKeyAt(pricing, r.provider, r.model, r.time)).providers
   check('没定价的模型按 ¥0 计,并在卡上列出来', unpriced[0]?.unpricedModels.join() === 'brand-new-x' && unpriced[0]?.cost === 0 && unpriced[0]?.models[0]?.cost === 0)
+  // 没有工作区注册表的宿主:按工作区这一面**不存在**(空),不是「全部未归属」。
+  check('没有工作区注册表时按工作区是空的,而不是把记录全塞进未归属',
+    window.byWorkspace.length === 0 && window.providers.reduce((sum, c) => sum + c.requests, 0) === 3)
 }
 
 if (section('窗口 → 日界,以及按窗口读账本')) {

@@ -22,7 +22,7 @@
 - slot 注册 API 对**未声明**的键直接抛错（`dsh-client-ui-slots` 的 `SlotCore.register` 文档原话：
   「registering into an undeclared slot throws」）。所以「把图标注册进项目行」这条路不存在。
 - 项目行在 DOM 里带 `data-row-key="workspace:<workspaceId>"`；未归属分组是 `workspace:`（空 key，
-  `buildGroup('' , undefined, …)`）。这个 `workspaceId` 与账本侧 `WorkspaceUsageRow.id`（`src/workspaces.ts`
+  `buildGroup('' , undefined, …)`）。这个 `workspaceId` 与账本侧 `WorkspaceUsageRow.id`（`src/window-usage.ts`
   的 `byId` 键）**是同一个值**——因此「哪一行 = 哪个项目」不需要新增 host 路由。
 - 本插件的其余 UI（footer 按钮、浮窗、会话词元页）全部注册进宿主**已声明**的槽（DESIGN §6.0 路线 A），
   **这枚图标将是唯一的例外**。

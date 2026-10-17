@@ -275,8 +275,7 @@ src/
   pricing-sync.ts     补价合并(纯函数):美元通道 × 账本用过 × 缺价格子,手写价永远赢
   pricing-sync-state.ts 日节流状态(models-dev-sync.json,不进 pricing.json)
   route-catalog.ts    路由目录:本机设置文档(settings)× 运行时适配器注册表(ctx.llm)
-  by-provider.ts      纯通道卡片聚合 + 按模型切法(用量明细 tab:摊平卡的模型行)
-  workspaces.ts       纯按工作区聚合(会话 cwd ↔ 工作区注册表的读时连接 + 未归属兜底)
+  window-usage.ts     用量明细三种切法(按通道的卡 / 按工作区 / 按模型)的**一趟**聚合
   quota.ts            官方额度归一化 + 内置计划身份
   quota-official.ts   key 解析 + 各通道官方用量抓取器
   quota-cache.ts      额度快照的磁盘缓存(stale-while-revalidate 的持久一侧)

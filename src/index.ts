@@ -25,7 +25,7 @@ import {
   readRecordsByDayRange, snapshotBaseline, staleSessionIds, summarizeRecords, warmRecordCache,
   type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
-import { workspaceRows, type WorkspaceRef } from './workspaces.ts'
+import { aggregateWindow, type WorkspaceRef } from './window-usage.ts'
 import {
   cnyTable, parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
   type PriceFile, type PriceParse,
@@ -36,7 +36,6 @@ import { billedRouteModels, mergeCatalogIntoTable } from './pricing-sync.ts'
 import { readPricingSyncState, writePricingSyncState } from './pricing-sync-state.ts'
 import { ledgerUsageOf, readPricingView, type LedgerUsage } from './pricing-view.ts'
 import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'
-import { modelRowsOf, providerCards } from './by-provider.ts'
 import { registerTokBookPricingLookupRoute, registerTokBookPricingRoutes, registerTokBookPricingSyncRoute, registerTokBookQuotaRoute, registerTokBookRoutes, registerTokBookSessionRoute, registerTokBookUsageRoute, type WebServerLike } from './routes.ts'
 import { buildSessionUsageView, readSessionJoinEvents } from './session-usage.ts'
 import { errorCard, isBuiltinQuotaPlan, isQuotaAlert, COMMAND_CODE_PROVIDER, OPENCODE_GO_PROVIDER } from './quota.ts'
@@ -483,39 +482,42 @@ export class TokenUsageBook extends Service {
    * 用量明细「按工作区」一行：账本记录按其会话所属工作区折叠。该 join 需要两条
    * live host 缝——工作区注册表（title + 规范 path）与会话 header（`cwd`）。
    * 列表中缺席的会话（其日志已消失）贡献不了 `cwd`，其记录落入未归属。
+   *
+   * 返回 `null` = 这个宿主没有工作区注册表：那时按工作区这一面**不存在**（不是
+   * 「所有记录都未归属」），`aggregateWindow` 据它把这一面留空。
    */
-  private workspaceUsage(
-    records: readonly UsageRecord[],
-    snapshots: readonly PersistenceSnapshotLike[],
-    pricing: PricingTable,
-    billing: BillingMap,
-    resolve: RateResolver,
-  ): WorkspaceUsageRow[] {
+  private workspaceRefs(): WorkspaceRef[] | null {
     const registry = this.workspaceRegistry()
-    if (registry === undefined) return []
-    const cwdBySession = new Map<string, string>()
-    for (const snap of snapshots) {
-      const cwd = snap.header.cwd
-      if (typeof cwd === 'string' && cwd !== '') cwdBySession.set(snap.header.id, cwd)
-    }
-    const workspaces: WorkspaceRef[] = registry.list().map(workspace => ({
+    if (registry === undefined) return null
+    return registry.list().map(workspace => ({
       id: String(workspace.id),
       title: workspace.title,
       path: workspace.path,
     }))
-    return workspaceRows(records, workspaces, id => cwdBySession.get(id), pricing, resolve, billing)
   }
 
   /**
    * 一个回看窗口的三种切法（按模型 / 按工作区 / 按通道），用量明细 tab 的载荷。
    * 复用概览的权威新鲜门与价表；只读窗口内的日文件（`all` 不设下界）。
+   *
+   * 三种切法由 `aggregateWindow` **一趟**折出来：从前这里是两条独立路径（通道卡 +
+   * 按工作区），各把窗口记录扫一遍、各跑一次 `summarizeRecords`/`attachCosts`——
+   * 那一步的成本随 rate 行数增长，在本机 `all` 窗口上合计约 1.1 s（整条路由的九成），
+   * 而这一页根本不渲染 byDay/byHour/rateRows。
    */
   async usageByRange(range: ProviderRange): Promise<ProviderUsageView> {
     const snapshots = await this.ensureFresh()
     const { table, billing, resolve } = await this.rateContext()
     const { fromDay, toDay } = rangeDayWindow(range)
     const records = await readRecordsByDayRange(this.dir, fromDay, toDay, this.logger)
-    const cards = providerCards(records, table, resolve, billing)
+    const cwdBySession = new Map<string, string>()
+    for (const snap of snapshots) {
+      const cwd = snap.header.cwd
+      if (typeof cwd === 'string' && cwd !== '') cwdBySession.set(snap.header.id, cwd)
+    }
+    const aggregate = aggregateWindow(
+      records, this.workspaceRefs(), id => cwdBySession.get(id), table, resolve, billing,
+    )
     // 通道名走 `routeLabels`（settings displayName 优先于适配器名），使 route 与
     // 价格表 tab 同名。
     const providerLabels = routeLabels(this.settings(), this.llm(), this.logger)
@@ -525,15 +527,15 @@ export class TokenUsageBook extends Service {
       toDay,
       updatedAt: Date.now(),
       providerLabels,
-      // 页头那句「窗口合计」的四个数。与按模型 / 按通道同源（见 modelRowsOf），
+      // 页头那句「窗口合计」的四个数。与按模型 / 按通道同源（见 aggregateWindow），
       // 所以三种切法的合计逐分相等。
-      totalTokens: cards.reduce((sum, card) => sum + card.tokens, 0),
-      totalRequests: cards.reduce((sum, card) => sum + card.requests, 0),
-      totalSpend: cards.reduce((sum, card) => sum + card.spend, 0),
-      totalSubscriptionValue: cards.reduce((sum, card) => sum + card.subscriptionValue, 0),
-      byModel: modelRowsOf(cards),
-      byWorkspace: this.workspaceUsage(records, snapshots, table, billing, resolve),
-      providers: cards,
+      totalTokens: aggregate.providers.reduce((sum, card) => sum + card.tokens, 0),
+      totalRequests: aggregate.providers.reduce((sum, card) => sum + card.requests, 0),
+      totalSpend: aggregate.providers.reduce((sum, card) => sum + card.spend, 0),
+      totalSubscriptionValue: aggregate.providers.reduce((sum, card) => sum + card.subscriptionValue, 0),
+      byModel: aggregate.byModel,
+      byWorkspace: aggregate.byWorkspace,
+      providers: aggregate.providers,
     }
   }
 

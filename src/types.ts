@@ -280,7 +280,7 @@ export type PriceVerdict = { ok: true } | { ok: false; error: string }
 /**
  * 用量明细「按工作区」一行：该工作区会话在**选定窗口内**的账本记录，用与其余
  * 视图相同的汇总 + 成本层折叠。归属是**读时 join**——账本行只存 `sessionId`，
- * 工作区取自会话持久化 header 的 `cwd`（见 `src/workspaces.ts`）——历史可追溯
+ * 工作区取自会话持久化 header 的 `cwd`（见 `src/window-usage.ts`）——历史可追溯
  * 归属。
  */
 export interface WorkspaceUsageRow {
