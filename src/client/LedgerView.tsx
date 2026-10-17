@@ -273,8 +273,9 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
             </div>
             <div className={`dtpl-grid${showCacheWrite ? '' : ' dtpl-grid-3'}`}>
               {/* 「输入」不是「我发过去的全部文字」，而是其中**没命中缓存**的那部分；
-                  标签必须自己说清这一点，否则这一格会把一次很长的对话读成很短。 */}
-              <Stat label="未命中输入" value={formatTokens(today.inputTokens)} share={share(today.inputTokens)} />
+                  标签必须自己说清这一点，否则这一格会把一次很长的对话读成很短。
+                  用词与 `session-shared` 的 `BUCKETS` 逐字一致（词元页那四个格同源）。 */}
+              <Stat label="未缓存输入" value={formatTokens(today.inputTokens)} share={share(today.inputTokens)} />
               <Stat label="缓存读取" value={formatTokens(today.cacheReadTokens)} share={share(today.cacheReadTokens)} />
               {showCacheWrite && <Stat label="缓存写入" value={formatTokens(today.cacheWriteTokens)} share={share(today.cacheWriteTokens)} />}
               <Stat label="输出" value={formatTokens(today.outputTokens)} share={share(today.outputTokens)} />

@@ -27,11 +27,11 @@ import { mergeCatalogIntoTable } from '../src/pricing-sync.ts'
 import { readPricingSyncState, writePricingSyncState } from '../src/pricing-sync-state.ts'
 import {
   baselinesOf, calendarYearTally, composePriceBody, defaultCalendarYear, draftFromView, duplicateSlot,
-  fxSignature, fxValue, inheritedCell, isBlankSlot, isUnpriced, modelDirty, modelSignature,
+  fxSignature, fxValue, inheritedCell, isBlankSlot, isUnpriced, modelDirty,
   newHoliday, newSlot, priceIssue, priceUnknown,
   ratesInForce, readHolidays, slotRange, stagedChanges, withCalendar, withFx, withRouteCurrency,
   withSlotEnd, withSlotStart,
-  type CalendarEntries, type CalendarHolidayDraft, type ModelDraft, type PriceDraft, type PriceState,
+  type CalendarEntries, type CalendarHolidayDraft, type ModelDraft, type PriceState,
 } from '../src/client/pricing/draft.ts'
 import {
   convertText, counterpartOf, parseAmount, unitOf,

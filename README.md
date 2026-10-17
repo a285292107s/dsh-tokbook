@@ -172,8 +172,8 @@ The quota tab pulls account-level subscription usage from the provider's own API
   `balance` card; those that report window percentages without a subscription (for example OpenCode Go
   answering `403` for a valid key with no Go plan) get a `none` card. A gate is only ever derived from
   an endpoint that actually answered — a timeout or a `5xx` is *unknown*, never "no subscription".
-- The dot on the sidebar button comes from the last successful on-disk snapshot and never calls a
-  provider API by itself.
+- The dot on the sidebar button comes from the last successful snapshot — an in-memory `ok` card when
+  there is one, otherwise the on-disk snapshot — and never calls a provider API by itself.
 
 ## Where the data lives
 
@@ -189,10 +189,12 @@ every row read as price-unknown (¥0), so back it up if you care about the amoun
 - `assistant/attempt` (an attempt that ended without producing a visible message) is not projected, so
   a failed attempt whose adapter only reported `usage` on the attempt stream is not recorded. Pairing
   attempts by retry lifecycle is a separate task (`src/usage-record.ts` carries the same note).
-- The cloud pricing mirror (reference price table, vendor grouping, wrapped route aliases) was removed
-  wholesale and is to be redone as a separate task.
-- The price-effective timeline was removed: the table holds current prices only, which is why amounts
-  are limited to windows of 30 days or less.
+- Prices are per-current-value, so amounts only cover the last 30 days (see **The ledger**). A
+  price-effective timeline — per-segment effective times, so historical amounts could be replayed at the
+  price in force then — is deliberately not built; the reasoning and the measured error are in
+  [`docs/DESIGN.md`](docs/DESIGN.md) §5.
+- There is no cloud pricing feed: `pricing.json` is written by hand (or filled from models.dev one
+  candidate at a time). Route aliasing and vendor grouping are not modelled.
 
 ## Development
 

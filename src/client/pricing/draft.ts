@@ -878,7 +878,7 @@ export function stagedChanges(state: PriceState, baseline: PriceBaseline): numbe
   for (const [route, card] of state.routes) {
     if ((baseline.billing.get(route) ?? 'metered') !== card.billing) count += 1
     if ((baseline.currency.get(route) ?? 'CNY') !== card.currency) count += 1
-    for (const [model, row] of card.models) {
+    for (const row of card.models.values()) {
       if (modelDirty(route, row, baseline.models)) count += 1
     }
   }

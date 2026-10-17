@@ -114,7 +114,7 @@ function unpricedKeysOf(view: ProviderUsageView): ReadonlySet<string> {
   return keys
 }
 
-/** 四桶齐全的 totals——渲染对它做算术（`totalsTokens`，src/types.ts:645-650），所以四个桶必须在场且是数。 */
+/** 四桶齐全的 totals——渲染对它做算术（`totalsTokens`，`src/types.ts`），所以四个桶必须在场且是数。 */
 function isBucketTotals(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
   const totals = raw as Partial<UsageTotals>
@@ -130,8 +130,8 @@ function isBucketTotals(raw: unknown): boolean {
  * 读 `range`，两种行清单对 `totals` 做算术并按 `model` / `provider` 排序。
  * 不合法就走面板已有的错误态（错误条 + 重试），绝不把半成品塞进 state——渲染期抛错会让这一条
  * list 型 slot 被宿主摘掉（浮窗从此打不开）。
- * 判据按 host 现在的组装处与类型：`usageByRange`（src/index.ts:434-459）、
- * `ProviderUsageView`（src/types.ts:404-430，`providerLabels` 缺席由渲染侧 `?? {}` 兜）。
+ * 判据按 host 的组装处与类型：`usageByRange`（`src/index.ts`）、`ProviderUsageView`
+ * （`src/types.ts`，`providerLabels` 缺席由渲染侧 `?? {}` 兜）。只给符号名，不写行号。
  */
 function readUsageView(raw: unknown): ProviderUsageView | null {
   if (typeof raw !== 'object' || raw === null) return null

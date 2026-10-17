@@ -1,5 +1,5 @@
 /**
- * token-book 的 stats 计算：读各分日文件，折成 totals、按日 / 按小时 /
+ * dsh-tokbook 的 stats 计算：读各分日文件，折成 totals、按日 / 按小时 /
  * 按 (provider, model) 行——并保留一行 (日, 模型, provider, rate 身份)。
  * 已冻结的分日文件从落盘 rollup 提供；只有今日文件每次调用都读。解析后的
  * 分日文件缓存在进程内存。
@@ -7,11 +7,11 @@
 
 import { readdir, readFile, stat, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { DAY_SETS, dayKeyOf } from './price-format.ts'
+import { dayKeyOf } from './price-format.ts'
 import { dayOfFileName } from './usage-log.ts'
 import { parseRecord } from './usage-record.ts'
 import {
-  type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type SlotRef, type TokenSummary,
+  type BillingMap, type CostedSummary, type CostedModelRow, type PricingTable, type ProviderRange, type RateKey, type TokenSummary,
   type UsageDayRow, type UsageHourRow, type UsageModelRow, type UsageRateRow, type UsageRecord,
   type UsageTotals, UNPRICED_KEY,
 } from './types.ts'
@@ -85,11 +85,6 @@ function hourKey(time: number): string {
   const date = new Date(time)
   const hour = String(date.getHours()).padStart(2, '0')
   return `${dayKeyOf(time)}T${hour}`
-}
-
-function dayStart(day: string): number {
-  const [year, month, date] = day.split('-').map(Number)
-  return new Date(year!, month! - 1, date!).getTime()
 }
 
 function dayKeyOffset(day: string, back: number): string {
@@ -313,21 +308,6 @@ function isTotals(value: unknown): value is UsageTotals {
 }
 
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/u
-
-function isSlotRef(value: unknown): value is SlotRef {
-  if (typeof value !== 'object' || value === null) return false
-  const ref = value as Record<string, unknown>
-  return typeof ref.start === 'number' && Number.isFinite(ref.start)
-    && DAY_SETS.some(days => days === ref.days)
-}
-
-function isRateKey(value: unknown): value is RateKey {
-  if (typeof value !== 'object' || value === null) return false
-  const key = value as Record<string, unknown>
-  // 「无价」的显式身份（types.ts 的 `unpriced`）：只接受 true 或缺席，别的一律不认。
-  if (key.unpriced !== undefined && key.unpriced !== true) return false
-  return key.slot === undefined || key.slot === null || isSlotRef(key.slot)
-}
 
 /** 折叠记下的文件版本表：键必须是本存储的分日文件名，值为非空版本串。 */
 function isFileStamps(value: unknown): value is Record<string, string> {

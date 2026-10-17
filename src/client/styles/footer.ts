@@ -1,6 +1,8 @@
 export const CSS_FOOTER = `/* 侧边栏入口按钮 */
 /* 对齐设置入口的几何（ui-settings-general SettingsRoot）：宽栏里一条全宽
-   42px bar，56px rail 上一个 36px 圆形图标钮。 */
+   42px bar；窄栏里一个 36px 圆形图标钮（rail）。
+   圆角**不跟它**——宿主用 --dsw-radius-md（12px），本插件的圆角是直角不变量
+   （--dtpl-radius: 0px，见 tokens 第七节）。 */
 [data-plugin="dsh-tokbook"].dtpl-footer{
   flex:1;min-width:0;
   display:flex;align-items:center;gap:8px;

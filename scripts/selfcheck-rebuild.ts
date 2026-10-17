@@ -18,11 +18,9 @@
  *     事件只作废它自己,不截断该会话后面的历史。
  *
  * Run: node --experimental-strip-types scripts/selfcheck-rebuild.ts
- *
- * @module dsh-tokbook/selfcheck-rebuild
  */
 
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { UsageLog, dayFileNameOf, resetUsageLogState } from '../src/usage-log.ts'

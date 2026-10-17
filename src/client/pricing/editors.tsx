@@ -6,7 +6,7 @@
  * 谁被选中由面板决定（两个下拉），所以本文件不持有选择状态——只通过小回调下发改动。
  */
 
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { DAY_SET_HINTS, DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange, type HourRange } from '../../price-format.ts'
 import type { BillingNature, DaySet, PriceCurrency } from '../../types.ts'
 import { counterpartOf, unitOf, type MoneyView } from './currency.ts'
@@ -49,7 +49,6 @@ export function CalendarEditor({ entries, missingYears, dirty, onChange }: {
   onChange: (year: string, next: CalendarDraft | null) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const [adding, setAdding] = useState('')
   const [addingTouched, setAddingTouched] = useState(false)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [typed, setTyped] = useState<string | null>(null)

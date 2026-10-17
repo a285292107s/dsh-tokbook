@@ -1,6 +1,6 @@
 # dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-10-04 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-10-17 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。本文只留**从代码推不出来**的东西：外部
 > 系统的机制与事实、为什么是现在这个形状、每条选择的代价。权威来源只有两个——官方文档站点
@@ -13,9 +13,9 @@
 
 > 本文是**设计推理与演进记录**，不是当前接口的唯一真相。时间线如下：
 >
-> - §1–§11 描述**第一期**框架（外置插件 + 浮窗 + 每会话聚合）。**§8 / §9 已于 2026-09-16 删除**：
->   接入步骤归 [`../README.md`](../README.md)，一期文件树读 README「布局」。**这两个号不再复用**
->   ——旧文字里引用它们的按 git 历史追溯。
+> - §1–§11 描述**第一期**框架（外置插件 + 浮窗 + 每会话聚合）。**§9 已于 2026-09-16 删除**（一期
+>   交付物清单），**号不再复用**；**§8 只剩一句指针**，正文搬去了 [`../README.zh.md`](../README.zh.md)
+>   的「安装」与「布局」。旧文字里引用它们的按 git 历史追溯。
 > - 「重构说明」与 §3.1 描述**第二期 = 当前代码形态**（逐请求 JSONL 账本 + 成本计价 + 通道/额度），
 >   **以此段为准**；§1 的「本期不做成本」与 §11 的预判已被二期推翻。成本语义见
 >   [`CONTRACTS.md`](CONTRACTS.md)。
@@ -26,7 +26,7 @@
 >   金额收口成「现价刻度」并且只在 30 天及更短的窗口里给（推理见 §5 末「为什么价表只有一份现价」）。
 >   「价段」这个词在第三期文字里仍会出现，读到它按第四期理解：那份价就是当前价。
 >
-> **精确接口** → [`CONTRACTS.md`](CONTRACTS.md)；实现与操作现状 → [`../README.md`](../README.md)；
+> **精确接口** → [`CONTRACTS.md`](CONTRACTS.md)；实现与操作现状 → [`../README.zh.md`](../README.zh.md)；
 > HMR → [`HMR.md`](HMR.md)。
 
 ---
@@ -52,9 +52,11 @@ Web UI 左下角（设置按钮上方）加一个入口按钮，点击弹出独�
 - **构建 / 语言**：TypeScript + 自建 bundle——外置包拿不到单仓 `clientBundle()` 预设（§7）。
 - **捕获**：`assistant/message` 的 `usage`——通道上报、持久、可重放、exactly-once，是唯一的权威计量；
   `session-telemetry` 可能丢 / 重，不能当账本（§5）。
-- **持久化**：`storage-domain`——base 层默认挂载的、schema 校验的 JSON 后端，不必自己挂。
+- **持久化**：自己按日追加 JSONL 到数据目录（`node:fs`）——账本是流水账，不是「几条小状态」，
+  所以不吃 base 层那套 schema 校验的 JSON 后端（`storage-domain`）。（§5 有同一条的完整理由。）
 - **host→浏览器**：`ctx.webServer` 的精确 Fetch 路由——外置插件难以贡献生成式 Typert Remote。
-- **UI**：只填**已声明**的 `sidebar.footer.action` + `shell.overlay`——外置插件不能声明新 slot（§6）。
+- **UI**：只填**已声明**的槽——入口按钮 + 浮窗（`sidebar.footer.action` + `shell.overlay`），
+  以及后来加的会话词元页（`conversation.view`）。外置插件不能声明新 slot（§6）。
 
 ## 3. DSH 插件机制（必要背景）
 
@@ -77,12 +79,13 @@ Web UI 左下角（设置按钮上方）加一个入口按钮，点击弹出独�
   patch 层；加载顺序 = 各 bundle 层 → profile 的 `cordis.patch.yml` → `$DSH_HOME/cordis.patch.yml` →
   `--patch` 覆盖层（`apps/cli/src/profile-boot.ts`）。
 - `token-meter`、`session-projection`、`storage`、`storage-json`、`storage-domain` 都在 **base 层**默认挂载，
-  所以你的插件无需自己挂 token-meter / storage，直接注入读取即可。
+  所以插件要用它们时直接注入即可、不必自己挂。（**本项目只用得上其中的投影类服务**：账本自己写
+  JSONL，见 §2 与 §5。）
 
 ## 4. 总体架构
 
 两个半区，一条单向数据流：**host 拥有全部数据**（持久事件流 → 折叠 → 账本落盘 → 精确 Fetch 路由），
-**browser 只注册两个已声明的 slot 并读那条路由**；浮窗开关是入口组件的私有 React state。**为什么：**
+**browser 只注册三个已声明的 slot 并读那条路由**（入口按钮 / 浮窗 / 会话词元页）；浮窗开关是入口组件的私有 React state。**为什么：**
 
 - **数据只过 host**：账本要跨重启、要被别的消费者读，而 browser 半区只活在一个页面里；持久
   `session/event` 流也只有 host 看得到。
@@ -103,8 +106,10 @@ Web UI 左下角（设置按钮上方）加一个入口按钮，点击弹出独�
   工作区注册表），所以价表改了、挂载点变了，下一次读取就是新答案，历史一行都不用重写——代价是每次读取重算。
 - **真源只有一个写者**：追加走串行队列 + 进程级 request-id 去重，幂等靠从磁盘重建的去重集；多写者会让
   rollup / 缓存 / refile 互踩。
-- **持久化走 `storage-domain`**（base 层默认挂载的、schema 校验的 JSON 后端），不必自己开文件；
-  **不要用 `session-telemetry` 记账**——官方文档写明它的记录是 best-effort、可能丢/重。
+- **持久化自己开文件，不走 `storage-domain`**：账本按日写 JSONL（`src/usage-log.ts` 用 `node:fs`），
+  派生文件原子写（temp + rename）。宿主那套 schema 校验的 JSON 后端是为「每条键一份小状态」设计的，
+  装不下逐行追加的流水账；**不要用 `session-telemetry` 记账**——官方文档写明它的记录是
+  best-effort、可能丢/重。
 
 ### 为什么价表只有一份现价，以及金额为什么只在 30 天窗口里给（第四期）
 
@@ -150,7 +155,7 @@ Web UI 左下角（设置按钮上方）加一个入口按钮，点击弹出独�
   开放一个 Cordis 服务，供消费插件注册 tab / file viewer，但它自建的是**右侧面板工作台**——位置与
   形态都不是一回事（右侧面板 ≠ 左下角入口 + 浮窗），且带版本墙与 `pnpm approve-builds` 门槛。
 
-> 何时转 B：只有当 token 账本想成为「那个侧边栏工作台」里的一等 tab 时，再以 optional peerDependency 引入。
+> 何时转 B：只有当词元账本想成为「那个侧边栏工作台」里的一等 tab 时，再以 optional peerDependency 引入。
 
 **复核结论：** 两个槽都是 list + root、additive，外置插件可直接填入；**都是「纯 slot 注册」，在任何 harness
 上生效**。只有想要「左栏常驻入口」而非 footer 按钮，才需要 in-repo 改 `ui-sidebar`；逐槽 props 与注册写法见 `src/client/index.ts`。
@@ -166,9 +171,12 @@ Web UI 左下角（设置按钮上方）加一个入口按钮，点击弹出独�
 的契约只有一个：模块体被包进 `window.__ModuleLoader__.load({ id, factory })` 的 **factory 闭包**——加载
 时只注册 factory，真正执行（materialize）时才跑模块体。构建脚本细节读 `scripts/build-client.mjs`。
 
-**基线外部依赖**必须与 DSH 的 `PLATFORM_MODULES` 完全一致（react 系 + cordis + client 的 store /
-ui-slots / ui-primitives），**DSH 升级改了这份清单就得同步**。单仓里这些纪律由
-verify-client-packages / bundle-purity gate 强制，外置包拿不到那些门，只能自己守：
+**基线外部依赖取的是 `PLATFORM_MODULES` 的一个子集，不是全等于它**：清单里只列本插件 client
+半区**实际 import** 的 specifier（当前只有 `react` 与 `react/jsx-runtime`），因为它们才是允许留在
+bundle 外的。多列几个看起来无害，实际会让一个越界的 import 静默通过构建、到运行时才靠宿主的
+模块表兜住——所以这份清单**兼一道门禁**（`verifyClientBundle` 判死表外的 require）。真源是
+`scripts/build-client.mjs` 的 `BASELINE_EXTERNALS`；**DSH 升级时按它新增的基线模块核对**。
+单仓里这些纪律由 verify-client-packages / bundle-purity gate 强制，外置包拿不到那些门，只能自己守：
 
 - 跨包类型一律 `import type`；绝不 runtime-import 另一个 feature 插件的值。
 - 非基线的运行时 `require` 必须在 `package.json` 的 `dsh.client.external` 里声明（`inject` 只是信息性依赖边）。
@@ -188,7 +196,7 @@ verify-client-packages / bundle-purity gate 强制，外置包拿不到那些门
 
 ## 8. 接入 `web` profile 的步骤（外置）
 
-**操作步骤的真源是 [`../README.md`](../README.md)「装进 DSH web profile」**——`dsh plugin add`、patch
+**操作步骤的真源是 [`../README.zh.md`](../README.zh.md)「安装」**——`dsh plugin add`、patch
 里那一行，以及「普通插件 vs `dsh.bundle` 包」的取舍都在那里。client 改动怎么生效（`rev` 不可变缓存、
 刷新 / 重启 + 硬刷新 / link 安装）见 [`HMR.md`](HMR.md)。
 
@@ -201,14 +209,14 @@ verify-client-packages / bundle-purity gate 强制，外置包拿不到那些门
    何时该反悔：一旦需要大量复用 DSH 内部 UI 模块、或走生成式 Remote，in-repo 会明显省力。
 2. **host→浏览器数据通路**：`ctx.webServer` 的精确 Fetch 路由，不用生成 Typert Remote；要实时可用 SSE。
 3. **记账权威源**：`assistant/message` 的 `usage`；不用 `session-telemetry`（可能丢 / 重）。
-4. **UI 槽位**：只填已声明的 `sidebar.footer.action` + `shell.overlay`，**无需改 DSH 仓库**（路线 A，见 §6.0）。
+4. **UI 槽位**：只填已声明的 `sidebar.footer.action` + `shell.overlay`（+ 后来的 `conversation.view`），**无需改 DSH 仓库**（路线 A，见 §6.0）。
 5. **不要看 `dsh-costbook`**（已废弃 / 有问题的实现），不要照抄它。
 
 ## 11. 风险与后续
 
 | 项 | 风险 / 说明 |
 |---|---|
-| 外置 bundle 格式 | 需自己维护基线 external 列表与纯净化纪律；DSH 升级若改 `PLATFORM_MODULES` 需同步。风险可控 |
+| 外置 bundle 格式 | 需自己维护基线 external 列表与纯净化纪律（它同时是判死表外 import 的门禁）；DSH 升级若新增本插件用到的基线模块需同步。风险可控 |
 | client 插件默认导出 | 不可给 client 入口加 `export default`（cordis loader `exports.default ?? exports` 会掩盖 `.inject`，报 “without inject”）。见 §7.4 |
 | 设置卡片（若后续做） | `settings.plugin.item` 卡片在 stock harness 上被 `WEB_SETTINGS_NAMESPACES` allowlist 卡住、显示“not exposed”；需在 DSH 的 api-proxy 加一行，或等官方把声明迁进 `settings.register()`。本项目 UI 走 footer+overlay（**纯 slot 注册，不受影响**），仅当后续加配置卡片时才需注意 |
 

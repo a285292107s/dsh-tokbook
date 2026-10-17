@@ -7,11 +7,11 @@
 
 ## 事实（决定这条的原因）
 
-- **日文件只追加、绝不重写**（[`CONTRACTS.md`](CONTRACTS.md) §3）。因此任何写进账本的字段都只能覆盖**此后**的行。
+- **日文件只追加、绝不重写**（[`CONTRACTS.md`](../CONTRACTS.md) §3）。因此任何写进账本的字段都只能覆盖**此后**的行。
 - 账本里此刻已有约 **3.9 万行 / 358 个会话**的存量行，它们不可能回头补上轮次。
 - 轮次与步骤**本来就在事件里**，不需要重新推导：`assistant/message` 带 `turn` + `step` + `usage`，`llm/retry` 带 `turn` + `step`，`turn/end` 只带 `turn`，`compaction/summary` 两个都不带。
 - 宿主已经有一条只读通道：`sessionPersistence.open(id, 'read')`，其 `read` **不取写所有权**，与正在写的宿主并行安全（`src/sync.ts` 已经在用，并且跳过 `inheritedEventCount` 的父会话前缀）。
-- 所以 join **不是**在第二处重写轮次折叠逻辑：它只是把 `requestId` 映射到两个现成字段。唯一需要小心的是压缩行——它归「轮间」，见 [`CONTEXT.md`](CONTEXT.md)。
+- 所以 join **不是**在第二处重写轮次折叠逻辑：它只是把 `requestId` 映射到两个现成字段。唯一需要小心的是压缩行——它归「轮间」，见 [`CONTEXT.md`](../CONTEXT.md)。
 
 ## 被否决的方案
 

@@ -48,8 +48,8 @@ function readAutoMinutes(): number {
  * 额度列表载荷的形状判定：渲染只解引用 `providers`（每项进请求 query、又当 React key），
  * 所以只认「字符串数组」。不合法就走面板**已有的**错误态（错误条 + 重试），绝不把半成品塞进
  * state——渲染期抛错会让这一条 list 型 slot 被宿主摘掉（浮窗从此打不开）。
- * 判据按 host 现在的组装处与类型：`QuotaView.providers`（src/types.ts:575-581）、
- * 路由原样 JSON 作答（src/routes.ts:211-213）。
+ * 判据按 host 的组装处与类型：`QuotaView.providers`（`src/types.ts`）、路由原样 JSON 作答
+ * （`src/routes.ts` 的额度 route）。只给符号名，不写行号——行号每改一次就错一次。
  */
 function readProviderList(raw: unknown): string[] | null {
   if (typeof raw !== 'object' || raw === null) return null
@@ -60,11 +60,10 @@ function readProviderList(raw: unknown): string[] | null {
 
 /**
  * 单张额度卡载荷的形状判定：只覆盖渲染**真正会无条件解引用**的字段——`state`（决定走哪一支正文）
- * 与 `windows`（`ringPressure` 对它 `find` / `for…of`，metrics.ts:79/88；正文里 `[...card.windows]`，
- * QuotaCard.tsx:113），以及窗口条目本身与 `credits` / `usage` 这两个**在场就必须是对象**的可选字段
- * （渲染用 `!== undefined` 判在场、随后直接读属性，QuotaCard.tsx:125/128 与 metrics.ts:26-28、220-236
- * 都没有可选链，`null` 会过关再抛）。其余可选字段与 `gate` / `title` / `message` 等一律不收紧。
- * 判据按 host 的卡的组装处与类型：`QuotaCard`（src/types.ts:555-573）。
+ * 与 `windows`（`ringPressure` 对它 `find` / `for…of`；正文里 `[...card.windows]`），以及窗口条目
+ * 本身与 `credits` / `usage` 这两个**在场就必须是对象**的可选字段（渲染用 `!== undefined` 判在场、
+ * 随后直接读属性，几处都没有可选链，`null` 会过关再抛）。其余可选字段与 `gate` / `title` /
+ * `message` 等一律不收紧。判据按 host 的卡的组装处与类型：`QuotaCard`（`src/types.ts`）。
  */
 function readQuotaCard(raw: unknown): QuotaCard | null {
   if (typeof raw !== 'object' || raw === null) return null

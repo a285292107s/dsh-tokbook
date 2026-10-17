@@ -1,17 +1,16 @@
 # dsh-tokbook · DSH 热重载（HMR）机制与本项目实况
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-09-23 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-17 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）插件热重载机制的**官方语义 + 本项目实际接线与实测**。
 > 官方依据：<https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>（“插件与生命周期”页）。
-> 本地核对：运行中的 Web GUI = 全局安装 `@deepseek-ai/dsh@0.1.7-alpha.1`；DSH 源码检出
-> `C:\Users\28529\Desktop\deepseek-harness` = `0.1.7-alpha.2`（`00102833df`，2026-09-22，作机制参考，文中已注明出处）。
+> 本地核对：运行中的 Web GUI 与 DSH 源码检出都在 `C:\Users\28529\Desktop\deepseek-harness`；两者版本号
+> **不在这里写死**（每升一次 DSH 就过期一次）——读 `node_modules/@deepseek-ai/dsh/package.json` 的
+> `version` 与检出根 `package.json` 的 `version` 即可。文中引的源码行号同样会随升级漂移，按符号名找。
 > 整理时间：2026-09-07（同日修正 §2.1 / §4：模块级 HMR 的卸载**不被等待**、模块级状态**不跨 HMR
 > 共享**——早期版本把这两点说反了，详见 §4 结尾说明）。
 > **2026-09-23 修订**：模块改名 `cordis-plugin-hmr` → `dsh-hmr`；profile patch 里**重申模块名**的那一行会被
-> 启动器按「name mismatch」整行跳过（本项目正是这样静默失去了模块级热更，见 §3.1）。§2.1 / §2.2 / §3.1 /
-> §5 / §6 的包名、base 行语义、版本与实测证据均已按 `0.1.7-alpha.1` 重新核对；§3.2 的 client 链本轮只做了
-> 一次抽查（SSE graph 与 `dsh-tokbook` 的独立 rev 仍在），其余仍为 2026-09-11 的记录。
+> 启动器按「name mismatch」整行跳过（本项目正是这样静默失去了模块级热更，见 §3.1）。
 
 ---
 
@@ -35,12 +34,12 @@
 
 ## 2. 这套机制在 DSH 里的实现落点（源码核对）
 
-以下路径相对 DSH 源码检出 `C:\Users\28529\Desktop\deepseek-harness`（`0.1.7-alpha.2`），
-行为与运行中的 `0.1.7-alpha.1` 安装一致（已逐条核对安装版 patch/产物）。
+以下路径相对 DSH 源码检出 `C:\Users\28529\Desktop\deepseek-harness`，行为与运行中的全局安装一致
+（已逐条核对安装版 patch/产物）。检出与安装的版本号见文首说明，不在正文重复。
 
 ### 2.1 host 侧模块级 HMR：`@deepseek-ai/dsh-hmr`
 
-- **模块名**：`0.1.7` 起 DSH 用 `@deepseek-ai/dsh-hmr`（实现 `packages/boot/hmr/src/index.ts`
+- **模块名**：DSH 现用 `@deepseek-ai/dsh-hmr`（实现 `packages/boot/hmr/src/index.ts`
   + `watch-config.ts`）。同仓库 `vendor/hmr` 仍是上游 `@deepseek-ai/cordis-plugin-hmr@1.0.19`
   的 vendored 副本；dsh-hmr 的 README 对此的说法是 “The vendored package remains available;
   DSH profiles use this package.”——**留着的是 vendored 那份，DSH 用的是 dsh-hmr**，而
@@ -81,10 +80,10 @@
 
 ### 2.2 base 行就是 watch-only 兜底：只 watch 配置不需要额外行
 
-`0.1.7` 的 base bundle 已经把 `hmr` 行插进组合（§2.1），`0.1.2-rc.1` 里“组合中没有 hmr 服务时由
+当期的 base bundle 已经把 `hmr` 行插进组合（§2.1）；更早的 `0.1.2-rc.1` 里“组合中没有 hmr 服务时由
 启动器另建一个 `root: []` 实例”的兜底已不存在（源码里已无 `patchReload`）。因此：
 - base 行（`root: []`）→ 改 `cordis.patch.yml` / home patch 可热生效，**改插件源码不会热更**；
-- 再把该行的 `config.root` 覆盖成 `['.']`（§3.1）→ 模块级 HMR 才激活。
+- 再把该行的 `config.root` 覆盖成**仓库所在的那些相对路径**（§3.1）→ 模块级 HMR 才激活。
 
 ### 2.3 client（浏览器 bundle）侧的 reload 链：`@deepseek-ai/dsh-client-hmr`
 
@@ -116,10 +115,17 @@
 - id: hmr
   disabled: false
   config:
-    base: 'file:///C:/Users/28529/Desktop/dsh-tokbook'
-    root: ['.']
-    ignored: ['**/node_modules', '**/.*', 'cache', 'data']
+    base: 'file:///C:/Users/28529/Desktop'
+    root: [ 'dsh-connect-zcode/dsh-connect-zcode', 'dsh-tokbook' ]
+    ignored: [ '*node_modules*' ]
 ```
+
+这份 profile 同时挂着**不止一个**本地 link 的插件仓库，所以 `base` 是那些仓库的**公共父目录**、
+每个仓库在 `root` 里各占一条——`base` 只能指一个目录，把它指向某一个仓库就会让另一个仓库
+不再热更。`ignored` 那条值得抄走：Windows 上 `relative()` 给的是**反斜杠**路径，而 picomatch
+的 `**/` 以 `/` 作分隔符、且把 `\` 当转义符，所以 `**/node_modules` 这类写法对内层路径**完全
+匹配不上**——node_modules 不被剪枝，chokidar 会跟着仓库里的软链扫进整个 DSH 安装（实测六万多个
+目录），把启动阻塞到分钟级。用不含分隔符的 `*node_modules*` 才命中。
 
 **⚠️ 不要写 `name:`**：启动器按 (id, name) 匹配 patch 行，模块名对不上就**整行跳过**（`disabled` /
 `config` 一起丢），只在启动输出里留一句。2026-09-23 前的本机配置写的还是改名前的
@@ -172,12 +178,14 @@ mtime 作探针（它只在构造时重写，同样只在 reload 时变），今
 
 ### 3.2 Client 侧：链路是活的；本项目主路径 = `pnpm build` + 浏览器刷新
 
-- `@deepseek-ai/dsh-client-hmr` 在 web-app bundle 里**常驻挂载**（§2.3），运行中的 GUI 实测
-  `GET http://127.0.0.1:3080/plugins/events` 能收到 SSE：首帧 `: connected` + `{"type":"graph",…}`
-  （2026-09-23 实测 64 个 entry，graph rev `88901c1372ed`）。
-- **reload 链确实活着（实测）**：graph 里每个 entry 带自己的内容哈希 rev，`dsh-tokbook` 是
-  `16c36ea4e189`（独立于其它 entry）——`pnpm build` 之后 `clientModules.rebuilt()` 会在**运行中**
-  按新内容哈希改写该插件的 rev 并经 SSE 广播（`rebuilt` 帧是浏览器热换的触发信号）。
+- `@deepseek-ai/dsh-client-hmr` 在 web-app bundle 里**常驻挂载**（§2.3）。要确认链活着，看运行中的
+  GUI 的 `GET http://127.0.0.1:3080/plugins/events`（SSE）：首帧是 `: connected`，随后一帧
+  `{"type":"graph",…}` 列出所有 client entry 及各自的 rev。**具体条目数与哈希值不写在这里**——它们
+  随每次构建变化，抄下来只会过期；要核对就在现场读那一帧。
+- **reload 链是否真的活着**：graph 里每个 entry 带**自己的**内容哈希 rev，`dsh-tokbook` 的那一条
+  独立于其它 entry。`pnpm build` 之后 `clientModules.rebuilt()` 会在**运行中**按新内容哈希改写该
+  插件的 rev 并经 SSE 广播（`rebuilt` 帧是浏览器热换的触发信号）。判据就是「`dsh-tokbook` 的 rev
+  在 build 后变了」——**不要**拿某个固定哈希值当预期值。
 - **本项目口径：client 改动以 `pnpm build` + 浏览器刷新为主路径，不依赖免刷新热更**（浏览器刷新
   成本可接受）：
 
@@ -249,7 +257,7 @@ mtime 作探针（它只在构造时重写，同样只在 reload 时变），今
 
 ## 5. 易错点 / 一页 Checklist
 
-- [ ] base bundle 已经插入 `hmr` 行（`@deepseek-ai/dsh-hmr`，有 profileContext 时启用，`root: []` = 只 watch 配置）；模块级 HMR 要 profile patch **按 id** 覆写 `config.root: ['.']`（本项目已配，勿删）。
+- [ ] base bundle 已经插入 `hmr` 行（`@deepseek-ai/dsh-hmr`，有 profileContext 时启用，`root: []` = 只 watch 配置）；模块级 HMR 要 profile patch **按 id** 覆写 `config.root`，列出要热更的仓库（本项目已配，勿删；确切内容见 §3.1）。
 - [ ] patch 行**绝不写 `name:`**：写成改名前的 `@deepseek-ai/cordis-plugin-hmr` 会被「name mismatch」整行跳过、静默退回 `root: []`；用 `dsh --profile web --dump-config` 核对。
 - [ ] 改 host 源码后必须 `pnpm build`（esbuild 落盘 `lib/index.js`）才触发 host HMR；`tsc --watch` 只产 `.d.ts`。
 - [ ] 改 client 源码后必须 `pnpm build`（落盘 `lib/client.js`）；主路径 = 刷新浏览器取新 rev；client-hmr 活着时可能 ≤500ms 免刷新热更（加分项，不依赖）。
@@ -264,13 +272,12 @@ mtime 作探针（它只在构造时重写，同样只在 reload 时变），今
 
 ## 6. 版本与出处（本次核对）
 
-- 运行中的 Web GUI：`@deepseek-ai/dsh@0.1.7-alpha.1`（`C:\Users\28529\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh`）。
-- 安装到 web profile 的机制包：`C:\Users\28529\.dsh\profiles\node_modules\@deepseek-ai\` 的 junction 指向
-  全局安装；本轮实际生效的是 `dsh-hmr@0.1.7-alpha.1`、`dsh-client-hmr@0.1.7-alpha.1`、
-  `dsh-web-app@0.1.7-alpha.1`、`dsh-base@0.1.7-alpha.1`（`dsh-base` 的 `dependencies` 里是
-  `@deepseek-ai/dsh-hmr: ^0.1.7-alpha.1`，**不是** `cordis-plugin-hmr`）。该目录里遗留的
-  `cordis-plugin-hmr` junction 目标已不存在（悬空链接：DSH 会跳过，不影响启动）。
-- 源码检出（`0.1.7-alpha.2`，`00102833df` 2026-09-22，机制参考）：`packages/boot/hmr/src/{index,watch-config}.ts`、
+- 运行中的 Web GUI 与安装到 profile 的机制包都是**同一份全局安装**：
+  `C:\Users\28529\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh`。`$DSH_HOME/profiles/node_modules/@deepseek-ai/`
+  里那一堆 junction 全部指向它，所以 `dsh-hmr` / `dsh-client-hmr` / `dsh-web-app` / `dsh-base` 与宿主
+  同版本——**要版本号就读宿主 `package.json` 的 `version`**（本文不写死，见文首说明）。`dsh-base` 的
+  `dependencies` 里是 `@deepseek-ai/dsh-hmr`，**不是** `cordis-plugin-hmr`。
+- 源码检出（机制参考，路径相对检出根）：`packages/boot/hmr/src/{index,watch-config}.ts`、
   `vendor/loader/src/{index,internal}.ts`、`packages/client/hmr/src/{index.ts,client/index.ts}`、
   `packages/client/modules/src/index.ts`、`packages/bundle/base/cordis.patch.yml`、
   `packages/bundle/web-app/cordis.patch.yml`、`apps/cli/tests/profile-hmr.spec.ts`、`scripts/dev-web.ts`。

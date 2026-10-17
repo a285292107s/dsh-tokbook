@@ -11,7 +11,7 @@ import {
   QUERY_FORCE, QUERY_MODEL, QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH, QUERY_SESSION,
   ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_PRICING_LOOKUP, ROUTE_PRICING_SYNC, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE,
 } from './route-paths.ts'
-import { PROVIDER_RANGES, type ModelsDevCandidate, type PriceVerdict, type PricingLookupResult, type PricingSyncResult, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SessionUsageView, type SyncStatusView, type TokBookOverview } from './types.ts'
+import { PROVIDER_RANGES, type PriceVerdict, type PricingLookupResult, type PricingSyncResult, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SessionUsageView, type SyncStatusView, type TokBookOverview } from './types.ts'
 import type { PriceParse } from './pricing.ts'
 
 /** 本插件用到的 host webserver 子集。 */

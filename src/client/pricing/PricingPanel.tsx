@@ -147,13 +147,13 @@ function rememberPicked(pick: Picked | null): void {
 
 /**
  * 价格表载荷的形状判定：只盖渲染期**无条件解引用**的那三样——`routes`（`draftFromView`
- * 逐个遍历，draft.ts:498）、`calendar`（同处 `Object.entries(view.calendar ?? {})`，
- * draft.ts:524）、`calendarMissing`（`CalendarEditor` 的 `filter`/`join`，editors.tsx:64/127）。
+ * 逐个遍历）、`calendar`（同处 `Object.entries(view.calendar ?? {})`）、`calendarMissing`
+ * （`CalendarEditor` 的 `filter`/`join`）。
  * 不合法按一次读失败处理（下方 `loadError` 分支 + 重试），绝不交给 `seed` / `mergeStaged`：
  * 半成品进 state 会让渲染期抛错，而宿主会为一次渲染期异常把这条 slot 摘掉（浮窗从此打不开）。
  * 可选字段（`fx`、模型行的 `name` / `unpriced` / `price`…）一律不收紧。
- * 判据按 host 现在的组装处与类型：`readPricingView`（src/pricing-view.ts:239-246）、
- * `PricingView`（src/types.ts:264-278）。
+ * 判据按 host 的组装处与类型：`readPricingView`（`src/pricing-view.ts`）与 `PricingView`
+ * （`src/types.ts`）——这里只给符号名，不写行号（行号每改一次就错一次）。
  */
 function readPricingView(raw: unknown): PricingView | null {
   if (typeof raw !== 'object' || raw === null) return null
@@ -616,7 +616,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           onChange={updateCalendar}
         />
       )}
-      {/* 路由来自本机 settings.yaml 与正在运行的适配器；一个都没有时不画两个空下拉——
+      {/* 通道来自本机 settings.yaml 与正在运行的适配器；一个都没有时不画两个空下拉——
           没有选项的控件只会把「这里本来没有内容」说成「你选不了」。 */}
       {state.routes.size > 0 && card !== undefined && (
         <div className="dtpl-price-pick">
@@ -751,7 +751,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         </div>
       )}
 
-      {/* 读不到就是读不到：错误条已经说了原因，下面不再补一句「没有可显示的路由」——
+      {/* 读不到就是读不到：错误条已经说了原因，下面不再补一句「没有可显示的通道」——
           那句话在说「这里本来就没有内容」，而真相是这一份没读到。 */}
       {view === null
         ? (loadError === null
@@ -765,9 +765,9 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         : state.routes.size === 0
           ? (
             <div className="dtpl-empty">
-              <p className="dtpl-empty-title">没有可显示的路由</p>
+              <p className="dtpl-empty-title">没有可显示的通道</p>
               <p className="dtpl-empty-sub">
-                路由来自本机 settings.yaml 与正在运行的适配器；账本或价格表里出现过的路由也会列出来。
+                通道来自本机 settings.yaml 与正在运行的适配器；账本或价格表里出现过的通道也会列出来。
               </p>
             </div>
           )

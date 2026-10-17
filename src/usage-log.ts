@@ -1,5 +1,5 @@
 /**
- * token-book 的持久 JSONL 存储：按本地日的分文件、每目录一条串行追加队列，以及 live
+ * dsh-tokbook 的持久 JSONL 存储：按本地日的分文件、每目录一条串行追加队列，以及 live
  * hook 与 history sync 共享的进程级 request-id 去重集。一行落在其事件时间的分日文件
  * （`record.time` 的本地 Y-M-D），绝不是追加时的墙钟。
  *

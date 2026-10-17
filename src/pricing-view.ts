@@ -10,9 +10,10 @@
 import { billingOf, rateKeyAt, readPriceFile } from './pricing.ts'
 import { readPricingSyncState } from './pricing-sync-state.ts'
 import type {
-  HolidayCalendar, ModelEntry, PriceEntry, PriceSlot, PricingEntryInput, PricingModelView,
+  HolidayCalendar, PriceEntry, PriceSlot, PricingEntryInput, PricingModelView,
   PricingRouteView, PricingSlotInput, PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
 } from './types.ts'
+
 interface Logger {
   error(...args: unknown[]): void
 }

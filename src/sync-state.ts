@@ -1,5 +1,5 @@
 /**
- * token 账本的首次启动 marker 与持久化同步基线。
+ * 词元账本的首次启动 marker 与持久化同步基线。
  *
  * 首次启动 marker（`initialized.marker`）门控一次性自动历史回填。同步基线
  * （`sync-progress.json`）是 host 内存 `syncedBySession` map 的跨进程记忆：

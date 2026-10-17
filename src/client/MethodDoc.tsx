@@ -90,7 +90,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           <b>四类、互不重复</b>，加起来就是「词元合计」：
         </p>
         <div className="dtpl-doc-buckets">
-          <Bucket name="未命中输入" desc="你发过去、但没命中缓存的文字量。" />
+          <Bucket name="未缓存输入" desc="你发过去、但没命中缓存的文字量。" />
           <Bucket name="缓存读取" desc="命中了缓存、不必重新计算的文字量，费率更低。" />
           <Bucket name="缓存写入" desc="写入缓存的文字量；多数厂商不上报，多为 0。" />
           <Bucket name="输出" desc="模型回复的全部文字（含思考过程）。" />
@@ -184,7 +184,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </p>
         <div className="dtpl-doc-map">
           <div className="dtpl-doc-map-row">
-            <span><b>未命中输入</b></span>
+            <span><b>未缓存输入</b></span>
             <span className="dtpl-doc-map-arrow">↔</span>
             <span><code>prompt_cache_miss_tokens</code></span>
           </div>
@@ -199,7 +199,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
             <span><code>completion_tokens</code></span>
           </div>
         </div>
-        <p className="dtpl-doc-map-note">未命中输入、缓存读取、输出正好对应平台导出的三个字段。</p>
+        <p className="dtpl-doc-map-note">未缓存输入、缓存读取、输出正好对应平台导出的三个字段。</p>
         <p className="dtpl-doc-map-note">除第 3 节列的那几类漏项外，应逐日吻合。</p>
       </section>
 

@@ -27,7 +27,7 @@ export interface LedgerOverlayProps {
 const SYNC_FOLLOW_INTERVAL_MS = 500
 const SYNC_FOLLOW_ATTEMPTS = 60
 
-/** 四桶齐全的 totals——`totalsTokens`（src/types.ts:645-650）与 `LedgerView` 都对它做算术。 */
+/** 四桶齐全的 totals——`totalsTokens`（`src/types.ts`）与 `LedgerView` 都对它做算术。 */
 function isBucketTotals(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
   const totals = raw as Partial<UsageDayRow['totals']>
@@ -42,8 +42,8 @@ function isBucketTotals(raw: unknown): boolean {
  * `day` / `totals`）与 `records`、`MethodDoc` 的 `dataDir`、页脚的 `syncStatus` / `syncError` /
  * `lastEventAt`。不合法就走 store 的错误态（错误条 + 重试），绝不把半成品塞进 store：
  * 渲染期抛错会让这条 list 型 slot 被宿主摘掉，footer 按钮还能开，浮窗却再也打不开。
- * 判据按 host 现在的组装处与类型：`overview()`（src/index.ts:382-401，按
- * `TokBookOverview` 直出）与 `TokBookOverview`（src/types.ts:439-463）。
+ * 判据按 host 的组装处与类型：`overview()`（`src/index.ts`，按 `TokBookOverview` 直出）与
+ * `TokBookOverview`（`src/types.ts`）。只给符号名，不写行号——行号每改一次就错一次。
  */
 function readOverview(raw: unknown): TokBookOverview | null {
   if (typeof raw !== 'object' || raw === null) return null

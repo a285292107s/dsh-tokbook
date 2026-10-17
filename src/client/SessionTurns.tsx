@@ -5,19 +5,15 @@
  * 明细表（TurnBlocks + 折叠块 + 步骤行）、用时分段语言（TimeBar + stepSegments）、
  * 以及图例形状常数。按关注点拆成了 `session-timing` / `session-chart` / `session-detail`
  * 三个文件，本文件只做两件事：
- *   1. 保留 `SessionTokens` 需要的那一份导入面（`MixBand` + 那几个组件与类型），
- *      让调用方不用知道它们分在几个文件里；
- *   2. 留下 `MixBand` 与 `BUCKETS` / `TurnPreview` / `PreviewMap`——前三者是
- *      SessionTokens 直接渲染的「词元构成」视图与轮次预览类型，后者是被图表与明细共用的
- *      常量（真身在 `session-shared`，这里只重导）。
+ *   1. 保留 `SessionTokens` 需要的那一份导入面，让调用方不用知道它们分在几个文件里；
+ *   2. 留下 `MixBand`——SessionTokens 直接渲染的「词元构成」视图。
  *
  * 拆分的取舍：不拆的话这一页的**第一个交互**（柱子悬停卡片）与**最后一条明细行**的
  * 用时表共用同一份分母算式，而它们的生命周期完全不同——卡片的定位逻辑只在挂载时跑一次，
  * 用时表的列集合按整块算一次。拆开之后各改各的，不会互相牵制。
  */
 
-export { num } from './session-wire.ts'
-export { BUCKETS, type PreviewMap, type TurnPreview } from './session-shared.ts'
+export { type PreviewMap, type TurnPreview } from './session-shared.ts'
 export { TimeBar } from './session-timing.tsx'
 export { TurnChart } from './session-chart.tsx'
 export { TurnBlocks } from './session-detail.tsx'
@@ -36,11 +32,10 @@ import type { UsageTotals } from '../types.ts'
  * 只出一条分区线：框归抬头那块面板（理由与量法见 SessionTokens）。这与浮窗那张「今日词元」卡
  * 是同一配方——读数、分区线、它拆出来的四桶，都在同一个框里。
  *
- * **这里曾经有一条四桶分段条（16px 的明度分段），已删。** 它抢眼的原因不是画错了，是位置错了：
- * 抬头那个 72px 的数字才是这一页的第一读数，而这条横贯 912px 的实心黑条紧贴在它下面，
- * 面积是数字的好几倍，读者先看到的是条不是数。而它想说的比例**四个格里的「占 X%」已经逐格
- * 说完了**——条没有增加任何信息，只是把同一组百分比换了个更响的说法。删掉之后这一块的层级
- * 回到「合计 → 它的四格读数」，与浮窗那张卡一致（那张卡的四桶格下方也没有条）。
+ * **这里不放四桶分段条。** 抬头那个 72px 的数字才是这一页的第一读数，而一条横贯整行的实心
+ * 条面积是数字的好几倍，读者先看到的是条不是数。它想说的比例**四个格里的「占 X%」已经逐格
+ * 说完了**——条没有增加任何信息。反过来，这一块的层级就是「合计 → 它的四格读数」，与浮窗那张
+ * 卡一致（那张卡的四桶格下方也没有条）。
  *
  * 缓存命中率跟着这一块走、不住在抬头的参照带里：它是**构成的读法**（缓存读取占计费输入多少），
  * 与它下面那四个格说的是同一件事。放进「实际支出 / 订阅价值 / 轮数」那串里，它是个混了单位的例外。

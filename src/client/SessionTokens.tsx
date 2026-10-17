@@ -12,7 +12,7 @@ import { QUERY_SESSION, ROUTE_SESSION } from '../route-paths.ts'
 import { formatDateTime, formatDuration, formatMoney, formatShare, formatTokens } from './format.ts'
 import { UsageGlyph } from './icons.tsx'
 import { SessionShell } from './SessionShell.tsx'
-import { MixBand, TimeBar, TurnBlocks, TurnChart, num, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
+import { MixBand, TimeBar, TurnBlocks, TurnChart, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
 import { readSessionView } from './session-wire.ts'
 
 /** 轮询步长。这一页每拉一次，宿主都要读账本并把该会话日志整份读来 join——成本随
@@ -337,7 +337,7 @@ function Footer({ total, unpriced, timing }: { total: UsageTotals; unpriced: rea
         <i aria-hidden="true">·</i>
         <span className="dtpl-hero-fact">失败 <b>{total.failures ?? 0}</b> 次</span>
         <i aria-hidden="true">·</i>
-        <span className="dtpl-hero-fact">未定价 <b>{unpriced.length}</b> 个 (通道, 模型)</span>
+        <span className="dtpl-hero-fact">价格未知 <b>{unpriced.length}</b> 个 (通道, 模型)</span>
       </span>
       {timing && (
         <p className="dtpl-tok-note">
@@ -346,7 +346,7 @@ function Footer({ total, unpriced, timing }: { total: UsageTotals; unpriced: rea
         </p>
       )}
       {unpriced.length > 0 && (
-        <p className="dtpl-tok-note">未定价：{unpriced.join(' · ')}——这些行按 ¥0 计</p>
+        <p className="dtpl-tok-note">价格未知：{unpriced.join(' · ')}——这些行按 ¥0 计</p>
       )}
     </div>
   )

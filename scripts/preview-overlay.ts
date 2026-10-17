@@ -133,9 +133,9 @@ if (LEDGER) {
   ctx.plugin(host.default, ledgerDir === undefined ? {} : { path: ledgerDir })
 }
 
-/** `YYYY-MM-DD`，**本地日**：与 `localDayKey()` 同源。此前这里走 `toISOString()`（UTC 日），
- *  于是 UTC+8 的凌晨那几小时里「今天」那一行会落到前一天——hero 因此整块归零，
- *  预览看不到有数据的样子。日期键是 UI 的口径，fixture 必须照它算。 */
+/** `YYYY-MM-DD`，**本地日**：与 `localDayKey()` 同源。**不能**走 `toISOString()`（UTC 日）——
+ *  那会让 UTC+8 的凌晨那几小时里「今天」那一行落到前一天，hero 整块归零、预览看不到有数据
+ *  的样子。日期键是 UI 的口径，fixture 必须照它算。 */
 function localDay(date) {
   const pad = (n) => String(n).padStart(2, '0')
   return `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
@@ -181,16 +181,15 @@ const mk = (inputTokens, cacheReadTokens, outputTokens, requests = 1) => ({
 /**
  * 概览载荷。**键集合与 `TokBookOverview`（`src/types.ts`）逐字对齐**：host 发的是
  * `src/index.ts` 那次瘦身后的形状（omit 掉 pricing / rateRows / byHour / byModel /
- * unpricedModels）。这里此前多带了几个 host 从不发的键（byHour、rateRows、pricing、
- * currency、usdExchangeRate）——多一个键听着无害，实际是把一整类 bug 藏起来：client 若
- * 读了一个**只在 preview 里存在**的键，这里一切正常，到真宿主才炸。fixture 只端 host
- * 端得出来的形状。
+ * unpricedModels）。**不许**多带 host 不发的键——多一个听着无害，实际是把一整类 bug 藏起来：
+ * client 若读了一个**只在 preview 里存在**的键，这里一切正常，到真宿主才炸。fixture 只端
+ * host 端得出来的形状。
  *
  * 按模型 / 按工作区**不在这里**：两者是窗口的切法，随 `ROUTE_USAGE` 走（见下面的
  * USAGE_CARDS）；价格未知同理只在用量明细的通道卡与价格表里可见。
  */
 const overview = {
-  total: { requests: 214, ...mk(1_920_000, 6_310_000, 486_000, 214), compactions: 6, failures: 3, usageUnknown: 5 },
+  total: { ...mk(1_920_000, 6_310_000, 486_000, 214), compactions: 6, failures: 3, usageUnknown: 5 },
   byDay: days(14),
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
   totalCost: 8.59,
@@ -212,9 +211,9 @@ const emptyOverview = {
   lastEventAt: null, syncStatus: 'idle', syncError: null,
 }
 
-/** 诊断带的两态（`TOKBOOK_MODE=sync|syncerr`）。此前这四处界面分支在预览台里
- *  **完全够不着**：概览恒报 `done`，探针也恒答 `done`——而「正在重新扫描…」与
- *  「上次重新扫描失败：…」正是数据变旧时用户唯一会读到的两句话。 */
+/** 诊断带的两态（`TOKBOOK_MODE=sync|syncerr`）。这两态在预览台里**必须够得着**：
+ *  否则概览恒报 `done`、探针也恒答 `done`——而「正在重新扫描…」与「上次重新扫描失败：…」
+ *  正是数据变旧时用户唯一会读到的两句话。 */
 const runningOverview = { ...overview, syncStatus: 'running' }
 const syncErrorText = 'EACCES: permission denied, scandir C:\\Users\\28529\\.dsh\\sessions'
 const syncErrOverview = { ...overview, syncStatus: 'error', syncError: syncErrorText }
@@ -270,8 +269,8 @@ const PRICING_FIXTURE = {
       // 折出来。这一条让「美元报价 + 人民币计价」两件事同时可看、可点。
       route: 'commandcode', label: 'commandcode', billing: 'subscription', currency: 'USD', records: 3240,
       models: [
-        // **最长的一个身份串**（命名空间前缀 + 长版本串）：上一版在这种行上会把徽章挤到第二行。
-        // 现在身份行只有名字（整列宽都归它）；这行本身已无判定可说（峰谷与不在配置都不再上模型行）。
+        // **最长的一个身份串**（命名空间前缀 + 长版本串）：留着它当宽度压力用例——身份行整列宽
+        // 都归名字，别让后来的改动把长串挤到第二行。
         { model: 'deepseek/deepseek-v4-flash', configured: false, records: 2964, unpriced: 0,
           price: { inputPerMillion: 0.14, outputPerMillion: 0.56, cacheReadPerMillion: 0.0028,
             slots: [
@@ -902,9 +901,9 @@ function groupOf(turn, rows) {
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x')
   if (url.pathname === '/client.js') {
-    /* **按请求读盘**：此前在启动时快照一次，于是 `pnpm build` 之后必须重启本进程才看得见
-       新 bundle——这条坑曾被读成「改动没生效」，还额外被浏览器缓存放大过一次。读失败
-       （build 正在写那个文件）就沿用上一次的好副本，不拿一个读到一半的 bundle 去糊页面。 */
+    /* **按请求读盘**：不能只在启动时快照一次，否则 `pnpm build` 之后必须重启本进程才看得见
+       新 bundle（那条坑会被读成「改动没生效」）。读失败（build 正在写那个文件）就沿用上一次
+       的好副本，不拿一个读到一半的 bundle 去糊页面。 */
     try {
       const fresh = readFileSync(clientPath, 'utf8')
       if (fresh !== clientJs) console.log('[preview] lib/client.js 变了，已在服务新构建产物')
@@ -1042,8 +1041,8 @@ const server = createServer((req, res) => {
       return
     }
     const provider = url.searchParams.get(QUERY_PROVIDER)
-    // 一次只写一次头：此前先 writeHead(200) 再按需 writeHead(404)，那个 200 是个
-    // 已经作废却留在代码里的状态（读到它的人会以为找不到 provider 也回 200）。
+    // 一次只写一次头：先 writeHead(200) 再按需 writeHead(404) 会让 200 那个状态先落地，
+    // 读到它的人会以为找不到 provider 也回 200。
     const payload = provider === null
       ? { providers: MODE === 'empty' ? [] : (QUOTA_MODES[serverState.quota] ?? []) }
       : quotaCards(serverState.quota)[provider]
@@ -1146,10 +1145,10 @@ const server = createServer((req, res) => {
     --dsw-alias-label-dimmed:#b4b8bc;
     --dsw-alias-label-primary-foreground:#ffffff;
     --dsw-alias-label-primary-inverted:#ffffff;
-    /* 品牌强调色按 **DSH 的真实取值**给：浅色皮肤 = neutral-bluish-1000（等于墨色），
-       深色皮肤 = neutral-bluish-50。DSH 里这一档是「身份色」，恰好等于主文字色——预览台此前
-       填的是 #4d6bfe（那只存在于插件自己的 CSS 兜底里），于是焦点环、侧栏入口那点
-       在预览里是蓝的、在真宿主里是墨的：拿预览验颜色会得出相反的结论（accent 不是自由强调色）。
+    /* 品牌强调色必须按 **DSH 的真实取值**给：浅色皮肤 = neutral-bluish-1000（等于墨色），
+       深色皮肤 = neutral-bluish-50。DSH 里这一档是「身份色」，恰好等于主文字色——**不能**
+       用插件自己 CSS 兜底里那个蓝（#4d6bfe），否则焦点环、侧栏入口那点在预览里是蓝的、
+       在真宿主里是墨的：拿预览验颜色会得出相反的结论（accent 不是自由强调色）。
        宿主另有一个还在推的 -new-color 蓝（#4176e6）。 */
     --dsw-alias-brand-primary:#0f1115;
     --dsw-alias-button-primary-fill:#4d6bfe;

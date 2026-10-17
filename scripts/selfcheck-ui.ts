@@ -20,8 +20,6 @@
  *     类名、颜色、圆角全都合规——第 1-8 项因此全绿，浏览器里那个元素却拿着全默认值。
  *
  * Run: node --experimental-strip-types scripts/selfcheck-ui.ts
- *
- * @module dsh-tokbook/selfcheck-ui
  */
 
 import { readdir, readFile } from 'node:fs/promises'

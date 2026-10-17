@@ -16,9 +16,9 @@ import {
   slotCovers, slotsOverlap, yearOfDate,
 } from './price-format.ts'
 import type {
-  BillingMap, BillingNature, CurrencyMap, FxSetting, HolidayCalendar, HolidayRange, ModelPricing, PriceCurrency,
+  BillingMap, BillingNature, CurrencyMap, FxSetting, HolidayCalendar, HolidayRange, ModelPricing,
   PriceEntry, PriceSlot,
-  PricingEntryInput, PricingSlotInput, PricingTable, RateKey, SlotRef, UsageTotals,
+  PricingTable, RateKey, SlotRef, UsageTotals,
 } from './types.ts'
 import { UNPRICED_KEY } from './types.ts'
 

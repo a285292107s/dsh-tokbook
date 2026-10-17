@@ -1,10 +1,11 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-04 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-17 · supersedes: —
 
-> 本文件整理本次「UI 优化 + 全中文 + 对齐 DSH 官方设置按钮样式」迭代中踩过的坑与结论，
-> 供后续维护 / 继续开发时对照。结构统一按 **现象 → 根因 → 修复 / 正确做法** 组织。
-> 整理时间：2026-09。涉及的所有 DSH 源码路径均相对 `C:\Users\28529\Desktop\deepseek-harness`。
+> 本文件是**踩坑记录的累积**，供后续维护 / 继续开发时对照；条目按 **现象 → 根因 → 修复 / 正确做法**
+> 组织。**DSH 源码路径均相对同一处检出**——那台机器上 `C:\Users\28529\Desktop\deepseek-harness`，
+> 换机器时把前缀换掉即可（文中不再逐条重复绝对路径）。
+> 每条记录的是**当时**的实测；判据（怎么判断、哪里会静默出错）留着，具体数字与版本会随升级漂移。
 
 ---
 
@@ -12,7 +13,7 @@
 
 ### 现象
 
-- token 账本按钮呈现**浏览器默认 button 样式**：`background-color: rgb(107,107,107)`（灰底）、
+- 词元账本按钮呈现**浏览器默认 button 样式**：`background-color: rgb(107,107,107)`（灰底）、
   `border: 2px outset white`、`border-radius: 0`、高度约 `25.5px`、`padding: 1px 6px`。
 - 用户看到的是一个"灰色方框"，跟下面"设置"按钮（透明、纯图标+文字）完全不一致。
 - 关键点：**注入的样式一条都没生效**，按钮被浏览器 UA 样式兜底。
@@ -126,17 +127,19 @@ CSS 变成 JS 语法错误，`pnpm typecheck` / `pnpm build` 当场红。
 - 官方侧栏脚部设置按钮：`packages/client/ui-settings-general/src/client/SettingsRoot.module.css`
   的 `.trigger` / `.trigger.rail`（由 `SettingsRoot.tsx` + `chrome.tsx` 的 `TriggerContent` 渲染）。
 - 它是**模块私有 CSS**，**没有导出**可复用组件。
-- `@deepseek-ai/dsh-client-ui-primitives` 只有通用 `Button`（胶囊形 `h36/r18`，变体
-  `primary | ghost | outline | toolbar`），**不是**侧栏脚部控件。
+- `@deepseek-ai/dsh-client-ui-primitives` 只有通用 `Button`（`h36`，`border-radius` 走
+  `--dsw-radius-md`，变体 `primary | ghost | outline | toolbar`），**不是**侧栏脚部控件。
 - 外置插件**不能 import** 别的插件私有 CSS module（bundle purity 门槛 + 未导出）。
 
 ### 正确做法：用同一套 `--dsw-*` 令牌复刻几何/颜色
 
-关键令牌 / 几何（对齐 `SettingsRoot.module.css`）：
+**抄几何，不抄圆角。** 宿主的 `.trigger` 用 `border-radius: var(--dsw-radius-md)`（12px），而本插件的
+圆角是**直角不变量**（`--dtpl-radius: 0px`，`selfcheck:ui` 强制只许 `0` / `50%` / `var()`）——所以
+只对齐高度、内距、间距、字号与墨色，圆角照自己的规矩来。其余几何（对齐 `SettingsRoot.module.css`）：
 
 | 状态 | 几何 / 颜色 |
 |------|------------|
-| 宽侧栏 | `flex:1` 满宽、`height:42px`、`border-radius:12px`、`border:none`、`background:transparent`、`padding:0 10px 0 8px`、`gap:8px`、`font-size:14px / line-height:22px`、`color:var(--dsw-alias-label-primary)`；hover=`--dsw-alias-interactive-bg-hover` |
+| 宽侧栏 | `flex:1` 满宽、`height:42px`、`border:none`、`background:transparent`、`padding:0 10px 0 8px`、`gap:8px`、`font-size:14px / line-height:22px`、`color:var(--dsw-alias-label-primary)`；hover=`--dsw-alias-interactive-bg-hover` |
 | 折叠 rail | 36×36 圆、`border-radius:50%` + `corner-shape:round`、居中、图标 18px、主墨色 |
 | 按压态 | 用 `aria-pressed` 承载状态；`color:var(--dsw-alias-brand-primary)`（注意别只靠颜色传达状态） |
 
@@ -151,7 +154,7 @@ CSS 变成 JS 语法错误，`pnpm typecheck` / `pnpm build` 当场红。
 
 ## 5. 构建与安装要点
 
-命令清单与产物见 [`../README.md`](../README.md)「构建」。这里只留会踩的三条:
+命令清单与产物见 [`../README.zh.md`](../README.zh.md)「构建」。这里只留会踩的三条:
 
 - **`pnpm watch` 只跑 `tsc --watch`,不重建 `lib/client.js`**——改了源码要手动 `pnpm build`;
   想要自动重建得改 watch 脚本。
@@ -159,30 +162,34 @@ CSS 变成 JS 语法错误，`pnpm typecheck` / `pnpm build` 当场红。
   `\uXXXX`,不便于排查)。
 - **client 入口不要 `export default`**(cordis loader 的 `exports.default ?? exports` 会让它掩盖
   `.inject`);`dsh.client` 必须 `platform:'web'`、`./client` 能解析到 `lib/client.js`,且
-  `BASELINE_EXTERNALS` 要跟 DSH 的 `PLATFORM_MODULES` 保持一致(随 DSH 升级同步)。
+  `BASELINE_EXTERNALS` 要是 DSH `PLATFORM_MODULES` 的**子集**——只列本插件真的 import 的那几个
+  (它同时是一道判死表外 import 的门禁,照全集抄会把这道门关掉)。细节见 DESIGN §7。
 
 ---
 
-## 6. 用浏览器桥接（kimi-webbridge）验证真实渲染
+## 6. 在真实渲染里验证界面（先无头 `playwright-cli`）
 
-### 为什么需要
+### 用哪一个
 
-宿主 Web 在 `http://127.0.0.1:3080` 需要登录（未认证请求返回 **401**），`curl` 拿不到真实页面。
-用 kimi-webbridge 借用用户当前标签页（`find_tab {active:true}`，`session` 每任务一个），即可在真实
-页面里 `snapshot` / `evaluate` / `screenshot`。
+**默认走无头 `playwright-cli`**（默认无头、独立会话，不干扰维护者前台那个浏览器）——大多数验证
+（截图、量 computed style、读无障碍树）它都做得到。它做不到的才回落 **kimi-webbridge**：需要维护者
+**真实登录态**或他那套浏览器环境时——宿主 Web 在 `http://127.0.0.1:3080` 需要登录（未认证请求返回
+**401**），无头会话拿不到那个页面，桥接则可以借用他当前标签页（`find_tab {active:true}`，`session`
+每任务一个）。
 
-### 坑与做法
+下面这些坑大多与工具无关（选择器、截图口径、预览台端口）；只有 `find_tab` 那条是桥接独有的，
+已单独标注。
 
 - **选择器**：元素自身同时带 `data-plugin` 和插件类时，`document.querySelector('[data-plugin] .class')`
   会 **not found**——应直接用 `.class` 或复合 `[data-plugin].class`（对应 §1）。
-- 先 `snapshot`（无障碍树）确认元素存在（按钮名，如 "词元账本" / "设置"），再 `evaluate` 读
-  `getComputedStyle`。
-- `evaluate` 每次用 **IIFE** 包变量，避免 `const` 重声明冲突。
+- **（仅桥接）** 先 `snapshot`（无障碍树）确认元素存在（按钮名，如 "词元账本" / "设置"），再
+  `evaluate` 读 `getComputedStyle`。
+- **（仅桥接）** `evaluate` 每次用 **IIFE** 包变量，避免 `const` 重声明冲突。
 - Windows 上发请求：**非 ASCII 走文件体 POST**（`curl.exe --data-binary @file`），避免 PowerShell 破坏中文；
   每个请求用独立随机文件名。
 - 判"选择器是否命中"：读 computed `background-color` / `border` / `height`，若为 UA 默认值
   （`rgb(107,107,107)` / `2px outset` / 25.5px），就是样式没命中。
-- **「当前标签页」会漂**:用户自己在浏览时,桥接的 current tab 可能已经不是宿主页——`evaluate`
+- **（仅桥接）「当前标签页」会漂**:用户自己在浏览时,桥接的 current tab 可能已经不是宿主页——`evaluate`
   会落到别的页面上,表现是"什么都查不到"（返回 `null` 或空值）而不是报错。**每次 evaluate /
   screenshot 前先 `find_tab`**(拿完整 URL,如 `http://127.0.0.1:3080/`)。
 - **预览台的 bundle 是热的,端口不是**:`/client.js` 现在**按请求读盘**(并带 `cache-control: no-store`),
@@ -241,7 +248,7 @@ padding-top:24px` ❌（居中照旧）。**判据**：固定高度 + 绝对定�
 
 ---
 
-## 8. DSH 会话持久化面换 API：`inspect()` → `open(id,'read')` + `read()`（2026-09-23）
+## 8. DSH 会话持久化面换 API：`inspect()` → `open(id,'read')` + `read()`
 
 ### 现象
 账本只涨 live hook 记下的行；历史回填一行不写，而 `/tokbook/sync` 一路报 `done`（`error: null`），
@@ -249,7 +256,7 @@ padding-top:24px` ❌（居中照旧）。**判据**：固定高度 + 绝对定�
 上百秒），却什么也没回填。
 
 ### 根因
-DSH 0.1.7 的 `sessionPersistence` 只剩 `create/open/stat/list/flush`：旧的整份读取 `inspect(id)` 与旧
+那一版 DSH 的 `sessionPersistence` 只剩 `create/open/stat/list/flush`：旧的整份读取 `inspect(id)` 与旧
 列表名 `listSnapshots()` 都没了。`syncHistory` 每会话调 `inspect` → TypeError → 按设计计入
 `failedSessions` 并继续；`doSync` 随后把这一批 id 从基线里删掉（`setBaseline(snapshots, failed)`），
 **全部失败 = 基线清空**。两个症状因此叠在一起，且都不冒错。
@@ -291,7 +298,7 @@ requestId 当时绑在 `seq` 上——同一事件被记成两个身份、各占
 - [ ] 图标用内联 SVG；文案用中文；给可访问名字与 `aria-pressed`/`aria-label`。
 - [ ] 对齐 DSH 外观：用 `--dsw-*` 令牌复刻，别 import 私有 CSS module。
 - [ ] client 入口无 `export default`；esbuild 加 `charset:'utf8'`。
-- [ ] 用 kimi-webbridge 时：先 `snapshot`，再 `evaluate` 读 computed style；**每次调用前先 `find_tab`**（当前标签页会漂）。
+- [ ] 浏览器验证**先走无头 `playwright-cli`**；要真实登录态才回落 kimi-webbridge（那时先 `find_tab`，当前标签页会漂）。先 `snapshot` 确认元素存在，再读 computed style。
 - [ ] 验**焦点交互**（失焦保存 / blur 重置 / 焦点环）前先 `cdp` → `Emulation.setFocusEmulationEnabled`：
   `Page.bringToFront` 只把标签页置前，**窗口自己没被聚焦时 `document.hasFocus()` 仍是 false**，此时
   `focus()` / `blur()` 一个 focus 事件都不派发——测试会"跑通"却什么都没测（`focusout` 监听器可以

@@ -22,9 +22,6 @@ export interface MoneyView {
   cnyPerUsd: number | null
 }
 
-/** 人民币报价、未设汇率：这一屏的默认读法。 */
-export const CNY_VIEW: MoneyView = { route: 'CNY', cnyPerUsd: null }
-
 /** 显示与换算共用 6 位小数。换算那一步必须取整，否则浮点噪声会写进文件（0.15 × 6.7 = 1.0050000000000001）。 */
 const DECIMALS = 6
 

@@ -32,7 +32,7 @@ import {
 } from './pricing.ts'
 import { dayKeyOf, holidaySet } from './price-format.ts'
 import { fetchCatalog, searchCatalog, type ModelsDevCatalog } from './models-dev.ts'
-import { billedRouteModels, mergeCatalogIntoTable, type SyncReport } from './pricing-sync.ts'
+import { billedRouteModels, mergeCatalogIntoTable } from './pricing-sync.ts'
 import { readPricingSyncState, writePricingSyncState } from './pricing-sync-state.ts'
 import { ledgerUsageOf, readPricingView, type LedgerUsage } from './pricing-view.ts'
 import { collectRoutes, routeLabels, type LlmLike, type SettingsLike } from './route-catalog.ts'

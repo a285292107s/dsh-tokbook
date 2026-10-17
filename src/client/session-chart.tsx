@@ -9,11 +9,11 @@
  */
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties } from 'react'
 import type { SessionUsageGroup } from '../types.ts'
 import { formatMoney, formatShare, formatTokens } from './format.ts'
 import { num } from './session-wire.ts'
-import { BUCKETS, hasPricedRow, type PreviewMap, type TurnPreview } from './session-shared.ts'
+import { BUCKETS, hasPricedRow, type PreviewMap } from './session-shared.ts'
 
 /** 一格图插在 style 上的列数——React 的 CSSProperties 不收 `--*`，在这里开一个口子。 */
 type SlotStyle = CSSProperties & Record<'--dtpl-slots', string>
@@ -39,7 +39,7 @@ function columnHeight(value: number, max: number): string {
 /**
  * 每轮两格小图（small multiples）：上格新增词元、下格缓存读取，共用同一列轮次与同一条轴线。
  *
- * 为什么不是「一列里并排两根柱」——那是上一版的画法，两件事一起读错：
+ * 为什么不是「一列里并排两根柱」——那样两件事一起读错：
  * 一是**两把尺子并排**，读者会不由自主地比高度，而两根柱的量级差着几十倍；
  * 二是**柱宽跟着列一起撑开**，三轮的会话里每列近 400px 宽，柱形变成一块灰砖，读不出是柱状图。
  * 分成两格后每格只有一把尺子，柱宽有上限（见 session.ts），量级差多少由格头那两个数说。
@@ -241,9 +241,8 @@ function clamp(value: number, low: number, high: number): number {
 }
 
 /**
- * 卡片里那句「柱高是怎么来的」：柱子指到哪一格就说哪一格的口径。旧版这是原生 title 里的四行
- * 审计（柱高吃掉哪几个桶、缓存读占计费输入多少），现在柱值就写在柱顶、四桶就在卡片里，所以
- * 只留这一句**口径**。
+ * 卡片里那句「柱高是怎么来的」：柱子指到哪一格就说哪一格的口径。柱值已写在柱顶、四桶就在
+ * 卡片里，所以这里只留**口径**，不再重复那四行审计。
  */
 function basisOf(panel: Panel, group: SessionUsageGroup, value: number): string {
   if (panel === 'fresh') return '柱高 = 未缓存输入 + 缓存写入 + 输出'

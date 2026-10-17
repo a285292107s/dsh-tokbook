@@ -1,8 +1,10 @@
 # ADR 0002 — 侧栏项目行的用量入口走 DOM 注入，不给 DSH 本体加 slot
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-09-30 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: draft · last-reviewed: 2026-10-17 · supersedes: —
 
-- **状态**：已接受（2026-09-30）
+- **状态**：已接受（2026-09-30），但**尚未实现**——`src/` 里从没有过它的代码（全历史可查），
+  当前 client 半区只注册三个 slot、没有任何宿主 DOM 注入。所以本文记的是**打算怎么做**，
+  不是现状；读了它别以为界面上已经有那枚图标。
 - **决策**：侧栏**项目行**里那枚「看这个项目的用量」图标，由插件 client 半区**往宿主 DOM 里注入**
   （项目行行尾的操作容器里、⋯ 之前），**不给 DSH 本体加 slot**。图标是纯图标（悬停出工具提示），
   点击打开已有的浮窗并落到「用量明细 · 按工作区」；**未归属分组上不出现**这枚入口。
@@ -12,8 +14,9 @@
 
 ## 事实（决定这条的原因）
 
-- 宿主（`@deepseek-ai/dsh` 0.2.0-rc.2，npm 上已是最新）在 `sidebar.workspaces` 底下只声明了 5 个子槽
-  （`session.menu.item` / `session.row.action` / `directoryFlow` / `session.row.leading` / `session.row.hover`），
+- 宿主（`@deepseek-ai/dsh`，版本见 `dsh --version`——不在本文写死）在侧栏声明了 5 个会话/目录用的
+  子槽：`sidebar.workspaces` 底下三个（`session.menu.item` / `session.row.action` / `directoryFlow`），
+  另外两个在 `sidebar.session.row.leading` / `sidebar.session.row.hover`，
   **全是会话行或目录选择器用的**。项目行（`ProjectRowItem`）里的 ⋯（重命名/删除）与 ⊕（新会话）是
   硬编码的 `Menu` / `Button`，没有任何 `renderSlot` 调用。
 - slot 注册 API 对**未声明**的键直接抛错（`dsh-client-ui-slots` 的 `SlotCore.register` 文档原话：
@@ -22,7 +25,7 @@
   `buildGroup('' , undefined, …)`）。这个 `workspaceId` 与账本侧 `WorkspaceUsageRow.id`（`src/workspaces.ts`
   的 `byId` 键）**是同一个值**——因此「哪一行 = 哪个项目」不需要新增 host 路由。
 - 本插件的其余 UI（footer 按钮、浮窗、会话词元页）全部注册进宿主**已声明**的槽（DESIGN §6.0 路线 A），
-  **这枚图标是唯一的例外**。
+  **这枚图标将是唯一的例外**。
 - 改 DSH 本体加 slot 的代价：补丁只能落在**全局 npm 安装**的
   `@deepseek-ai/dsh-client-ui-workspace/lib/client.js`（打好的 bundle，不是源码）——`npm i -g` 一升级就没了，
   得在仓库外另养一份重放脚本 + 缺失自检，且上游一改 `ProjectRowItem` 的代码形状，脚本里的锚点就失效。
@@ -40,7 +43,7 @@
 
 ## 后果
 
-1. 宿主 DOM 改了（`data-row-key` 前缀、或行尾那个操作容器换了结构）时，这枚图标**静默消失**，插件其余部分
+1. 宿主 DOM 改了（`data-row-key` 前缀、或行尾那个操作容器换了结构）时，这枚图标会**静默消失**，插件其余部分
    不受影响。排查入口就是上面点名的两个 DOM 坐标——这也是这份 ADR 存在的主要理由：代码里只看得见
    「按某个选择器找宿主行」，看不出「为什么这里不走 slot」。
 2. 宿主是 React 渲染的，行会整块重建，所以注入的节点必须在每次重渲染后**重新对位**：client 半区需要一条

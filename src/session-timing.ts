@@ -13,8 +13,6 @@
  * - 工具 `tool/call` → `tool/result`，按 `callId` 配对，取并集
  *
  * 量不出来的一律**缺席**，不是 0：取消的步骤没有产出，重试耗尽的步骤没有产出、但墙钟还在。
- *
- * @module dsh-tokbook/session-timing
  */
 
 import type { StepTiming } from './types.ts'

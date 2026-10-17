@@ -1,5 +1,5 @@
 /**
- * token-book 的按工作区聚合——概览「按工作区」节背后的纯数学。
+ * dsh-tokbook 的按工作区聚合——概览「按工作区」节背后的纯数学。
  *
  * 账本行只命名其会话，因此归属是对 workspace registry 与会话 header `cwd`
  * 的**读时 join**。没有 workspace 认领的记录折进「未归属」行，使本节始终

@@ -176,7 +176,7 @@ function workspaceDetail(row: WorkspaceUsageRow, money: (value: number) => strin
     row.path === '' ? '未归属用量' : `工作区 ${row.title}`,
     row.path === '' ? '会话没有工作区目录，或目录未注册为工作区。' : `目录 ${row.path}`,
     `窗口 ${formatTokens(row.tokens)} 词元 · ${totals.requests} 请求${failed > 0 ? ` · ${failed} 失败` : ''}`,
-    `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
+    `未缓存输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
     + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
     ...(showMoney ? [`实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`] : []),
     `最近一次 ${formatDateTime(row.lastAt)}`,
@@ -203,7 +203,7 @@ function modelDetail(
     + ` · ${totals.requests} 请求${compactions > 0 ? ` · ${compactions} 压缩` : ''}`
     + `${failed > 0 ? ` · ${failed} 失败` : ''}${unknown > 0 ? ` · ${unknown} 次没上报用量` : ''}`
     + `${showMoney && noPrice ? ' · 价格未知' : ''}`,
-    `输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
+    `未缓存输入 ${formatTokens(totals.inputTokens)} · 缓存读取 ${formatTokens(totals.cacheReadTokens)}`
     + ` · 缓存写入 ${formatTokens(totals.cacheWriteTokens)} · 输出 ${formatTokens(totals.outputTokens)}`,
     ...(showMoney ? [`实际支出 ${money(row.spend)} · 订阅价值 ${money(row.subscriptionValue)}`] : []),
   ].join('\n')
