@@ -15,7 +15,9 @@ import type { SessionStepRow, SessionUsageGroup, StepTiming } from '../types.ts'
 import { formatDateTime, formatDuration, formatMoney, formatTokens } from './format.ts'
 import { num } from './session-wire.ts'
 import { BUCKETS, hasPricedRow, type PreviewMap, type TurnPreview } from './session-shared.ts'
-import { LEGEND_SHAPE, TimeBar, stepSegments, sumSegments } from './session-timing.tsx'
+import {
+  LEGEND_SHAPE, PHASE_LABEL, TimeBar, TimeReads, stepSegments, sumSegments, type TimeBarRead,
+} from './session-timing.tsx'
 
 /** 块头那几个数的形状：三轮/轮间/轮次未知共用一套读数，不各自算。 */
 interface BlockTotals {
@@ -186,6 +188,14 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
   const open = expanded.has(blockKey)
   // 用时表有哪些列，由**整块**决定（见 TIMING_METRICS）。
   const columns = timingColumnsOf(rows)
+  // 块头那条尺与它下面那串读数共用这一份分段：形状与数字同源，改一处两处一起动。
+  const phases = sumSegments(rows)
+  const phaseReads: TimeBarRead[] = phases.map((phase) => ({
+    key: phase.key,
+    kind: phase.kind,
+    label: PHASE_LABEL[phase.kind],
+    value: formatDuration(phase.value),
+  }))
   return (
     <div className={`dtpl-tok-turn${loose === true ? ' is-loose' : ''}`}>
       <button
@@ -238,10 +248,17 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
             `scale` 由外部给：轮与轮之间比的是「哪一轮更重」，所以分母是**所有轮里最长的那个**。
             分段与下面那列步骤尺同源（`sumSegments`），所以形状上这一条正是那几条的合成（各步的
             段边界按时间加权平均）；但**长度只有这一条有**——步骤尺铺满车道，量级由这里独担。 */}
-        {totals.workMs !== undefined && (
-          <span className="dtpl-tok-turn-bar">
-            <TimeBar tone="turn" scale={turnScale} segments={sumSegments(rows)} />
-          </span>
+        {phases.length > 0 && (
+          <>
+            <span className="dtpl-tok-turn-bar">
+              <TimeBar tone="turn" scale={turnScale} segments={phases} />
+            </span>
+            {/* 尺只给形状，数得写在下面：要知道「这一轮等首 token 花了多少、工具花了多少」，
+                只有条没有数字就得点开逐行加。这串读数让收起状态也答得出那两件事——读者扫一列
+                轮块头就能找到那个卡住的轮。名字与步骤表、图例同取 `PHASE_LABEL`，
+                三处说的是同一批词；分段同取 `phases`，所以条与数不可能对不上。 */}
+            <TimeReads reads={phaseReads} />
+          </>
         )}
         {preview !== undefined && (preview.prompt !== '' || preview.response !== '') && (
           <span className="dtpl-tok-turn-preview">
@@ -266,7 +283,7 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
 }
 
 /**
- * 一步的用时**表**：模型 / 首 token / 生成 / 工具 / 速度，标签在上值在下，一列一个量。
+ * 一步的用时**表**：模型 / 等首 token / 生成 / 工具 / 速度，标签在上值在下，一列一个量。
  *
  * 为什么排成表而不是那串「甲 X · 乙 Y · 丙 Z」：这一步的用时要和**别的步**比才有意义（哪一步
  * 慢、慢在哪一段），而一串折行的读数里每个数的横坐标都不一样，眼睛没法上下对——同一串里
@@ -279,9 +296,9 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
  */
 const TIMING_METRICS: ReadonlyArray<{ key: 'llmMs' | 'ttftMs' | 'decodeMs' | 'toolMs'; label: string }> = [
   { key: 'llmMs', label: '模型' },
-  { key: 'ttftMs', label: '首 token' },
-  { key: 'decodeMs', label: '生成' },
-  { key: 'toolMs', label: '工具' },
+  { key: 'ttftMs', label: PHASE_LABEL.wait },
+  { key: 'decodeMs', label: PHASE_LABEL.generate },
+  { key: 'toolMs', label: PHASE_LABEL.tool },
 ]
 
 /** 这一块的步骤里，哪几列真的有读数（含速度）。整块共用一份，见 TIMING_METRICS 的注释。 */
@@ -484,7 +501,7 @@ function timingDetail(timing: StepTiming | undefined): string[] {
   const lines = [
     wall === undefined ? model : `${wall}（${model}）`,
   ]
-  if (timing.ttftMs !== undefined) lines.push(`首 token ${formatDuration(timing.ttftMs)}`)
+  if (timing.ttftMs !== undefined) lines.push(`${PHASE_LABEL.wait} ${formatDuration(timing.ttftMs)}`)
   if (timing.decodeMs !== undefined) lines.push(`生成 ${formatDuration(timing.decodeMs)}`)
   if (timing.toolMs !== undefined) {
     const calls = timing.toolCalls ?? 0

@@ -4,8 +4,9 @@
  *
  * 这里只放**被两处以上共用**的东西：
  *   - `TimeBar` —— 画尺的组件（轮块头那条、抬头那条、图例那条都它）；
+ *   - `TimeReads` —— 尺下面那串「记号 + 段名 + 数」的读数（抬头那条、轮块头那条）；
  *   - `stepSegments` / `sumSegments` —— 把一行 / 一组的用时拆成那三段；
- *   - `LEGEND_SHAPE` —— 图例那条示例尺的形状与标签。
+ *   - `PHASE_LABEL` / `LEGEND_SHAPE` —— 三段的名字与图例那条示例尺的形状。
  *
  * 为什么单独成文件：这块是**设计语言**而不是 UI——它的灰阶词汇是这一页唯一的「比例」语言；
  * 它被图表（TurnChart 的块头尺）与明细（TurnBlock 的块头尺、StepRow 的步骤尺、图例）复用，
@@ -14,16 +15,35 @@
 
 import type { SessionStepRow, StepTiming } from '../types.ts'
 
+/** 一段的名字与长度：`kind` 决定那枚记号的明度，与真尺同源。 */
+export interface TimeBarRead {
+  key: string
+  kind: TimeSegment['kind']
+  label: string
+  value: string
+}
+
+/** 相位那四段的名字。**只有一份**：图例、轮块头那串读数、步骤表都从这里取，改一个字三处一起改。 */
+export const PHASE_LABEL: Record<'wait' | 'generate' | 'model' | 'tool', string> = {
+  wait: '等首 token',
+  generate: '生成',
+  model: '模型（拆不开）',
+  tool: '工具',
+}
+
 /**
- * 图例那条示例尺的**形状与标签**。份额只是为了让三段都看得见（约 3:5:3），不是任何真实数据
- * ——它画的是「这三段长什么样」，数字在同一行的用时表里。改这里就等于改图例，
+ * 图例那条示例尺的**形状**。份额只是为了让三段都看得见（约 3:5:3），不是任何真实数据
+ * ——它画的是「这三段长什么样」，数字在轮块头与步骤行里。改这里就等于改图例，
  * 与真尺共用同一套灰阶与同一条分隔配方，所以不会与真尺脱节。
+ * 名字取 `PHASE_LABEL`：图例与读数上的字因此不可能写成两种。
  */
-export const LEGEND_SHAPE: ReadonlyArray<{ kind: 'wait' | 'generate' | 'tool'; share: number; label: string }> = [
-  { kind: 'wait', share: 30, label: '等首 token' },
-  { kind: 'generate', share: 52, label: '生成' },
-  { kind: 'tool', share: 32, label: '工具' },
-]
+export const LEGEND_SHAPE: ReadonlyArray<{ kind: 'wait' | 'generate' | 'tool'; share: number; label: string }> = (
+  [
+    { kind: 'wait', share: 30 },
+    { kind: 'generate', share: 52 },
+    { kind: 'tool', share: 32 },
+  ] as const
+).map((phase) => ({ ...phase, label: PHASE_LABEL[phase.kind] }))
 
 /**
  * 一段时间的**构成尺**：把几个组成按比例摊在一条线上。
@@ -81,8 +101,32 @@ export interface TimeBarRead {
 }
 
 /**
+ * 尺下面那串「记号 + 段名 + 数」。
+ *
+ * 记号与真尺的段共用 `data-kind` 那套灰阶（样式侧写在同一条选择器里）：改尺就改了记号，
+ * 两者不可能分家。几何另给——尺上的段是满高的一块，记号是 9×10 的一小枚。
+ *
+ * 两处用它：抬头那条（「引擎工作 / 没在算」两段）与轮块头那条（等首 token / 生成 / 工具）。
+ * 后者是因为**只有宽度没有数**的尺答不了「这一轮等了几秒、工具花了几秒」——形状给眼睛，
+ * 数字给要拿它做判断的人。两处必须同一份，否则读者要学两遍哪枚记号对应哪一句。
+ */
+export function TimeReads({ reads }: { reads: readonly TimeBarRead[] }) {
+  return (
+    <span className="dtpl-tok-reads">
+      {reads.map((read) => (
+        <span className="dtpl-tok-read" key={read.key}>
+          <span className="dtpl-tok-read-mark" data-kind={read.kind} aria-hidden="true" />
+          <span>{read.label}</span>
+          <b>{read.value}</b>
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/**
  * 三档尺各要什么：`step` 没有分母可用（不收 `scale`，省得调用方以为自己传的是长度）；
- * `turn` 有长度、没有段名（它旁边就是那列步骤尺与用时表）；`hero` **必须**带段名
+ * `turn` 有长度、没有段名（块头那串读数就画在它下面）；`hero` **必须**带段名
  * ——名字是承重的（见上），少写一个不会报错，只会把那条尺退回进度条的读法。
  */
 type TimeBarProps = { segments: readonly TimeSegment[] } & (
@@ -130,17 +174,7 @@ export function TimeBar(props: TimeBarProps) {
   return (
     <span className="dtpl-tok-hero-ratio">
       {bar}
-      <span className="dtpl-tok-hero-reads">
-        {props.reads.map((read) => (
-          <span className="dtpl-tok-hero-read" key={read.key}>
-            {/* 记号与真尺的段共用 `data-kind` 那套灰阶（样式侧写在同一条选择器里）：改尺就改了
-                记号，两者不可能分家。几何另给——尺上的段是满高的一块，记号是 9×10 的一小枚。 */}
-            <span className="dtpl-tok-hero-mark" data-kind={read.kind} aria-hidden="true" />
-            <span>{read.label}</span>
-            <b>{read.value}</b>
-          </span>
-        ))}
-      </span>
+      <TimeReads reads={props.reads} />
     </span>
   )
 }

@@ -108,9 +108,11 @@ over its whole lifetime, opened up by turn and by step.
   omitted rather than rendered as zero.
 - Two small-multiple charts — new tokens and cache reads per turn — each normalised to its own scale and
   sharing one turn axis. Hovering a bar shows that turn's read-out plus question/answer previews.
-- Per-turn detail, collapsed by default. Expanding a turn lists its steps: one row per billed call, with
-  its identity, its money, a three-phase time bar (first token / generation / tools) and a
-  `model / first token / generation / tools / tok per s` table.
+- Per-turn detail, collapsed by default. Each turn's header carries a three-phase time bar (wait for
+  first token / generation / tools) **and the same breakdown as numbers**, so a collapsed turn already
+  says how long it waited and how long it spent in tool calls. Expanding a turn lists its steps: one row
+  per billed call, with its identity, its money, the step's own three-phase bar and a
+  `model / wait for first token / generation / tools / tok per s` table.
 - A footer summing unknown usage, failures, and unpriced `(route, model)` pairs across the session.
 
 It is **read-only** against the ledger and the config — its only write is a content width kept in the
