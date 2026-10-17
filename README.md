@@ -103,6 +103,11 @@ over its whole lifetime, opened up by turn and by step.
 
 - A header with the session's four-bucket total, its share of today's spend, actual spend and
   subscription value, the turn and step count, the token composition band, and the cache hit rate.
+- **Subagents**: each direct subagent session gets a row (the creation label from the parent's
+  catalog, tokens, its share of all subagents, and money), with nested delegations folded into
+  their direct parent so no subtree is counted twice. The header total stays **session-only**;
+  a manual fork carries `parentSession` too but is not a subagent, so only the host header's
+  `origin` decides. Without any direct child the block is omitted.
 - **Session time**: engine work against session span, a bar for the difference between them (the time
   nothing was running), and the first and last record. When neither can be measured the whole block is
   omitted rather than rendered as zero.
@@ -123,8 +128,9 @@ poll on hosts that do not report it. Nothing is sent while the page is in the ba
 
 > **A known degradation:** attributing rows to turns and steps depends on the host's `sessionPersistence`.
 > Without it the numbers still arrive, but every non-compaction row lands in an "unknown turn" block, and
-> the charts and the session-time block do not render at all. Timings are local wall-clock, not billed
-> duration.
+> the charts and the session-time block do not render at all. The subagent block also needs persistence
+> for session lineage and is omitted entirely without it — "cannot tell whether there are children" is not
+> "there are none". Timings are local wall-clock, not billed duration.
 
 ## The four tabs
 

@@ -715,6 +715,51 @@ export interface SessionUsageGroup {
   rows: SessionStepRow[]
 }
 
+/**
+ * 词元页「子代理」一段的一行：一个**直接**子代理，连同它自己派出的下级（整棵子树）。
+ * 按子树报数而不是逐个后代各报一行，是因为「这个子代理花了多少」与「它的下级花了多少」
+ * 是同一个问题的两半；分行列出会让读者把子树成本再加一遍。
+ */
+export interface SessionSubagentRow {
+  sessionId: string
+  /** 父会话目录里的创建标签；目录读不到时为空串（client 用短会话 id 兜底）。 */
+  label: string
+  /** 整棵子树的四桶之和。 */
+  tokens: number
+  /** 子树里的计费调用数（失败不计入，与 {@link UsageTotals.requests} 同口径）。 */
+  requests: number
+  /** 子树里失败的调用数（没有产出，不产生词元）。 */
+  failures: number
+  /** 子树里「用量未知」的调用数；这些调用的词元没有加进任何桶。 */
+  usageUnknown: number
+  spend: number
+  subscriptionValue: number
+  /** 子树里有没有一行走到计价路径；false = 整棵价格未知（那个 ¥0 只是占位）。 */
+  priced: boolean
+  /** 这个子代理自己又派出的子代理数（含更深层）。 */
+  descendants: number
+}
+
+/**
+ * 词元页的「子代理」一段：本会话**直接**派出的下级会话，每个行含它自己的整棵子树。
+ * 缺席 = 这一页不知道（没有持久化面），不渲染这一段——「不知道」不写成「没有」。
+ */
+export interface SessionSubagentsView {
+  /** 直接子代理数（不含下级）。 */
+  count: number
+  /** 全部下级子代理（含嵌套）的四桶合计；等于各行之和。 */
+  totalTokens: number
+  spend: number
+  subscriptionValue: number
+  /** 子树里用量未知的调用数。 */
+  usageUnknown: number
+  /** 子树里失败的调用数。 */
+  failures: number
+  /** 子树里价格未知的 (通道, 模型) 键 `${provider}|${model}`。 */
+  unpriced: string[]
+  rows: SessionSubagentRow[]
+}
+
 /** 会话词元页的 wire 载荷（`GET /tokbook/session`）。 */
 export interface SessionUsageView {
   sessionId: string
@@ -743,6 +788,8 @@ export interface SessionUsageView {
   /** 引擎工作总时长：各步模型用时 + 工具用时之和。与 `spanMs` **并排**才是它的用处——
    *  两者之差就是没在算的时间。 */
   workMs?: number
+  /** 本会话直接派出的子代理（含各自的整棵子树）；没有下级时缺席，持久化面读不到时也缺席。 */
+  subagents?: SessionSubagentsView
 }
 
 /** 聚合 totals 行的四桶之和。 */

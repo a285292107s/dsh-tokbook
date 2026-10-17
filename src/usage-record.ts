@@ -49,6 +49,9 @@ export interface SessionEventLike {
     name?: string
     /** 压进这一条事件里的模型输出流；首 token 的时刻只能从这里读（见 session-timing）。 */
     stream?: readonly unknown[]
+    /** `subagent/catalog` 的创建事实：父会话目录里那个子会话的身份与标签。 */
+    childId?: string
+    label?: string
   }
 }
 

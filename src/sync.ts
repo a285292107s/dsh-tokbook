@@ -33,10 +33,18 @@ export interface SyncProgressTick {
  * 同步读到的会话列表项：不可变 header，外加（后端有则）廉价变更 token
  * （revision 相等 = 日志未变）。`revision` 可选——当前 `list()` 与旧的
  * `listSnapshots()` 都给，更早的裸 header 列表没有（届时每个会话都算 stale）。
- * header 的 `cwd` 一并带上，概览的按工作区一节用它 join 账本。
+ * header 的 `cwd` 一并带上，概览的按工作区一节用它 join 账本；`parentSession` 与
+ * `origin` 只带**已声明的**两格血缘（会话词元页的「子代理」一段据它认下级）。
  */
 export interface PersistenceSnapshotLike {
-  header: { id: string; cwd?: string }
+  header: {
+    id: string
+    cwd?: string
+    /** fork 血缘（用户手动 fork 的会话也带它），不能单独用来认子代理。 */
+    parentSession?: string
+    /** 宿主对「这个会话是子代理」的粗分类。 */
+    origin?: 'subagent'
+  }
   revision?: unknown
 }
 
@@ -102,11 +110,14 @@ function normalizeSnapshot(value: unknown): PersistenceSnapshotLike | null {
   const header = (typeof raw.header === 'object' && raw.header !== null ? raw.header : raw) as Record<string, unknown>
   if (typeof header.id !== 'string' || header.id === '') return null
   return {
-    // 只拷本模块声明的两个字段，外来后端无法把非 string `cwd` 走私进
-    // 工作区 join。
+    // 只拷本模块声明的几个字段，外来后端无法把非 string 值走私进工作区 join /
+    // 子代理血缘。
     header: {
       id: header.id,
       ...(typeof header.cwd === 'string' && header.cwd !== '' ? { cwd: header.cwd } : {}),
+      ...(typeof header.parentSession === 'string' && header.parentSession !== ''
+        ? { parentSession: header.parentSession } : {}),
+      ...(header.origin === 'subagent' ? { origin: header.origin as 'subagent' } : {}),
     },
     ...(raw.revision !== undefined ? { revision: raw.revision } : {}),
   }

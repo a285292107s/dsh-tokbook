@@ -1691,7 +1691,9 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
   /** 一组事件 → `buildSessionUsageView` 要的 join 资料。生产里它由 `sessionJoin` 按日志
    *  revision 缓存（读一次日志、算一次索引），这里只有事件、没有持久化面，所以就地算。 */
   const joinOf = (events: readonly SessionEventLike[] | null, sessionId = 'sess-t'): SessionJoin =>
-    (events === null ? { turn: null, timing: null, span: null } : joinOfEvents(sessionId, events))
+    (events === null
+      ? { turn: null, timing: null, span: null, labels: new Map() }
+      : joinOfEvents(sessionId, events))
 
   /** 一条打包的文本流(messages.dev 那种「首段 + 相邻差值」的紧凑形状)。 */
   const packed = (time0: number, texts: string[], dt: number[]) =>
@@ -1824,6 +1826,60 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
     && retryRows.find((row) => row.usage !== undefined)?.timing?.wallMs === 9_000)
   check('同一步的用时不被加两遍:引擎工作 8s(模型)≤ 跨度 9s',
     retryView.workMs === 8_000 && retryView.spanMs === 9_000)
+}
+
+// 子代理：按会话血缘把下级折成一段，每个**直接**子代理一行、含自己的整棵子树；主合计不并入。
+if (section('会话子代理:整棵子树归一个直接子代理,fork 不算子代理')) {
+  const base = dayMillis('2026-03-03', 9)
+  const sessions = [
+    { header: { id: 'sess-p' } },
+    { header: { id: 'sub-a', parentSession: 'sess-p', origin: 'subagent' } },
+    { header: { id: 'sub-a-1', parentSession: 'sub-a', origin: 'subagent' } },
+    { header: { id: 'sub-b', parentSession: 'sess-p', origin: 'subagent' } },
+    // 用户手动 fork 的会话也带 parentSession，但 origin 缺席——它不是子代理。
+    { header: { id: 'fork-x', parentSession: 'sess-p' } },
+    { header: { id: 'other' } },
+  ]
+  const record = (sessionId: string, inputTokens: number) => ({
+    requestId: `${sessionId}:m1`, time: base, sessionId, model: 'm', provider: 'p',
+    usage: { inputTokens, outputTokens: 0 },
+  })
+  const records = [
+    record('sess-p', 100),
+    record('sub-a', 200),
+    record('sub-a-1', 300),
+    record('sub-b', 50),
+    record('fork-x', 999),
+    record('other', 999),
+  ]
+  const parentEvents: SessionEventLike[] = [
+    { type: 'assistant/message', time: base, seq: 0, data: { turn: 1, step: 1, message: { id: 'sess-p:m1', source: { provider: 'p', model: 'm' } } } },
+    { type: 'subagent/catalog', time: base, seq: 1, data: { childId: 'sub-a', label: '审查计价' } },
+  ]
+  const view = buildSessionUsageView({
+    sessionId: 'sess-p', records, sessions,
+    join: joinOfEvents('sess-p', parentEvents),
+    pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+  })
+  const subagents = view.subagents
+  check('主合计仍是本会话自己的 100 词元,不并入子代理', view.totalTokens === 100)
+  check('两个直接子代理各自一行', subagents?.count === 2 && subagents.rows.length === 2)
+  // sub-a 的 200 与它派出的 sub-a-1 的 300 折进同一行；sub-a-1 不单独占行。
+  check('整棵子树折进直接子代理:sub-a 500 = 200 + 300,子代理合计 550',
+    subagents?.rows[0]?.sessionId === 'sub-a' && subagents.rows[0].tokens === 500
+    && subagents?.totalTokens === 550)
+  check('「含 N 个下级」只数它自己的后代', subagents?.rows[0]?.descendants === 1 && subagents?.rows[1]?.descendants === 0)
+  check('两个直接子代理按词元降序排列', subagents?.rows[1]?.sessionId === 'sub-b' && subagents?.rows[1]?.tokens === 50)
+  // fork 的 999 与无关会话都不进这一段:只认 origin === 'subagent'。
+  check('fork 与无关会话都不算子代理', subagents?.rows.every((row) => row.sessionId !== 'fork-x' && row.sessionId !== 'other') === true)
+  check('父会话目录里的创建标签随行到达,缺席时留空', subagents?.rows[0]?.label === '审查计价' && subagents?.rows[1]?.label === '')
+  check('整段价格未知时行不报 ¥0 读数', subagents?.rows.every((row) => row.priced === false) === true)
+  // 读不到会话血缘(独立查看器没有持久化面)时整段缺席,不能填成「0 个子代理」。
+  const noLineage = buildSessionUsageView({
+    sessionId: 'sess-p', records, join: joinOfEvents('sess-p', parentEvents),
+    pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+  })
+  check('没有会话清单时子代理一段缺席(不知道 ≠ 没有)', noLineage.subagents === undefined)
 }
 
 // 过滤后一节都没命中,是这里最坏的一种结果:它一条断言都没跑,却和「全绿」长得一模一样。

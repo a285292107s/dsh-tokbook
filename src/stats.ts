@@ -17,10 +17,10 @@ import {
 } from './types.ts'
 import { billingOf, costOf, priceOfKey } from './pricing.ts'
 
-/** 与 sync.ts 的 `PersistenceSnapshotLike` 同形——变更令牌与 `cwd` 的外部事实
+/** 与 sync.ts 的 `PersistenceSnapshotLike` 同形——变更令牌、`cwd` 与两格会话血缘
  *  记在那份注释里。 */
 export interface PersistenceSnapshotLike {
-  header: { id: string; cwd?: string }
+  header: { id: string; cwd?: string; parentSession?: string; origin?: 'subagent' }
   revision?: unknown
 }
 

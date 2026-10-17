@@ -52,6 +52,73 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 [data-plugin="dsh-tokbook"] .dtpl-tok-timing .dtpl-tok-hero-ratio{margin-top:-6px;}
 /* 首记 / 末记是事件**锚点**，不是用量读数：留在事实带那一档，与两个主角差两级。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-timing .dtpl-hero-facts{margin-top:-2px;}
+/* 子代理那一段：与抬头、会话时间同级的一块有边的面。它回答的是抬头那个问题的另一半
+   （下级会话花了多少），所以紧跟在抬头之后；主合计**不并入**它，两笔账分开放。
+   面板与抬头同配方（硬边框 + 卡面 + 材质），但**不含**材质：一页里材质只给第一读数，
+   第二块再上材质就与抬头抢。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub{
+  border:1px solid var(--dtpl-border);
+  background:var(--dtpl-panel-bg);
+}
+/* 两个读数格：合计与钱。它们不是抬头那个 72px 主的同级，用这一页通用的 24px 读数格，
+   但**去掉** .dtpl-tok-col 给四桶那排的 16px 内白——这段的格贴在面板上，内白由面板自己给。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-sum{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-sum .dtpl-stat{padding:16px 18px 10px;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-sum .dtpl-stat + .dtpl-stat{border-left:1px solid var(--dtpl-border);}
+/* 子代理逐行：名称在左，词元 / 份额 / 钱在右。份额是**这个子代理占全部子代理**的比例，
+   与上面那格「占本会话 + 子代理」不是同一个分母——两个分母都写在各自旁边。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-list{
+  border-top:1px solid var(--dtpl-border);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto auto auto;
+  grid-template-areas:"name tokens share cost";
+  align-items:baseline;gap:4px 16px;
+  padding:10px 18px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-row + .dtpl-tok-sub-row{
+  border-top:.5px solid var(--dtpl-hairline);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-name{
+  grid-area:name;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;
+  min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-label{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:13px;line-height:20px;font-weight:600;color:var(--dtpl-fg);
+}
+/* 「含 N 个下级」是这一行的**范围**说明，不是读数：小一档、走次级墨色。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-extra{
+  flex:none;font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-tokens{
+  grid-area:tokens;white-space:nowrap;
+  font-family:var(--dtpl-mono);font-size:13px;line-height:20px;font-weight:600;
+  font-variant-numeric:tabular-nums;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-share{
+  grid-area:share;white-space:nowrap;
+  font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
+  font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-cost{
+  grid-area:cost;white-space:nowrap;justify-self:end;
+  font-family:var(--dtpl-mono);font-size:12px;line-height:18px;
+  font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-cost[data-kind="spend"]{color:var(--dtpl-fg);font-weight:600;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-cost[data-kind="subscription"]{color:var(--dtpl-fg-2);font-weight:400;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-cost[data-kind="unpriced"],
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-cost[data-kind="none"]{color:var(--dtpl-fg-3);font-weight:400;}
+/* 一段的两句降级事实（用量未知 / 价格未知）走这一页的脚注口径：它们是读法，不是错误。 */
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-note{
+  display:flex;flex-wrap:wrap;gap:2px 6px;align-items:baseline;
+  margin:0;padding:0 18px 14px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-sub-note i{font-style:normal;color:var(--dtpl-fg-dim);padding:0 5px;}
 /* 这一页自己的滚动区：高度由外面给（根是它的 flex 容器），滚动归自己。底部那块是给飘浮的
    输入框让位——输入框高由宿主发布在滚动容器上（实测 128px），不留的话最后一段内容永远压在
    它下面、滚不出来。轨迹页用的是同一个算式。
@@ -776,6 +843,14 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 }
 
 @media (max-width:640px){
+  /* 子代理两格与逐行读数在窄处各改单列/两行：四列在窄屏会把名称压到只剩几个字。 */
+  [data-plugin="dsh-tokbook"] .dtpl-tok-sub-sum{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-tok-sub-sum .dtpl-stat + .dtpl-stat{border-left:0;border-top:1px solid var(--dtpl-border);}
+  [data-plugin="dsh-tokbook"] .dtpl-tok-sub-row{
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"name name" "tokens share" "cost cost";
+  }
+  [data-plugin="dsh-tokbook"] .dtpl-tok-sub-cost{justify-self:start;}
   /* 窄屏：末尾两块改上下排列——并排时每块只剩半屏，四桶读数会折成一团。 */
   [data-plugin="dsh-tokbook"] .dtpl-tok-tail{grid-template-columns:minmax(0,1fr);}
   /* 两枚段名不再一左一右：窄处那一行放不下「引擎工作 5分55秒 没在算 14时00分」，

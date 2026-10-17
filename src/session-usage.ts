@@ -7,6 +7,10 @@
  * `assistant/message` 的 `message.id`，retry 失败是 `recordFromRetry` 合成的
  * `failure:` 键，`turn/end` 失败行的键里本来就带回合号（不必 join）。日志读不到
  * 时那些行进 `unattributed`——不猜、不按时间硬塞（同 ADR 的后果 2）。
+ *
+ * 「子代理」一段走另一条读时归集：会话清单的 header 血缘（`parentSession` +
+ * `origin`）把本会话直接派出的下级会话认出来，账本行按 `sessionId` 折进各自的整棵子树。
+ * 它不改主会话的轮次 / 步骤折叠，也不往账本行里补字段。
  */
 
 import { billingOf, costOf, priceOfKey } from './pricing.ts'
@@ -15,8 +19,9 @@ import { summarizeRecords, type RateResolver, type StatsLogger } from './stats.t
 import { recordFromRetry, type SessionEventLike } from './usage-record.ts'
 import type { SyncPersistence } from './sync.ts'
 import {
-  settleTiming, totalsTokens, type BillingMap, type PricingTable, type SessionStepRow, type SessionUsageGroup,
-  type SessionUsageView, type StepTiming, type UsageFields, type UsageRecord, type UsageTotals,
+  settleTiming, totalsTokens, type BillingMap, type PricingTable, type SessionStepRow, type SessionSubagentRow,
+  type SessionSubagentsView, type SessionUsageGroup, type SessionUsageView, type StepTiming, type UsageFields,
+  type UsageRecord, type UsageTotals,
 } from './types.ts'
 
 /** {@link buildSessionUsageView} 的输入：账本行 + 计价上下文 + 该会话日志的 join。 */
@@ -27,6 +32,9 @@ export interface SessionUsageInput {
   /** 该会话日志的 join 产物（见 {@link sessionJoinIndex}）。读不到日志时
    *  `turn` / `timing` 为 null，所有需要 join 的行进 `unattributed`。 */
   join: SessionJoin
+  /** 持久化会话清单（只用 header 的两格血缘）：子代理一段靠它把下级会话 join 到本会话。
+   *  缺席 = 这一页读不到血缘（独立查看器没有持久化面），那一段整块不出。 */
+  sessions?: readonly SessionLineageLike[]
   /** 计价用的价表（已折人民币；口径同 `attachCosts` 的 `table`）。 */
   pricing: PricingTable
   billing: BillingMap
@@ -35,6 +43,15 @@ export interface SessionUsageInput {
   /** 今日实际支出 ¥（全部会话）——抬头参照系，取自概览同一条聚合。 */
   todaySpend: number
   updatedAt: number
+}
+
+/**
+ * 会话清单里本页只读的那两格血缘事实。`origin` 是宿主对「这是子代理会话」的粗分类；
+ * `parentSession` 只是 fork 血缘——用户手动 fork 的会话也带它，所以**不能**只用
+ * `parentSession` 认子代理（那会把 fork 的用量算成子代理花的）。
+ */
+export interface SessionLineageLike {
+  header: { id: string; parentSession?: string; origin?: string }
 }
 
 /** join 出来的归属：`step` 缺席 = 该事件没带步骤号（`turn/end` 失败行就没有）。 */
@@ -198,7 +215,7 @@ function groupOf(turn: number | null, entries: readonly Entry[], resolve: RateRe
   }
 }
 
-/** {@link buildSessionUsageView} 需要的 join 资料：归属索引、用时索引、日志首末时刻。 */
+/** {@link buildSessionUsageView} 需要的 join 资料：归属索引、用时索引、日志首末时刻、子代理标签。 */
 export interface SessionJoin {
   /** 账本 requestId → (turn, step)；日志读不到为 null。 */
   turn: ReadonlyMap<string, Attribution> | null
@@ -206,10 +223,12 @@ export interface SessionJoin {
   timing: SessionTimingIndex | null
   /** 日志首末事件时刻（算会话跨度用）；日志读不到为 null → 跨度与工作量都缺席。 */
   span: { first: number; last: number } | null
+  /** 父会话日志里 `subagent/catalog` 的创建标签：child session id → label。读不到日志时为空表。 */
+  labels: ReadonlyMap<string, string>
 }
 
 /** 日志读不到时的 join：需要 join 的行全进「轮次未知」，用时与跨度都缺席。 */
-const NO_JOIN: SessionJoin = { turn: null, timing: null, span: null }
+const NO_JOIN: SessionJoin = { turn: null, timing: null, span: null, labels: new Map() }
 
 /**
  * 一份日志的 join 资料，按「日志 revision」缓存。
@@ -248,15 +267,26 @@ async function revisionOf(persistence: SyncPersistence, sessionId: string): Prom
 export function joinOfEvents(sessionId: string, events: readonly SessionEventLike[]): SessionJoin {
   let first = Number.POSITIVE_INFINITY
   let last = Number.NEGATIVE_INFINITY
+  const labels = new Map<string, string>()
   for (const event of events) {
-    if (!Number.isFinite(event.time)) continue
-    if (event.time < first) first = event.time
-    if (event.time > last) last = event.time
+    if (Number.isFinite(event.time)) {
+      if (event.time < first) first = event.time
+      if (event.time > last) last = event.time
+    }
+    // 父会话目录里的创建标签：子代理那一行靠它显示「是哪个子代理」，不必再读子会话日志。
+    if (event.type === 'subagent/catalog') {
+      const childId = event.data?.childId
+      const label = event.data?.label
+      if (typeof childId === 'string' && childId !== '' && typeof label === 'string' && label !== '') {
+        labels.set(childId, label)
+      }
+    }
   }
   return {
     turn: turnIndexOf(sessionId, events),
     timing: timingIndexOf(sessionId, events),
     span: Number.isFinite(first) && last >= first ? { first, last } : null,
+    labels,
   }
 }
 
@@ -318,6 +348,136 @@ export async function readSessionJoinEvents(
   }
 }
 
+/**
+ * 一个直接子代理连同它自己派出的下级。子树里的会话 id 只挂在**一个**直接子代理下：
+ * 报数按这棵树分组，读者把各行的数加起来正好是下一段那一个合计，不会重复。
+ */
+interface SubagentBranch {
+  id: string
+  tree: readonly string[]
+}
+
+/**
+ * 从会话清单折出本会话的直接子代理与各自的整棵子树。只认 `origin === 'subagent'`：
+ * `parentSession` 也是 fork 血缘，手动 fork 的会话带它却不是子代理（见 SessionLineageLike）。
+ * 环（畸形血缘）由 `seen` 挡住，不会把遍历挂死。
+ */
+function subagentBranches(sessions: readonly SessionLineageLike[], rootId: string): SubagentBranch[] {
+  const children = new Map<string, string[]>()
+  for (const snapshot of sessions) {
+    const { id, parentSession, origin } = snapshot.header
+    if (origin !== 'subagent') continue
+    if (typeof parentSession !== 'string' || parentSession === '') continue
+    const siblings = children.get(parentSession)
+    if (siblings === undefined) children.set(parentSession, [id])
+    else siblings.push(id)
+  }
+  const branches: SubagentBranch[] = []
+  for (const child of children.get(rootId) ?? []) {
+    const tree: string[] = []
+    const seen = new Set<string>()
+    const stack = [child]
+    while (stack.length > 0) {
+      const id = stack.pop()!
+      if (seen.has(id)) continue
+      seen.add(id)
+      tree.push(id)
+      for (const grandchild of children.get(id) ?? []) stack.push(grandchild)
+    }
+    branches.push({ id: child, tree })
+  }
+  return branches
+}
+
+/**
+ * 本会话的「子代理」一段：直接子代理各占一行、含自己的整棵子树，一段另给合计。
+ * token 与钱都只取账本行——子代理是**独立的 sessionId**，所以它们的行不在主会话的
+ * `total` 里；这里按血缘把它们折成一段，**不并进抬头合计**（那会让抬头与按轮次明细对不上）。
+ *
+ * 读不到会话清单时返回 undefined：那是「不知道有没有下级」，不是「没有」。
+ */
+function subagentsOf(input: SessionUsageInput, labels: ReadonlyMap<string, string>): SessionSubagentsView | undefined {
+  const sessions = input.sessions
+  if (sessions === undefined || sessions.length === 0) return undefined
+  const branches = subagentBranches(sessions, input.sessionId)
+  if (branches.length === 0) return undefined
+
+  // 一条账本行只归一个直接子代理的子树：按 sessionId 建好归属表，再扫一遍全部记录。
+  const owner = new Map<string, string>()
+  for (const branch of branches) {
+    for (const id of branch.tree) owner.set(id, branch.id)
+  }
+  const recordsByBranch = new Map<string, UsageRecord[]>()
+  for (const record of input.records) {
+    const branchId = owner.get(record.sessionId)
+    if (branchId === undefined) continue
+    const list = recordsByBranch.get(branchId)
+    if (list === undefined) recordsByBranch.set(branchId, [record])
+    else list.push(record)
+  }
+
+  const unpriced = new Set<string>()
+  const rows: SessionSubagentRow[] = []
+  let totalTokens = 0
+  let spend = 0
+  let subscriptionValue = 0
+  let usageUnknown = 0
+  let failures = 0
+  for (const branch of branches) {
+    const records = recordsByBranch.get(branch.id) ?? []
+    // 次数与四桶走 summarizeRecords，与主会话 totals 是同一条口径（失败不计入 requests、
+    // 缺 usage 的行单独计 usageUnknown）。
+    const totals = summarizeRecords(records, input.resolve).total
+    let branchSpend = 0
+    let branchSubscription = 0
+    let priced = false
+    for (const record of records) {
+      const price = priceOfRecord(record, input.pricing, input.billing, input.resolve, unpriced)
+      if (price.bucket === 'spend') {
+        branchSpend += price.cost
+        priced = true
+      } else if (price.bucket === 'subscription') {
+        branchSubscription += price.cost
+        priced = true
+      }
+    }
+    const tokens = totalsTokens(totals)
+    const unknown = totals.usageUnknown ?? 0
+    const failed = totals.failures ?? 0
+    rows.push({
+      sessionId: branch.id,
+      label: labels.get(branch.id) ?? '',
+      tokens,
+      requests: totals.requests,
+      failures: failed,
+      usageUnknown: unknown,
+      spend: branchSpend,
+      subscriptionValue: branchSubscription,
+      priced,
+      descendants: branch.tree.length - 1,
+    })
+    totalTokens += tokens
+    spend += branchSpend
+    subscriptionValue += branchSubscription
+    usageUnknown += unknown
+    failures += failed
+  }
+  // 花的多的排前面：「哪个子代理重」正是这一段要回答的问题。
+  rows.sort((left, right) => right.tokens - left.tokens
+    || (left.label !== right.label ? (left.label < right.label ? -1 : 1)
+      : (left.sessionId < right.sessionId ? -1 : left.sessionId > right.sessionId ? 1 : 0)))
+  return {
+    count: rows.length,
+    totalTokens,
+    spend,
+    subscriptionValue,
+    usageUnknown,
+    failures,
+    unpriced: [...unpriced].sort(),
+    rows,
+  }
+}
+
 /** 把一个会话的账本记录折成视图。分组规则见 docs/CONTEXT.md：压缩归轮间（不硬塞
  *  进某一轮），失败行按自己身份里的回合号进组，join 不上的行进 `unattributed`
  *  ——「轮次未知」与「轮间」分列。
@@ -374,6 +534,7 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
     .sort((left, right) => left[0] - right[0])
     .map(([turn, entries]) => groupOf(turn, entries, input.resolve))
   const tail = between.length === 0 ? null : groupOf(null, between, input.resolve)
+  const subagents = subagentsOf(input, input.join.labels)
 
   return {
     sessionId: input.sessionId,
@@ -390,6 +551,7 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
     unattributed: sortEntries(unattributed).map(entry => entry.row),
     todaySpend: input.todaySpend,
     ...spanOf(span, all.map(entry => entry.row)),
+    ...(subagents === undefined ? {} : { subagents }),
   }
 }
 

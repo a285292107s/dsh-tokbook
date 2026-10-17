@@ -15,7 +15,9 @@
  * 的 wire 读」，它是 wire 层的工具，不是展示层的。
  */
 
-import type { SessionStepRow, SessionUsageGroup, SessionUsageView, StepTiming, UsageTotals } from '../types.ts'
+import type {
+  SessionStepRow, SessionSubagentRow, SessionSubagentsView, SessionUsageGroup, SessionUsageView, StepTiming, UsageTotals,
+} from '../types.ts'
 
 /** 账本数字一律当**不可信**的 wire 读：缺字段时这一页仍要画出来（空白不报错，也不显示 NaN）。 */
 export function num(value: unknown): number {
@@ -49,6 +51,50 @@ export function readSessionView(raw: unknown): SessionUsageView | null {
     todaySpend: num(source.todaySpend),
     spanMs: optionalMs(source.spanMs),
     workMs: optionalMs(source.workMs),
+    subagents: readSubagents(source.subagents),
+  }
+}
+
+/**
+ * 「子代理」一段。一段的存在与否是**事实**：宿主读不到血缘时整格缺席（旧 host / 独立查看器），
+ * 客户端不能把它填成「0 个子代理」——那是把「不知道」印成「没有」。所以缺字段 / 形状不合法
+ * 一律返回 undefined，而不是一份空视图。
+ */
+function readSubagents(raw: unknown): SessionSubagentsView | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const source = raw as Partial<SessionSubagentsView>
+  const rows: SessionSubagentRow[] = []
+  if (Array.isArray(source.rows)) {
+    for (const item of source.rows) {
+      if (typeof item !== 'object' || item === null) continue
+      const row = item as Partial<SessionSubagentRow>
+      if (typeof row.sessionId !== 'string' || row.sessionId === '') continue
+      rows.push({
+        sessionId: row.sessionId,
+        label: typeof row.label === 'string' ? row.label : '',
+        tokens: num(row.tokens),
+        requests: num(row.requests),
+        failures: num(row.failures),
+        usageUnknown: num(row.usageUnknown),
+        spend: num(row.spend),
+        subscriptionValue: num(row.subscriptionValue),
+        priced: row.priced === true,
+        descendants: num(row.descendants),
+      })
+    }
+  }
+  if (rows.length === 0) return undefined
+  return {
+    count: num(source.count),
+    totalTokens: num(source.totalTokens),
+    spend: num(source.spend),
+    subscriptionValue: num(source.subscriptionValue),
+    usageUnknown: num(source.usageUnknown),
+    failures: num(source.failures),
+    unpriced: Array.isArray(source.unpriced)
+      ? source.unpriced.filter((key): key is string => typeof key === 'string')
+      : [],
+    rows,
   }
 }
 

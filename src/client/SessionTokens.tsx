@@ -13,6 +13,7 @@ import { formatDateTime, formatDuration, formatMoney, formatShare, formatTokens 
 import { UsageGlyph } from './icons.tsx'
 import { ledgerClockSupported, subscribeLedgerChanges } from './ledger-clock.ts'
 import { SessionShell } from './SessionShell.tsx'
+import { SubagentSection } from './session-subagents.tsx'
 import { MixBand, TimeBar, TurnBlocks, TurnChart, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
 import { readSessionView } from './session-wire.ts'
 
@@ -311,10 +312,17 @@ function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap
           <MixBand totals={view.total} totalTokens={tokens} />
         </div>
       </Block>
+      {/* 子代理紧跟抬头：它答的是抬头那个问题的另一半（这个会话的下级花了多少），
+          而主合计**不并入**它们——两笔账分开写，范围才不会在一个数里混掉。 */}
+      {view.subagents !== undefined && (
+        <Block i={1}>
+          <SubagentSection view={view.subagents} sessionTokens={tokens} />
+        </Block>
+      )}
       {/* 会话时间单列一块：用量块问「算了多少钱」，这四个数问「时间花在哪、花了多久」——
           两种问句并进一串读数，3 小时的引擎工作会被读成第三桶的份额。缺时间数据时整块不出。 */}
       {view.workMs !== undefined && view.spanMs !== undefined && (
-        <Block i={1}>
+        <Block i={2}>
           <SessionTiming
             workMs={view.workMs}
             spanMs={view.spanMs}
@@ -323,8 +331,8 @@ function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap
           />
         </Block>
       )}
-      <Block i={2}><TurnChart turns={view.turns} previews={previews} /></Block>
-      <Block i={3}>
+      <Block i={3}><TurnChart turns={view.turns} previews={previews} /></Block>
+      <Block i={4}>
         <TurnBlocks
           turns={view.turns}
           betweenTurns={view.betweenTurns}
@@ -332,7 +340,7 @@ function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap
           previews={previews}
         />
       </Block>
-      <Block i={4}><Footer total={view.total} unpriced={view.unpriced} timing={hasTiming(view)} /></Block>
+      <Block i={5}><Footer total={view.total} unpriced={view.unpriced} timing={hasTiming(view)} /></Block>
     </>
   )
 }

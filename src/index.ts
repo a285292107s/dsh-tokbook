@@ -544,13 +544,17 @@ export class TokenUsageBook extends Service {
    * 轮次 / 步骤在请求时 join 该会话的持久化日志——日志读不到时那些行进「轮次未知」，
    * 口径与理由见 docs/adr/0001-turn-attribution-read-time-join.md。
    *
+   * 「子代理」一段另用探针那份会话清单的 header 血缘：把本会话直接派出的下级会话
+   * 各折成一行（含各自的整棵子树）；它只归集、不改主会话合计。
+   *
    * `todaySpend` 不再为它跑一份聚合：它从记录缓存里挑出今日那些行，走**同一批**
    * 计价函数（见 {@link todaySpendOf}），抬头那个参照系因此仍与浮窗逐分一致。
    */
   async sessionUsage(sessionId: string): Promise<SessionUsageView> {
     // 新鲜度探针照跑（清单走缓存、窗口过了也只重取到后台），但**不跑整份概览**——
     // 这一页只要今日一行支出，概览的全量聚合与第二次读价表在这里都是白付的。
-    await this.ensureFresh()
+    // 清单里的 header 另外带上两格血缘，供「子代理」一段把下级会话 join 到本会话。
+    const snapshots = await this.ensureFresh()
     const { table, billing, resolve } = await this.rateContext()
     const records = await readCachedRecords(this.dir, this.logger)
     // join 按该会话日志的 revision 缓存：账本变了而日志没变时（别处落了行、或只是切回
@@ -561,6 +565,7 @@ export class TokenUsageBook extends Service {
       sessionId,
       records,
       join,
+      sessions: snapshots,
       pricing: table,
       billing,
       resolve,
