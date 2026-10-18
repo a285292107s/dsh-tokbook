@@ -5,12 +5,8 @@ export const CSS_SESSION = `
   flex:1 1 0;min-height:0;overflow:hidden;
   position:relative;
   color:var(--dtpl-fg);
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb,var(--dtpl-fg) 1.2%,transparent) 0%,
-      color-mix(in srgb,var(--dtpl-fg) 0.4%,transparent) 100%),
-    radial-gradient(color-mix(in srgb,var(--dtpl-fg) 3%,transparent) 1px, transparent 1px);
-  background-size:100%, 3px 3px;
+  background:var(--dtpl-paper);
+  background-size:var(--dtpl-paper-size);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-timing{
   display:flex;flex-direction:column;gap:12px;

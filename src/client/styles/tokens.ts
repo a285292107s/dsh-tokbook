@@ -26,6 +26,12 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
     inset 0 1px 0 0 color-mix(in srgb,#fff 7%,transparent),
     inset 0 -1px 0 0 color-mix(in srgb,#000 12%,transparent);
   --dtpl-panel-bg:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
+  --dtpl-paper:
+    linear-gradient(180deg,
+      color-mix(in srgb,var(--dtpl-fg) 1.2%,transparent) 0%,
+      color-mix(in srgb,var(--dtpl-fg) 0.4%,transparent) 100%),
+    radial-gradient(color-mix(in srgb,var(--dtpl-fg) 3%,transparent) 1px, transparent 1px);
+  --dtpl-paper-size:100%,3px 3px;
 
   --dtpl-radius:0px;
   --dtpl-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);

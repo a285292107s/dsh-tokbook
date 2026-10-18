@@ -127,10 +127,6 @@ export const CSS_PRICING = `
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-price-pick{
-  display:flex;flex-direction:column;gap:2px;
-  border-bottom:1px solid var(--dtpl-border);padding-bottom:8px;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-pick{
   display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
   column-gap:16px;row-gap:8px;align-items:start;
   border-bottom:1px solid var(--dtpl-border);padding-bottom:10px;

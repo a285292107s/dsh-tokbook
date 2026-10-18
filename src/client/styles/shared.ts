@@ -72,7 +72,6 @@ export const CSS_SHARED = `
     grid-template-columns:repeat(2,minmax(0,1fr));
     row-gap:8px;
   }
-  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cols-k{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cols{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-scope{grid-column:1 / -1;padding-right:0;}
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-addrow{grid-template-columns:minmax(0,1fr);}

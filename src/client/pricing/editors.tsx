@@ -160,7 +160,10 @@ export function CalendarEditor({ entries, missingYears, autoYears, dirty, expand
               entry={entries.get(year)!}
               reads={reads.get(year)!}
               onChange={(next) => onChange(year, next)}
-              onRemove={() => onChange(year, null)}
+              onRemove={() => {
+                onChange(year, null)
+                setFocusId('cal-newyear')
+              }}
             />
           ))}
           <div className="dtpl-price-cal-add">
@@ -215,16 +218,23 @@ function CalendarYearGroup({ entry, reads, onChange, onRemove }: {
 }) {
   const [confirming, setConfirming] = useState(false)
   const tally = calendarYearTally(entry.year, entry.holidays)
-  const [pendingFocus, setPendingFocus] = useState<CalendarHolidayDraft | null>(null)
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null)
   useEffect(() => {
     if (pendingFocus === null) return
-    document.getElementById(dateFieldId(pendingFocus, 'start'))?.focus()
+    document.getElementById(pendingFocus)?.focus()
     setPendingFocus(null)
   }, [pendingFocus])
   const addHoliday = (): void => {
     const holiday = newHoliday()
     onChange({ ...entry, holidays: [...entry.holidays, holiday] })
-    setPendingFocus(holiday)
+    setPendingFocus(dateFieldId(holiday, 'start'))
+  }
+  const removeHoliday = (index: number): void => {
+    const holiday = entry.holidays[index]
+    if (holiday === undefined) return
+    onChange({ ...entry, holidays: entry.holidays.filter(item => item.id !== holiday.id) })
+    const next = entry.holidays[index + 1] ?? entry.holidays[index - 1]
+    setPendingFocus(next === undefined ? `cal-${entry.year}-add` : dateFieldId(next, 'start'))
   }
   return (
     <div className="dtpl-price-cal-year">
@@ -238,6 +248,7 @@ function CalendarYearGroup({ entry, reads, onChange, onRemove }: {
         <button
           type="button"
           className="dtpl-price-ghost dtpl-price-ghost-danger"
+          aria-label={`${confirming ? '确认删除' : '删除'}这一年（${entry.year}）`}
           data-confirm={confirming}
           onClick={() => {
             if (!confirming) {
@@ -266,10 +277,10 @@ function CalendarYearGroup({ entry, reads, onChange, onRemove }: {
             ...entry,
             holidays: entry.holidays.map(item => (item.id === holiday.id ? next : item)),
           })}
-          onRemove={() => onChange({ ...entry, holidays: entry.holidays.filter(item => item.id !== holiday.id) })}
+          onRemove={() => removeHoliday(index)}
         />
       ))}
-      <button type="button" className="dtpl-price-add-ghost" onClick={addHoliday}>
+      <button type="button" id={`cal-${entry.year}-add`} className="dtpl-price-add-ghost" onClick={addHoliday}>
         <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>加一段假期
       </button>
     </div>
@@ -321,7 +332,9 @@ function HolidayRow({ year, index, row, read, onEdit, onRemove }: {
         </span>
         <button
           type="button"
+          id={`cal-${String(row.id)}-remove`}
           className="dtpl-price-ghost dtpl-price-ghost-danger"
+          aria-label={`${confirming ? '确认删除' : '删除'}（${where}）`}
           data-confirm={confirming}
           onClick={() => {
             if (!confirming) {
@@ -382,7 +395,12 @@ function RateCell({ id, label, value, state, context, placeholder, note, onEdit,
   view: MoneyView
 }) {
   const errorId = `${id}-err`
+  const noteId = `${id}-note`
   const message = state === 'bad' ? '须为非负数字' : undefined
+  const describedBy = [
+    message !== undefined ? errorId : undefined,
+    note !== undefined ? noteId : undefined,
+  ].filter((ref): ref is string => ref !== undefined).join(' ') || undefined
   const counterpart = counterpartOf(view, value)
   const tip = state === 'bad'
     ? `${label}必须是非负数字（${unitOf(view)}）`
@@ -403,12 +421,13 @@ function RateCell({ id, label, value, state, context, placeholder, note, onEdit,
         value={value}
         aria-label={`${context} ${label}`}
         aria-invalid={state === 'bad' || undefined}
-        aria-describedby={message !== undefined ? errorId : undefined}
+        aria-describedby={describedBy}
         onChange={(event) => onEdit?.(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur()
         }}
       />
+      {note !== undefined && <span id={noteId} className="dtpl-sr">{note}</span>}
       {message !== undefined && <span id={errorId} className="dtpl-price-cell-err" role="alert">{message}</span>}
     </div>
   )
@@ -423,7 +442,7 @@ function LiveRates({ live, records, view }: { live: InForceRates | null; records
     return ''
   }
   return (
-    <div className="dtpl-price-live" aria-label="此刻计费的价">
+    <div className="dtpl-price-live" role="group" aria-label="此刻计费的价">
       <div className="dtpl-price-live-head">
         <span className="dtpl-price-live-k">此刻计费</span>
         <span className="dtpl-price-live-unit">{unitOf(view)}</span>
@@ -468,14 +487,14 @@ function DayBand({ price }: { price: ModelDraft }) {
       role="img"
       aria-label={`24 小时生效范围：基准价铺满全天${drawn.length === 0 ? '' : `；${drawn.map(row => `${row.label} 覆盖 ${String(row.start)}–${String(row.end)} 点`).join('；')}`}`}
     >
-      <div className="dtpl-price-day-row">
+      <div className="dtpl-price-day-row" aria-hidden="true">
         <span className="dtpl-price-day-k">基准价</span>
         <span className="dtpl-price-day-cells" aria-hidden="true">
           {HOURS.map(hour => <span className="dtpl-price-day-cell" key={hour} data-on="base" />)}
         </span>
       </div>
       {drawn.map(row => (
-        <div className="dtpl-price-day-row" key={row.id}>
+        <div className="dtpl-price-day-row" key={row.id} aria-hidden="true">
           <span className="dtpl-price-day-k">{row.label}</span>
           <span className="dtpl-price-day-cells" aria-hidden="true">
             {HOURS.map(hour => (
@@ -503,7 +522,7 @@ function PriceRow({ slot, index, price, view, onChange, onRemove, onDuplicate }:
   onRemove: () => void
   onDuplicate: () => void
 }) {
-  const context = slot === null ? '这条价的基准价' : `第 ${String(index + 1)} 个峰谷时段`
+  const context = slot === null ? '基准价' : `第 ${String(index + 1)} 个峰谷时段`
   const [confirming, setConfirming] = useState(false)
   const inert = slot !== null && isBlankSlot(slot)
   const hours = slot === null ? null : (() => {
@@ -565,10 +584,12 @@ function PriceRow({ slot, index, price, view, onChange, onRemove, onDuplicate }:
                 {inert ? '不改写任何档，不影响计价' : hours === null ? '时段还没成段' : `持续 ${String(hours)} 小时`}
               </span>
               <span className="dtpl-price-rowacts">
-                <button type="button" className="dtpl-price-ghost" onClick={onDuplicate}>复制</button>
+                <button type="button" className="dtpl-price-ghost" aria-label={`复制（${context}）`} onClick={onDuplicate}>复制</button>
                 <button
                   type="button"
+                  id={`slot-${String(slot.id)}-remove`}
                   className="dtpl-price-ghost dtpl-price-ghost-danger"
+                  aria-label={`${confirming ? '确认删除' : '删除'}（${context}）`}
                   data-confirm={confirming}
                   onClick={() => {
                     if (!confirming) {
@@ -620,21 +641,28 @@ function PriceTable({ price, view, onChange }: {
   view: MoneyView
   onChange: (next: ModelDraft) => void
 }) {
-  const [pendingFocus, setPendingFocus] = useState<number | null>(null)
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null)
   useEffect(() => {
     if (pendingFocus === null) return
-    document.getElementById(`slot-${String(pendingFocus)}-input`)?.focus()
+    document.getElementById(pendingFocus)?.focus()
     setPendingFocus(null)
   }, [pendingFocus])
   const addSlot = (): void => {
     const slot = newSlot()
     onChange({ ...price, slots: [...price.slots, slot] })
-    setPendingFocus(slot.id)
+    setPendingFocus(`slot-${String(slot.id)}-input`)
+  }
+  const removeSlot = (index: number): void => {
+    const slot = price.slots[index]
+    if (slot === undefined) return
+    onChange({ ...price, slots: price.slots.filter(item => item.id !== slot.id) })
+    const next = price.slots[index + 1] ?? price.slots[index - 1]
+    setPendingFocus(next === undefined ? 'price-add-slot' : `slot-${String(next.id)}-input`)
   }
   return (
     <>
-      <div className="dtpl-price-tbl">
-        <div className="dtpl-price-cols">
+      <div className="dtpl-price-tbl" role="group" aria-label={`四档价（${unitOf(view)}）`}>
+        <div className="dtpl-price-cols" aria-hidden="true">
           <span className="dtpl-price-cols-k">生效范围</span>
           {CELLS.map(({ field, label }) => <span className="dtpl-price-cols-n" key={field}>{label}</span>)}
         </div>
@@ -656,7 +684,7 @@ function PriceTable({ price, view, onChange }: {
               price={price}
               view={view}
               onChange={onChange}
-              onRemove={() => onChange({ ...price, slots: price.slots.filter(item => item.id !== slot.id) })}
+              onRemove={() => removeSlot(slotIndex)}
               onDuplicate={() => onChange({ ...price, slots: [...price.slots, duplicateSlot(slot)] })}
             />
           ))}
@@ -665,6 +693,7 @@ function PriceTable({ price, view, onChange }: {
       <div className="dtpl-price-addrow">
         <button
           type="button"
+          id="price-add-slot"
           className="dtpl-price-add-ghost dtpl-price-add-slot"
           aria-label="添加峰谷时段"
           onClick={addSlot}
@@ -720,6 +749,7 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
             <span className="dtpl-price-switch" role="group" aria-label="报价币种">
               <button
                 type="button"
+                aria-label="按人民币报价（¥）"
                 aria-pressed={currency === 'CNY'}
                 title="这条通道的价按人民币记（¥/百万词元）。切过来会把现有价按汇率换算成人民币，金额不变"
                 onClick={() => onCurrency('CNY')}
@@ -728,6 +758,7 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
               </button>
               <button
                 type="button"
+                aria-label="按美元报价（$）"
                 aria-pressed={currency === 'USD'}
                 disabled={rate === null}
                 title={rate === null
@@ -767,7 +798,7 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
         </p>
       )}
       {issue !== null && (
-        <p className="dtpl-price-issue" role="alert">{row.model}:{issue}</p>
+        <p className="dtpl-price-issue" role="status">{row.model}:{issue}</p>
       )}
     </section>
   )

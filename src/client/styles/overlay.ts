@@ -11,7 +11,10 @@ export const CSS_OVERLAY = `
   position:relative;
   width:min(720px,100%);height:min(680px,88dvh);height:min(680px,88vh);
   display:flex;flex-direction:column;
-  background:var(--dtpl-card);color:var(--dtpl-fg);
+  background:var(--dtpl-paper);
+  background-color:var(--dtpl-card);
+  background-size:var(--dtpl-paper-size);
+  color:var(--dtpl-fg);
   border-radius:0;
   box-shadow:
     inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),

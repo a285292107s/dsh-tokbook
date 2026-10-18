@@ -166,6 +166,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const [holiday, setHoliday] = useState<{ running: boolean; result: HolidayRefreshResult | null; error: string | null }>({ running: false, result: null, error: null })
   const [picked, setPicked] = useState<Picked | null>(readPicked)
   const [calendarOpen, setCalendarOpen] = useState(false)
+  const searchButtonRef = useRef<HTMLButtonElement>(null)
+  const restoreLookupFocusRef = useRef(false)
 
   const choosePicked = useCallback((pick: Picked) => {
     setPicked(pick)
@@ -264,10 +266,14 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     try {
       const result = await postLookup(keyword)
       if (!aliveRef.current) return
-      setLookup((current) => current.open ? { ...current, loading: false, result, error: null } : current)
+      setLookup((current) => current.open
+        ? { ...current, loading: false, result, error: null }
+        : { ...current, loading: false })
     } catch (err) {
       if (!aliveRef.current) return
-      setLookup((current) => current.open ? { ...current, loading: false, result: null, error: err instanceof Error ? err.message : String(err) } : current)
+      setLookup((current) => current.open
+        ? { ...current, loading: false, result: null, error: err instanceof Error ? err.message : String(err) }
+        : { ...current, loading: false })
     }
   }, [postLookup])
 
@@ -276,8 +282,15 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   }, [])
 
   const closeLookup = useCallback(() => {
+    restoreLookupFocusRef.current = true
     setLookup((current) => ({ ...current, open: false }))
   }, [])
+
+  useEffect(() => {
+    if (!restoreLookupFocusRef.current || lookup.open || lookup.loading) return
+    restoreLookupFocusRef.current = false
+    searchButtonRef.current?.focus()
+  }, [lookup.open, lookup.loading])
 
   const autoSyncedRef = useRef(false)
   useEffect(() => {
@@ -475,6 +488,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
 
   const openLookup = useCallback(() => {
     if (card === undefined || row === undefined) return
+    restoreLookupFocusRef.current = false
     setLookup({ open: true, keyword: row.model, loading: true, result: null, error: null })
     void doSearch(row.model)
   }, [card, row, doSearch])
@@ -499,7 +513,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   return (
     <section
       className="dtpl-price-sec"
-      aria-label="价格表"
       onBlur={(event) => {
         if (event.target instanceof HTMLSelectElement) return
         if (stagedChanges(stateRef.current, baselineRef.current) === 0) return
@@ -591,8 +604,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         const autoFailed = view.holidaySync !== undefined
           && (view.holidaySync.state === 'failed' || view.holidaySync.state === 'missing')
         return (
-          <div className="dtpl-price-calarm" role="status">
-            <span className="dtpl-price-calarm-text">
+          <div className="dtpl-price-calarm">
+            <span className="dtpl-price-calarm-text" role="status">
               缺 {missing.join('、')} 年的法定节假日安排：「法定工作日」时段会把那几年的节假日按高峰多算。
               {autoFailed && '自动拉取没成功，可以展开年历手动填（手写永远优先）。'}
               {holiday.error !== null && <b>（自动拉取失败：{holiday.error}）</b>}
@@ -693,6 +706,9 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           <button
             type="button"
             className="dtpl-price-tool"
+            ref={searchButtonRef}
+            aria-haspopup="dialog"
+            aria-expanded={lookup.open}
             disabled={lookup.loading || card === undefined || row === undefined}
             title="按名字在 models.dev 里搜原厂价，选中一条填进当前这一行的四档（会覆盖这一行已填的数）。只在美元报价的通道上可用。"
             onClick={() => void openLookup()}
@@ -786,21 +802,38 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
   const isUsd = currency === 'USD'
   const currentKey = normalizeModelId(currentModel)
 
+  const panelRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+    panelRef.current?.scrollIntoView({ block: 'nearest' })
+    inputRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  useEffect(() => {
+    if (lookup.result === null && lookup.error === null) return
+    panelRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [lookup.result, lookup.error])
 
   return (
-    <div className="dtpl-price-lookup" role="dialog" aria-label="从 models.dev 选一份价填进这一行">
+    <div
+      className="dtpl-price-lookup"
+      role="dialog"
+      aria-label="从 models.dev 选一份价填进这一行"
+      ref={panelRef}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+      }}
+    >
       <div className="dtpl-price-lookup-head">
         <span className="dtpl-price-lookup-k">在 models.dev 里找这个模型</span>
         <input
           className="dtpl-price-input dtpl-price-lookup-input"
           type="text"
+          ref={inputRef}
           value={lookup.keyword}
           placeholder="模型名（如 deepseek-v4-flash）"
           aria-label="搜索关键词"
@@ -819,7 +852,7 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
         >
           搜索
         </button>
-        <button type="button" className="dtpl-price-ghost" aria-label="关闭" onClick={onClose}>
+        <button type="button" className="dtpl-price-ghost" aria-label="关闭搜索价" onClick={onClose}>
           ×
         </button>
       </div>
@@ -867,6 +900,7 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
                       <button
                         type="button"
                         className="dtpl-price-ghost"
+                        aria-label={`把 ${candidate.provider}/${candidate.modelId} 的价填进这一行`}
                         disabled={!isUsd}
                         title={isUsd
                           ? `把 ${candidate.provider}/${candidate.modelId} 的价填进这一行（覆盖这一行已填的四档）`
