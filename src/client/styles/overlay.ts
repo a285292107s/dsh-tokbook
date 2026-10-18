@@ -40,7 +40,7 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
 }
 [data-plugin="dsh-tokbook"] .dtpl-title{
   display:flex;align-items:center;gap:10px;min-width:0;
-  font-size:16px;line-height:24px;font-weight:600;letter-spacing:.02em;
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;letter-spacing:.02em;
 }
 /* 工业徽记：黄底 + 墨色图形。这是**抽象替身**，不是鹰角商标的复刻。
    徽记压一个 1px 墨边——恒定黄在任何底上都没有边界，不压边就糊成一团。 */
@@ -74,7 +74,7 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
 [data-plugin="dsh-tokbook"] .dtpl-tab{
   position:relative;appearance:none;flex:1;border:0;background:transparent;
   height:30px;padding:0 12px;
-  font:inherit;font-size:12px;line-height:18px;font-weight:500;
+  font:inherit;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;
   color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:background .15s ease,color .15s ease;
 }

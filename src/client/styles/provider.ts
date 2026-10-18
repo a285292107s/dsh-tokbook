@@ -37,7 +37,7 @@ export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是
 /* 「全部账本只给词元」这句解释就挂在窗口控件旁边——金额列在那一个窗口里不出现，
    原因必须与控件同屏，否则读起来像少了一列。它是要读的一句话，所以走 fg-2。 */
 [data-plugin="dsh-tokbook"] .dtpl-usage-money-note{
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;white-space:nowrap;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-range-tabs{
   display:flex;flex:none;
@@ -47,7 +47,7 @@ export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是
   flex:0 0 auto;
   position:relative;appearance:none;border:0;background:transparent;
   height:24px;padding:0 11px;
-  font:inherit;font-size:11px;line-height:16px;font-weight:500;
+  font:inherit;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:500;
   color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:background .15s ease,color .15s ease;
 }
@@ -99,13 +99,13 @@ export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是
   display:flex;align-items:center;gap:6px;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-name{
-  color:var(--dtpl-fg);font-size:14px;line-height:20px;font-weight:600;
+  color:var(--dtpl-fg);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 /* 标签下的 route key：账本的计费键，走等宽。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-key{
   font-family:var(--dtpl-mono);
-  font-size:10px;
+  font-size:var(--dtpl-fs-micro);
 }
 /* 计费性质：**用形区分，不用色相**。按量 = 描边芯片（一条通道的分类），订阅 = 实心墨芯片
    （这个数不是现金）。分类从不该由颜色承担——DSH 皮肤里 accent 本就等于墨色、换个皮肤又会变蓝；
@@ -116,7 +116,7 @@ export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是
   flex:none;display:inline-flex;align-items:center;
   height:15px;padding:0 5px;
   border:1px solid var(--dtpl-border);
-  font-size:10px;line-height:13px;font-weight:600;white-space:nowrap;
+  font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);font-weight:600;white-space:nowrap;
   color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-bill[data-billing="subscription"]{
@@ -125,7 +125,7 @@ export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是
 }
 /* 卡头这一段是**信息**（请求 / 压缩 / 没上报用量 / 价格未知的模型），不是装饰：墨色取 fg-2。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-meta{
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-nums{
@@ -133,7 +133,7 @@ export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-tokens{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg);font-size:19px;line-height:25px;font-weight:600;
+  color:var(--dtpl-fg);font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);font-weight:600;
   letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 金额：与总览同一套口径——实际支出走墨色 + 600，订阅价值走次要色 + 400。
@@ -141,15 +141,15 @@ export const CSS_PROVIDER = `/* 用量明细：并入用量总览之后，它是
 [data-plugin="dsh-tokbook"] .dtpl-provider-cost{
   display:flex;flex-direction:column;align-items:flex-end;gap:1px;
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-2);font-size:12px;line-height:18px;font-weight:400;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:400;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-spend{font-weight:600;color:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-provider-value{color:var(--dtpl-fg-2);font-weight:400;font-size:10px;line-height:15px;}
+[data-plugin="dsh-tokbook"] .dtpl-provider-value{color:var(--dtpl-fg-2);font-weight:400;font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);}
 /* 模型行副行（请求数 · 金额）是读数：fg-2，现金金额另走主墨色 600（见 ledger 的 dtpl-cash-amt）。 */
 [data-plugin="dsh-tokbook"] .dtpl-provider-model-sub{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 模型行自带「发丝线 + 上下间距」（.dtpl-row + .dtpl-row，见 ledger 片段），这里**不再**叠

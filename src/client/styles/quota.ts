@@ -1,7 +1,7 @@
 export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sec{display:flex;flex-direction:column;gap:16px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-intro{
-  margin:0;font-size:12px;line-height:20px;color:var(--dtpl-fg-2);
+  margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
 }
 /* 自动刷新：标签 + 选择器 + 实时状态。选择器与窗口 tab、总览子 tab、通道时间跨度共用
    同一条「横排 + 竖发丝分隔 + 底部实条」——全窗口只有一种「当前项」。 */
@@ -9,7 +9,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-label{
-  color:var(--dtpl-fg-2);font-size:12px;line-height:18px;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-seg{
   display:flex;align-self:flex-start;
@@ -18,7 +18,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt{
   position:relative;appearance:none;border:0;background:transparent;
   height:24px;padding:0 11px;
-  font:inherit;font-size:11px;line-height:16px;font-weight:500;
+  font:inherit;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:500;
   color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:background .15s ease,color .15s ease;
 }
@@ -34,7 +34,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 /* 「每 N 分钟自动刷新」是**正在生效的机制**，不是健康状态：绿只留给真正的 ok，所以它走中性色；
    「哪一档被选中」由上面那颗实条说明。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-state{
-  margin-left:auto;color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
+  margin-left:auto;color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-quota-cards{display:flex;flex-direction:column;gap:12px;}
@@ -66,12 +66,12 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 /* 卡头左列永远是**同一只环**：有分母时是量规，没有读数时只画轨道（见下）。形状不随状态换语言。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-id-text{display:flex;flex-direction:column;gap:1px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-name{
-  color:var(--dtpl-fg);font-size:14px;line-height:20px;font-weight:600;
+  color:var(--dtpl-fg);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-sub{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-head-side{
@@ -108,7 +108,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-idle{color:var(--dtpl-fg-2);}
 /* 词的字号受环内径限制（再大一号就贴到描边），只容得下两三个字——长句归正文，不归这里。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-word{
-  font-size:9px;line-height:1;font-weight:600;
+  font-size:var(--dtpl-fs-micro);line-height:1;font-weight:600;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-svg{width:44px;height:44px;display:block;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-track{
@@ -124,20 +124,20 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   position:absolute;inset:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:2px;
   color:inherit;font-family:var(--dtpl-mono);
-  font-size:11px;line-height:1;font-weight:700;
+  font-size:var(--dtpl-fs-label);line-height:1;font-weight:700;
   font-variant-numeric:tabular-nums;white-space:nowrap;
   pointer-events:none;
 }
 /* 百分比那枚「%」是**要读的文本**：这一行环心是 aria-hidden，读屏拿到 aria-label，有视力的人
    只有这枚单位能读出「这是个百分比」，所以走 fg-2。字号仍受环内径限制（见 .dtpl-quota-gauge-word）。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-n i{
-  font-style:normal;font-size:9px;line-height:1;font-weight:600;
+  font-style:normal;font-size:var(--dtpl-fs-micro);line-height:1;font-weight:600;
   color:var(--dtpl-fg-2);margin-left:.5px;
 }
 /* 命名这个环所汇总的预算的小号说明：「这个百分比说的是哪个预算」只由这一行给出
    （见组件的文档注释），所以取 fg-2 与 10px。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-cap{
-  font-size:10px;line-height:1;font-weight:600;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-micro);line-height:1;font-weight:600;color:var(--dtpl-fg-2);
 }
 /* 卡内消息面板（加载失败 / 未配置 / 拉取失败）：1px 硬边框，凹进去的一块说明面，
    不是又一层染色洗色块。 */
@@ -150,12 +150,12 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   border-color:color-mix(in srgb,var(--dtpl-err) 45%,transparent);
   background:color-mix(in srgb,var(--dtpl-err) 7%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-quota-msg-title{margin:0;font-size:12px;line-height:18px;font-weight:600;color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-quota-msg-title{margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:600;color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-err .dtpl-quota-msg-title{color:var(--dtpl-err);}
 /* 「未配置」不是错误：同一块说明面，只是标题降一档到次要色——与环心的词同一档。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-muted .dtpl-quota-msg-title{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-body{
-  margin:0;font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
+  margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
   overflow-wrap:anywhere;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg .dtpl-retry{margin-top:6px;}
@@ -165,7 +165,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   border:1px solid color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
   background:color-mix(in srgb,var(--dtpl-warn) 8%,transparent);
   color:var(--dtpl-warn-ink);
-  font-size:11px;line-height:16px;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
 }
 /* 用量条：每个预算窗口一行，所有数据形态共用同一骨架。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-windows{display:flex;flex-direction:column;gap:12px;}
@@ -174,11 +174,11 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   display:flex;align-items:baseline;justify-content:space-between;gap:12px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-window-label{
-  color:var(--dtpl-fg);font-size:12px;line-height:18px;font-weight:600;
+  color:var(--dtpl-fg);font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:600;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-window-metric{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-bar{
@@ -208,14 +208,14 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-remaining{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg);font-size:12px;line-height:18px;font-weight:600;
+  color:var(--dtpl-fg);font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:600;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-window[data-tone="warn"] .dtpl-quota-remaining{color:var(--dtpl-warn-ink);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-window[data-tone="danger"] .dtpl-quota-remaining{color:var(--dtpl-err);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-reset{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-reset-limited{color:var(--dtpl-err);font-weight:600;}
@@ -223,18 +223,18 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance{display:flex;align-items:baseline;gap:8px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-v{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg);font-size:22px;line-height:27px;font-weight:600;
+  color:var(--dtpl-fg);font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);font-weight:600;
   font-variant-numeric:tabular-nums;letter-spacing:-.01em;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-k{
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;font-weight:500;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:500;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-note{
-  margin:6px 0 0;font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
+  margin:6px 0 0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 /* 额度来源（月额度 / 已购 / 赠送）：余额下的一行紧凑说明——带加购额度的生效卡则在用量条下方。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sources{
-  margin:8px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  margin:8px 0 0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
 }
 /* 用量摘要活动条：**与总览的「今日词元构成」同一只框**（见 ledger 的 .dtpl-grid），
@@ -252,20 +252,20 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-stat-v{
   display:flex;align-items:baseline;gap:6px;
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg);font-size:13px;line-height:19px;font-weight:600;
+  color:var(--dtpl-fg);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-stat-warn{
   font-family:var(--dtpl-mono);
-  font-style:normal;font-size:10px;line-height:14px;font-weight:600;color:var(--dtpl-err);
+  font-style:normal;font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);font-weight:600;color:var(--dtpl-err);
   font-variant-numeric:tabular-nums;
 }
-[data-plugin="dsh-tokbook"] .dtpl-quota-stat-k{color:var(--dtpl-fg-2);font-size:11px;line-height:16px;}
+[data-plugin="dsh-tokbook"] .dtpl-quota-stat-k{color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);}
 /* 卡片头刷新钮前的新鲜度标签：官方数字何时拉回。它坐在卡片面板上、紧挨可交互控件，
    所以留在 fg-2 而不是降到 fg-3。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-updated{
   font-family:var(--dtpl-mono);
-  color:var(--dtpl-fg-2);font-size:11px;line-height:16px;font-weight:400;
+  color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:400;
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-body{display:flex;flex-direction:column;gap:8px;}
@@ -274,7 +274,7 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-line-short{width:35%;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-sk-bar{height:7px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-note{
-  margin:10px 0 0;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  margin:10px 0 0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 
 /* 入场动效（只在重挂时播；reduce 见 shared 的关断表）：

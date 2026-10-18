@@ -233,6 +233,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   }>({ open: false, keyword: '', loading: false, result: null, error: null })
   /** 手动选过的那一份；null = 还没选过，一切走「列表里的第一个」。 */
   const [picked, setPicked] = useState<Picked | null>(readPicked)
+  /** 年历展开与否。它是这一屏**末尾**那条折叠带的状态，也由顶部的缺年告警打开。 */
+  const [calendarOpen, setCalendarOpen] = useState(false)
 
   /** 记下一次选择：组件状态（这一屏立刻跟手）与 localStorage（下次打开还认它）。 */
   const choosePicked = useCallback((pick: Picked) => {
@@ -632,25 +634,16 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         void writeRef.current()
       }}
     >
-      {/* 年历是**全局**的一份数据（不属于任何一行），所以它挂在选择带之上、跟着这一屏常驻：
-          `workdays` 时段的生效判定靠它，缺一年就会把法定节假日按高峰多算——它自己会报出来。 */}
-      {view !== null && (
-        <CalendarEditor
-          entries={state.calendar}
-          missingYears={view.calendarMissing}
-          dirty={calendarDirty(state, baseline)}
-          onChange={updateCalendar}
-        />
-      )}
-      {/* 通道来自本机 settings.yaml 与正在运行的适配器；一个都没有时不画两个空下拉——
-          没有选项的控件只会把「这里本来没有内容」说成「你选不了」。 */}
+      {/* 这条带子是这一屏的**主语行**：正在编辑哪条通道的哪个模型。它是导航，不是内容——
+          所以不给它面板的框，也不让它占掉首屏的高度。 */}
       {state.routes.size > 0 && card !== undefined && (
         <div className="dtpl-price-pick">
-          <label className="dtpl-price-pick-row">
+          <div className="dtpl-price-pick-row">
             <span className="dtpl-price-pick-k">通道</span>
             <select
               className="dtpl-price-select dtpl-price-pick-sel"
               value={card.route}
+              aria-label="通道"
               onChange={(event) => {
                 // 模型先落到空串：换通道时沿用上一条通道的模型名没有意义，下一帧的回落会
                 // 挑出这条通道里请求最多的那一个。
@@ -661,8 +654,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 <option key={item.route} value={item.route}>{routeOptionLabel(item)}</option>
               ))}
             </select>
-          </label>
-          <label className="dtpl-price-pick-row">
+          </div>
+          <div className="dtpl-price-pick-row">
             <span className="dtpl-price-pick-k">模型</span>
             <select
               className="dtpl-price-select dtpl-price-pick-sel"
@@ -681,12 +674,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 </option>
               ))}
             </select>
-          </label>
-          {/* 汇率是选择带里唯一**不属于任何一行**的输入：它是全表唯一的换算率——把按美元报价的
-              通道折成人民币（计价与悬停读数）、以及切换报价币种时换算已有的数。它旁边那句反向
-              读数就是「汇率换算」本身。它是价文件的一部分（保留键 `$fx`），所以自动保存、
-              状态栏、未保存圆点全套照旧。 */}
-          <label className="dtpl-price-pick-row">
+          </div>
+          {/* 汇率是**全表共用的一份事实**，不属于上面任何一条；所以它落在同一个网格的
+              第二行左格，右格空着——读起来是「这一组还有一个字段」，不是另起一行设置。 */}
+          <div className="dtpl-price-pick-row">
             <span className="dtpl-price-pick-k">汇率</span>
             <span className="dtpl-price-fx">
               <span className="dtpl-price-fx-eq">1 美元 =</span>
@@ -712,63 +703,34 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 {inverseHint(rate) ?? '填了才能按美元报价'}
               </span>
             </span>
-          </label>
-          {fxProblem !== null && <span className="dtpl-price-fx-err" role="alert">{fxProblem}</span>}
+            {fxProblem !== null && <span className="dtpl-price-fx-err" role="alert">{fxProblem}</span>}
+          </div>
         </div>
       )}
 
-      {/* models.dev 补价这一行在状态栏之上常驻（挂载即自动同步一次）：同步是这一屏自己的
-          事，跟「这次写没写进去」是两句话，不挤同一条状态。没话时按钮也留——它是入口。 */}
-      {state.routes.size > 0 && (
-        <div className="dtpl-price-syncbar">
-          <button
-            type="button"
-            className="dtpl-price-ghost"
-            disabled={lookup.loading || card === undefined || row === undefined}
-            title="按当前模型名在 models.dev 上模糊搜索原厂美元价，找到后可一键采用填入；只在美元报价的通道上采用。"
-            onClick={() => void openLookup()}
-          >
-            查价
-          </button>
-          <span className="dtpl-price-sync-state" role="status" aria-live="polite">
-            {syncText(sync, view?.sync.lastError ?? null)}
+      {/* 年历是**全局**的一份数据（不属于任何一行），所以它排在价格内容**之后**：它是这套价的
+          一个前提（`workdays` 时段的生效判定靠它），而不是打开这一屏要做的事。
+          缺年那条告警留在最上面——它说的是「金额会算错」，不能压到折叠线以下；但它只负责
+          带路（展开年历），真正的「补上」按钮只有一个，就在年历自己那一行里。 */}
+      {view !== null && view.calendarMissing.length > 0 && (
+        <div className="dtpl-price-calarm" role="status">
+          <span className="dtpl-price-calarm-text">
+            缺 {view.calendarMissing.join('、')} 年的法定节假日安排：「法定工作日」时段会把那几年的节假日按高峰多算。
           </span>
           <button
             type="button"
-            className="dtpl-price-ghost"
-            disabled={sync.running}
-            title="从 models.dev 拉取原厂美元价，补进账本用过的、缺价的美元通道格；手写价不动。"
-            onClick={() => void runSync(true)}
+            className="dtpl-price-calarm-act"
+            aria-controls="price-calendar"
+            onClick={() => {
+              setCalendarOpen(true)
+              document.getElementById('price-calendar')?.scrollIntoView({ block: 'nearest' })
+            }}
           >
-            {sync.running ? '同步中…' : '从 models.dev 补价'}
+            去年历补齐
           </button>
         </div>
-      )}
-      {/* 「查价」面板：开关时挂在补价条之下、状态栏之上。它跟补价是两件事——
-          补价说「自动补了多少洞」，这一块说「你选了哪一份价」。没打开时什么都不占。 */}
-      {lookup.open && card !== undefined && row !== undefined && (
-        <LookupPanel
-          lookup={lookup}
-          currency={card.currency}
-          currentModel={row.model}
-          onKeywordChange={changeKeyword}
-          onSearch={doSearch}
-          onAdopt={adopt}
-          onClose={closeLookup}
-        />
       )}
 
-      {/* 状态栏在没话要说时让位（见 `veiled`）：常驻一个空盒子会在选择带与那份价之间撑出空隙。 */}
-      {(state.routes.size > 0 || loadError !== null) && !veiled && (
-        <div className="dtpl-price-bar">
-          <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
-            {stateText}
-          </span>
-          {save.kind === 'error' && (
-            <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
-          )}
-        </div>
-      )}
 
       {loadError !== null && (
         <div className="dtpl-error" role="alert">
@@ -831,6 +793,70 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 onBilling={updateBilling}
               />
             )}
+      {/* 这一屏按**「价 → 辅助动作 → 全局前提」**排：打开时第一眼是那份价，
+          补价与查价（这一屏的辅助动作）在它之后，年历（一年改一次的前提）压轴。
+          状态栏在没话要说时让位（见 `veiled`）：常驻一个空盒子会在价与它下面那段之间撑出空隙。 */}
+      {(state.routes.size > 0 || loadError !== null) && !veiled && (
+        <div className="dtpl-price-bar">
+          <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
+            {stateText}
+          </span>
+          {save.kind === 'error' && (
+            <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
+          )}
+        </div>
+      )}
+      {/* models.dev 补价与「查价」是这一屏的辅助动作，不是价本身。挂载即自动同步一次；
+          同步跟「这次写没写进去」是两句话，不挤同一条状态。 */}
+      {state.routes.size > 0 && (
+        <div className="dtpl-price-syncbar">
+          <span className="dtpl-price-sync-state" role="status" aria-live="polite">
+            {syncText(sync, view?.sync.lastError ?? null)}
+          </span>
+          <button
+            type="button"
+            className="dtpl-price-ghost"
+            disabled={lookup.loading || card === undefined || row === undefined}
+            title="按当前模型名在 models.dev 上模糊搜索原厂美元价，找到后可一键采用填入；只在美元报价的通道上采用。"
+            onClick={() => void openLookup()}
+          >
+            查价
+          </button>
+          <button
+            type="button"
+            className="dtpl-price-ghost"
+            disabled={sync.running}
+            title="从 models.dev 拉取原厂美元价，补进账本用过的、缺价的美元通道格；手写价不动。"
+            onClick={() => void runSync(true)}
+          >
+            {sync.running ? '同步中…' : '从 models.dev 补价'}
+          </button>
+        </div>
+      )}
+      {/* 「查价」面板：它跟补价是两件事——补价说「自动补了多少洞」，这一块说「你选了哪一份价」。
+          没打开时什么都不占。 */}
+      {lookup.open && card !== undefined && row !== undefined && (
+        <LookupPanel
+          lookup={lookup}
+          currency={card.currency}
+          currentModel={row.model}
+          onKeywordChange={changeKeyword}
+          onSearch={doSearch}
+          onAdopt={adopt}
+          onClose={closeLookup}
+        />
+      )}
+      {/* 年历收在这一屏的末尾、默认收起：它一页的体量比这一屏的主体还大，而它一年只改一次。 */}
+      {view !== null && (
+        <CalendarEditor
+          entries={state.calendar}
+          missingYears={view.calendarMissing}
+          dirty={calendarDirty(state, baseline)}
+          expanded={calendarOpen}
+          onExpandedChange={setCalendarOpen}
+          onChange={updateCalendar}
+        />
+      )}
     </section>
   )
 }

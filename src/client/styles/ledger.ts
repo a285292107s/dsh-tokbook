@@ -71,7 +71,7 @@ export const CSS_LEDGER = `
 /* 前面那枚黄牌是节标题那套工业徽记，与 .dtpl-sec-title::before 同一手法。 */
 [data-plugin="dsh-tokbook"] .dtpl-total-k{
   display:inline-flex;align-items:center;gap:8px;
-  font-size:12px;line-height:18px;font-weight:500;letter-spacing:.06em;
+  font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;letter-spacing:.06em;
   color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-total-k::before{
@@ -84,7 +84,7 @@ export const CSS_LEDGER = `
    下面那行口径词的身份。 */
 [data-plugin="dsh-tokbook"] .dtpl-total-num{
   font-family:var(--dtpl-mono);
-  font-size:38px;line-height:44px;font-weight:600;color:var(--dtpl-fg);
+  font-size:var(--dtpl-fs-hero);line-height:var(--dtpl-lh-hero);font-weight:600;color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;letter-spacing:-.03em;
 }
 /* 参照行与主角数字同行、紧贴其后。
@@ -92,11 +92,11 @@ export const CSS_LEDGER = `
    墨色取 fg-2 而非 fg-3：这一行是**读数**，不是装饰（分档见 tokens 的文字墨阶）。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-figure{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-delta{
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);white-space:nowrap;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero-delta b{
   font-family:var(--dtpl-mono);
-  font-size:13px;line-height:18px;font-weight:600;color:var(--dtpl-fg);
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;
 }
 /* 今日金额：标签左、金额右的双行块，两行共用 max-content 宽度，所以两端各自成列。
@@ -109,10 +109,10 @@ export const CSS_LEDGER = `
   border-top:1px solid var(--dtpl-hairline);
   padding-top:2px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-hero-money-k{font-size:11px;line-height:17px;color:var(--dtpl-fg-2);white-space:nowrap;}
+[data-plugin="dsh-tokbook"] .dtpl-hero-money-k{font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-hero-money-v{
   font-family:var(--dtpl-mono);
-  font-size:12px;line-height:17px;font-weight:500;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 现金与订阅金额不靠颜色分：DSH 皮肤里 --dtpl-accent 本就等于墨色，颜色区分是空操作；
@@ -126,7 +126,7 @@ export const CSS_LEDGER = `
    fg-2。 */
 [data-plugin="dsh-tokbook"] .dtpl-hero-facts{
   display:flex;flex-wrap:wrap;align-items:baseline;min-width:0;
-  font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
 }
 /* 每项整体换行（数字不与自己的标签拆开），分隔点因此永不出现在行首。 */
@@ -150,7 +150,7 @@ export const CSS_LEDGER = `
   font-style:normal;
   font-family:var(--dtpl-mono);color:var(--dtpl-fg-3);font-weight:400;font-variant-numeric:tabular-nums;
 }
-[data-plugin="dsh-tokbook"] .dtpl-cost-k{font-style:normal;font-size:10px;line-height:14px;color:var(--dtpl-fg-2);margin-left:3px;}
+[data-plugin="dsh-tokbook"] .dtpl-cost-k{font-style:normal;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);margin-left:3px;}
 
 /* 词元构成：**卡内**的一条读数带——工程读数是「框 + 竖分隔」，框由上方的 hero 给，这里只出
    格与格之间的竖发丝（额度页的用量摘要活动条同一配方）。它**不是**第二块面板。
@@ -173,7 +173,7 @@ export const CSS_LEDGER = `
   border-left:2px solid var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-k{
-  font-size:12px;line-height:18px;font-weight:500;letter-spacing:.05em;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;letter-spacing:.05em;color:var(--dtpl-fg-2);
   white-space:nowrap;
 }
 /* 份额取 fg-2（它是读数），且自己带「占」字——卡上不留裸百分比（一个百分比要么带桶名，
@@ -181,22 +181,22 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-stat .dtpl-v{
   display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
   font-family:var(--dtpl-mono);
-  font-size:20px;line-height:26px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;
+  font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;
 }
-[data-plugin="dsh-tokbook"] .dtpl-stat-pct{font-size:12px;line-height:18px;color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-stat-pct{font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);}
 /* 会话词元页「词元构成」那四个读数格：与用量总览同一套读数（标签 / 读数 / 份额），类名却
    带 dtpl-stat- 前缀——总览那几个（.dtpl-k / .dtpl-stat .dtpl-v / .dtpl-stat-pct）在
    LedgerView 里，这一页不跟它们抢名字。三格都是 .dtpl-stat 的直接子级、竖排（标签、读数、份额）。
    份额那格自己带「占」字——卡上不留裸百分比（一个百分比要么带桶名，要么带「占」字）。 */
 [data-plugin="dsh-tokbook"] .dtpl-stat-k{
-  font-size:12px;line-height:18px;font-weight:500;letter-spacing:.05em;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;letter-spacing:.05em;color:var(--dtpl-fg-2);
   white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-stat-v{
   font-family:var(--dtpl-mono);
-  font-size:24px;line-height:30px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
+  font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
 }
-[data-plugin="dsh-tokbook"] .dtpl-stat-p{font-size:12px;line-height:18px;color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-stat-p{font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);}
 
 /* 节标题 = 工业徽记 + 分区词。徽记是**反复出现**的那枚标记，黄牌 + 墨边——见 tokens 第五节。
    右端旁注（.dtpl-sec-aside）由它所在那一行的 space-between 推到边上，不画延伸线。
@@ -204,7 +204,7 @@ export const CSS_LEDGER = `
    差两档就会读成「这一页的标题」——而它不是，它只是这一节的名字。 */
 [data-plugin="dsh-tokbook"] .dtpl-sec-title{
   display:flex;align-items:baseline;gap:9px;
-  font-size:13px;line-height:20px;font-weight:600;letter-spacing:.04em;color:var(--dtpl-fg);
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;letter-spacing:.04em;color:var(--dtpl-fg);
   margin:0 0 11px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-sec-title::before{
@@ -215,7 +215,7 @@ export const CSS_LEDGER = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-sec-aside{
   flex:none;margin-bottom:11px;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 
@@ -294,7 +294,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-bar-label{
   position:absolute;left:50%;transform:translateX(-50%);
   font-family:var(--dtpl-mono);
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
+  font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
   white-space:nowrap;pointer-events:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:600;}
@@ -310,7 +310,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis{
   display:flex;gap:3px;margin-top:6px;padding:0 14px;
   font-family:var(--dtpl-mono);
-  font-size:10px;line-height:16px;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
+  font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis span{flex:1 1 0;min-width:0;text-align:center;white-space:nowrap;}
 /* 峰值那天的日期：主墨色 + 600，与柱值标签的峰值同族——整张图的峰值语言是统一的
@@ -329,7 +329,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-bd-tab{
   position:relative;appearance:none;border:0;background:transparent;
   padding:3px 14px 8px;
-  font:inherit;font-size:12px;line-height:18px;font-weight:500;
+  font:inherit;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;
   color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:color .15s ease,background .15s ease;
 }
@@ -357,7 +357,7 @@ export const CSS_LEDGER = `
    事实行用的是同一个分隔符。精确对位让给「它像一行表头」（两行标签比它标注的数据还高）。 */
 [data-plugin="dsh-tokbook"] .dtpl-bd-cols{
   padding:8px 0 6px;
-  font-size:10px;line-height:14px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bd-col-id,
 [data-plugin="dsh-tokbook"] .dtpl-bd-col-nums{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -372,11 +372,11 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-model{display:flex;align-items:flex-start;gap:8px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-model-txt{display:flex;flex-direction:column;gap:3px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-model-name{
-  color:var(--dtpl-fg);font-size:13px;line-height:20px;font-weight:500;
+  color:var(--dtpl-fg);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:500;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-model-provider{
-  font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-size:11px;line-height:16px;letter-spacing:.04em;
+  font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);letter-spacing:.04em;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 /* 占比环：与额度表盘、价格表盘同族的描边环几何——轨道 16% 墨 1、弧主墨 2、12 点起算。
@@ -390,13 +390,13 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{fill:none;stroke:var(--dtpl-fg);stroke-width:2;}
 [data-plugin="dsh-tokbook"] .dtpl-share-ring-num{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  font-family:var(--dtpl-mono);font-size:11px;line-height:1;color:var(--dtpl-fg);
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-label);line-height:1;color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
-[data-plugin="dsh-tokbook"] .dtpl-share-ring-num i{font-style:normal;font-size:8px;}
+[data-plugin="dsh-tokbook"] .dtpl-share-ring-num i{font-style:normal;font-size:var(--dtpl-fs-micro);}
 [data-plugin="dsh-tokbook"] .dtpl-model-nums{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-val{
-  font-family:var(--dtpl-mono);color:var(--dtpl-fg);font-size:13px;line-height:20px;
+  font-family:var(--dtpl-mono);color:var(--dtpl-fg);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 金额格 = 一段或两段「数额 + 桶名」。**只限不可预测的那一半**：值（数额）会被裁，所以它
@@ -408,7 +408,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-cost{
   display:flex;align-items:baseline;justify-content:flex-end;gap:0;
   max-width:100%;
-  font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-size:12px;line-height:16px;
+  font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-cost-seg{
@@ -426,10 +426,10 @@ export const CSS_LEDGER = `
    走 fg-2 而不是 fg-3：它与「按模型」行的通道行是同一档信息（行的次要身份），不是装饰。 */
 [data-plugin="dsh-tokbook"] .dtpl-ws-meta{
   display:flex;align-items:baseline;gap:6px;min-width:0;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-ws-path{
-  font-family:var(--dtpl-mono);font-size:11px;
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-label);
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-ws-sep{flex:none;color:var(--dtpl-fg-dim);}
@@ -460,7 +460,7 @@ export const CSS_LEDGER = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-sync{
   display:inline-flex;align-items:center;gap:6px;min-width:0;
-  font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-sync-dot{
@@ -476,7 +476,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot{animation:dtpl-pulse 1.2s ease-in-out infinite;}
 [data-plugin="dsh-tokbook"] .dtpl-foot-latest{
   font-family:var(--dtpl-mono);
-  font-size:11px;line-height:18px;letter-spacing:.04em;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);letter-spacing:.04em;color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 重扫是偶尔用的维护动作，不是这一屏的主行动：描边式方按钮，不是实心 CTA。 */
@@ -484,7 +484,7 @@ export const CSS_LEDGER = `
   display:inline-flex;align-items:center;gap:6px;flex:none;
   height:30px;padding:0 12px;
   border:1px solid var(--dtpl-border);background:transparent;color:var(--dtpl-fg);
-  font:inherit;font-size:12px;line-height:18px;font-weight:500;cursor:pointer;
+  font:inherit;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;cursor:pointer;
   transition:background .15s ease,border-color .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-rescan:hover:not(:disabled){
@@ -503,13 +503,13 @@ export const CSS_LEDGER = `
   box-shadow:var(--dtpl-metal);
 }
 [data-plugin="dsh-tokbook"] .dtpl-error-text{
-  margin:0;font-size:12px;line-height:18px;color:var(--dtpl-err);min-width:0;overflow-wrap:anywhere;
+  margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-err);min-width:0;overflow-wrap:anywhere;
 }
 [data-plugin="dsh-tokbook"] .dtpl-retry{
   flex:none;height:26px;padding:0 12px;
   border:1px solid color-mix(in srgb,var(--dtpl-err) 45%,transparent);
   background:transparent;color:var(--dtpl-err);
-  font:inherit;font-size:12px;line-height:18px;cursor:pointer;
+  font:inherit;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);cursor:pointer;
   transition:background .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-retry:hover{background:color-mix(in srgb,var(--dtpl-err) 12%,transparent);}
@@ -542,9 +542,9 @@ export const CSS_LEDGER = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-empty-ico{width:24px;height:24px;margin-bottom:12px;color:var(--dtpl-fg-3);}
 [data-plugin="dsh-tokbook"] .dtpl-empty-title{
-  font-size:15px;line-height:22px;font-weight:600;color:var(--dtpl-fg);margin:0 0 6px;
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);margin:0 0 6px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-empty-sub{font-size:12px;line-height:20px;color:var(--dtpl-fg-2);margin:0;max-width:44ch;}
+[data-plugin="dsh-tokbook"] .dtpl-empty-sub{font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);margin:0;max-width:44ch;}
 [data-plugin="dsh-tokbook"] .dtpl-empty-sub code{
   font-family:var(--dtpl-mono);font-size:.9em;
   padding:.1em .35em;

@@ -7,7 +7,7 @@
  */
 
 import { memo, useEffect, useState } from 'react'
-import { DAY_SET_HINTS, DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange, type HourRange } from '../../price-format.ts'
+import { DAY_SET_HINTS, DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange } from '../../price-format.ts'
 import type { BillingNature, DaySet, PriceCurrency } from '../../types.ts'
 import { counterpartOf, unitOf, type MoneyView } from './currency.ts'
 import {
@@ -29,6 +29,11 @@ const CELLS: ReadonlyArray<{ field: RateField; label: string }> = [
 const START_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
 const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour + 1)
 
+/** 24 小时条的格子与刻度。刻度只标 0/6/12/18/24 五处——24 格各标一次在窄处必然互相压字，
+ *  而那五处已经够读出「这一段落在一天里的哪儿」。 */
+const HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
+const HOUR_TICKS: readonly number[] = [0, 6, 12, 18, 24]
+
 /**
  * 法定节假日年历：价表里唯一**全局**的一份数据（不属于任何 route / model）。
  *
@@ -39,16 +44,18 @@ const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hou
  * 一年一组、**一段假期一行**，输入的形状照抄官方通知（「起 ~ 止 + 共 N 天」）——
  * 非法日期与跨年区间由控件挡住，抄错由每行后面的天数对着通知核。
  */
-export function CalendarEditor({ entries, missingYears, dirty, onChange }: {
+export function CalendarEditor({ entries, missingYears, dirty, expanded, onExpandedChange, onChange }: {
   entries: CalendarEntries
   /** 账本覆盖到、而这里没有的年份（host 算好的）。 */
   missingYears: readonly string[]
   /** 年历是否还没落盘。 */
   dirty: boolean
+  /** 展开与否由调用处持有：这一屏顶部的缺年告警要能把年历打开（它说的就是这里的事）。 */
+  expanded: boolean
+  onExpandedChange: (expanded: boolean) => void
   /** 改一年；`null` = 删掉那一年。 */
   onChange: (year: string, next: CalendarDraft | null) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
   const [addingTouched, setAddingTouched] = useState(false)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [typed, setTyped] = useState<string | null>(null)
@@ -101,41 +108,41 @@ export function CalendarEditor({ entries, missingYears, dirty, onChange }: {
       const holiday = year === gaps[0] && first !== null ? first : newHoliday()
       onChange(year, { year, holidays: [holiday] })
     }
-    setExpanded(true)
+    onExpandedChange(true)
     setFocusId(first === null ? null : dateFieldId(first, 'start'))
   }
 
   return (
-    <section className="dtpl-price-cal" data-dirty={dirty} aria-label="法定节假日年历">
+    <section className="dtpl-price-cal" id="price-calendar" data-dirty={dirty} data-open={expanded} aria-label="法定节假日年历">
+      {/* 头 = 一整条按钮：它既是这一节的名字，也是它的开关。所以给它按钮该有的样子——
+          闭合的边、悬停洗色、右端那枚朝向随开合翻转的三角，以及一句「展开 / 收起」。
+          这一屏其余的行都是「被读的内容」，只有这一条是「能按的东西」。
+          缺年的「补上」是这条带子上的**次要动作**，与开关同高并排，不另起一行。 */}
       <div className="dtpl-price-cal-head">
         <button
           type="button"
           className="dtpl-price-cal-toggle"
           aria-expanded={expanded}
-          onClick={() => setExpanded(current => !current)}
+          onClick={() => onExpandedChange(!expanded)}
         >
-          <span className="dtpl-price-cal-caret" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
-          法定节假日年历
+          <span className="dtpl-price-cal-caret" aria-hidden="true" />
+          <span className="dtpl-price-cal-title">法定节假日年历</span>
+          <span className="dtpl-price-cal-sum">{summarizeCalendar(kept)}</span>
+          {broken.length > 0 && (
+            <span className="dtpl-price-cal-warn">{broken.join('、')} 年写不出来</span>
+          )}
+          <span className="dtpl-price-cal-hint" aria-hidden="true">{expanded ? '收起' : '展开'}</span>
         </button>
-        <span className="dtpl-price-cal-sum">{summarizeCalendar(kept)}</span>
-        {broken.length > 0 && (
-          <span className="dtpl-price-cal-warn" role="status">{broken.join('、')} 年写不出来</span>
+        {/* 缺年这件事由这一屏顶部的告警**说一遍**（那里离眼睛更近），这里只留动作：
+            说两遍同一句话会把一个提醒读成一串噪音。 */}
+        {missingYears.length > 0 && gaps.length > 0 && (
+          <button type="button" className="dtpl-price-cal-fix" onClick={fillGaps}
+            title={`这些年的「法定工作日」时段会按周一至周五全额计，落在法定节假日的工作日被多算高峰价。补上那一年，或展开年历手动加一年。`}>
+            <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>
+            {gaps.length > 2 ? `补上缺的 ${String(gaps.length)} 年` : `补上 ${gaps.join('、')} 年`}
+          </button>
         )}
       </div>
-      {missingYears.length > 0 && (
-        <div className="dtpl-price-cal-miss">
-          <p className="dtpl-price-cal-miss-text" role="status"
-            title={`这些年的「法定工作日」时段会按周一至周五全额计，落在法定节假日的工作日被多算高峰价。补上那一年，或展开年历手动加一年。`}>
-            缺 {missingYears.join('、')} 年：节假日会按高峰多算
-          </p>
-          {gaps.length > 0 && (
-            <button type="button" className="dtpl-price-cal-fix" onClick={fillGaps}>
-              <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>
-              {gaps.length > 2 ? `补上这 ${String(gaps.length)} 年` : `补上 ${gaps.join('、')} 年`}
-            </button>
-          )}
-        </div>
-      )}
       {expanded && (
         <div className="dtpl-price-cal-body">
           <p className="dtpl-price-cal-note">
@@ -336,10 +343,11 @@ function summarizeCalendar(years: readonly string[]): string {
   return `${years.join('、')} 已收录`
 }
 
-function RateCell({ id, label, hint, value, state, context, placeholder, note, onEdit, view }: {
+/** 一格价。桌面上的格名由 `.dtpl-price-cols` 那行**共用的**列头给（四档重复三遍只会让
+ *  这份表读起来像三个表单），所以格名本身只在窄屏出现——那里 2×2 折行，列头不再指向任何一列。 */
+function RateCell({ id, label, value, state, context, placeholder, note, onEdit, view }: {
   id: string
   label: string
-  hint?: string
   value: string
   state: 'ok' | 'empty' | 'bad'
   context: string
@@ -359,7 +367,7 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
     : [note, counterpart].filter((text): text is string => text !== undefined && text !== null).join(' · ') || undefined
   return (
     <div className="dtpl-price-cell" data-state={state}>
-      <label className="dtpl-price-cell-k" htmlFor={id}>{hint ?? label}</label>
+      <label className="dtpl-price-cell-k" htmlFor={id}>{label}</label>
       <input
         id={id}
         className="dtpl-price-input"
@@ -384,15 +392,16 @@ function RateCell({ id, label, hint, value, state, context, placeholder, note, o
   )
 }
 
-/** 只读的「当前生效」读数：与格子里的编辑面同源（`ratesInForce` 的折叠结果），缓存两档没单独
- *  定价时按生效的输入价计（`inheritedCell` 与宿主 `costOf` 的同一条规则）。
- *  它是纯展示——不带框、不坐刻线；改价仍然只在格子里。 */
+/** 这一屏的**主读数**：此刻正在计费的价。读者打开这一屏要知道的是「我现在按多少钱在花」，
+ *  而不是「有哪些格子可以填」——所以它在价之上，四档并排、走 24px。
+ *
+ *  它报的常常与下面第一行一样（没有时段在生效时就是基准价），那**不是**冗余：这两行说的
+ *  是两件事——这一行说「此刻计费的是谁」，那一行说「你写进文件的是什么」。有峰谷时段生效
+ *  时两者不同，这个读数就是唯一说得出差别的地方，所以它必须在场、而不是被折叠掉。
+ *  数值与格子同源（`ratesInForce` 的折叠结果），缓存两档没单独定价时按生效的输入价计
+ *  （`inheritedCell` 与宿主 `costOf` 的同一条规则）。它是纯展示：改价仍然只在下面的表里。 */
 function LiveRates({ live, records, view }: { live: InForceRates | null; records: number; view: MoneyView }) {
-  const title = live === null
-    ? undefined
-    : live.slot === null
-      ? unitOf(view)
-      : `${unitOf(view)} · 此刻在峰谷时段内：${dayLabel(live.slot)}`
+  // 留空的档落到别处取值这件事，只有在这个读数里说得清：它报的是**正在计费**的数。
   const shown = (field: RateField): string => {
     if (live === null) return ''
     const own = live.values[field].trim()
@@ -401,229 +410,223 @@ function LiveRates({ live, records, view }: { live: InForceRates | null; records
     return ''
   }
   return (
-    <div className="dtpl-price-live" title={title} aria-label="当前生效的价">
-      <span className="dtpl-price-live-k">当前生效</span>
+    <div className="dtpl-price-live" aria-label="此刻计费的价">
+      <div className="dtpl-price-live-head">
+        <span className="dtpl-price-live-k">此刻计费</span>
+        <span className="dtpl-price-live-unit">{unitOf(view)}</span>
+      </div>
       {live === null ? (
         // 「按 ¥0 计」是对**已有记录**说的；一条从没被调用过的模型说这句话是假的。
-        <span className="dtpl-price-live-none">
+        <p className="dtpl-price-live-none">
           {records > 0 ? '还没有价：这些记录按 ¥0 计（价格未知）' : '还没有价：它还没有被调用过'}
-        </span>
+        </p>
       ) : (
         <>
-          {CELLS.map(({ field, label }) => {
-            const text = shown(field)
-            const bad = fieldState(live.values, field) === 'bad'
-            return (
-              <span className="dtpl-price-live-cell" key={field} data-bad={bad || undefined}>
-                <span className="dtpl-price-live-label">{label}</span>
-                <span className="dtpl-price-live-v">{text === '' ? '—' : text}</span>
-              </span>
-            )
-          })}
+          <div className="dtpl-price-live-cells">
+            {CELLS.map(({ field, label }) => {
+              const text = shown(field)
+              const bad = fieldState(live.values, field) === 'bad'
+              return (
+                <span className="dtpl-price-live-cell" key={field} data-bad={bad || undefined}>
+                  <span className="dtpl-price-live-label">{label}</span>
+                  <span className="dtpl-price-live-v">{text === '' ? '—' : text}</span>
+                </span>
+              )
+            })}
+          </div>
+          <p className="dtpl-price-live-note">
+            {live.slot === null
+              ? '按基准价计：没有峰谷时段正在生效'
+              : `正在按峰谷时段「${dayLabel(live.slot)}」计`}
+          </p>
         </>
       )}
     </div>
   )
 }
 
-/** 表盘几何按**像素尺度**固定，并小到能坐在基准价那一行的行首：
- *  圈多了盘长大，而不是把每圈压小；外圈顶到 DIAL_MAX_R 后间距自己收窄。 */
-const DIAL_BASE_R = 11
-const DIAL_STEP = 3
-const DIAL_MAX_R = 24
-const DIAL_PX_PER_UNIT = 1.25
-/** 弧最粗 2 单位，零点刻钉还要探到外圈之外。 */
-const DIAL_MARGIN = 2.5
-
-/** 盘上的一圈：半径 + 它覆盖的小时（`null` = 时刻还没成段，只剩淡轨）。 */
-interface DialRing {
-  r: number
-  hours: HourRange | null
-  /** 这一圈是谁——进 aria-label，也挂在它自己的 title 上。 */
-  label: string
-}
-
-/** 24 小时表盘：最里面一圈是**基准价**（满弧——它管每天全天），每个峰谷时段在它外面各占一圈，
- *  弧就是那个窗口覆盖的小时；星期进不了盘（它只说小时），所以每圈的 title 把「工作日 09:00–12:00」
- *  这样的整句带上，盘与下面的时段卡因此对得上号（由内向外 = 时段卡的先后）。
- *  圈数随时段数长：没有时段时它就是一枚标准圆环。 */
-function DayDial({ slots }: { slots: readonly SlotDraft[] }) {
-  const step = Math.min(DIAL_STEP, (DIAL_MAX_R - DIAL_BASE_R) / Math.max(1, slots.length))
-  const rings: DialRing[] = [
-    { r: DIAL_BASE_R, hours: { start: 0, end: 24 }, label: '基准价 每天 全天' },
-    ...slots.map((slot, index) => {
-      const { start, end } = slotRange(slot)
-      const place = `第 ${String(index + 1)} 个峰谷时段`
-      return {
-        r: DIAL_BASE_R + step * (index + 1),
-        hours: isHourRange({ start, end }) ? { start, end } : null,
-        label: `${place} ${dayLabel(slot)}`,
-      }
-    }),
-  ]
-  const outer = DIAL_BASE_R + step * slots.length
-  const half = outer + DIAL_MARGIN
-  const size = Math.round(half * 2 * DIAL_PX_PER_UNIT)
+/** 24 小时上谁在生效：基准价一行铺满（它是**默认**，所以走淡轨），每个**带价的**峰谷时段
+ *  各占一行、只把它覆盖的小时点成实心墨。
+ *  文字标签说不出「这一天还剩哪几小时没被覆盖」——这条说得出来。
+ *  零覆盖的时段不画（`effectiveSlots`）：它们不改写任何档，画出来只会显得有洞。 */
+function DayBand({ price }: { price: ModelDraft }) {
+  const slots = effectiveSlots(price).map(slot => {
+    const { start, end } = slotRange(slot)
+    const ok = isHourRange({ start, end })
+    return { id: slot.id, label: dayLabel(slot), start: ok ? start : 0, end: ok ? end : 0 }
+  })
+  // 没成段的时段在表里已经红着报错，这里不画灯。
+  const drawn = slots.filter(row => row.end > row.start)
   return (
-    <svg
-      className="dtpl-price-slot-ring"
-      viewBox={`${String(-half)} ${String(-half)} ${String(half * 2)} ${String(half * 2)}`}
-      width={size} height={size}
+    <div
+      className="dtpl-price-day"
       role="img"
-      aria-label={rings.map(ring => ring.label).join('；')}
+      aria-label={`24 小时生效范围：基准价铺满全天${drawn.length === 0 ? '' : `；${drawn.map(row => `${row.label} 覆盖 ${String(row.start)}–${String(row.end)} 点`).join('；')}`}`}
     >
-      {rings.map((ring, index) => {
-        const c = 2 * Math.PI * ring.r
-        // 满弧就是一整圈：走整圆而不是一段 dash——一整天没有起点，dash 会在 12 点钟留一道接缝。
-        const full = ring.hours !== null && ring.hours.end - ring.hours.start >= 24
-        return (
-          <g key={ring.r}>
-            <title>{ring.label}</title>
-            <circle className="dtpl-price-slot-ring-track" r={ring.r} />
-            {ring.hours !== null && (full
-              ? <circle className="dtpl-price-slot-ring-arc" r={ring.r} />
-              : (
-                <circle
-                  className="dtpl-price-slot-ring-arc"
-                  r={ring.r}
-                  strokeDasharray={`${String((c * (ring.hours.end - ring.hours.start)) / 24)} ${String(c)}`}
-                  strokeDashoffset={-(c * ring.hours.start) / 24}
-                  transform="rotate(-90)"
-                />
-              ))}
-            {/* 零点刻钉跟着**内圈**画：它压在基准价那一圈上（同色，那里本来看不见），从内圈一直
-                探到外圈之外——它是「几点钟」这一个读法的索引，所有圈共用它。它排在其余各圈之前，
-                所以任何一段跨过零点的弧都照样完整。 */}
-            {index === 0 && (
-              <line className="dtpl-price-slot-ring-zero" y1={-(DIAL_BASE_R - 2.5)} y2={-(outer + 2)} />
-            )}
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
-
-/** 一个峰谷时段：适用星期、覆盖小时、重写的桶。它与上方的基准价行同构——行首一枚标记，
- *  四档价从标记右缘起排。
- *  零覆盖的时段与计价无关（`isBlankSlot`），整条降级并直说这一点——空着不写文件是设计，不是待办。 */
-function SlotEditor({ slot, index, price, view, onChange, onRemove, onDuplicate }: {
-  slot: SlotDraft
-  index: number
-  /** 这一行自己的基准价：留空的档从它（缓存两档再往下落到它的输入价）沿用。 */
-  price: ModelDraft
-  view: MoneyView
-  onChange: (next: SlotDraft) => void
-  onRemove: () => void
-  onDuplicate: () => void
-}) {
-  const context = `第 ${String(index + 1)} 个峰谷时段`
-  const { start, end } = slotRange(slot)
-  const hours = isHourRange({ start, end }) ? end - start : null
-  // 删除要两下：它改的是金额，账本没有撤销。聚焦离开即取消。
-  const [confirming, setConfirming] = useState(false)
-  const inert = isBlankSlot(slot)
-  // 这行唯一带价的时段：删掉它，这行就没有峰谷时段了，全部小时退回基准价。
-  const lastPriced = !inert && effectiveSlots(price).length === 1
-  return (
-    <div className="dtpl-price-slot" data-inert={inert}>
-      <span className="dtpl-price-slot-rail" aria-hidden="true">
-        <span className="dtpl-price-slot-dot" />
-      </span>
-      <div className="dtpl-price-slot-card">
-        <div className="dtpl-price-slot-head">
-          <select
-            className="dtpl-price-select dtpl-price-select-days"
-            value={slot.days}
-            aria-label={`${context}的适用日`}
-            title={DAY_SET_HINTS[slot.days]}
-            onChange={(event) => onChange({ ...slot, days: event.target.value as DaySet })}
-          >
-            {DAY_SETS.map(days => <option key={days} value={days}>{DAY_SET_LABELS[days]}</option>)}
-          </select>
-          <span className="dtpl-price-slot-clock">
-            <select
-              className="dtpl-price-select"
-              value={slot.start}
-              aria-label={`${context}的开始时间`}
-              onChange={(event) => onChange(withSlotStart(slot, event.target.value))}
-            >
-              {START_HOURS.map(hour => <option key={hour} value={String(hour)}>{clockLabel(hour)}</option>)}
-            </select>
-            <span className="dtpl-price-slot-dash" aria-hidden="true">–</span>
-            <select
-              className="dtpl-price-select"
-              value={slot.end}
-              aria-label={`${context}的结束时间`}
-              onChange={(event) => onChange(withSlotEnd(slot, event.target.value))}
-            >
-              {END_HOURS.map(hour => <option key={hour} value={String(hour)}>{clockLabel(hour)}</option>)}
-            </select>
-          </span>
-          {hours !== null && (
-            <span className="dtpl-price-slot-span" aria-hidden="true">{`· 持续 ${String(hours)} 小时`}</span>
-          )}
-          {inert && <span className="dtpl-price-slot-inert">未改写任何档：不影响计价</span>}
-          <span className="dtpl-price-slot-actions">
-            <button type="button" className="dtpl-price-ghost" onClick={onDuplicate}>复制</button>
-            <button
-              type="button"
-              className="dtpl-price-ghost dtpl-price-ghost-danger"
-              data-confirm={confirming}
-              onClick={() => {
-                if (!confirming) {
-                  setConfirming(true)
-                  return
-                }
-                setConfirming(false)
-                onRemove()
-              }}
-              onBlur={() => setConfirming(false)}
-              title={confirming
-                ? lastPriced
-                  ? '再点一次：这个时段会被删掉，这行不再有峰谷时段，全部小时按基准价计'
-                  : '再点一次：这个时段会被删掉，它覆盖的小时回到基准价'
-                : lastPriced
-                  ? '删除这个峰谷时段：它是这行唯一带价的时段，删掉后按基准价计（需再点一次确认）'
-                  : '删除这个峰谷时段（需再点一次确认）'}
-            >
-              {confirming ? '确认删除' : '删除'}
-            </button>
+      <div className="dtpl-price-day-row">
+        <span className="dtpl-price-day-k">基准价</span>
+        <span className="dtpl-price-day-cells" aria-hidden="true">
+          {HOURS.map(hour => <span className="dtpl-price-day-cell" key={hour} data-on="base" />)}
+        </span>
+      </div>
+      {drawn.map(row => (
+        <div className="dtpl-price-day-row" key={row.id}>
+          <span className="dtpl-price-day-k">{row.label}</span>
+          <span className="dtpl-price-day-cells" aria-hidden="true">
+            {HOURS.map(hour => (
+              <span className="dtpl-price-day-cell" key={hour} data-on={hour >= row.start && hour < row.end ? 'slot' : undefined} />
+            ))}
           </span>
         </div>
-        <div className="dtpl-price-rates dtpl-price-slot-rates">
-          {CELLS.map(({ field, label }) => {
-            const cell = inheritedCell(price, slot, field)
-            return (
-              <RateCell
-                key={field}
-                id={`slot-${String(slot.id)}-${field}`}
-                label={label}
-                value={slot[field]}
-                state={fieldState(slot, field)}
-                context={context}
-                placeholder={cell.value}
-                note={cell.note}
-                onEdit={(next) => onChange({ ...slot, [field]: next })}
-                view={view}
-              />
-            )
-          })}
-        </div>
+      ))}
+      <div className="dtpl-price-day-row" aria-hidden="true">
+        <span className="dtpl-price-day-k" />
+        <span className="dtpl-price-day-axis">
+          {HOUR_TICKS.map(hour => <span key={hour}>{String(hour).padStart(2, '0')}</span>)}
+        </span>
       </div>
     </div>
   )
 }
 
-/** 一条 (通道, 模型) 的价：四档基准价一行（行首是它的 24 小时表盘），下面是它的峰谷时段。
- *  四档全空 = 这条没有价，它的记录按 ¥0 计并列为价格未知。 */
-function PriceEditor({ price, view, onChange }: {
+/** 一行读数（基准价或一个峰谷时段）：左边的生效范围，右边四档价。
+ *  零覆盖的时段与计价无关（`isBlankSlot`），整行降级并直说这一点——空着不写文件是设计，不是待办。 */
+function PriceRow({ slot, index, price, view, onChange, onRemove, onDuplicate }: {
+  /** `null` = 基准价那一行（它没有峰谷时段的那些控件）。 */
+  slot: SlotDraft | null
+  index: number
+  /** 这一行自己的基准价：留空的档从它（缓存两档再往下落到它的输入价）沿用。 */
+  price: ModelDraft
+  view: MoneyView
+  /** 整份价的新值：这一行只改自己那一段，替换由它交给调用处（基准价行改的是顶层四档）。 */
+  onChange: (next: ModelDraft) => void
+  onRemove: () => void
+  onDuplicate: () => void
+}) {
+  const context = slot === null ? '这条价的基准价' : `第 ${String(index + 1)} 个峰谷时段`
+  // 删除要两下：它改的是金额，账本没有撤销。聚焦离开即取消。
+  const [confirming, setConfirming] = useState(false)
+  const inert = slot !== null && isBlankSlot(slot)
+  const hours = slot === null ? null : (() => {
+    const range = slotRange(slot)
+    return isHourRange(range) ? range.end - range.start : null
+  })()
+  // 这一行唯一带价的时段：删掉它，这行就没有峰谷时段了，全部小时退回基准价。
+  const lastPriced = slot !== null && !inert && effectiveSlots(price).length === 1
+  /** 改这一行的某个字段。基准价行改的是顶层四档，时段行只换回自己那一段。 */
+  const edit = (field: RateField, text: string): void => {
+    if (slot === null) {
+      onChange({ ...price, [field]: text })
+      return
+    }
+    replaceSlot({ ...slot, [field]: text })
+  }
+  /** 换掉自己那一段（时段行的钟点、日档与四档都走这一条）。 */
+  const replaceSlot = (next: SlotDraft): void => {
+    onChange({ ...price, slots: price.slots.map(item => (item.id === next.id ? next : item)) })
+  }
+
+  return (
+    <div className="dtpl-price-row" data-inert={inert || undefined}>
+      <div className="dtpl-price-scope">
+        {slot === null ? (
+          <>
+            <span className="dtpl-price-scope-k">基准价</span>
+            <span className="dtpl-price-scope-sub">全周 · 全天，峰谷时段之外都按它计</span>
+          </>
+        ) : (
+          <>
+            <span className="dtpl-price-scope-ctl">
+              <select
+                className="dtpl-price-select dtpl-price-select-days"
+                value={slot.days}
+                aria-label={`${context}的适用日`}
+                title={DAY_SET_HINTS[slot.days]}
+                onChange={(event) => replaceSlot({ ...slot, days: event.target.value as DaySet })}
+              >
+                {DAY_SETS.map(days => <option key={days} value={days}>{DAY_SET_LABELS[days]}</option>)}
+              </select>
+              <select
+                className="dtpl-price-select dtpl-price-select-hour"
+                value={slot.start}
+                aria-label={`${context}的开始时间`}
+                onChange={(event) => replaceSlot(withSlotStart(slot, event.target.value))}
+              >
+                {START_HOURS.map(hour => <option key={hour} value={String(hour)}>{clockLabel(hour)}</option>)}
+              </select>
+              <span className="dtpl-price-scope-dash" aria-hidden="true">–</span>
+              <select
+                className="dtpl-price-select dtpl-price-select-hour"
+                value={slot.end}
+                aria-label={`${context}的结束时间`}
+                onChange={(event) => replaceSlot(withSlotEnd(slot, event.target.value))}
+              >
+                {END_HOURS.map(hour => <option key={hour} value={String(hour)}>{clockLabel(hour)}</option>)}
+              </select>
+            </span>
+            <span className="dtpl-price-scope-foot">
+              <span className="dtpl-price-scope-sub">
+                {inert ? '不改写任何档，不影响计价' : hours === null ? '时段还没成段' : `持续 ${String(hours)} 小时`}
+              </span>
+              <span className="dtpl-price-rowacts">
+                <button type="button" className="dtpl-price-ghost" onClick={onDuplicate}>复制</button>
+                <button
+                  type="button"
+                  className="dtpl-price-ghost dtpl-price-ghost-danger"
+                  data-confirm={confirming}
+                  onClick={() => {
+                    if (!confirming) {
+                      setConfirming(true)
+                      return
+                    }
+                    setConfirming(false)
+                    onRemove()
+                  }}
+                  onBlur={() => setConfirming(false)}
+                  title={confirming
+                    ? lastPriced
+                      ? '再点一次：这个时段会被删掉，这行不再有峰谷时段，全部小时按基准价计'
+                      : '再点一次：这个时段会被删掉，它覆盖的小时回到基准价'
+                    : lastPriced
+                      ? '删除这个峰谷时段：它是这行唯一带价的时段，删掉后按基准价计（需再点一次确认）'
+                      : '删除这个峰谷时段（需再点一次确认）'}
+                >
+                  {confirming ? '确认删除' : '删除'}
+                </button>
+              </span>
+            </span>
+          </>
+        )}
+      </div>
+      {CELLS.map(({ field, label }) => {
+        const cell = inheritedCell(price, slot, field)
+        return (
+          <RateCell
+            key={field}
+            id={slot === null ? `price-${field}` : `slot-${String(slot.id)}-${field}`}
+            label={label}
+            value={slot === null ? price[field] : slot[field]}
+            state={fieldState(slot === null ? price : slot, field)}
+            context={context}
+            placeholder={cell.value}
+            note={cell.note}
+            onEdit={(next) => edit(field, next)}
+            view={view}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+/** 四档价是一张**表**：列头只写一遍，基准价与每个峰谷时段各占一行。
+ *  格名重复三遍会让三个生效范围读成三张互不相干的表单，而它们其实是同一个人的同一份价。 */
+function PriceTable({ price, view, onChange }: {
   price: ModelDraft
   /** 这条通道的报价币种与汇率。 */
   view: MoneyView
   onChange: (next: ModelDraft) => void
 }) {
-  const slotCount = price.slots.length
   const [pendingFocus, setPendingFocus] = useState<number | null>(null)
   useEffect(() => {
     if (pendingFocus === null) return
@@ -637,70 +640,55 @@ function PriceEditor({ price, view, onChange }: {
   }
   return (
     <>
-      <div className="dtpl-price-allday">
-        <div className="dtpl-price-dial-col">
-          <DayDial slots={price.slots} />
+      <div className="dtpl-price-tbl">
+        <div className="dtpl-price-cols">
+          <span className="dtpl-price-cols-k">生效范围</span>
+          {CELLS.map(({ field, label }) => <span className="dtpl-price-cols-n" key={field}>{label}</span>)}
         </div>
-        <div className="dtpl-price-allday-body">
-          <div className="dtpl-price-rates dtpl-price-base-rates">
-            {CELLS.map(({ field, label }) => {
-              const cell = inheritedCell(price, null, field)
-              return (
-                <RateCell
-                  key={field}
-                  id={`price-${field}`}
-                  label={label}
-                  value={price[field]}
-                  state={fieldState(price, field)}
-                  context="这条价的基准价"
-                  placeholder={cell.value}
-                  note={cell.note}
-                  onEdit={(next) => onChange({ ...price, [field]: next })}
-                  view={view}
-                />
-              )
-            })}
-          </div>
-        </div>
-      </div>
-      <div className="dtpl-price-body">
-        {slotCount > 0 && (
-          <div className="dtpl-price-slots">
-            <span className="dtpl-price-slots-spine" aria-hidden="true" />
-            {price.slots.map((slot, slotIndex) => (
-              <SlotEditor
-                key={slot.id}
-                slot={slot}
-                index={slotIndex}
-                price={price}
-                view={view}
-                onChange={(next) => onChange({ ...price, slots: price.slots.map(item => (item.id === slot.id ? next : item)) })}
-                onRemove={() => onChange({ ...price, slots: price.slots.filter(item => item.id !== slot.id) })}
-                onDuplicate={() => onChange({ ...price, slots: [...price.slots, duplicateSlot(slot)] })}
-              />
-            ))}
-          </div>
-        )}
-        <div className="dtpl-price-band">
-          <button
-            type="button"
-            className="dtpl-price-add-ghost dtpl-price-add-slot"
-            aria-label="添加峰谷时段"
-            onClick={addSlot}
-          >
-            <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>峰谷时段
-          </button>
+        <div className="dtpl-price-rows">
+          <PriceRow
+            slot={null}
+            index={0}
+            price={price}
+            view={view}
+            onChange={onChange}
+            onRemove={() => undefined}
+            onDuplicate={() => undefined}
+          />
+          {price.slots.map((slot, slotIndex) => (
+            <PriceRow
+              key={slot.id}
+              slot={slot}
+              index={slotIndex}
+              price={price}
+              view={view}
+              onChange={onChange}
+              onRemove={() => onChange({ ...price, slots: price.slots.filter(item => item.id !== slot.id) })}
+              onDuplicate={() => onChange({ ...price, slots: [...price.slots, duplicateSlot(slot)] })}
+            />
+          ))}
         </div>
       </div>
+      <div className="dtpl-price-addrow">
+        <button
+          type="button"
+          className="dtpl-price-add-ghost dtpl-price-add-slot"
+          aria-label="添加峰谷时段"
+          onClick={addSlot}
+        >
+          <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>峰谷时段
+        </button>
+      </div>
+      {effectiveSlots(price).length > 0 && <DayBand price={price} />}
     </>
   )
 }
-/** 选中模型的详情面：身份 | 报价币种 | 计费性质 | 当前生效读数 | 这份价直接铺开。
+
+/** 选中模型的详情面：身份 | 报价币种 | 计费性质 | 此刻计费的价 | 这份价的表。
  *
  *  它是这一屏的**主体**（两个下拉在上面选谁），所以没有折叠：四档基准价、峰谷时段、
  *  加时段的按钮常驻。身份行是这一块唯一一行摘要——精确模型串（账本的计费键）与账本
- *  记录数都在这里。此刻在效的四档价在详情头有一行只读读数（`ratesInForce`）——这一屏
- *  被读得最多的数不该等滚动；改价仍然只在格子里。 */
+ *  记录数都在这里。 */
 export const ModelDetail = memo(function ModelDetail({ route, row, billing, baseline, holidays, currency, rate, onCurrency, onRowChange, onBilling }: {
   route: string
   row: ModelDraft
@@ -772,7 +760,7 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
         </div>
       </div>
       <LiveRates live={live} records={row.records} view={view} />
-      <PriceEditor price={row} view={view} onChange={(next) => onRowChange(route, row.model, next)} />
+      <PriceTable price={row} view={view} onChange={(next) => onRowChange(route, row.model, next)} />
       <p className="dtpl-price-note">
         {live !== null
           ? '留空 = 沿用基准价；没被峰谷时段覆盖的小时按基准价计。清空四档 = 删掉这条价。'

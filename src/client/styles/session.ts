@@ -88,25 +88,25 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-sub-label{
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font-size:13px;line-height:20px;font-weight:600;color:var(--dtpl-fg);
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);
 }
 /* 「含 N 个下级」是这一行的**范围**说明，不是读数：小一档、走次级墨色。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-sub-extra{
-  flex:none;font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
+  flex:none;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-sub-tokens{
   grid-area:tokens;white-space:nowrap;
-  font-family:var(--dtpl-mono);font-size:13px;line-height:20px;font-weight:600;
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;
   font-variant-numeric:tabular-nums;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-sub-share{
   grid-area:share;white-space:nowrap;
-  font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-sub-cost{
   grid-area:cost;white-space:nowrap;justify-self:end;
-  font-family:var(--dtpl-mono);font-size:12px;line-height:18px;
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-sub-cost[data-kind="spend"]{color:var(--dtpl-fg);font-weight:600;}
@@ -195,22 +195,24 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
    负的上边距是把分区词那 11px 的下边距收回来一点，句与标题仍是一组。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-note{
   margin:-5px 0 10px;
-  font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
   overflow-wrap:anywhere;
 }
 /* 这一页的主角数字：比浮窗那格（38px / 600）大一截、重一档。
    它是这一页的**第一读数**——四桶合计，不是仪表盘上的一条参照。浮窗那格是「今日总额」，
-   周围还有趋势图与四桶格 competing for attention；这一页它周围没有别的读数，所以它该抢眼。
+   周围还有趋势图与四桶格在分注意力；这一页它周围没有别的读数，所以它该抢眼。
    72px / 700 是量出来的：再大就顶到下面那行事实带、再小就退回「又一个读数格」。
    字重 700 不是标题——它仍是读数，但它是**主角**读数，600 在这个字号下不够撑住场面。
-   letter-spacing 压到 -.06em：等宽数字天生有缝，不压就读成「一串格子」而不是一个数。 */
+   letter-spacing 压到 -.06em：等宽数字天生有缝，不压就读成「一串格子」而不是一个数。
+   字号刻度外的**唯一**一处：它是整页的主角读数，而这一页不在 720px 浮窗里（见 tokens 的 fs-hero）。
+   不再新开档——要改这一屏的层级就改这个值本身，别拿它当中转站。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-head .dtpl-total-num{
   font-size:72px;line-height:76px;font-weight:700;letter-spacing:-.06em;
 }
 /* 口径词在主角数字上方，留出呼吸：它不再与数字抢同一行（浮窗那格是并排的），
    而是整行压在上面，像报表的栏头。字号收到 11px——它是**身份**不是标题，小一号才不与数字争。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-head .dtpl-total-k{
-  font-size:11px;line-height:16px;letter-spacing:.08em;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);letter-spacing:.08em;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-foot{
   /* 页脚不是「底部那串小字」，是这一页的**收口**——与抬头、会话时间、词元构成同级，
@@ -303,10 +305,10 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 }
 /* 卡里那句「柱高是怎么来的」：它是口径说明、不是读数，所以走次级墨色，字号与四桶那行同档。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-hover-basis{
-  margin:0;font-size:10px;line-height:15px;color:var(--dtpl-fg-2);
+  margin:0;font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-2);
 }
 /* 四桶在卡里排成一条事实带：卡片只有 300px 宽，字号比页面上的读数带再收一档。 */
-[data-plugin="dsh-tokbook"] .dtpl-tok-hover-buckets{font-size:10px;line-height:15px;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-hover-buckets{font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);}
 [data-plugin="dsh-tokbook"] .dtpl-tok-plot .dtpl-bars{height:80px;margin-top:22px;}
 /* 轴线贴着自己上面那格：16px 的格间距对「轴属于谁」太远，收回去 6px。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-plot .dtpl-trend-axis{margin-top:-6px;}
@@ -314,11 +316,11 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 /* 格头 = 这一格的纵轴：系列名（图例色块 + 名）+ 合计 + 峰值。三个数都在这，柱上不再画刻度。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-panel-k{
   display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;margin:0;
-  font-size:13px;line-height:20px;font-weight:600;color:var(--dtpl-fg);
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-panel-v,
 [data-plugin="dsh-tokbook"] .dtpl-tok-panel-k i{
-  font-family:var(--dtpl-mono);font-size:10px;line-height:16px;font-weight:400;
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);font-weight:400;
   font-style:normal;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
 }
 /* 柱宽 = 列宽的 48%，并封顶 44px：柱与缝因此始终约 1:1。百分比管住「列被挤窄」（轮数多），
@@ -384,15 +386,15 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   transition:background .15s ease;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head:hover{background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-turn-k{flex:none;font-size:15px;line-height:22px;font-weight:600;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn-k{flex:none;font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;}
 /* 块头那串事实在这一页比浮窗那档（11px）大一档：它是这一节的**摘要**，而展开后每一步的读数
    是 13px——摘要比明细还小，层级就反了（理由同 .dtpl-tok-col .dtpl-sec-title）。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-head .dtpl-hero-facts{
-  font-size:12px;line-height:19px;
+  font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-cue{
   flex:none;margin-left:auto;align-self:center;
-  font-size:10px;line-height:16px;color:var(--dtpl-fg-3);
+  font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-3);
   transition:transform .3s cubic-bezier(.22,.68,.24,1);
 }
 /* 展开时箭头转 180°：它不只是一个状态指示，是「这块翻开了」的形态语言。
@@ -403,7 +405,7 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-preview{
   flex:1 1 100%;min-width:0;
   display:flex;flex-direction:column;
-  font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-ask,
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-reply{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -485,19 +487,19 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-no{
-  font-size:14px;line-height:21px;font-weight:600;color:var(--dtpl-fg);white-space:nowrap;
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-time{
-  font-family:var(--dtpl-mono);font-size:12px;line-height:18px;color:var(--dtpl-fg-2);
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-model{
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font-family:var(--dtpl-mono);font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 /* 失败 / 压缩芯片：用**形**（描边小片）区分它们，色相只给真要看一眼的那一种（失败）。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-chip{
-  flex:none;font-style:normal;font-size:11px;line-height:16px;font-weight:600;
+  flex:none;font-style:normal;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:600;
   padding:0 5px;
   border:1px solid var(--dtpl-border);
   color:var(--dtpl-fg-2);
@@ -510,15 +512,15 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   display:flex;align-items:baseline;gap:7px;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost-k{
-  font-size:11px;line-height:18px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost-k i{
-  font-style:normal;font-size:10px;color:var(--dtpl-fg-3);margin-left:4px;
+  font-style:normal;font-size:var(--dtpl-fs-micro);color:var(--dtpl-fg-3);margin-left:4px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-cash-amt,
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-sub-amt,
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-cost-na{
-  font-family:var(--dtpl-mono);font-size:13px;line-height:18px;font-variant-numeric:tabular-nums;
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-cash-amt{color:var(--dtpl-fg);font-weight:600;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost .dtpl-sub-amt{color:var(--dtpl-fg-2);font-weight:400;}
@@ -567,22 +569,22 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
    是「只给装饰」，浅皮实测 3.5:1，给 10px 的正文标签用会掉到 AA 以下）——「首 token」是要读的
    字，不是装饰。层级靠 10px : 13px 与 fg-2 : fg 这两条拉开，不靠把字调淡。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-metric-k{
-  font-size:10px;line-height:15px;color:var(--dtpl-fg-2);white-space:nowrap;
+  font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-2);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-metric-v{
-  font-family:var(--dtpl-mono);font-size:13px;line-height:19px;color:var(--dtpl-fg);
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);color:var(--dtpl-fg);
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 /* 没有读数的格子（「—」）与「未计时」同档：都是**没有数**，不是 0。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-untimed{
-  font-size:13px;line-height:19px;color:var(--dtpl-fg-3);
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);color:var(--dtpl-fg-3);
 }
 /* 「无产出」那句口径说明是解释、不是读数：整句独占一行，走次级墨色。
    它**不能**跟着 .dtpl-tok-untimed 走 fg-3——那一档是「这里没有数」的记号，而这是一句要读
    的话（解释这一步为什么没有模型那段）。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-metrics.is-flat .dtpl-tok-untimed.is-note{
-  flex:1 1 100%;font-size:11px;line-height:16px;color:var(--dtpl-fg-2);
+  flex:1 1 100%;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 
 /* ── 构成尺：一页里唯一的「比例」语言 ──────────────────────────────────────────
@@ -721,7 +723,7 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
    「我说的是哪一条」。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-reads{
   display:flex;flex-wrap:wrap;gap:2px 16px;
-  font-size:11px;line-height:17px;color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero-ratio{
   display:flex;flex-direction:column;gap:6px;min-width:0;
@@ -766,7 +768,7 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
   width:232px;flex:none;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-legend-keys{
-  display:flex;font-size:10px;line-height:12px;color:var(--dtpl-fg-2);
+  display:flex;font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-2);
 }
 /* flex-basis:0 是**承重的**：只给 flexGrow 的话，摊的是**剩余**空间，而各标签的文字
    宽度本来就不一样，于是列宽不等于段宽——实测「生成」那个标签会偏到 15px 外，正好压在
@@ -803,7 +805,7 @@ export const CSS_SESSION = `/* 会话词元页（对话视图环的第三个视�
    上下都是空白，该撑住场面。15px / 700 是量出来的：再大就与主角数字抢，
    再小就退回「又一个标签」。字重从 600 提到 700——分区词不是正文，是题，题该重。 */
 [data-plugin="dsh-tokbook"] .dtpl-tok-col .dtpl-sec-title{
-  font-size:15px;line-height:22px;font-weight:700;letter-spacing:.02em;
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:700;letter-spacing:.02em;
   margin:0 0 14px;
 }
 /* 这一页的四桶读数格：比浮窗那格（10px 14px 11px + 竖发丝分隔）宽松一档，

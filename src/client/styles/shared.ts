@@ -43,10 +43,13 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
      其余柱值仍在自己的 title 里，节末那行合计照旧说明总量与峰值——不是把数值藏起来，
      是不让它叠成一团。 */
   [data-plugin="dsh-tokbook"] .dtpl-bar-label:not(.is-peak){display:none;}
-  /* 轴上的日期同样挤（14 格每格放不下「9/10」）。窄处隔一格留一个（偶数格收掉），
-     **峰值那一天永远留下**（它是这张图的信息点，位置本身说不清是哪一天）。
-     收掉的是重复的位置信息，不是日期。 */
-  [data-plugin="dsh-tokbook"] .dtpl-trend-axis span:nth-child(even):not(.is-peak){visibility:hidden;}
+  /* 轴上的日期比柱子还挤：14 格摊下来每格只有约 20px，而「10/10」要 28px——所以窄处隔 4 格
+     留一个（每 4 格因此有约 80px，宽裕）。**峰值那一天永远留下**（它是这张图的信息点，
+     位置本身说不清是哪一天）。
+     收掉的是重复的位置信息，不是日期：留下的那几个仍然等距，读得出「哪一段是几号」。
+     峰值紧邻的那一格必须让位：保留格恰好落在峰值前一天时，两个日期会叠在一起（实测踩到过）。 */
+  [data-plugin="dsh-tokbook"] .dtpl-trend-axis span:not(:nth-child(4n+1)):not(.is-peak){visibility:hidden;}
+  [data-plugin="dsh-tokbook"] .dtpl-trend-axis span:has(+ .is-peak){visibility:hidden;}
   /* 明细表：窄处一张两列的表塞不下（数字列会把身份列压到放不下模型名与目录）。按价格表的先例：
      **列头收掉**（它在窄处不再指向任何一列），行改成单列堆叠，数字从「右上竖排」改为
      「身份下面横排一行」。 */
@@ -88,41 +91,37 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   [data-plugin="dsh-tokbook"] .dtpl-provider-nums{align-items:flex-start;}
   [data-plugin="dsh-tokbook"] .dtpl-provider-cost{align-items:flex-start;}
 
-  /* 价格表：选择带在窄处把标签压窄一点，下拉多留一点宽度给 route key 与模型串。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-pick{padding:8px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-pick-row{column-gap:8px;}
+  /* 价格表：主语行在窄处折成**一列**——两列会把 route key 与模型串都截成「deepseek-o…」，
+     而这一行存在的全部意义就是把那两条完整读出来。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick{grid-template-columns:minmax(0,1fr);column-gap:0;}
   [data-plugin="dsh-tokbook"] .dtpl-price-input{text-align:left;}
-  /* 费率列在桌面是四格定宽、紧挨成一簇，窄处折成 2×2：四格并排塞不进窄 sheet 的内容列。
-     这里必须带上 .dtpl-price-detail 这一层，否则压不住 pricing 片段里那条只带 [data-plugin] 的基规则。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-rates{
+  /* 价的那张表在窄处折成**一段一块**：四档价并排塞不进窄 sheet 的内容列，所以生效范围
+     独占一行、四档价落到它下面两行两列（2×2）。这里必须带上 .dtpl-price-detail 这一层，
+     否则压不住 pricing 片段里那条只带 [data-plugin] 的基规则。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cols,
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-row{
     grid-template-columns:repeat(2,minmax(0,1fr));
+    row-gap:8px;
   }
-  /* 窄处数字改左对齐（上面那条），格名也要跟着左对齐才守在同一条左缘上：桌面那套是
-     「格名与数字结束在同一边缘」，在这里两个都反过来。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-base-rates .dtpl-price-cell-k,
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-rates .dtpl-price-cell-k{
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cols-k{display:none;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cols{display:none;}
+  /* 生效范围那一格横跨两列，四档价因此从它的下一行起排。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-scope{grid-column:1 / -1;padding-right:0;}
+  /* 幽灵行在窄处回到整宽：表已经折成一列，网格的第一列不再是「生效范围」那一格。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-addrow{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-add-slot{grid-column:1 / -1;justify-self:stretch;}
+  /* 列头在窄处不再指向任何一列（它们被上面那条 display:none 收掉了），所以格名自己回来。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cell-k{display:block;}
+  /* 窄处数字改左对齐（上面那条），格名也要跟着左对齐才守在同一条左缘上。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cell-k{
     text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
   }
-  /* 卡片缩进（--dtpl-slot-indent，时段卡与那条幽灵行共用）：桌面那列的值让卡的内容盒正好落在
-     基准价四档价的左缘上——改任一边都要重量这条对齐；窄处四档价折成 2×2 撑满整宽，这条对齐
-     不复存在，让位只剩它的另一个用途——给栅栏（轨 + 圆点）那一列留位置，所以收到刚好容下栅栏。
-     窄处轨与实心点已经贴在一起，挖洞只会把轨咬掉一截、露出卡边的亮缝，所以窄屏不用那条挖洞渐变。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-sec{--dtpl-slot-indent:29px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-rail{width:6.5px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-slots-spine{
-    left:6.5px;
-    background:linear-gradient(180deg,transparent,var(--dtpl-rail-ink) 16px,
-      var(--dtpl-rail-ink) calc(100% - 20px),transparent);
-  }
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-dot{left:4.5px;}
-  /* 基准价盘的盘心跟着窄轨走（圆点中心 8px，见上）；间距躲开盘的最大右缘（8 + 33.5）。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-dial-col{width:16px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-allday{gap:36px;}
-  /* 时段卡上的复制/删除不再靠悬停（触控没有悬停）。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions{opacity:1;}
+  /* 一天里谁在生效：窄处标签那一列收窄（最长的是「周一至周五 09:00–12:00」，截断即可，
+     它是索引不是读数），把宽度让给 24 格。 */
+  [data-plugin="dsh-tokbook"] .dtpl-price-day-row{grid-template-columns:minmax(0,88px) minmax(0,1fr);column-gap:8px;}
   /* 年历的一段假期在窄处要留在**一行**里：两个日期格与字号收窄、天数那一列也收窄——
      这样「8 天 删除」不必折到第二行去，一年七八段不至于变成十四五行的长条。 */
-  [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{width:100px;font-size:12px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{width:100px;font-size:var(--dtpl-fs-body);}
   [data-plugin="dsh-tokbook"] .dtpl-price-cal-days{min-width:40px;}
 }
 
@@ -186,7 +185,6 @@ export const CSS_SHARED = `/* 只给读屏的文本：视觉上不占位，但�
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
   [data-plugin="dsh-tokbook"] .dtpl-spin,
-  [data-plugin="dsh-tokbook"] .dtpl-price-slot-actions,
   [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost,
   [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill,

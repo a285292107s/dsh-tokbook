@@ -323,6 +323,9 @@ const PRICING_FIXTURE = {
   // 汇率（`$fx`）：价格表的美元读写面靠它换算。默认给一个真值，好让「切到美元看四档价」
   // 这条路径一打开就在；把它清空就是「未设汇率」那一态（美元开关停用）。
   fx: { cnyPerUsd: 7.15 },
+  // models.dev 补价的状态：client 挂载即读它（`sync.lastError`），所以这一路**必须有**——
+  // host 的 `readPricingView` 无条件给，fixture 少这一个键会让整块面板在渲染期抛错。
+  sync: { lastSyncDay: null, lastError: null },
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
   updatedAt: Date.now(),
 }

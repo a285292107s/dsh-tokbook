@@ -50,10 +50,20 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
      换皮肤又会变蓝。兜底取墨色而非某个蓝——端出 DSH 里不存在的强调色更糟。 */
   --dtpl-accent:var(--dsw-alias-brand-primary,#1f2328);
 
+  /* 侧栏 footer 入口按钮的焦点环（见 footer 片段）。
+     它要相对**侧栏底色**跳出来，而插件拿不到「现在是不是深皮」——宿主把色板写成
+     :root / body 上的扁平值，没有给选择器。所以不取宿主的品牌色：深皮里那档是近白
+     （实测 #f9fafb），会在深侧栏上画出一圈白框，读起来像按钮坏了。
+     取**宿主的正文字色**：它本来就是「压在当前皮肤背景上要读得清」的那一档，
+     浅皮近黑、深皮近白，天然与脚下的面反向。
+     实测过两条错路，别再走：①照抄品牌色 = 深皮白框；②拿它和 --dtpl-fg 混着想中和 = 无效，
+     因为深皮里 --dtpl-fg 本身就是近白，混完实测仍是 rgb(249,250,251)。 */
+  --dtpl-footer-focus:var(--dsw-alias-label-primary,#1f2328);
+
   /* ── 五、品牌黄 ───────────────────────────────────────────────────────────
      恒定黄无法同时当浅底与深底上的线条色（#FFCD00 压白卡 1.57:1），
      所以只以实心块 + 墨边出现，两个主题共用形态，周围面色随主题翻转。 */
-  --dtpl-brand:#e0b84a;    /* 当前页标记、峰值牌、工业徽记、草稿点、选区，以及价表「当前生效」的钉点与芯片。
+  --dtpl-brand:#e0b84a;    /* 当前页标记、峰值牌、工业徽记、草稿点、选区，以及价表「此刻计费」前那枚黄牌。
                                比原 #ffcd00 暖一档：原色偏荧光工业黄，这档是擦金——与暖墨同族，
                                压白卡仍只有 1.73:1（故仍只以实心块 + 墨边出现，不做文字色） */
   --dtpl-on-brand:#24211e; /* 金块上的字与墨边。跟着主墨一起暖过来，原来那档 #14150f 偏冷偏黑，
@@ -75,6 +85,38 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-radius:0px; /* 唯一允许的圆角值（footer 按钮基线在用） */
   --dtpl-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace); /* 全部是数字 */
 
+  /* ── 七之二、字号刻度 ──────────────────────────────────────────────────────
+     六档，**新写与改动一律用这些名字，不再写裸 px。**
+
+     为什么收紧：旧版实测有 17 档（8/9/10/11/11.5/12/13/14/15/16/19/20/22/24/38/72），
+     其中 10、11、11.5、12、13 五档做的是同一件事。彼此只差 1px 的字号读的人分辨不出来，
+     所以它们没有造出层级，只是让层级变得不可读。
+
+     相邻两档必须一眼分得开（除 micro 外最小跨度 1.14 倍）：
+       micro 10 → label 12   图表轴与柱值标签
+       label 12 → body  14   说明性文字 → 连续正文
+       body  14 → lead  16   正文 → 节标题 / 身份名
+       lead  16 → figure 20  标题 → 读数
+       figure 20 → hero  38  读数 → 主角（一屏只有一个）
+
+     micro 是唯一的例外：只有图表轴与柱值标签用它——那些数字不承载判断，少 2px 换图不挤。
+     除此之外任何文字都不得小于 label。 */
+  --dtpl-fs-micro:10px;   /* 图表的轴与柱值标签。不承载判断的数字专用。 */
+  --dtpl-fs-label:12px;   /* 字段名、表头、按钮、状态句、旁注——界面里所有说明性文字。
+                             次要文字的下限。 */
+  --dtpl-fs-body:14px;    /* 要连续读的正文：方法页段落、空态说明、错误文案。 */
+  --dtpl-fs-lead:16px;    /* 一屏里的「小标题」：节标题、模型名、轮次头、主语行的值。 */
+  --dtpl-fs-figure:20px;  /* 读数格里的数（四桶、金额、通道合计）。 */
+  --dtpl-fs-hero:38px;    /* **一屏一个**：浮窗的今日词元。词元页那屏另有 72px
+                             （整页读数，不在 720px 浮窗里，见 session 片段）。 */
+
+  /* 行高：小字给 1.33–1.43（说明句要能折行），大字收紧（读数 1.3、主角 1.16）。 */
+  --dtpl-lh-micro:14px;
+  --dtpl-lh-label:16px;
+  --dtpl-lh-body:20px;
+  --dtpl-lh-lead:22px;
+  --dtpl-lh-figure:26px;
+  --dtpl-lh-hero:44px;
   /* 「一行读数」的右列宽，由跨 tab 共用的 .dtpl-row 使用，故必须挂根（见文件头 ①）。
      它是下限不是定宽，使用处写 minmax(min-content,var(--dtpl-row-nums-w))——金额位数不受控，
      写死会让右列溢出、金额被裁。 */
@@ -116,6 +158,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-warn:#9a6700;
   --dtpl-err:#cf222e;
   --dtpl-accent:#1f2328; /* DSH 浅皮的「身份色」本就等于墨色，焦点环压铝壳 9.82 */
+  --dtpl-footer-focus:#1f2328; /* 焦点环 = 主墨（设备皮没有宿主色板，亮度由面自己定） */
   /* 壳：铝面。casing-ink 9.82 / casing-ink-2 4.80 均为压 #c9ccd2 的实测。 */
   --dtpl-casing:#c9c5bf;
   --dtpl-casing-ink:#24211e;
@@ -147,6 +190,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-warn:#f59e0b;
   --dtpl-err:#ff6b61;
   --dtpl-accent:#f9fafb;
+  --dtpl-footer-focus:#f9fafb; /* 深面上焦点环取亮的一档——与屏幕面反向 */
   /* 壳：炮铜面。casing-ink 13.21 / casing-ink-2 7.22 均为压 #2a2d33 的实测。 */
   --dtpl-casing:#2a2d33;
   --dtpl-casing-ink:#f9fafb;

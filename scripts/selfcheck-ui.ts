@@ -80,7 +80,7 @@ const tsPrefixes = [...tsText.matchAll(/\b(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)-\$\{/g
 const deadInCss = [...cssClasses]
   .filter((c) => !tsTokens.has(c)
     && !tsPrefixes.some((p) => c.startsWith(`${p}-`))
-    && !cssPrefixes.some((p) => tsTokens.has(p)))
+    && !tsPrefixes.includes(c))
   .sort()
 // `id="dtpl-tab-ledger"` / `aria-controls="dtpl-usage-panel"` 里的名字是**结构性锚点**，不是类：
 // 它们本来就不需要样式规则，所以自动排除，不靠手工白名单。属性值可能是模板串
