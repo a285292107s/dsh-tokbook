@@ -1,25 +1,9 @@
-/**
- * 订阅额度 tab 的持久最近已知快照。
- *
- * 官方额度拉取打的是 provider 自己的账户 API（数秒网络延迟），但返回的数字
- * 按分钟到小时的尺度变化。tab 因此应立即渲染**最近已知**的官方数字，并在
- * 后台刷新，而不是让整轮往返都用骨架屏把卡空白化。这要求最近已知卡跨进程
- * 重启存活，故每次成功的（'ok'）官方拉取后宿主把卡持久化到这里——数据目录中
- * 每 provider 一个小 JSON 文件（`quota-<provider>.json`）。
- *
- * 读严格：缺失、撕裂或畸形的文件读作 null，坏写入永远不能充当假的「最近
- * 已知」。只写 'ok' 卡：`unconfigured`/`error` 卡重推很廉价，且不得遮住稍后
- * 的恢复（把一次瞬时网络失败持久化成「最近已知」会立刻永远渲染）。
- */
-
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import type { QuotaCard } from './types.ts'
 
-/** 一个 provider 额度快照的磁盘形状。 */
 export interface QuotaSnapshotFile {
-  /** 官方拉取产出该卡的时刻，epoch ms。 */
   savedAt: number
   card: QuotaCard
 }
@@ -28,19 +12,15 @@ function snapshotFileName(provider: string): string {
   return `quota-${provider}.json`
 }
 
-/** 解析后的快照是否可信：只接受带合理时间戳的 'ok' 卡。其余读作缺席。 */
 function isSnapshotFile(value: unknown): value is QuotaSnapshotFile {
   if (typeof value !== 'object' || value === null) return false
   const raw = value as Record<string, unknown>
   if (typeof raw.savedAt !== 'number' || !Number.isFinite(raw.savedAt)) return false
   const card = raw.card as Record<string, unknown> | undefined
   if (typeof card !== 'object' || card === null) return false
-  // `windows` 是告急判定（`isQuotaAlert`）与卡正文都会直接展开的字段：它不在场时
-  // 这张「最近已知」会让额度路由与额度 tab 当场抛错，所以它必须在场才算可信。
   return card.state === 'ok' && Array.isArray(card.windows)
 }
 
-/** 读一个 provider 最近已知的 'ok' 额度卡（严格读法见文件头）。 */
 export async function readQuotaSnapshot(dir: string, provider: string): Promise<QuotaCard | null> {
   let text: string
   try {
@@ -57,43 +37,28 @@ export async function readQuotaSnapshot(dir: string, provider: string): Promise<
   return isSnapshotFile(value) ? value.card : null
 }
 
-/**
- * 同一目标路径的在飞写入链（模块级）：每次都排在前一次**落定**之后。调用点是
- * fire-and-forget（`src/index.ts` 的额度刷新），两个并发刷新若不串行，后一个的
- * `unlink(target)` 会删掉前一个刚 rename 好的快照。
- */
 const writeChains = new Map<string, Promise<void>>()
 
 async function writeQuotaSnapshotFile(dir: string, provider: string, card: QuotaCard): Promise<void> {
   const target = join(dir, snapshotFileName(provider))
-  // 临时名唯一：固定的 `.tmp` 会被并发写者互相覆盖，于是其中一个的 `rename`
-  // 报 ENOENT（被调用方的 catch 吞掉），磁盘上反而**没有**快照——唯一来源丢了。
   const tmp = `${target}.${String(process.pid)}.${randomUUID()}.tmp`
   await mkdir(dirname(target), { recursive: true })
   try {
     await writeFile(tmp, JSON.stringify({ savedAt: Date.now(), card } satisfies QuotaSnapshotFile), 'utf8')
-    // 先 unlink 目标：Windows 覆盖 rename 间歇失败。
     await unlink(target).catch(() => undefined)
     await rename(tmp, target)
   } catch (error) {
-    // 尽力回收自己的临时文件；失败仍报给调用方（它记日志）。
     await unlink(tmp).catch(() => undefined)
     throw error
   }
 }
 
-/** 原子持久化一个 provider 的额度卡（临时 + rename；先 unlink 目标——
- *  Windows 覆盖 rename 间歇失败）。调用方只持久化 'ok' 卡；快照写失败非致命，
- *  由调用方记日志。同一目标路径上的写互相串行；前一次失败不会毒化后续。 */
 export function writeQuotaSnapshot(dir: string, provider: string, card: QuotaCard): Promise<void> {
   const target = join(dir, snapshotFileName(provider))
   const previous = writeChains.get(target) ?? Promise.resolve()
   const next = previous.then(() => writeQuotaSnapshotFile(dir, provider, card))
-  // 链上只记「已落定」：rejection 由调用方处理，不会顺着链传染给下一位，
-  // 也不会变成第二条未处理的 rejection。
   const settled = next.then(() => undefined, () => undefined)
   writeChains.set(target, settled)
-  // 只有自己仍是链尾时才摘除条目，否则会把后来者的链删掉。
   void settled.then(() => {
     if (writeChains.get(target) === settled) writeChains.delete(target)
   })

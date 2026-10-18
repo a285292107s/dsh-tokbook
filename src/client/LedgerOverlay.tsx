@@ -1,8 +1,3 @@
-/**
- * 词元账本浮窗（路由 A：`shell.overlay`）——纯壳层：tab 条、面板分发与浮窗级生命周期，
- * 各 tab 内容在各自组件里。
- */
-
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
 import type { SyncStatusView, TokBookOverview, UsageDayRow } from '../types.ts'
@@ -19,20 +14,14 @@ import { formatDateTime } from './format.ts'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
 
 export interface LedgerOverlayProps {
-  /** 共享 view store（inject 注入）。 */
   view: TokBookViewStore
 }
 
-/** 追一轮后台 walk 的轮询步长与上限（30 s）：够覆盖一次「整份会话日志重读」，又不至于
- *  在状态真卡住时无限打路由。 */
 const SYNC_FOLLOW_INTERVAL_MS = 500
 const SYNC_FOLLOW_ATTEMPTS = 60
 
-/** 浮窗开着时跟账本的最小间隔。账本时钟每 3 s 探一次，这里再兜一道：概览是一次全量
- *  聚合（本机 ~0.1 s），一轮对话里落三行不该造成三次全量重算。 */
 const OVERVIEW_REFRESH_MIN_GAP_MS = 2_000
 
-/** 四桶齐全的 totals——`totalsTokens`（`src/types.ts`）与 `LedgerView` 都对它做算术。 */
 function isBucketTotals(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
   const totals = raw as Partial<UsageDayRow['totals']>
@@ -42,14 +31,6 @@ function isBucketTotals(raw: unknown): boolean {
     && typeof totals.outputTokens === 'number'
 }
 
-/**
- * 概览载荷的形状判定：只盖渲染**真正会解引用**的字段——`LedgerView` 的 `byDay`（逐行
- * `day` / `totals`）与 `records`、`MethodDoc` 的 `dataDir`、页脚的 `syncStatus` / `syncError` /
- * `lastEventAt`。不合法就走 store 的错误态（错误条 + 重试），绝不把半成品塞进 store：
- * 渲染期抛错会让这条 list 型 slot 被宿主摘掉，footer 按钮还能开，浮窗却再也打不开。
- * 判据按 host 的组装处与类型：`overview()`（`src/index.ts`，按 `TokBookOverview` 直出）与
- * `TokBookOverview`（`src/types.ts`）。只给符号名，不写行号——行号每改一次就错一次。
- */
 function readOverview(raw: unknown): TokBookOverview | null {
   if (typeof raw !== 'object' || raw === null) return null
   const source = raw as Partial<TokBookOverview>
@@ -59,7 +40,6 @@ function readOverview(raw: unknown): TokBookOverview | null {
     const day = row as Partial<UsageDayRow>
     if (typeof day.day !== 'string' || !isBucketTotals(day.totals)) return null
   }
-  // host 这两格恒为 string|null（不是可选），缺席也是形状漂移。
   if (source.lastEventAt !== null && typeof source.lastEventAt !== 'number') return null
   if (source.syncError !== null && typeof source.syncError !== 'string') return null
   if (typeof source.records !== 'number' || typeof source.dataDir !== 'string') return null
@@ -72,15 +52,10 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
   useEffect(() => injectStyles(), [])
   const { open, overview, error, pricingDirty } = useSyncExternalStore(view.subscribe, view.getSnapshot)
   const [scanning, setScanning] = useState(false)
-  /** 在飞的那一条 follow（打开浮窗追一轮 / 重新扫描追一轮）。两条路径**登记同一个 ref**：
-   *  新一轮开始前先中止上一轮，避免两条循环同时每 500ms 打 `/tokbook/sync` 并各自拉全量概览。
-   *  存 ref 也是为了让关窗 / 卸载能中止它——轮询本身没有生命周期。 */
   const followRef = useRef<AbortController | null>(null)
 
-  /** 上一次成功拉到概览的时刻。跟账本的变化走时用它做节流（见 {@link OVERVIEW_REFRESH_MIN_GAP_MS}）。 */
   const lastOverviewAt = useRef(0)
 
-  /** 开新一轮 follow：先中止上一轮，再登记自己。返回这一轮的 signal。 */
   const beginFollow = useCallback((): AbortController => {
     followRef.current?.abort()
     const controller = new AbortController()
@@ -94,7 +69,6 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       .then((raw) => {
         if (signal?.aborted === true) return
         const next = readOverview(raw)
-        // 形状不对按一次读失败处理：错误态是重试的入口，而半成品进 store 会让渲染期抛错。
         if (next === null) throw new Error('响应不是一份账本概览')
         lastOverviewAt.current = Date.now()
         view.setOverview(next)
@@ -102,10 +76,6 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       .catch((err: unknown) => { if (signal?.aborted !== true) view.setError(err instanceof Error ? err.message : String(err)) })
   }, [view])
 
-  /** 只读 host 内存的同步状态探针。追 walk 落定靠它、不靠反复拉概览：概览每次都是全量
-   *  聚合，而追的 tick 次数正比于 walk 耗时——那等于把负载加在正被 walk 压着的路径上。
-   *  读不到就返回 null（调用方按「已落定」处理，随后照常拉一次概览：同一份包里 client 与
-   *  host 同版本，探针失败只可能是路由之外的意外）。 */
   const fetchSyncState = useCallback((signal?: AbortSignal): Promise<SyncStatusView | null> => {
     return fetch(ROUTE_SYNC, { signal })
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<SyncStatusView> })
@@ -113,11 +83,6 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       .catch(() => null)
   }, [])
 
-  // host 的读路径不等后台 walk（CONTRACTS §2），所以概览里的 `running` 只是那一刻的事实：
-  // 打开浮窗与按下重新扫描都靠追到落定，walk 补进来的行也才会被拉回屏上。
-  // 退出条件看**屏上那份快照**、不看探针：探针可能在 walk 真正开始前就报 `done`
-  // （`rescan` 的 walk 是 fire-and-forget 起跑的）。所以探针说落定后仍拉一次概览，
-  // 若它报 `running` 就继续追。
   const followSync = useCallback(async (signal?: AbortSignal): Promise<void> => {
     for (let attempt = 0; attempt < SYNC_FOLLOW_ATTEMPTS; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, SYNC_FOLLOW_INTERVAL_MS))
@@ -127,12 +92,9 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
       await fetchOverview(signal)
       if (view.getSnapshot().overview?.syncStatus !== 'running') return
     }
-    // 上限内没落定：数据仍取一次——walk 可能还在跑，状态由载荷自己说。
     await fetchOverview(signal)
   }, [fetchOverview, fetchSyncState, view])
 
-  // 每次打开拉取一次（读到 running 则继续追到落定）。这一轮也登记进 `followRef`：它可能还在
-  // 追的时候用户按了「重新扫描」，那时新一轮要先把它中止掉（见 `onRescan`）。
   useEffect(() => {
     if (!open) return
     const controller = beginFollow()
@@ -142,38 +104,27 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     return () => { controller.abort() }
   }, [open, beginFollow, fetchOverview, followSync, view])
 
-  // 关闭浮窗 / 组件卸载即中止当前这一轮跟随（打开的那一轮与重新扫描的那一轮登记在同一个 ref 上）。
   useEffect(() => {
     if (!open) {
       followRef.current?.abort()
-      // 被中止不是失败：那一轮已经随着关窗作废，按钮上的「扫描中」也一起作废。
       setScanning(false)
       return
     }
     return () => { followRef.current?.abort() }
   }, [open])
 
-  // 浮窗开着时跟账本：宿主每落一行就推进一次代数，时钟探到它变了就让这一页重拉。
-  // 从前浮窗只在打开那一刻读一次，于是**会话还在跑而数字一直冻着**——这正是「打开后
-  // 不及时更新」的根因（用量明细那一段也一样，它自己订阅同一口时钟）。
-  //
-  // **只在总览那一页跟**：概览是一次全量聚合，而它只为 `LedgerView` 与页脚（最新记录 /
-  // 扫描状态）渲染。用户切到别的 tab 时不再跟着账本跑；切回来那一下立刻补一次（见
-  // `onVisibleTab`），所以看不到一份过时的总览。节流兜住「一轮对话落好几行」。
   const visibleTab = useRef<OverlayTab>('ledger')
   useEffect(() => {
     if (!open) return
     const unsubscribe = subscribeLedgerChanges(() => {
       if (visibleTab.current !== 'ledger') return
-      if (view.getSnapshot().overview?.syncStatus === 'running') return // 那一轮自己会 follow 到落定
+      if (view.getSnapshot().overview?.syncStatus === 'running') return
       if (Date.now() - lastOverviewAt.current < OVERVIEW_REFRESH_MIN_GAP_MS) return
       void fetchOverview()
     })
     return unsubscribe
   }, [open, fetchOverview, view])
 
-  /** 切回总览时补一次：别的 tab 期间账本变过的话，屏上那份已经旧了（上面那条订阅
-   *  故意不跟）。节流同一条，避免来回点 tab 时连打概览。 */
   const onVisibleTab = useCallback((next: OverlayTab) => {
     const previous = visibleTab.current
     visibleTab.current = next
@@ -183,18 +134,14 @@ export function LedgerOverlay({ view }: LedgerOverlayProps) {
     void fetchOverview()
   }, [fetchOverview, view])
 
-  // 触发一次权威再同步，然后追到落定。**开新一轮前先中止上一轮**——被打断的可能是打开浮窗
-  // 那条 follow，不然两条循环会同时追同一场 walk。
   const onRescan = useCallback(async () => {
     const controller = beginFollow()
     setScanning(true)
     try {
-      // 带 signal：关窗中止得了这次 POST，不会把「扫描中…」永远挂在按钮上。
       await fetch(ROUTE_RESCAN, { method: 'POST', signal: controller.signal })
         .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
       await followSync(controller.signal)
     } catch (err) {
-      // 被中止不是失败：那一轮已经随着关窗作废，报错只会把「关掉了」说成「扫不动」。
       if (!controller.signal.aborted) view.setError(err instanceof Error ? err.message : String(err))
     } finally {
       if (followRef.current === controller) setScanning(false)
@@ -231,7 +178,6 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
   onRescan: () => void
   onRetry: () => void
   onRefresh: () => void
-  /** 可见 tab 变了——父级据此决定要不要补拉总览（切走期间账本变过的话屏上那份已经旧了）。 */
   onVisibleTab: (tab: OverlayTab) => void
   onClose: () => void
 }) {
@@ -239,26 +185,21 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
   const cardRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
-  // tab 是父级也要知道的事实（见 `onVisibleTab`）：在这里一处汇报，四个 tab 按钮与方向键
-  // 导航都走这条路，不给每个按钮各挂一次。
   const selectTab = useCallback((next: OverlayTab) => {
     setTab(next)
     onVisibleTab(next)
   }, [onVisibleTab])
 
-  // 打开时聚焦卡片，关闭时焦点回到触发按钮。
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
     cardRef.current?.focus()
     return () => previous?.focus()
   }, [])
 
-  // body 是所有 tab 共享的持久滚动容器；每次切换 tab 重置到顶部。
   useEffect(() => {
     bodyRef.current?.scrollTo(0, 0)
   }, [tab])
 
-  // Escape 关闭；打开时 Tab 被困在对话框内。
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') { onClose(); return }
@@ -283,7 +224,6 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // tablist 的 roving-tabindex 方向键导航（自动激活）。
   const onTablistKeyDown = useCallback((e: ReactKeyboardEvent) => {
     const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
     if (delta === 0) return
@@ -293,7 +233,6 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
     document.getElementById(`dtpl-tab-${next}`)?.focus()
   }, [tab, selectTab])
 
-  // 点中背景本身（非卡片）时关闭。
   const onBackdropMouseDown = useCallback((e: ReactMouseEvent) => {
     if (e.target === e.currentTarget) onClose()
   }, [onClose])
@@ -319,9 +258,6 @@ function OverviewCard({ overview, error, scanning, pricingDirty, onDirtyChange, 
         </header>
 
         <div className="dtpl-tabs" role="tablist" aria-label="账本视图" onKeyDown={onTablistKeyDown}>
-          {/* 四个 tab 共指**同一个** tabpanel（`dtpl-panel`）：面板是同一个滚动容器、内容随 tab 换，
-              所以每格写死一个自己的 id 会让四个 `aria-controls` 指向不存在的元素——指向一个不存在的
-              id 比不指更糟。 */}
           <button
             type="button"
             role="tab"

@@ -1,10 +1,8 @@
-export const CSS_QUOTA = `/* 订阅额度 tab */
+export const CSS_QUOTA = `
 [data-plugin="dsh-tokbook"] .dtpl-quota-sec{display:flex;flex-direction:column;gap:16px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-intro{
   margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
 }
-/* 自动刷新：标签 + 选择器 + 实时状态。选择器与窗口 tab、总览子 tab、通道时间跨度共用
-   同一条「横排 + 竖发丝分隔 + 底部实条」——全窗口只有一种「当前项」。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh{
   display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
 }
@@ -31,15 +29,11 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt.dtpl-quota-autorefresh-on::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
 }
-/* 「每 N 分钟自动刷新」是**正在生效的机制**，不是健康状态：绿只留给真正的 ok，所以它走中性色；
-   「哪一档被选中」由上面那颗实条说明。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-state{
   margin-left:auto;color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-quota-cards{display:flex;flex-direction:column;gap:12px;}
-/* 一张订阅卡 = 同一块读数面板（与总览 hero / 通道卡同源）。悬停时受光边提亮——
-   它是可刷新的活卡，不是静态读数块。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-card{
   padding:13px 15px 12px;
   border:1px solid var(--dtpl-border);
@@ -63,7 +57,6 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-id{
   display:flex;align-items:center;gap:10px;min-width:0;
 }
-/* 卡头左列永远是**同一只环**：有分母时是量规，没有读数时只画轨道（见下）。形状不随状态换语言。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-id-text{display:flex;flex-direction:column;gap:1px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-name{
   color:var(--dtpl-fg);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;
@@ -78,8 +71,6 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   display:flex;align-items:center;gap:8px;flex:none;
   min-width:0;
 }
-/* 单卡刷新：紧凑图标钮，请求在飞时禁用。图标取 fg-2 而不是 fg-3——它是这张卡上**唯一的动作**；
-   悬停再升到主墨色给反馈。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh{
   display:inline-flex;align-items:center;justify-content:center;
   width:28px;height:28px;padding:0;
@@ -88,7 +79,6 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh:hover:not(:disabled){background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh:disabled{opacity:.45;cursor:default;}
-/* 一次性点击「pop」挂在外层容器上（靠 React key 重挂载），与字形分离——否则会与加载 spinner 的旋转互相抵消。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim{
   display:inline-flex;align-items:center;justify-content:center;
 }
@@ -96,17 +86,11 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   animation:dtpl-refresh-pop .35s cubic-bezier(.34,1.56,.64,1);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-ico{width:15px;height:15px;display:block;}
-/* 月度预算环形量规：环描边带色调，已用 % 数字居中在环*内*，它所指的预算以小号说明挂在数字
-   下方。（真圆是这套直角语言里**写明的一处例外**：表盘本来就是个圆。） */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge{
   position:relative;flex:none;width:44px;height:44px;
   color:var(--dtpl-fg);
 }
-/* 没有读数的那只环：只画轨道，环心写状态词。词取 fg-2。
-   **这条必须排在 .dtpl-quota-gauge 之后、色调块之前**：同特异性下靠源码顺序，色相才算数
-   （.dtpl-quota-tone-danger 在更后面，故错误态仍是红的）。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-idle{color:var(--dtpl-fg-2);}
-/* 词的字号受环内径限制（再大一号就贴到描边），只容得下两三个字——长句归正文，不归这里。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-word{
   font-size:var(--dtpl-fs-micro);line-height:1;font-weight:600;
 }
@@ -128,19 +112,13 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   font-variant-numeric:tabular-nums;white-space:nowrap;
   pointer-events:none;
 }
-/* 百分比那枚「%」是**要读的文本**：这一行环心是 aria-hidden，读屏拿到 aria-label，有视力的人
-   只有这枚单位能读出「这是个百分比」，所以走 fg-2。字号仍受环内径限制（见 .dtpl-quota-gauge-word）。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-n i{
   font-style:normal;font-size:var(--dtpl-fs-micro);line-height:1;font-weight:600;
   color:var(--dtpl-fg-2);margin-left:.5px;
 }
-/* 命名这个环所汇总的预算的小号说明：「这个百分比说的是哪个预算」只由这一行给出
-   （见组件的文档注释），所以取 fg-2 与 10px。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-cap{
   font-size:var(--dtpl-fs-micro);line-height:1;font-weight:600;color:var(--dtpl-fg-2);
 }
-/* 卡内消息面板（加载失败 / 未配置 / 拉取失败）：1px 硬边框，凹进去的一块说明面，
-   不是又一层染色洗色块。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg{
   display:flex;flex-direction:column;align-items:flex-start;gap:2px;
   padding:10px 12px;margin:2px 0 6px;
@@ -152,14 +130,12 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-title{margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:600;color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-err .dtpl-quota-msg-title{color:var(--dtpl-err);}
-/* 「未配置」不是错误：同一块说明面，只是标题降一档到次要色——与环心的词同一档。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-muted .dtpl-quota-msg-title{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg-body{
   margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
   overflow-wrap:anywhere;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-msg .dtpl-retry{margin-top:6px;}
-/* ok 正文上方的 stale-while-revalidate 提示。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-stale{
   margin:0 0 8px;padding:6px 10px;
   border:1px solid color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
@@ -167,7 +143,6 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   color:var(--dtpl-warn-ink);
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
 }
-/* 用量条：每个预算窗口一行，所有数据形态共用同一骨架。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-windows{display:flex;flex-direction:column;gap:12px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-window{display:flex;flex-direction:column;gap:5px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-window-line1{
@@ -189,15 +164,11 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   display:block;position:relative;height:100%;
   transition:width .4s ease,background-color .2s ease;
 }
-/* 条顶 1px 受光边：与趋势图柱顶那道同一手法（见 ledger 片段），量条于是和柱子是同一种材质。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill::before{
   content:"";position:absolute;left:0;right:0;top:0;height:1px;
   background:color-mix(in srgb,#fff 22%,transparent);
 }
-/* 健康态**不染色**：条与表盘的默认填充是次要墨色，绿只留给真正的 ok。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-tone-ok{color:var(--dtpl-fg-2);}
-/* 告急 / 超限是**状态数字**：文字一律走 warn-ink（裸 warn 过不了正文对比度）；条体这类
-   非文本填充才用裸 warn。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-tone-warn{color:var(--dtpl-warn-ink);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-tone-danger{color:var(--dtpl-err);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill.dtpl-quota-tone-ok{background:var(--dtpl-fg-2);}
@@ -219,7 +190,6 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-reset-limited{color:var(--dtpl-err);font-weight:600;}
-/* 余额门控正文：余额顶在用量条该在的位置。余额没有分母，没有百分比可画，也没有环。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance{display:flex;align-items:baseline;gap:8px;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-v{
   font-family:var(--dtpl-mono);
@@ -232,13 +202,10 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
 [data-plugin="dsh-tokbook"] .dtpl-quota-balance-note{
   margin:6px 0 0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
-/* 额度来源（月额度 / 已购 / 赠送）：余额下的一行紧凑说明——带加购额度的生效卡则在用量条下方。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-sources{
   margin:8px 0 0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
   font-variant-numeric:tabular-nums;
 }
-/* 用量摘要活动条：**与总览的「今日词元构成」同一只框**（见 ledger 的 .dtpl-grid），
-   不是又一层染色块——一块卡里不出现「面板 + 面板」两层盒子。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-stats{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0;
   margin-top:12px;
@@ -261,8 +228,6 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-stat-k{color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);}
-/* 卡片头刷新钮前的新鲜度标签：官方数字何时拉回。它坐在卡片面板上、紧挨可交互控件，
-   所以留在 fg-2 而不是降到 fg-3。 */
 [data-plugin="dsh-tokbook"] .dtpl-quota-updated{
   font-family:var(--dtpl-mono);
   color:var(--dtpl-fg-2);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:400;
@@ -277,9 +242,6 @@ export const CSS_QUOTA = `/* 订阅额度 tab */
   margin:10px 0 0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 
-/* 入场动效（只在重挂时播；reduce 见 shared 的关断表）：
-   表盘的弧从 12 点扫到自己的读数（弧长由 QuotaCard 以 --dtpl-arc 随元素给出），
-   额度条从 0 填到自己的宽度——两只「量具」上电时都走一遍自己的量程。 */
 @media (prefers-reduced-motion:no-preference){
   [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill{animation:dtpl-draw .5s cubic-bezier(.3,.6,.3,1) both;}
   [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill{animation:dtpl-width-in .45s cubic-bezier(.3,.6,.3,1) both;}

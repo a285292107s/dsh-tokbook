@@ -1,25 +1,3 @@
-/**
- * 账本不变量自检(纯逻辑 + 真临时目录,不需要 DSH 运行时):
- *
- *  1. **折叠是派生状态**:删掉或弄坏 `rollup.json` 必须能从日文件无损重建,且与「直接全量
- *     聚合」逐字段相等;`schemaVersion` 不符一律读作缺失;用量未知这类计数必须活过折叠往返。
- *  2. **单写者与去重**:去重身份按数据目录共享——同一目录上的第二个 `UsageLog` 立刻去重,
- *     进程重启后也要能从磁盘行**重新推出**去重集;`refileByEventDay()` 把行搬回它事件的日文件、
- *     幂等、绝不丢畸形行(源文件与接收文件同样);上个进程留下的**撕裂尾行**不会吞掉下一条完整
- *     记录;`mkdir` 失败不被永久记住,障碍解除后同一个实例的下一次写入自愈。
- *  3. **价格签名**:`pricing.json` 内容一变签名就变,而费率行身份是从价格表推导的,所以签名
- *     不符 → **整份折叠作废**、由日文件按当前表重建(逐日金额与费率行身份一起跟上)。
- *  4. **重启后的同步基线**:载入 `sync-progress.json` 后未变的会话不该被重走,漂移 / 新增的才走;
- *     缺失或残缺的基线读作 null(调用方退回全量走一遍并重写一份)。
- *  5. **派生态自证有效**:往日被补写之后,折叠(逐文件版本)与解析缓存(逐文件版本)都自己作废,
- *     没有调用方需要「记得」;旧文件的价段数组读成「今天仍在生效的那一段」,写回去只剩一份价。
- *  6. **会话同步**:seeded(fork)子会话只折 `inheritedEventCount` 之后的历史——继承前缀重折会
- *     按子会话 id 再记一行压缩;单个会话的投影抛错只算一份失败,不掀掉整轮 walk;一条折不动的
- *     事件只作废它自己,不截断该会话后面的历史。
- *
- * Run: node --experimental-strip-types scripts/selfcheck-rebuild.ts
- */
-
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -41,13 +19,11 @@ function check(label: string, ok: boolean, detail?: unknown): void {
   if (!ok) failures += 1
 }
 
-/** Epoch ms of a local calendar date + hour. */
 function dayMs(day: string, hour: number): number {
   const [y, m, d] = day.split('-').map(Number)
   return new Date(y!, m! - 1, d!, hour).getTime()
 }
 
-/** A ledger row: request/compaction/failure kinds + optional usage. */
 function rec(
   requestId: string,
   day: string,
@@ -66,7 +42,6 @@ function rec(
 
 const quiet = { error: () => {} } as const
 const never = () => new Date('2099-01-01T00:00:00')
-/** Match the unpriced default resolver `buildSummary`/`summarizeRecords` share, so both agree on rateRows. */
 const resolve: RateResolver = () => UNPRICED_KEY
 
 const cleanDir = async (): Promise<string> => mkdtemp(join(tmpdir(), 'tokbook-rebuild-'))
@@ -79,13 +54,9 @@ const rowCount = async (dir: string, name: string): Promise<number> => {
 const fileExists = async (dir: string, name: string): Promise<boolean> =>
   readFile(join(dir, name), 'utf8').then(() => true, () => false)
 
-/** 折叠结果里值得逐字段比对的那几块。 */
 const foldKey = (s: { total: unknown; byDay: unknown; byHour: unknown; byModel: unknown; rateRows: unknown }): string =>
   JSON.stringify({ total: s.total, byDay: s.byDay, byHour: s.byHour, byModel: s.byModel, rateRows: s.rateRows })
 
-// ---------------------------------------------------------------------------
-// 1. 折叠是派生状态:删掉 / 弄坏 / 旧版本 → 无损重建
-// ---------------------------------------------------------------------------
 console.log('rollup: 派生状态无损重建')
 {
   const dir = await cleanDir()
@@ -96,14 +67,12 @@ console.log('rollup: 派生状态无损重建')
       rec('m3', '2026-01-03', 11, 'deepseek-chat', { inputTokens: 800, outputTokens: 500 }),
       { ...rec('c1', '2026-01-03', 12, 'deepseek-chat', { inputTokens: 60, outputTokens: 20 }), kind: 'compaction' as const },
       { ...rec('f1', '2026-01-03', 12, 'deepseek-chat'), kind: 'failure' as const, failureCode: 'RATE_LIMIT' },
-      // 通道没上报用量的计费调用(中断的请求、没回报用量的 summarize):计次、不计量。
       rec('m4', '2026-01-04', 9, 'deepseek-chat'),
       { ...rec('c2', '2026-01-04', 10, 'deepseek-chat'), kind: 'compaction' as const },
     ]
     const log = new UsageLog(dir, quiet)
     for (const row of rows) await log.record(row)
 
-    // 全部落在冻结的(非「今天」)日文件里;「今天」设成 2099,于是每个文件都是冷的,折叠一次。
     const first = await buildSummary(dir, never, resolve, quiet)
     await rm(join(dir, 'rollup.json'), { force: true })
     const rebuilt = await buildSummary(dir, never, resolve, quiet)
@@ -112,8 +81,6 @@ console.log('rollup: 派生状态无损重建')
     check('删掉或弄坏 rollup.json 都从日文件无损重建,与第一次读逐字段相等',
       await fileExists(dir, 'rollup.json') && foldKey(first) === foldKey(rebuilt) && foldKey(first) === foldKey(fromCorrupt))
 
-    // v1 折叠(没有 schemaVersion,rateRows 与 byModel 也还没有 provider)是一次格式迁移:
-    // 必须读作缺失并按当前形状重建,绝不把跨通道 / 跨时段的行悄悄并起来。
     const v1 = JSON.parse(await readFile(join(dir, 'rollup.json'), 'utf8'))
     delete v1.schemaVersion
     const strip = (r: { provider?: string }): unknown => {
@@ -128,7 +95,6 @@ console.log('rollup: 派生状态无损重建')
     check('旧版本折叠按当前形状重建并盖上新的 schemaVersion',
       foldKey(first) === foldKey(fromV1) && fromV1.rateRows.every((r: { provider?: string }) => r.provider !== undefined)
       && restamped.schemaVersion === ROLLUP_SCHEMA_VERSION, restamped.schemaVersion)
-    // 用量未知是冻结折叠的一部分:它必须活过往返,而不是读回来变成 0。
     check('用量未知活过折叠往返', first.total.usageUnknown === 2 && rebuilt.total.usageUnknown === 2 && fromV1.total.usageUnknown === 2,
       [first.total.usageUnknown, rebuilt.total.usageUnknown, fromV1.total.usageUnknown])
 
@@ -140,9 +106,6 @@ console.log('rollup: 派生状态无损重建')
   }
 }
 
-// ---------------------------------------------------------------------------
-// 2. refile:走错门的行搬回它事件的日文件,幂等,畸形行不动
-// ---------------------------------------------------------------------------
 console.log('refile: 走错门的行搬回事件日')
 {
   const dir = await cleanDir()
@@ -164,15 +127,12 @@ console.log('refile: 走错门的行搬回事件日')
     clearRecordCache(dir)
   }
 
-  // 接收文件自己原有的畸形行也属于「坏行绝不被丢掉」:refile 只重写解析成功的记录时
-  // 会把它悄悄抹掉,所以目标分支必须把 raw 行原样带过去。
   const dirDst = await cleanDir()
   try {
     const kept = rec('keep-1', '2026-03-05', 9, 'deepseek-chat', { inputTokens: 30, outputTokens: 30 })
     const moved = rec('move-1', '2026-03-05', 11, 'deepseek-chat', { inputTokens: 40, outputTokens: 40 })
     const receiving = dayFileNameOf(moved.time)
     await writeFile(join(dirDst, receiving), `${serializeRecord(kept)}\nnot json at all\n`, 'utf8')
-    // 源文件挂在 03-06,里面那行的 time 是 03-05 → 该被搬进接收文件。
     await writeFile(join(dirDst, 'usage-2026-03-06.jsonl'), `${serializeRecord(moved)}\n`, 'utf8')
     const log = new UsageLog(dirDst, quiet)
     const movedCount = await log.refileByEventDay()
@@ -188,13 +148,8 @@ console.log('refile: 走错门的行搬回事件日')
   }
 }
 
-// ---------------------------------------------------------------------------
-// 2b. 存储自愈:撕裂尾行不吞下一条记录,mkdir 失败不被永久记忆
-// ---------------------------------------------------------------------------
 console.log('log: 撕裂尾行不吞行 + mkdir 失败不被永久记忆')
 {
-  // 上个进程写到一半崩了:日文件尾是一个没有换行的半行。直接追加会把下一条完整记录拼到
-  // 它后面、合成一条非法 JSON 行,那条已写入的记录就从所有聚合里消失。
   const dir = await cleanDir()
   try {
     const day = '2026-02-20'
@@ -217,8 +172,6 @@ console.log('log: 撕裂尾行不吞行 + mkdir 失败不被永久记忆')
     resetUsageLogState(dir)
   }
 
-  // mkdir 失败(数据目录的父路径是个文件)不得被永久缓存成 rejected promise:否则该实例
-  // 之后每一次 record 都失败,一行也写不进,直到宿主重启。
   const base = await cleanDir()
   const blocked = join(base, 'blocker', 'data')
   try {
@@ -238,9 +191,6 @@ console.log('log: 撕裂尾行不吞行 + mkdir 失败不被永久记忆')
   }
 }
 
-// ---------------------------------------------------------------------------
-// 3. 单写者:去重集按目录共享,且活过进程重启
-// ---------------------------------------------------------------------------
 console.log('dedupe: 去重集按目录共享,重启后从磁盘重新推出')
 {
   const dir = await cleanDir()
@@ -248,13 +198,11 @@ console.log('dedupe: 去重集按目录共享,重启后从磁盘重新推出')
     const row = rec('dup-1', '2026-03-01', 9, 'deepseek-chat', { inputTokens: 100, outputTokens: 100 })
     const logA = new UsageLog(dir, quiet)
     const first = await logA.record(row)
-    // 同一目录上的第二个实例共享去重集:热重载 / 重叠写者也不可能把同一行写两遍。
     const logB = new UsageLog(dir, quiet)
     const second = await logB.record(row)
     check('同一目录的第二个实例立刻去重,文件里只有一行',
       first === true && second === false && await rowCount(dir, dayFileNameOf(row.time)) === 1)
 
-    // 模拟进程重启:先忘掉进程内状态,新的 UsageLog 必须在第一次写之前从磁盘行重建去重集。
     resetUsageLogState(dir)
     const afterRestart = new UsageLog(dir, quiet)
     const refused = await afterRestart.record(row)
@@ -268,14 +216,10 @@ console.log('dedupe: 去重集按目录共享,重启后从磁盘重新推出')
   }
 }
 
-// ---------------------------------------------------------------------------
-// 4. 价格签名一变,整份折叠作废
-// ---------------------------------------------------------------------------
 console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)')
 {
   const dir = await cleanDir()
   try {
-    // 2026-09-14 周一、09-15 周二,10:00 都落在 09:00–12:00 的工作时段里,按例外价计费。
     const rows = [
       { ...rec('pr-1', '2026-09-14', 10, 'deepseek-chat', { inputTokens: 1_000_000, outputTokens: 0 }), provider: 'deepseek-official' },
       { ...rec('pr-2', '2026-09-15', 10, 'deepseek-chat', { inputTokens: 1_000_000, outputTokens: 0 }), provider: 'deepseek-official' },
@@ -283,8 +227,6 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
     const log = new UsageLog(dir, quiet)
     for (const row of rows) await log.record(row)
 
-    // 真实输入是价格文件:折叠记下它文本的 djb2 签名,费率行身份取自同一张表——时段由
-    // (start, days) 标识,所以挪动 start 就换了那些键。
     const prices = (slotStart: number, inputPerMillion: number): PricingTable => ({
       'deepseek-official': {
         'deepseek-chat': {
@@ -294,7 +236,6 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
       },
     })
     const resolverOf = (table: PricingTable) => (row: UsageRecord) => rateKeyAt(table, row.provider, row.model, row.time)
-    // 同一张表、同一份基准价，只是**没有时段**——「删掉时段」后的磁盘形状。
     const noSlot = (inputPerMillion: number): PricingTable => ({
       'deepseek-official': {
         'deepseek-chat': {
@@ -314,9 +255,6 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
       before.revision !== '' && await foldedRevision() === before.revision
       && daySpend(beforeCost).length === 2 && daySpend(beforeCost).every(spend => Math.abs(spend - 4) < 1e-9))
 
-    // 价格文件变了:时段 start 挪位(费率行身份跟着变)且费率下降。按旧签名折出来的行指着一个
-    // 新表里不再存在的时段,而那份折叠必须整份作废——重建之后没有任何一行停在价格未知:
-    // 历史由新表按记录时刻重新解身份,就地跟上新价。
     await writePriceFile(dir, { table: prices(8, 1), billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
     const after = await readPriceFile(dir, quiet)
     const secondFold = await buildSummary(dir, never, resolverOf(after.table), quiet, { pricingRevision: after.revision })
@@ -329,8 +267,6 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
     const direct = summarizeRecords(await readRecordsByDayRange(dir, '0000-01-01', '9999-12-31', quiet), resolverOf(after.table))
     check('重折的结果来自日文件而不是被丢掉的旧折叠(== 新价下的直接全量聚合)', foldKey(direct) === foldKey(secondFold))
 
-    // 删掉时段是同一条规则的极端形:那一刻另有一个身份在生效(段的基准价),历史因此退回
-    // 基准价而不是掉成价格未知。
     await writePriceFile(dir, { table: noSlot(1), billing: {}, currency: {}, calendar: {}, revision: '' }, quiet)
     const stripped = await readPriceFile(dir, quiet)
     const thirdFold = await buildSummary(dir, never, resolverOf(stripped.table), quiet, { pricingRevision: stripped.revision })
@@ -346,9 +282,6 @@ console.log('rollup: pricingRevision 一变,整份折叠作废(日文件重建)'
   }
 }
 
-// ---------------------------------------------------------------------------
-// 5. 同步基线:重启后只走漂移 / 新增的会话
-// ---------------------------------------------------------------------------
 console.log('baseline: 重启后只走漂移 / 新增的会话')
 {
   const snap = (id: string, revision: unknown): PersistenceSnapshotLike => ({ header: { id }, ...(revision !== undefined ? { revision } : {}) })
@@ -358,7 +291,7 @@ console.log('baseline: 重启后只走漂移 / 新增的会话')
     await writeSyncProgress(dir, { syncedAt: Date.now(), sessions: Object.fromEntries(snapshotBaseline(listing)) })
     const progress = await readSyncProgress(dir)
     const map = new Map(Object.entries(progress?.sessions ?? {}))
-    const syncedOnce = true   // 载入基线之后 host 就是这么标记的
+    const syncedOnce = true
     const nothing = staleSessionIds(syncedOnce, map, listing)
     const drift = staleSessionIds(syncedOnce, map, [snap('a', 'rev-1-changed'), snap('b', 'rev-2'), snap('c', 'rev-3'), snap('d', 'rev-4')])
     check('写下的基线读得回来;未变的会话一个都不走,漂移 / 新增的才走,只有会话被删也算干净',
@@ -379,19 +312,14 @@ console.log('baseline: 重启后只走漂移 / 新增的会话')
   }
 }
 
-// ---------------------------------------------------------------------------
-// 6. 派生态自证有效:往日被追加后,没有人需要「记得作废」也能看见
-// ---------------------------------------------------------------------------
 console.log('fold: 往日被追加后自动重折 + 缓存不再把冻结日当不可变')
 {
   const dir = await cleanDir()
   try {
     const log = new UsageLog(dir, quiet)
     await log.record(rec('late-1', '2026-04-01', 9, 'deepseek-chat', { inputTokens: 100, outputTokens: 10 }))
-    // 先让解析缓存与折叠都把这一天当成「已定」。
     const cachedBefore = await readCachedRecords(dir, quiet)
     const first = await buildSummary(dir, never, resolve, quiet)
-    // 权威 walk 补写往日就是这条路径:同一个进程、不清缓存、不删 rollup,直接追加。
     await log.record(rec('late-2', '2026-04-01', 10, 'deepseek-chat', { inputTokens: 200, outputTokens: 20 }))
     const cachedAfter = await readCachedRecords(dir, quiet)
     const after = await buildSummary(dir, never, resolve, quiet)
@@ -406,9 +334,6 @@ console.log('fold: 往日被追加后自动重折 + 缓存不再把冻结日当�
   }
 }
 
-// ---------------------------------------------------------------------------
-// 7. 旧价段数组:读成当前价,写回去只剩一份不带生效时刻的价
-// ---------------------------------------------------------------------------
 console.log('price: 旧价段数组读成当前价,写回一份不带生效时刻的价')
 {
   const dir = await cleanDir()
@@ -433,15 +358,10 @@ console.log('price: 旧价段数组读成当前价,写回一份不带生效时�
   }
 }
 
-// ---------------------------------------------------------------------------
-// 8. 会话同步:fork 的继承前缀不重折,单会话投影抛错不掀掉整轮 walk
-// ---------------------------------------------------------------------------
 console.log('sync: seeded 会话只折自己的历史 + 投影抛错只算一份失败')
 {
   const snapshot = (id: string, revision: string): PersistenceSnapshotLike => ({ header: { id }, revision })
   const route = { provider: 'deepseek-official', model: 'deepseek-chat' }
-  // 父会话的一段历史。seeded(fork)子会话的存盘日志从 seq 0 起就含它,切点是
-  // `inheritedEventCount`(DSH:child-owned history starts at inheritedEventCount)。
   const prefix: SessionEventLike[] = [
     { type: 'request/context', time: dayMs('2026-05-01', 9), seq: 0, data: route },
     { type: 'compaction/summary', time: dayMs('2026-05-01', 9), seq: 1, data: { ...route, compactionId: 'c-parent', usage: { inputTokens: 400_000, outputTokens: 2_000, cacheReadTokens: 380_000 } } },
@@ -463,7 +383,6 @@ console.log('sync: seeded 会话只折自己的历史 + 投影抛错只算一份
       list: async () => [snapshot('parent', 'rev-p'), snapshot('child', 'rev-c')],
       open: async (id: string, _access: 'read') => ({
         ...(id === 'child' ? { inheritedEventCount: prefix.length } : {}),
-        // 不带 offset 的真实语义是从 seq 0 读起:不传切点的实现会整份重折父前缀。
         read: async (offset = 0) => ({ events: (logs.get(id) ?? []).slice(offset) }),
         close: async () => undefined,
       }),
@@ -481,8 +400,6 @@ console.log('sync: seeded 会话只折自己的历史 + 投影抛错只算一份
     resetUsageLogState(dir)
   }
 
-  // 投影层的非空断言(event.data.message 缺席)一旦抛错,只作废该会话:折到一半的行留下,
-  // 其余会话照走,`failedSessions` 计数——异常穿出 syncHistory 会让调用方永不推进同步基线。
   const dir2 = await cleanDir()
   try {
     const log = new UsageLog(dir2, quiet)
@@ -520,8 +437,6 @@ console.log('sync: seeded 会话只折自己的历史 + 投影抛错只算一份
     resetUsageLogState(dir2)
   }
 
-  // 一条折不动的事件只作废它自己:兜底收窄到单事件之后,坏事件**后面**的计费行照样折出来
-  // (包在整个会话外面时它们全丢,而调用方永不推进该会话的同步基线 → 每次读都全量重走)。
   const dir3 = await cleanDir()
   try {
     const log = new UsageLog(dir3, quiet)

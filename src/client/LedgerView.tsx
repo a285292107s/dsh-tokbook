@@ -1,9 +1,3 @@
-/**
- * 用量总览 tab 的**上半段**：今日仪表卡 + 近 14 天趋势（往下滚是用量明细那一节 `ProviderPanel`，
- * 由浮窗壳层拼在同一面板里）。本段只陈述今天与近 14 天——**累计事实不在这里**，去处是同页下方的
- * 用量明细「全部」窗口。卡的构成与排版理由在 ledger 片段。
- */
-
 import type { CSSProperties } from 'react'
 import type { TokBookOverview, UsageDayRow, UsageTotals } from '../types.ts'
 import { totalsTokens } from '../types.ts'
@@ -13,13 +7,10 @@ import {
   localDayKey, shiftDayKey, shortDay,
 } from './format.ts'
 
-/** 趋势窗口天数。 */
 const TREND_DAYS = 14
 
-/** 与今天对比的完整天数。排除今天本身，避免忙碌的一天拉高自己的基线。 */
 const BASELINE_DAYS = 7
 
-/** 今天有账本行时用它。 */
 const ZERO_TOTALS: UsageTotals = {
   requests: 0,
   inputTokens: 0,
@@ -28,10 +19,6 @@ const ZERO_TOTALS: UsageTotals = {
   outputTokens: 0,
 }
 
-/**
- * 一格读数：标签 + 值 + **份额**，分母是今日四桶之和（与「今日词元」同源）。
- * 比率走 `formatRatio`（恒定一位小数、向下截断）：0.1% 而不是「0%」，量到的零永远不出现。
- */
 function Stat({ label, value, share }: {
   label: string
   value: string
@@ -74,10 +61,6 @@ function todayHero(overview: TokBookOverview): TodayHero {
   }
 }
 
-/**
- * 把今日数字变成判断的那一行。账本短于基线窗口时不给参照：平均会把缺失的天当作零拉进来，
- * 让正常的一天看起来像尖峰。
- */
 function todayReference(overview: TokBookOverview, today: string, todayTokens: number): TodayHero['reference'] {
   const byDay = new Map(overview.byDay.map(entry => [entry.day, totalsTokens(entry.totals)]))
   const noRecord = {
@@ -92,9 +75,6 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
   const average = sum / BASELINE_DAYS
   if (average <= 0) return todayTokens === 0 ? noRecord : null
 
-  // 零天需要基线做上下文；从零算出的百分比只是噪音披上了信号的外衣。
-  // 「今天还没记录」写进标签而不是只写进 title：这一行的三个状态都要在原地读得懂，
-  // 否则读者要么悬停，要么把基线数字当成今天的数字。
   if (todayTokens === 0) {
     return {
       label: `近${BASELINE_DAYS}天日均（今天还没有记录）`,
@@ -104,7 +84,6 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
   }
 
   const percent = Math.round(Math.abs(todayTokens / average - 1) * 100)
-  // 持平这一档也要给出数字：它正是读者此刻最想知道的「平均水平是多少」。
   if (percent === 0) {
     return {
       label: `持平于近${BASELINE_DAYS}天日均`,
@@ -120,19 +99,10 @@ function todayReference(overview: TokBookOverview, today: string, todayTokens: n
   }
 }
 
-/**
- * 一根柱的填充高度表达式。柱高与标签锚点**共用这一个函数**：两处若各写一份，标签就会和柱顶
- * 悄悄错开。
- */
 function columnHeight(tokens: number, max: number): string {
   return tokens > 0 ? `max(2px, ${String(Math.round((tokens / max) * 100))}%)` : '0px'
 }
 
-/**
- * 图区本体。`is-anim` 静态挂着：错峰入场动画只在元素重挂时播一次，而数据刷新不重挂柱子，
- * CSS 动画不因重渲染重播——所以不需要「播完摘类」的监听。错峰步长由每根柱的 `--dtpl-i` 给出
- * （见 shared 片段的动效段）。
- */
 function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
   slots: readonly string[]
   values: readonly number[]
@@ -149,8 +119,6 @@ function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
     >
       {values.map((tokens, index) => {
         const isPeak = index === peakIndex
-        // 这一类必须挂在**柱**上：柱脚的零刻度（`::after`）与「零日撤标签」都由 `.dtpl-bar.is-zero`
-        // 选中，只挂在标签上这两条规则都是死的。峰值的样式分挂标签与填充，不挂柱。
         const columnH = columnHeight(tokens, max)
         return (
           <div
@@ -178,10 +146,6 @@ function TrendPlot({ slots, values, peak, peakIndex, max, sum }: {
   )
 }
 
-/**
- * 连续日历窗口内按日的词元柱状图（图区本体在 `TrendPlot`）。宿主的 `byDay` 只带有点记录的
- * 天，故窗口在此重建：无记录的天变成零柱而不是消失——否则时间轴会被悄悄压缩。
- */
 function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
   if (days.length === 0) return null
   const byDay = new Map(days.map(row => [row.day, totalsTokens(row.totals)]))
@@ -209,7 +173,6 @@ function DailyTrend({ days }: { days: readonly UsageDayRow[] }) {
       />
       <div className="dtpl-trend-axis">
         {slots.map((day, index) => (
-          // 峰值的日期永远留下（窄屏收偶数格的规则见 `shared`，它豁免 `.is-peak`）。
           <span key={day} className={index === peakIndex ? 'is-peak' : undefined}>
             {shortDay(day)}
           </span>
@@ -225,7 +188,6 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
   const hero = todayHero(overview)
   const today = hero.totals
   const share = (bucket: number): number => (hero.tokens > 0 ? (bucket / hero.tokens) * 100 : 0)
-  // 缓存写入是否是本账本的维度。按安装决定而非按天：聚合无法区分「上报了 0」与「未上报」，按天决定会让通道组合变化时网格 reflow。零桶因此表示「本安装不关心这一维」。
   const showCacheWrite = overview.byDay.some(row => row.totals.cacheWriteTokens > 0)
   return (
     <>
@@ -241,7 +203,6 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
             <div className="dtpl-hero-art" aria-hidden="true" />
             <div className="dtpl-hero-top">
               <div className="dtpl-hero-lead">
-                {/* 派生比值不挂在口径词那一行上：读者还得回头找它的分母。 */}
                 <span className="dtpl-hero-head">
                   <span className="dtpl-total-k">今日词元</span>
                 </span>
@@ -255,7 +216,6 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
                   )}
                 </span>
               </div>
-              {/* 零从不借强调色：纯订阅日没有现金支出。 */}
               <div className="dtpl-hero-money">
                 {(hero.spend > 0 || hero.subscriptionValue === 0) && (
                   <span className="dtpl-hero-money-row">
@@ -272,9 +232,6 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
               </div>
             </div>
             <div className={`dtpl-grid${showCacheWrite ? '' : ' dtpl-grid-3'}`}>
-              {/* 「输入」不是「我发过去的全部文字」，而是其中**没命中缓存**的那部分；
-                  标签必须自己说清这一点，否则这一格会把一次很长的对话读成很短。
-                  用词与 `session-shared` 的 `BUCKETS` 逐字一致（词元页那四个格同源）。 */}
               <Stat label="未缓存输入" value={formatTokens(today.inputTokens)} share={share(today.inputTokens)} />
               <Stat label="缓存读取" value={formatTokens(today.cacheReadTokens)} share={share(today.cacheReadTokens)} />
               {showCacheWrite && <Stat label="缓存写入" value={formatTokens(today.cacheWriteTokens)} share={share(today.cacheWriteTokens)} />}
@@ -289,7 +246,6 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
   )
 }
 
-/** 首次拉取进行中的占位块；与真块同高（耦合见 styles/ledger.ts 骨架段）。 */
 export function LedgerSkeleton() {
   return (
     <div className="dtpl-skeleton" aria-hidden="true">

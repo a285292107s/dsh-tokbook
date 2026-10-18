@@ -32,14 +32,14 @@ footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含
   的 `turn/end`。通道没上报用量的调用**仍写一行、仍计入次数**,但没有 token 可加——**未知不等于 0**,不估算。
   **已知缺口**:`assistant/attempt`(流结束时没产出可见消息的那次尝试)当前不投影,所以 adapter
   只把 `usage` 放进 attempt 的 stream 上报的那种失败尝试不入账;一次 attempt 既没安排重试、也没以
-  error 收尾时一行都不写。补它得按 retry 生命周期配对尝试,是独立任务(`src/usage-record.ts` 有同一条注释)。
+  error 收尾时一行都不写。补它得按 retry 生命周期配对尝试,是独立任务。
 - **金额由你自己写价。** 一份 `pricing.json`(路由 → 精确模型串 → **一份当前价**),金额分
   「**实际支出**」与「**订阅价值**」两桶。价只有一份,所以它衡量的是**最近用掉的 token 值多少钱**
   ——**不是**当时那笔账单,金额因此只在 30 天及更短的窗口里给(「全部账本」只给词元)。
   没定价的是**价格未知**(按 ¥0 计,但会在界面上列出来);费率为 0 才是免费。
 
 界面词与代码/契约的逐条对应见 [`docs/CONTRACTS.md`](docs/CONTRACTS.md) 的「术语」段。**界面规格的真源是代码**:
-token 与「什么时候用哪个」在 `src/client/styles/tokens.ts` 的注释里,各个面长什么样看 `src/client/styles/**`;
+token 与「什么时候用哪个」见 [`docs/CONTEXT.md`](docs/CONTEXT.md) 的「取值与样式口径」一节,各个面长什么样看 `src/client/styles/**`;
 静态可判定的那批禁令由 `pnpm selfcheck:ui` 强制,其余要人看。文档树地图见 [`docs/INDEX.md`](docs/INDEX.md)。
 
 > **术语**:本文档与界面说的**通道**就是代码与契约里的 provider —— 你从哪接入、按什么方式付费的
@@ -261,7 +261,7 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 
 - 额度计划每个通道路由只收一个 API key(尚无多账户轮换)。
 - `assistant/attempt`(流结束时没产出可见消息的那次尝试)当前不投影,补它得按 retry 生命周期配对
-  尝试,是独立任务(`src/usage-record.ts` 有同一条注释)。
+  尝试,是独立任务。
 - 价是「当前价」而非账单,所以金额只覆盖近 30 天(见[它怎么记 token](#它怎么记-token))。
   **不做「价格生效时间轴」**(按段记生效时刻、好让历史金额按当时在用的价重放)是刻意的取舍:
   推理与实测误差见 [`docs/DESIGN.md`](docs/DESIGN.md) §5。
@@ -350,7 +350,7 @@ scripts/
   selfcheck-rebuild.ts     账本不变量:折叠无损重建 / refile / 跨实例去重 / 价格签名 / 重启基线 / 派生态自证 / seeded 会话同步
   selfcheck-ui.ts          界面禁令静态检查:死类双向 / 色值 / 虚线 / 圆角 / 宿主变量白名单 / 动效·焦点·窄屏分支 / ARIA 引用
 
-docs/                      文档树(地图:docs/INDEX.md):CONTRACTS 契约 / DESIGN 推理 / HMR / LESSONS / COMMENTS
+docs/                      文档树(地图:docs/INDEX.md):CONTRACTS 契约 / DESIGN 推理 / HMR / LESSONS / CONTEXT / adr
 cordis.patch.example.yml   profile 挂载行的示例(见「安装」)
 lib/                       构建产物(gitignore):lib/index.js + lib/client.js + lib/types/**/*.d.ts
 ```
@@ -382,7 +382,7 @@ node --experimental-strip-types scripts/preview-overlay.ts --ledger D:/data/tokb
 ```
 
 页面壳自己供一套 DSH 的 `--dsw-alias-*` 色板(按宿主真实取值,浅 / 深两套),浮窗还额外穿一层
-**设备皮**(`styles/device.ts` + `tokens.ts` 第八节,只在根元素带 `data-dtpl-device="light|dark"`
+**设备皮**(`styles/device.ts` + `tokens.ts` 里那两段 `[data-dtpl-device]`,只在根元素带 `data-dtpl-device="light|dark"`
 时生效)——所以不装宿主也能按真实皮肤看。
 
 不带 `--ledger` 时同一个脚本退化成 **fixture 预览台**,用来看 UI 的各个状态与空态:

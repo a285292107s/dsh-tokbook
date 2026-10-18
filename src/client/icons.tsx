@@ -1,7 +1,3 @@
-/**
- * 内联 SVG 图标：bundle 禁止运行时 import 非基线包，故自带描边图标。
- */
-
 export function UsageGlyph({ className }: { className?: string }) {
   return (
     <svg

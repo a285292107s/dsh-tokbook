@@ -1,56 +1,35 @@
-/**
- * 词元账本浮窗的价格表 tab。
- *
- * 没有保存按钮也没有撤销：变更在停止输入一拍后自动写入，字段失焦则立刻写。草稿写不出来的
- * 时候（半输入的数字）不写也不报，等这个字段交代完才说。磁盘上的内容是
- * 唯一状态，状态栏只报告它。
- *
- * 一屏只面对**一个模型**：两个下拉选通道与模型，下面是它的价（直接铺开，没有折叠）。
- * 下拉的选项文字自己带路标——多少个模型没价、这一行多少次请求、有没有没落盘的改动——
- * 使「这张表有没有洞」不必点到才看得见。
- */
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ModelsDevCandidate, PriceCurrency, PriceVerdict, PricingLookupResult, PricingSyncResult, PricingView } from '../../types.ts'
+import type { HolidayRefreshResult, ModelsDevCandidate, PriceCurrency, PriceVerdict, PricingLookupResult, PricingSyncResult, PricingSyncView, PricingView } from '../../types.ts'
 import { normalizeModelId } from '../../models-dev.ts'
-import { QUERY_FORCE, QUERY_MODEL, ROUTE_PRICING, ROUTE_PRICING_LOOKUP, ROUTE_PRICING_SYNC } from '../../route-paths.ts'
+import { QUERY_FORCE, QUERY_MODEL, QUERY_YEAR, ROUTE_HOLIDAY_SYNC, ROUTE_PRICING, ROUTE_PRICING_LOOKUP, ROUTE_PRICING_SYNC } from '../../route-paths.ts'
 import { inverseHint } from './currency.ts'
 import {
   baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxSignature, fxValue, modelDirty,
   modelOptionLabel,
-  routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency,
+  routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency, adoptYear,
   type CalendarDraft, type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
 import { CalendarEditor, ModelDetail } from './editors.tsx'
+import { formatRelative } from '../format.ts'
 import { subscribeLedgerChanges } from '../ledger-clock.ts'
 
 export interface PricingPanelProps {
-  /** 保存成功后通知父级刷新总览。 */
   onChanged: () => void
-  /** 报告 tab 当前是否有未保存的暂存改动（驱动 tab 圆点）。不在 unmount 时清除：草稿跨面板存活。 */
   onDirtyChange?: (dirty: boolean) => void
 }
 
-/** 最后一次按键后 tab 等待多久才写入——**不是唯一的写入时机**：字段失焦会立刻写一次。
- *  要长到能合并一行的四个数字。 */
 const AUTO_SAVE_DELAY_MS = 600
 
-/** 一次写成功之后隔多久才通知父级刷新。父级收到后会跑一次**全量**概览聚合，而失焦提交让
- *  「离开一个字段 = 一次写」——连改几档就是连着写几次，所以合并窗给得宽；离开面板时把还没发出的那次立刻补上。 */
 const REFRESH_MERGE_MS = 1000
 
-/** 状态栏那条文字。 */
 type SaveState =
   | { kind: 'clean' }
   | { kind: 'pending' }
   | { kind: 'saving' }
   | { kind: 'saved'; at: number }
-  /** 草稿本身尚不可写（必填数字为空）。文件仍持有最后的好状态；下次编辑重试。 */
   | { kind: 'invalid'; message: string }
-  /** 宿主拒绝或请求失败；未写入任何内容。 */
   | { kind: 'error'; message: string }
 
-/** 尚未到达磁盘的草稿在面板 unmount 后存活（切 tab、关浮窗），使尚未触发的自动保存——或被宿主拒绝的保存——绝不被悄悄丢弃。 */
 interface Staged {
   view: PricingView
   state: PriceState
@@ -58,25 +37,8 @@ interface Staged {
 }
 let staged: Staged | null = null
 
-/**
- * 上一次读到的**干净**视图，跨挂载留着。
- *
- * 面板随 tab 切换 / 浮窗关闭整块卸载，而这一屏的挂载要等一次宿主往返（读价文件 + 账本
- * 透镜 + 路由目录，本机约 0.2–0.5 s）。留着上一次那份只为**先把这一屏画出来**——挂载后
- * 那次读照常把它换成磁盘上的新值（草稿仍然只在 dirty 的那几处胜出，见 `mergeStaged`）。
- *
- * 只在视图干净时存：有未落盘草稿时那份 `view` 是「读磁盘那一刻的」快照，拿它当首帧会
- * 让读者以为磁盘上已经是草稿的样子——草稿本来就由 `staged` 单独管着。
- */
 let lastView: PricingView | null = null
 
-/**
- * 把一份尚未落盘的草稿合并到刚读回来的宿主视图上：只有**真正 dirty** 的那几处胜出——
- * 逐 (通道, 模型) 行、通道的计费性质与报价币种、年历、汇率各按自己的签名判。基线同步换成磁盘的，
- * 所以被保留的那几处仍显示「未保存」；其余内容（新增的 route / 模型、账本计数、缺年告警）
- * 一律用磁盘上的新值。视图里没有的通道整个丢弃——**「有哪些通道」由宿主说了算**，
- * 留着一份陈旧整卡只会在下一次写回里把它重新写进文件。
- */
 function mergeStaged(fresh: PricingView, saved: Staged): { state: PriceState; baseline: PriceBaseline } {
   let state = draftFromView(fresh)
   const baseline = baselinesOf(fresh)
@@ -113,25 +75,16 @@ function mergeStaged(fresh: PricingView, saved: Staged): { state: PriceState; ba
   return { state, baseline }
 }
 
-const EMPTY_STATE: PriceState = { routes: new Map(), calendar: new Map(), holidays: new Set(), fx: '' }
+const EMPTY_STATE: PriceState = { routes: new Map(), calendar: new Map(), holidays: new Set(), autoYears: new Set(), fx: '' }
 const EMPTY_BASELINE: PriceBaseline = { models: new Map(), billing: new Map(), currency: new Map(), calendar: '[]', fx: '' }
 
-/** 选中的 (通道, 模型)。`model` 为空串 = 「这条通道里请求最多的那一个」，即换通道时的中间态。 */
 interface Picked {
   route: string
   model: string
 }
 
-/**
- * 选中的那一份存放处。这是**视图偏好**（每台浏览器自己上次看的是哪一行），不是账本数据，
- * 所以进 localStorage 而不是宿主配置——同一个理由见 `QuotaPanel` 的自动刷新间隔。
- *
- * 面板 unmount 就带走的组件状态活不过关浮窗，而这一屏的意图恰恰是「下次打开还是这个选项」。
- */
 const PICKED_KEY = 'dsh-tokbook.pricing-picked'
 
-/** 读回上次选的那一行。只认形状对的值，坏值一律当作「没选过」——一个记不住的选择回落到
- *  列表第一个，比让下拉显示一个不存在的选择要好。 */
 function readPicked(): Picked | null {
   try {
     const saved = localStorage.getItem(PICKED_KEY)
@@ -142,32 +95,18 @@ function readPicked(): Picked | null {
     if (typeof route !== 'string' || route === '' || typeof model !== 'string') return null
     return { route, model }
   } catch {
-    // 隐私模式等拿不到存储：这一屏照常画，只是不记得上次看的是哪一行。
     return null
   }
 }
 
-/** 记下当前的选择。`null`（「看第一条通道」）抹掉它：那时用户要的正是列表的第一个，不该留一个
- *  下次回来还会生效的旧选择。 */
 function rememberPicked(pick: Picked | null): void {
   try {
     if (pick === null) localStorage.removeItem(PICKED_KEY)
     else localStorage.setItem(PICKED_KEY, JSON.stringify(pick))
   } catch {
-    // 存不下不影响这一次选择，只是下次打开回到列表第一个。
   }
 }
 
-/**
- * 价格表载荷的形状判定：只盖渲染期**无条件解引用**的那三样——`routes`（`draftFromView`
- * 逐个遍历）、`calendar`（同处 `Object.entries(view.calendar ?? {})`）、`calendarMissing`
- * （`CalendarEditor` 的 `filter`/`join`）。
- * 不合法按一次读失败处理（下方 `loadError` 分支 + 重试），绝不交给 `seed` / `mergeStaged`：
- * 半成品进 state 会让渲染期抛错，而宿主会为一次渲染期异常把这条 slot 摘掉（浮窗从此打不开）。
- * 可选字段（`fx`、模型行的 `name` / `unpriced` / `price`…）一律不收紧。
- * 判据按 host 的组装处与类型：`readPricingView`（`src/pricing-view.ts`）与 `PricingView`
- * （`src/types.ts`）——这里只给符号名，不写行号（行号每改一次就错一次）。
- */
 function readPricingView(raw: unknown): PricingView | null {
   if (typeof raw !== 'object' || raw === null) return null
   const source = raw as Partial<PricingView>
@@ -185,7 +124,6 @@ function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: str
   }).then(async (res) => {
     const payload = await res.json().catch(() => null) as PriceVerdict | null
     if (!res.ok || payload === null || !payload.ok) {
-      // 宿主的拒绝理由优先于状态码：它说的是哪一段价、错在哪儿。
       const reason = payload !== null && !payload.ok ? payload.error : ''
       return { ok: false as const, error: reason !== '' ? reason : `HTTP ${String(res.status)}` }
     }
@@ -196,7 +134,6 @@ function putPrice(body: unknown): Promise<{ ok: true } | { ok: false; error: str
   }))
 }
 
-/** 触发一次 models.dev 补价。挂载后的自动同步与手动按钮共用：`force` 绕过宿主的日节流。 */
 function postPricingSync(force: boolean): Promise<PricingSyncResult> {
   const query = force ? `?${QUERY_FORCE}=1` : ''
   return fetch(`${ROUTE_PRICING_SYNC}${query}`, { method: 'POST' }).then(async (res) => {
@@ -212,18 +149,13 @@ function clockOf(epochMs: number): string {
 }
 
 export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
-  // 首帧：有未落盘草稿就沿用它自己那份（含它 rely 的基线），否则用上一次读到的干净视图
-  // （见 `lastView`）。两者都没有才从骨架屏开始等宿主——「打开这一屏先看见上一次的样子」
-  // 与词元页、用量明细同一处置。
   const [view, setView] = useState<PricingView | null>(() => staged?.view ?? lastView)
   const [state, setState] = useState<PriceState>(() => staged?.state ?? (lastView === null ? EMPTY_STATE : draftFromView(lastView)))
   const [baseline, setBaseline] = useState<PriceBaseline>(() =>
     staged?.baseline ?? (lastView === null ? EMPTY_BASELINE : baselinesOf(lastView)))
   const [loadError, setLoadError] = useState<string | null>(null)
   const [save, setSave] = useState<SaveState>({ kind: 'clean' })
-  /** models.dev 补价的状态：在飞的那轮与刚落定的判决。状态行据它报"补了 N 条"。 */
   const [sync, setSync] = useState<{ running: boolean; result: PricingSyncResult | null; error: string | null }>({ running: false, result: null, error: null })
-  /** 「查价」面板的状态：开关、用户敲的关键词、在飞的那轮与刚落定的候选。 */
   const [lookup, setLookup] = useState<{
     open: boolean
     keyword: string
@@ -231,12 +163,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     result: PricingLookupResult | null
     error: string | null
   }>({ open: false, keyword: '', loading: false, result: null, error: null })
-  /** 手动选过的那一份；null = 还没选过，一切走「列表里的第一个」。 */
+  const [holiday, setHoliday] = useState<{ running: boolean; result: HolidayRefreshResult | null; error: string | null }>({ running: false, result: null, error: null })
   const [picked, setPicked] = useState<Picked | null>(readPicked)
-  /** 年历展开与否。它是这一屏**末尾**那条折叠带的状态，也由顶部的缺年告警打开。 */
   const [calendarOpen, setCalendarOpen] = useState(false)
 
-  /** 记下一次选择：组件状态（这一屏立刻跟手）与 localStorage（下次打开还认它）。 */
   const choosePicked = useCallback((pick: Picked) => {
     setPicked(pick)
     rememberPicked(pick)
@@ -244,7 +174,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
 
   const changes = useMemo(() => stagedChanges(state, baseline), [state, baseline])
 
-  // 防抖写入器读的 ref，保存绝不捕获过期草稿。
   const stateRef = useRef(state)
   stateRef.current = state
   const baselineRef = useRef(baseline)
@@ -253,14 +182,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const writingRef = useRef(false)
   const againRef = useRef(false)
   const aliveRef = useRef(true)
-  /** 成功写入的代数。读路径在发起前记下它、响应落地时对不上就整份丢弃（理由见 `loadView`）。 */
   const writeGenRef = useRef(0)
-  /** 用户是否已经「交代过」某个字段（失焦 / 重新回到面板）。打字途中的失败保持沉默——
-   *  半输入的数字不是错误，只有离开这个字段之后它才是。 */
   const committedRef = useRef(false)
   const refreshRef = useRef<number | null>(null)
 
-  /** 合并通知：连着几笔写只在最后一笔之后再让父级刷新一次（见 `REFRESH_MERGE_MS`）。 */
   const notifyChanged = useCallback(() => {
     if (refreshRef.current !== null) window.clearTimeout(refreshRef.current)
     refreshRef.current = window.setTimeout(() => {
@@ -269,12 +194,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     }, REFRESH_MERGE_MS)
   }, [onChanged])
 
-  /** 同步补价后要重读视图，但 `loadView` 声明在后面——经 ref 解耦，避免调换顺序。 */
   const loadViewRef = useRef<(() => Promise<void>) | null>(null)
 
-  /** 把新视图同时采纳为渲染源和基线。**先算完再落 state**：`draftFromView` 万一在这份载荷上抛
-   *  （判定没盖到的形状漂移，比如某张卡少了 `models`），异常要在任何 setState 之前发生——
-   *  否则会留下「view 已换成新的、state 还是旧的」这种半成品屏。 */
   const seed = useCallback((next: PricingView) => {
     const nextState = draftFromView(next)
     const nextBaseline = baselineOfDraft(nextState)
@@ -283,25 +204,16 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     setBaseline(nextBaseline)
   }, [])
 
-  /** 读一次宿主的价格表视图。**读失败是一个可重试的状态**，不是「这张表是空的」——所以它自己
-   *  带一次重新读取（与用量明细 / 额度两个 tab 同一形状：错误条 + 重试）。 */
   const loadView = useCallback(async (): Promise<void> => {
     setLoadError(null)
-    // 发起这一次读时的写入代数。响应落地时若已经变过，说明这一份读的是**写入之前**的磁盘
-    // （GET 在 PUT 之前被处理、却在 PUT 之后才 resolve）——采纳它会把刚写进去的价从屏上抹掉、
-    // 让 `changes` 归零（tab 脏点跟着灭），而磁盘其实是新值。所以整份丢弃：不 seed、不 merge、
-    // 也不碰 `save` 状态。对账点仍只有重新挂载（会重新 GET 并重新播种，见 docs/CONTRACTS.md:96）。
     const gen = writeGenRef.current
     try {
       const res = await fetch(ROUTE_PRICING)
       if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
       const raw = await res.json() as unknown
       if (!aliveRef.current || writeGenRef.current !== gen) return
-      // 形状判定在**任何 setState 之前**：不合法就当一次读失败，绝不把半成品交给 seed / mergeStaged。
       const body = readPricingView(raw)
       if (body === null) throw new Error('响应不是一份价格表视图')
-      // 未落盘的草稿只把它真正 dirty 的那几处压上去（见 `mergeStaged`）——于是重读既刷新了
-      // 磁盘上的变化，也没有把草稿整份写回去。
       if (staged === null) {
         seed(body)
         return
@@ -311,50 +223,33 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       setState(merged.state)
       setBaseline(merged.baseline)
     } catch (err) {
-      // 这一次读同样属于被写入取代的那个旧世界：它的失败不该在画着新值的屏上报错。
       if (aliveRef.current && writeGenRef.current === gen) setLoadError(err instanceof Error ? err.message : String(err))
     }
   }, [seed])
   loadViewRef.current = loadView
 
-  // 每次挂载都重读宿主文件：草稿只在自己 dirty 的那几处胜出，不重读就会让期间新增的
-  // route / 模型、账本计数与缺年告警一直停在离开那一刻。
   useEffect(() => {
-    // 回到面板 = 一次提交点：上次没写完的坏草稿要说出原因，而不是只挂着一句「待保存…」。
     if (staged !== null) committedRef.current = true
     void loadView()
   }, [loadView])
 
-  // 账本又落行了就重读：这一屏的下拉选项自己带着「N 次请求」「N 个模型未知」，会话还在
-  // 跑时它们该跟着走。重读只把**草稿真正 dirty 的那几处**留住（见 `mergeStaged`），所以
-  // 正在输入的格子不会被冲掉；页面在后台时整段不发。
   useEffect(() => subscribeLedgerChanges(() => {
     if (document.hidden) return
     void loadViewRef.current?.()
   }), [])
-  /**
-   * 触发一轮 models.dev 补价并刷新视图。`force`（手动按钮）绕过日节流；挂载的
-   * 自动同步不带 force——今天同步过就由宿主直接答 0 格，等于免费。
-   */
+  const syncFromUserRef = useRef(false)
   const runSync = useCallback(async (force: boolean): Promise<void> => {
+    syncFromUserRef.current = force
     setSync({ running: true, result: null, error: null })
     try {
       const result = await postPricingSync(force)
       setSync({ running: false, result, error: null })
-      // 补上的价在磁盘上：重读让下拉的「N 个模型未知」与行内价立即跟上。
-      // 同步写（writeGen）已推进的旧世界丢弃规则在这里自然成立——loadView 自己比对。
       if (result.added > 0) await loadViewRef.current?.()
     } catch (err) {
       setSync({ running: false, result: null, error: err instanceof Error ? err.message : String(err) })
     }
   }, [])
 
-  /**
-   * 「查价」：按关键词在 models.dev 的**原厂采信目录**里模糊搜索，返回排序后的候选。
-   *  与 `runSync` 的分工：那条是自动补洞（账本用过的 × 精确名 × 缺价的），这条是
-   *  用户自己挑。候选池里没有转售价，所以不存在「便宜的转售价冒充通道成本」——
-   *  用户要做的只是挑哪一家原厂。
-   */
   const postLookup = useCallback((keyword: string): Promise<PricingLookupResult> => {
     const query = `?${new URLSearchParams({ [QUERY_MODEL]: keyword }).toString()}`
     return fetch(`${ROUTE_PRICING_LOOKUP}${query}`).then(async (res) => {
@@ -364,7 +259,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     })
   }, [])
 
-  /** 用给定的关键词跑一轮搜索，并把结果写进面板。在飞期间面板不接受新的搜索。 */
   const doSearch = useCallback(async (keyword: string): Promise<void> => {
     setLookup((current) => ({ ...current, loading: true, error: null }))
     try {
@@ -377,7 +271,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     }
   }, [postLookup])
 
-  /** 改关键词：清掉上一轮的结果，避免旧候选被当成还匹配。真正去搜的是 `doSearch`。 */
   const changeKeyword = useCallback((text: string) => {
     setLookup((current) => ({ ...current, keyword: text, result: null, error: null }))
   }, [])
@@ -386,8 +279,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     setLookup((current) => ({ ...current, open: false }))
   }, [])
 
-  // 挂载后自动同步一次：每天首次打开价表 tab 时补价（「手动按钮 + 每天首次打开时
-  // 自动同步」）。读先落地再同步，使状态行的"上次同步"有据可依。
   const autoSyncedRef = useRef(false)
   useEffect(() => {
     if (autoSyncedRef.current) return
@@ -395,19 +286,12 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     void runSync(false)
   }, [runSync])
 
-  /**
-   * 写入整个文件。草稿尚无效时拒绝（不写入），使半输入的数字不能阻塞或破坏其余内容；
-   * 防抖 effect 在草稿再次变化时重试。保存串行化：在飞的写入期间发生的变更排队一次。
-   * **写不进去这件事只在提交点说出来**（字段失焦 / 回到面板）：打字途中它必然是无效的，
-   * 那一刻报错只会把「还没打完」读成「你错了」。
-   */
   const writeNow = useCallback(async (): Promise<void> => {
     if (stagedChanges(stateRef.current, baselineRef.current) === 0) return
     if (writingRef.current) {
       againRef.current = true
       return
     }
-    // 冻结本次 PUT 写入的草稿。响应落地时 live ref 可能已持有更晚的按键。
     const snapshot = stateRef.current
     const composed = composePriceBody(snapshot)
     if (!composed.ok) {
@@ -422,42 +306,33 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       if (aliveRef.current) setSave({ kind: 'error', message: result.error })
       return
     }
-    // 基线始终推进到刚写入的内容，即使已 unmount——离场前的 flush 写入必须让 `staged` 保持干净。
     const nextBaseline = baselineOfDraft(snapshot)
     baselineRef.current = nextBaseline
-    // 写成功了：从这一刻起，任何在它之前发起的读都是旧世界（见 `loadView`）。
     writeGenRef.current += 1
-    // 写成功了：下一次编辑重新从「安静」开始，直到它自己被交代出去。
     committedRef.current = false
     if (staged !== null) {
       staged = stagedChanges(staged.state, nextBaseline) > 0
         ? { ...staged, baseline: nextBaseline }
         : null
     }
-    // 在飞期间又攒了改动：接上下一笔，别让这一笔之后的重写被跳过。
     const queued = againRef.current
     againRef.current = false
     if (!aliveRef.current) {
-      // 卸载后的补写：状态栏已经不在了，但 tab 圆点与父级屏上的金额都还活着——两样都得同步。
       onDirtyChange?.(stagedChanges(stateRef.current, baselineRef.current) > 0)
       notifyChanged()
       if (queued) void writeNow()
       return
     }
-    // 本地草稿保持为唯一真源——从响应重新播种会 remount 用户可能仍在输入的输入框。
     setBaseline(nextBaseline)
     setSave({ kind: 'saved', at: Date.now() })
     notifyChanged()
     if (queued) void writeNow()
   }, [notifyChanged, onDirtyChange])
 
-  // 自动保存：任何变更重置短计时器；最后一次变更胜出。写入器经 ref 读取，使父级 re-render 绝不会饿死防抖。
   const writeRef = useRef(writeNow)
   writeRef.current = writeNow
   useEffect(() => {
     if (changes === 0) {
-      // 改动被撤回到与磁盘一致：没有问题可报，也没有东西待写——回到「安静」的起点。
-      // 「保存失败」也一起清掉：草稿与基线一致，就确实没有哪一处内容没落盘。
       committedRef.current = false
       setSave(current => (current.kind === 'pending' || current.kind === 'invalid' || current.kind === 'error'
         ? { kind: 'clean' }
@@ -465,7 +340,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       return
     }
     if (timerRef.current !== null) window.clearTimeout(timerRef.current)
-    // 已经报出来的问题不因为继续打字而撤回：它说的地点与原因仍然成立。它由**写成功**或**改动归零**清掉。
     setSave(current => (current.kind === 'error' || current.kind === 'invalid' ? current : { kind: 'pending' }))
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null
@@ -479,18 +353,14 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     }
   }, [changes, state])
 
-  // 从未到达磁盘的草稿留给下次挂载；干净的丢弃，使下次挂载读宿主文件。（选中的那一行不走这里：
-  // 它在 localStorage 里，与草稿的生死无关。）
   useEffect(() => {
     if (view === null) return
     staged = changes > 0 ? { view, state, baseline } : null
-    // 干净的那一份才留作下次挂载的首帧（见 `lastView`）。
     if (changes === 0) lastView = view
   }, [view, state, baseline, changes])
 
   useEffect(() => { onDirtyChange?.(changes > 0) }, [changes, onDirtyChange])
 
-  // 离开 tab（或关闭浮窗）不能搁浅一次待写的保存，也不能丢掉一次还没发出的刷新通知。
   useEffect(() => {
     aliveRef.current = true
     return () => {
@@ -499,7 +369,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         window.clearTimeout(timerRef.current)
         timerRef.current = null
       }
-      // 那次刷新说的是**已经落盘**的价，别的 tab 正拿它算金额：跟着面板一起丢掉会让它们停在旧数。
       if (refreshRef.current !== null) {
         window.clearTimeout(refreshRef.current)
         refreshRef.current = null
@@ -531,29 +400,48 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     })
   }, [])
 
-  /** 改 / 加 / 删一年年历。放假日集合跟着一起换（见 `withCalendar`）。 */
   const updateCalendar = useCallback((year: string, next: CalendarDraft | null) => {
     setState((current) => {
       const calendar: CalendarEntries = new Map(current.calendar)
       if (next === null) calendar.delete(year)
       else calendar.set(year, next)
-      return withCalendar(current, calendar)
+      return withCalendar(adoptYear(current, year), calendar)
     })
   }, [])
 
-  /** 改汇率。它是**唯一的**换算率：只在切换通道报价币种、以及 host 把美元通道折成人民币时被读。
-   *  写不写得出去由 `composePriceBody` 说。 */
+  const runHolidaySync = useCallback(async (force: boolean, extraYears: readonly string[] = []): Promise<void> => {
+    setHoliday({ running: true, result: null, error: null })
+    try {
+      const query = new URLSearchParams()
+      if (force) query.set(QUERY_FORCE, '1')
+      for (const year of extraYears) query.append(QUERY_YEAR, year)
+      const suffix = query.toString() === '' ? '' : `?${query.toString()}`
+      const res = await fetch(`${ROUTE_HOLIDAY_SYNC}${suffix}`, { method: 'POST' })
+      const payload = await res.json().catch(() => null) as (HolidayRefreshResult & { error?: string }) | null
+      if (!res.ok || payload === null) throw new Error(payload?.error ?? `HTTP ${String(res.status)}`)
+      setHoliday({ running: false, result: payload, error: null })
+      if (payload.changed || payload.fetched.length > 0) await loadViewRef.current?.()
+    } catch (err) {
+      setHoliday({ running: false, result: null, error: err instanceof Error ? err.message : String(err) })
+    }
+  }, [])
+
   const updateFx = useCallback((text: string) => {
     setState(current => withFx(current, text))
   }, [])
 
-  /** 换一条通道的报价币种：按当前汇率把它的价整体重记（一次真正的改价，自动保存）。
-   *  没有汇率时原样不动——切过去只会在保存口被 `composePriceBody` 挡住。 */
   const changeCurrency = useCallback((route: string, next: 'CNY' | 'USD') => {
     setState(current => withRouteCurrency(current, route, next, fxValue(current.fx)))
   }, [])
 
-  // Ctrl/Cmd+S 立即 flush 待写的保存（文件本来也会自动保存）。
+  const autoHolidayRef = useRef(false)
+  useEffect(() => {
+    if (autoHolidayRef.current) return
+    if (view === null) return
+    autoHolidayRef.current = true
+    void runHolidaySync(false, view.calendarMissing)
+  }, [view, runHolidaySync])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -571,41 +459,30 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [changes, writeNow])
 
-  // 两个下拉的候选就是宿主给的全部通道与全部模型；「这张表有没有洞」由选项文字自己说（见
-  // `routeOptionLabel` / `modelOptionLabel`），不另设筛选。
   const routeChoices = useMemo(() => [...state.routes.values()], [state.routes])
 
-  // 选中的是谁：手动选过、且此刻仍在选项里才作数；其余一律回落到「列表里的第一个」（host 已按
-  // 请求数排序，所以「第一个」就是最该看的那一个）。
   const card = routeChoices.find(item => item.route === picked?.route) ?? routeChoices[0]
   const models = card === undefined ? [] : [...card.models.values()]
   const row = models.find(item => item.model === picked?.model) ?? models[0]
 
   const stateText = saveStateText(save)
-  // 汇率：`rate` 是换算能力（null = 未设，美元报价的通道算不出人民币），`fxProblem` 是这一格的问题。
+  const syncLine = view === null ? null : describeSync(view.sync, sync, syncFromUserRef.current)
+  const syncTone = syncLine === null ? 'quiet' : syncLine.tone
+  const syncGapsPrefix = syncLine === null ? '' : syncLine.prefix
+  const syncActionText = syncLine === null ? '取价' : syncLine.action
   const rate = fxValue(state.fx)
   const fxProblem = fxIssue(state.fx)
-  // 什么都没选过、也没有任何待写的改动：状态栏没有话要说。常驻一个空盒子会在选择带与
-  // 那份价之间撑出一道什么也不说的空隙。
-  const veiled = picked === null && save.kind === 'clean' && changes === 0
 
-  /** 打开面板：关键词默认就是当前选中的模型名，打开即搜一次。 */
   const openLookup = useCallback(() => {
     if (card === undefined || row === undefined) return
     setLookup({ open: true, keyword: row.model, loading: true, result: null, error: null })
     void doSearch(row.model)
   }, [card, row, doSearch])
 
-  /**
-   * 采用一条候选：把它的四档美元价填进当前这一行的四个格子。**只在美元报价的
-   *  通道上**做——人民币通道的挂牌价不是美元价的函数（见 CONTRACTS §2），所以那
-   *  时按钮是停用的，面板上另说一句该先切币种。已有峰谷时段原样不动，它是一份
-   *  独立的细化。填入即一次普通改价，自动保存会接着把它写盘。
-   */
   const adopt = useCallback((candidate: ModelsDevCandidate): void => {
     if (card === undefined || row === undefined) return
     if (card.currency !== 'USD') {
-      setLookup((current) => ({ ...current, error: '这条通道按人民币报价，models.dev 的价是美元的。请先在详情头把报价币种切成美元，再回来采用。' }))
+      setLookup((current) => ({ ...current, error: '这条通道的价按人民币记，models.dev 只有美元价。要填进来的话，先在详情头把报价币种切成美元——那会把整条通道已有的价按汇率换算一次。' }))
       return
     }
     const next: ModelDraft = {
@@ -623,19 +500,13 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     <section
       className="dtpl-price-sec"
       aria-label="价格表"
-      // 任一字段失焦 = 提交点：立刻写一次（不必再等防抖），并让此后写不进去的失败说话。
-      // **没有待写的改动就不算一次交代**——否则在这里随便点一下，下一次打字的中途报错就被放行了。
       onBlur={(event) => {
-        // 下拉换人不是一次「交代」：弹层里没有字段可交代，而这一次 blur 会被读成「用户离开了
-        // 某个没写完的字段」，于是切一下下拉就报一句「未保存」。
         if (event.target instanceof HTMLSelectElement) return
         if (stagedChanges(stateRef.current, baselineRef.current) === 0) return
         committedRef.current = true
         void writeRef.current()
       }}
     >
-      {/* 这条带子是这一屏的**主语行**：正在编辑哪条通道的哪个模型。它是导航，不是内容——
-          所以不给它面板的框，也不让它占掉首屏的高度。 */}
       {state.routes.size > 0 && card !== undefined && (
         <div className="dtpl-price-pick">
           <div className="dtpl-price-pick-row">
@@ -645,8 +516,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
               value={card.route}
               aria-label="通道"
               onChange={(event) => {
-                // 模型先落到空串：换通道时沿用上一条通道的模型名没有意义，下一帧的回落会
-                // 挑出这条通道里请求最多的那一个。
                 choosePicked({ route: event.target.value, model: '' })
               }}
             >
@@ -659,8 +528,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
             <span className="dtpl-price-pick-k">模型</span>
             <select
               className="dtpl-price-select dtpl-price-pick-sel"
-              /* value 必须落在选项集合里：row 是 undefined（这条通道一个模型都没有）时给空串，
-                 它不在任何 option 的 value 上，React 便让浏览器显示第一个选项。 */
               value={row === undefined ? '' : row.model}
               disabled={models.length === 0}
               aria-label={`${card.label} 的模型`}
@@ -675,9 +542,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
               ))}
             </select>
           </div>
-          {/* 汇率是**全表共用的一份事实**，不属于上面任何一条；所以它落在同一个网格的
-              第二行左格，右格空着——读起来是「这一组还有一个字段」，不是另起一行设置。 */}
-          <div className="dtpl-price-pick-row">
+          <div className="dtpl-price-pick-row dtpl-price-pick-fxrow">
             <span className="dtpl-price-pick-k">汇率</span>
             <span className="dtpl-price-fx">
               <span className="dtpl-price-fx-eq">1 美元 =</span>
@@ -694,7 +559,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 title="1 美元等于多少元。它不动价文件里已写的数，但会重算按美元报价的通道的金额——那些价是美元记的，人民币数字本来就是汇率的函数。人民币通道一分不动。"
                 onChange={(event) => updateFx(event.target.value)}
                 onKeyDown={(event) => {
-                  // Enter 离开这一格（值已暂存）。
                   if (event.key === 'Enter') event.currentTarget.blur()
                 }}
               />
@@ -705,32 +569,51 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
             </span>
             {fxProblem !== null && <span className="dtpl-price-fx-err" role="alert">{fxProblem}</span>}
           </div>
-        </div>
-      )}
-
-      {/* 年历是**全局**的一份数据（不属于任何一行），所以它排在价格内容**之后**：它是这套价的
-          一个前提（`workdays` 时段的生效判定靠它），而不是打开这一屏要做的事。
-          缺年那条告警留在最上面——它说的是「金额会算错」，不能压到折叠线以下；但它只负责
-          带路（展开年历），真正的「补上」按钮只有一个，就在年历自己那一行里。 */}
-      {view !== null && view.calendarMissing.length > 0 && (
-        <div className="dtpl-price-calarm" role="status">
-          <span className="dtpl-price-calarm-text">
-            缺 {view.calendarMissing.join('、')} 年的法定节假日安排：「法定工作日」时段会把那几年的节假日按高峰多算。
-          </span>
-          <button
-            type="button"
-            className="dtpl-price-calarm-act"
-            aria-controls="price-calendar"
-            onClick={() => {
-              setCalendarOpen(true)
-              document.getElementById('price-calendar')?.scrollIntoView({ block: 'nearest' })
-            }}
+          <div
+            className="dtpl-price-pick-row dtpl-price-pick-state"
+            data-quiet={save.kind === 'clean' && changes === 0 ? 'true' : undefined}
           >
-            去年历补齐
-          </button>
+            <span className="dtpl-price-pick-k">状态</span>
+            <span className="dtpl-price-state-row">
+              <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
+                {stateText === '' ? '与磁盘一致' : stateText}
+              </span>
+              {save.kind === 'error' && (
+                <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
+              )}
+            </span>
+          </div>
         </div>
       )}
 
+      {view !== null && view.calendarMissing.length > 0 && (() => {
+        const missing = view.calendarMissing
+        const autoFailed = view.holidaySync !== undefined
+          && (view.holidaySync.state === 'failed' || view.holidaySync.state === 'missing')
+        return (
+          <div className="dtpl-price-calarm" role="status">
+            <span className="dtpl-price-calarm-text">
+              缺 {missing.join('、')} 年的法定节假日安排：「法定工作日」时段会把那几年的节假日按高峰多算。
+              {autoFailed && '自动拉取没成功，可以展开年历手动填（手写永远优先）。'}
+              {holiday.error !== null && <b>（自动拉取失败：{holiday.error}）</b>}
+            </span>
+            <button
+              type="button"
+              className="dtpl-price-calarm-act"
+              aria-controls="price-calendar"
+              disabled={holiday.running}
+              title="从 holiday-cn 拉这几年的法定节假日安排（它每日抓国务院公告，按年一份 JSON）。手写过的年份不受影响。"
+              onClick={() => {
+                void runHolidaySync(true, missing)
+                setCalendarOpen(true)
+                document.getElementById('price-calendar')?.scrollIntoView({ block: 'nearest' })
+              }}
+            >
+              {holiday.running ? '拉取中…' : `↻ 自动拉取 ${missing.length > 2 ? `${String(missing.length)} 年` : `${missing.join('、')} 年`}`}
+            </button>
+          </div>
+        )
+      })()}
 
       {loadError !== null && (
         <div className="dtpl-error" role="alert">
@@ -739,8 +622,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         </div>
       )}
 
-      {/* 读不到就是读不到：错误条已经说了原因，下面不再补一句「没有可显示的通道」——
-          那句话在说「这里本来就没有内容」，而真相是这一份没读到。 */}
       {view === null
         ? (loadError === null
           ? (
@@ -793,48 +674,33 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 onBilling={updateBilling}
               />
             )}
-      {/* 这一屏按**「价 → 辅助动作 → 全局前提」**排：打开时第一眼是那份价，
-          补价与查价（这一屏的辅助动作）在它之后，年历（一年改一次的前提）压轴。
-          状态栏在没话要说时让位（见 `veiled`）：常驻一个空盒子会在价与它下面那段之间撑出空隙。 */}
-      {(state.routes.size > 0 || loadError !== null) && !veiled && (
-        <div className="dtpl-price-bar">
-          <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
-            {stateText}
-          </span>
-          {save.kind === 'error' && (
-            <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
-          )}
-        </div>
-      )}
-      {/* models.dev 补价与「查价」是这一屏的辅助动作，不是价本身。挂载即自动同步一次；
-          同步跟「这次写没写进去」是两句话，不挤同一条状态。 */}
-      {state.routes.size > 0 && (
-        <div className="dtpl-price-syncbar">
-          <span className="dtpl-price-sync-state" role="status" aria-live="polite">
-            {syncText(sync, view?.sync.lastError ?? null)}
+      {state.routes.size > 0 && view !== null && (
+        <div className="dtpl-price-actions">
+          <span className="dtpl-price-actions-fill">
+            <span className={`dtpl-price-actions-note${syncTone === 'quiet' ? '' : ` is-${syncTone}`}`}>
+              {syncGapsPrefix}
+            </span>
+            <button
+              type="button"
+              className="dtpl-price-actions-link"
+              disabled={sync.running}
+              title={`从 ${view.sync.source.label}（公共美元价目录）取一次：只填账本用过、还没有价的美元通道格，你手写的价一格不动。平时每天自动一次；这里是「现在就取」。`}
+              onClick={() => void runSync(true)}
+            >
+              {sync.running ? '正在取价…' : syncActionText}
+            </button>
           </span>
           <button
             type="button"
-            className="dtpl-price-ghost"
+            className="dtpl-price-tool"
             disabled={lookup.loading || card === undefined || row === undefined}
-            title="按当前模型名在 models.dev 上模糊搜索原厂美元价，找到后可一键采用填入；只在美元报价的通道上采用。"
+            title="按名字在 models.dev 里搜原厂价，选中一条填进当前这一行的四档（会覆盖这一行已填的数）。只在美元报价的通道上可用。"
             onClick={() => void openLookup()}
           >
-            查价
-          </button>
-          <button
-            type="button"
-            className="dtpl-price-ghost"
-            disabled={sync.running}
-            title="从 models.dev 拉取原厂美元价，补进账本用过的、缺价的美元通道格；手写价不动。"
-            onClick={() => void runSync(true)}
-          >
-            {sync.running ? '同步中…' : '从 models.dev 补价'}
+            搜索价
           </button>
         </div>
       )}
-      {/* 「查价」面板：它跟补价是两件事——补价说「自动补了多少洞」，这一块说「你选了哪一份价」。
-          没打开时什么都不占。 */}
       {lookup.open && card !== undefined && row !== undefined && (
         <LookupPanel
           lookup={lookup}
@@ -846,22 +712,24 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           onClose={closeLookup}
         />
       )}
-      {/* 年历收在这一屏的末尾、默认收起：它一页的体量比这一屏的主体还大，而它一年只改一次。 */}
       {view !== null && (
         <CalendarEditor
           entries={state.calendar}
           missingYears={view.calendarMissing}
+          autoYears={[...state.autoYears].sort((left, right) => left.localeCompare(right))}
+          sync={view.holidaySync}
           dirty={calendarDirty(state, baseline)}
           expanded={calendarOpen}
           onExpandedChange={setCalendarOpen}
           onChange={updateCalendar}
+          onAutoRefresh={() => void runHolidaySync(true, view.calendarMissing)}
+          syncing={holiday.running}
         />
       )}
     </section>
   )
 }
 
-/** 状态文字只说**这次写没写进去**。 */
 function saveStateText(save: SaveState): string {
   switch (save.kind) {
     case 'pending': return '待保存…'
@@ -879,30 +747,31 @@ interface SyncUiState {
   error: string | null
 }
 
-/** 补价一行的文字：优先说在飞/刚落定的这轮，其次宿主记下的上次失败；从没有过就说没同步过。
- *  跳过数不逐条念（那是审计），只说还有多少格没补上——它与「N 个模型未知」是同一个洞。 */
-function syncText(sync: SyncUiState, lastError: string | null): string {
-  if (sync.running) return '正在从 models.dev 拉取价格…'
-  if (sync.error !== null) return `同步失败：${sync.error}`
-  if (sync.result !== null) {
-    if (sync.result.throttled === true) return '今天已同步过 models.dev（按钮可强制再来一次）'
-    if (sync.result.added === 0 && sync.result.skipped === 0) return '已检查 models.dev：没有可补的价'
-    const parts: string[] = []
-    parts.push(sync.result.added > 0 ? `已补 ${String(sync.result.added)} 条` : '没有需要补的价')
-    if (sync.result.skipped > 0) parts.push(`跳过 ${String(sync.result.skipped)} 格（无采信条目或非美元通道）`)
-    return parts.join(' · ')
+function describeSync(
+  view: PricingSyncView,
+  ui: SyncUiState,
+  fromUser: boolean,
+): { prefix: string; action: string; tone: 'quiet' | 'warn' | 'err' } | null {
+  if (ui.running) return { prefix: '', action: '正在取价…', tone: 'quiet' }
+  if (ui.error !== null) return { prefix: `取价失败：${ui.error}（手写的价没动）`, action: '', tone: 'err' }
+  if (ui.result !== null && fromUser) {
+    if (ui.result.throttled === true) return { prefix: '刚刚已经取过了', action: '', tone: 'quiet' }
+    if (ui.result.added === 0 && ui.result.skipped === 0) return { prefix: '没有要填的价', action: '', tone: 'quiet' }
+    const parts: string[] = [ui.result.added > 0 ? `填上了 ${String(ui.result.added)} 个模型的价` : '没有要填的价']
+    if (ui.result.skipped > 0) parts.push(`跳过 ${String(ui.result.skipped)} 个（目录里没有，或不是美元通道）`)
+    return { prefix: parts.join(' · '), action: '', tone: 'quiet' }
   }
-  if (lastError !== null) return `上次同步失败：${lastError}`
-  return '尚未从 models.dev 同步过'
+  if (view.state === 'failed') {
+    return { prefix: `上次取价失败${view.lastError === null ? '' : `（${view.lastError}）`}，`, action: '重试', tone: 'err' }
+  }
+  if (view.gaps > 0) {
+    return { prefix: `${String(view.gaps)} 个用过的模型还没价，`, action: '现在取价', tone: 'warn' }
+  }
+  if (view.lastAttemptAt === null) return { prefix: '价由 models.dev 每天自动取，', action: '现在取一次', tone: 'quiet' }
+  if (view.state === 'stale') return { prefix: '价是上次取的，', action: '现在取价', tone: 'quiet' }
+  return { prefix: '价已是最新（models.dev 每天自动取），', action: '重新取', tone: 'quiet' }
 }
 
-/** 「查价」面板：可编辑的关键词 + 排序后的候选 + 采用按钮。
- *
- *  拆成独立组件是为了让主面板的状态树不被这一块污染——它自己的开关、在飞与落定
- *  都封在这里，主面板只通过 props 关心「有没有打开 / 选了哪条」。候选池是原厂
- *  采信集（见 `models-dev.ts`），所以每一条都是可信价，不存在转售价冒充通道成本；
- *  用户要做的只是挑哪一家原厂。只在**美元报价**的通道上开放采用。
- */
 function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch, onAdopt, onClose }: {
   lookup: { open: boolean; keyword: string; loading: boolean; result: PricingLookupResult | null; error: string | null }
   currency: PriceCurrency
@@ -917,7 +786,6 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
   const isUsd = currency === 'USD'
   const currentKey = normalizeModelId(currentModel)
 
-  // Esc 关掉面板：它是这一块的对话框，关不掉就得去点 ×。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
@@ -927,9 +795,9 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
   }, [onClose])
 
   return (
-    <div className="dtpl-price-lookup" role="dialog" aria-label="从 models.dev 查模型价">
+    <div className="dtpl-price-lookup" role="dialog" aria-label="从 models.dev 选一份价填进这一行">
       <div className="dtpl-price-lookup-head">
-        <span className="dtpl-price-lookup-k">查 models.dev</span>
+        <span className="dtpl-price-lookup-k">在 models.dev 里找这个模型</span>
         <input
           className="dtpl-price-input dtpl-price-lookup-input"
           type="text"
@@ -938,7 +806,6 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
           aria-label="搜索关键词"
           spellCheck={false}
           autoComplete="off"
-          // 关键词变了就清掉上一轮结果；真正去搜的是下面那个按钮 / Enter。
           onChange={(event) => onKeywordChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && canSearch) void onSearch(lookup.keyword)
@@ -958,7 +825,8 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
       </div>
       {!isUsd && (
         <p className="dtpl-price-lookup-note">
-          这条通道按人民币报价，models.dev 的价是美元的——先在详情头把报价币种切成美元，再回来采用。
+          这条通道的价按人民币记，而 models.dev 只有美元价。要填进来的话，先在详情头把报价币种切成美元——
+          那会把整条通道已有的价按汇率换算一次，是真改价。
         </p>
       )}
       {lookup.loading
@@ -973,8 +841,8 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
           : lookup.result !== null && lookup.result.candidates.length === 0
             ? (
               <p className="dtpl-price-lookup-empty">
-                models.dev 上没有采信的与「{lookup.keyword}」相关的模型。换个关键词试试（模型串、
-                或者只敲厂商名如 deepseek / qwen）。
+                没找到与「{lookup.keyword}」相关的模型（只收原厂挂牌价，转售商与价格分裂的条目不列）。
+                换个关键词试试：模型串，或者只敲厂商名如 deepseek / qwen。
               </p>
             )
             : lookup.result !== null && (
@@ -991,8 +859,8 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
                         <span className="dtpl-price-lookup-provider">{candidate.provider}</span>
                         <span className="dtpl-price-lookup-slash">/</span>
                         <span>{candidate.modelId}</span>
-                        {isExact && <span className="dtpl-price-lookup-badge" title="与你搜的关键词完全同一模型">就是这条</span>}
-                        {isCurrent && !isExact && <span className="dtpl-price-lookup-badge" title="与当前选中的模型同一模型串">当前这条</span>}
+                        {isExact && <span className="dtpl-price-lookup-badge" title="与你搜的关键词是同一个模型">就是搜的这个</span>}
+                        {isCurrent && !isExact && <span className="dtpl-price-lookup-badge" title="就是当前这一行正在编辑的模型">当前这一行</span>}
                       </div>
                       <div className="dtpl-price-lookup-name">{candidate.name}</div>
                       <div className="dtpl-price-lookup-cost">{lookupCostText(candidate.cost)}</div>
@@ -1001,11 +869,11 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
                         className="dtpl-price-ghost"
                         disabled={!isUsd}
                         title={isUsd
-                          ? `把 ${candidate.provider}/${candidate.modelId} 的四档美元价填进这一行`
-                          : '这条通道按人民币报价，models.dev 的价是美元的；先在详情头把报价币种切成美元'}
+                          ? `把 ${candidate.provider}/${candidate.modelId} 的价填进这一行（覆盖这一行已填的四档）`
+                          : '这条通道按人民币报价，models.dev 只有美元价；先在详情头把报价币种切成美元'}
                         onClick={() => onAdopt(candidate)}
                       >
-                        采用
+                        填进这一行
                       </button>
                     </li>
                   )
@@ -1017,7 +885,6 @@ function LookupPanel({ lookup, currency, currentModel, onKeywordChange, onSearch
   )
 }
 
-/** 一条候选的四档价：美元 / 百万词元，缺的档就不列。 */
 function lookupCostText(cost: ModelsDevCandidate['cost']): string {
   const parts: string[] = [`$${String(cost.input)}`, `$${String(cost.output)}`]
   if (cost.cacheRead !== undefined) parts.push(`读 $${String(cost.cacheRead)}`)

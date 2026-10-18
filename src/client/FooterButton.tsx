@@ -1,17 +1,9 @@
-/**
- * 词元账本的侧栏 footer 触发按钮（路由 A：`sidebar.footer.action`）。
- *
- * 徽标本身从不轮询 provider API；由 client 入口经 `GET /tokbook/quota`（纯磁盘列表 + alert）刷新。
- */
-
 import { useSyncExternalStore } from 'react'
 import type { TokBookViewStore } from './store.ts'
 import { UsageGlyph } from './icons.tsx'
 
 export interface FooterButtonProps {
-  /** 侧栏列状态：false = 收起的窄栏。 */
   wide: boolean
-  /** 共享 view store（inject 注入）。 */
   view: TokBookViewStore
 }
 

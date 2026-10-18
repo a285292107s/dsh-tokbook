@@ -1,23 +1,11 @@
-/**
- * 统计口径 tab。只留值得记住的事实；实现管道在 README，不在此 tab。
- */
-
 import type { TokBookOverview } from '../types.ts'
 import { formatDateTime } from './format.ts'
 
-/**
- * 「记了哪些调用」判定表：一行一种**用户看得见的情况**，后两列是两个维度的判定。
- * 口径真源是 `src/stats.ts` 的 `addUsage`（规则另见 CONTRACTS §2）；这里只做白话转写，
- * 不引入第三套说法——改口径先改那里。
- */
 interface JudgeRow {
-  /** 用户视角的一句话情况。 */
   what: string
-  /** 这句情况的来由或做法。 */
   detail: string
   requests: string
   tokens: string
-  /** 省略 = true（有数，描边芯片）；false = 静默芯片（这个维度没有数可加）。 */
   requestsOn?: boolean
   tokensOn?: boolean
 }
@@ -61,8 +49,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <p>向模型提问时，通道会回报这次消耗了多少词元。本页记的就是这些回报、逐条累加——<b>不是</b>模型厂商官网上的账户数据。</p>
       </div>
 
-      {/* `role="group"` 不是装饰：`aria-label` 落在**没有角色**的 div 上，浏览器不会把它
-          暴露给读屏（generic 角色不支持命名），这一组事实就等于没有名字。 */}
       <div className="dtpl-doc-facts" role="group" aria-label="口径速览">
         <div className="dtpl-doc-fact">
           <span className="dtpl-doc-fact-k">来源</span>
@@ -74,17 +60,12 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </div>
         <div className="dtpl-doc-fact">
           <span className="dtpl-doc-fact-k">范围</span>
-          {/* 这一格钉的是**哪个工具**这一维（别的 AI 工具、直连脚本都看不到）；**哪台设备**
-              那一维由第 3 节的「记账维度不同」负责，两处不复述同一个轴。
-              「只记」两字不能省：省掉这一格就与上一格「来源」是同一件事，边界消失。 */}
           <span className="dtpl-doc-fact-v">只记 DeepSeek Harness 的会话记录</span>
         </div>
       </div>
 
       <section className="dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">1</span>词元分四桶</h2>
-        {/* 金额 / 计价 / 怎么改价不在这一节：前者在 §3「差额从哪来」，后两者是价格表 tab
-            自己的操作。 */}
         <p className="dtpl-doc-sub">
           厂商按 <b>词元（token）</b>计费——可以理解为模型读写的最小文字单位。一次请求的用量被拆成
           <b>四类、互不重复</b>，加起来就是「词元合计」：
@@ -113,7 +94,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
           <tbody>
             {JUDGE_ROWS.map((row) => (
               <tr key={row.what}>
-                {/* 情况是**行表头**：它命名的是这一行，不是某一列。 */}
                 <th scope="row">
                   <span className="dtpl-doc-judge-what">{row.what}</span>
                   <span className="dtpl-doc-judge-detail">{row.detail}</span>
@@ -157,9 +137,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
                 <span className="dtpl-doc-gap-item-name">记账维度不同</span>
                 <span className="dtpl-doc-gap-item-desc">本账本按「这台设备上的会话」记账，账单按「账号」汇总；同一个账号在多台设备 / 多个工具里使用时，两边必然对不齐。</span>
               </li>
-              {/* 金额与计价只在这里说一次。价格表页怎么改价、行内四个数字改的是哪一份价,
-                  不在这里教——那是价格表 tab 的界面本身(四档价 + 峰谷时段),
-                  文档只留用户对账时用得上的结论。 */}
               <li>
                 <span className="dtpl-doc-gap-item-name">金额是现价刻度</span>
                 <span className="dtpl-doc-gap-item-desc">按你在价格表页写的<b>当前价</b>(¥ / 百万词元)逐条折算后累加;同一个模型串在不同<b>通道</b>可以是不同的价。一份价管全部历史,所以它衡量的是「最近用掉的词元值多少钱」——<b>不是</b>当时那笔账单(厂商改过价,历史那几天的金额就按现价重算)。刻度只在够近的窗口里成立:金额只在近 30 天及更短的窗口里给,<b>全部账本</b>只给词元。</span>
@@ -222,7 +199,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
   )
 }
 
-/** 判定芯片：描边 = 这个维度有数，静默 = 没有数可加。两种形状，不是两种颜色。 */
 function Judge({ value, on = true }: { value: string; on?: boolean }) {
   return <span className={on ? 'dtpl-doc-chip' : 'dtpl-doc-chip dtpl-doc-chip-off'}>{value}</span>
 }

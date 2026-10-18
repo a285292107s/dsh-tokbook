@@ -1,12 +1,3 @@
-/**
- * 手工价表：provider route key → 精确 model 串 → 该 (route, model) 的**当前价**
- * （四档基准价 + 可选峰谷时段）。没有生效时刻那一轴——账本里所有记录都用同一份价
- * 折算（理由与代价见 docs/CONTRACTS.md §2）。旧文件的价段数组仍读得进来：取生效时刻
- * 最晚的那一段（就是今天仍在生效的价），更早的段按它重算。
- *
- * 读宽松（畸形段/时段丢弃，不致命）；写严格且整文件替换，坏 PUT 不会半落地。
- */
-
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
@@ -31,12 +22,9 @@ export {
 
 interface Logger {
   error(...args: unknown[]): void
-  /** 可选：读路径的降级说明（从 `.bak` 恢复、跨年区间被夹取）。 */
   warn?(...args: unknown[]): void
 }
 
-/** `revision` 是价文件**文本**的内容签名——派生 rollup 记下其 rate 行所折叠的
- *  revision，不同则重建；外部对文件的任何编辑都因此可见。 */
 export interface PriceFile {
   table: PricingTable
   billing: BillingMap
@@ -50,9 +38,6 @@ function isRate(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
-/** 读文件的结果：`text` 为 null 时 `missing` 区分「**确实不存在**（ENOENT）」与
- *  「存在但读不到（EACCES/EBUSY/…）」。两者的处置不同：只有前者才允许走
- *  `.bak` 回退——把权限错误当成「文件没了」会拿旧备份盖住一份还在的文件。 */
 type TextFileRead = { text: string } | { text: null; missing: boolean }
 
 async function readTextFile(dir: string, name: string, logger: Logger): Promise<TextFileRead> {
@@ -61,13 +46,11 @@ async function readTextFile(dir: string, name: string, logger: Logger): Promise<
     return { text: text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text }
   } catch (error) {
     const missing = (error as NodeJS.ErrnoException).code === 'ENOENT'
-    // 「还没有这个文件」是正常状态（首次安装），不报；读不到已有文件才报。
     if (!missing) logger.error(`[tokbook] cannot read ${name}:`, error)
     return { text: null, missing }
   }
 }
 
-/** 廉价内容签名（djb2, hex）：rollup 只需区分不同价文件，不需抗篡改。 */
 function revisionOf(text: string): string {
   let hash = 5381
   for (let index = 0; index < text.length; index += 1) {
@@ -95,7 +78,6 @@ function coerceRates(raw: Record<string, unknown>): ModelPricing | null {
   }
 }
 
-/** 峰谷时段重述的费率：四档的任意非空子集。 */
 function coerceSlotRates(raw: Record<string, unknown>): ModelPricing | null {
   const rates: ModelPricing = {
     ...(isRate(raw.inputPerMillion) ? { inputPerMillion: raw.inputPerMillion } : {}),
@@ -106,8 +88,6 @@ function coerceSlotRates(raw: Record<string, unknown>): ModelPricing | null {
   return Object.keys(rates).length === 0 ? null : rates
 }
 
-/** 文件中的一个峰谷时段：覆盖的小时与星期集合 + 重述的档位。畸形时段丢弃
- *  ——绝不猜 day set 套用，否则会静默按例外价计费每一天。 */
 function coerceSlot(raw: unknown): PriceSlot | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const slot = raw as Record<string, unknown>
@@ -124,7 +104,6 @@ function coerceSlot(raw: unknown): PriceSlot | null {
   return { days, start: slot.start, end: slot.end, rates }
 }
 
-/** 按 start 升序；重叠时段丢弃——文件中较早的时段胜出。 */
 function normalizeSlots(slots: readonly PriceSlot[]): PriceSlot[] {
   const out: PriceSlot[] = []
   for (const slot of [...slots].sort((left, right) =>
@@ -135,11 +114,8 @@ function normalizeSlots(slots: readonly PriceSlot[]): PriceSlot[] {
   return out
 }
 
-/** 旧文件里 `from` 的两种写法：本地日，或本地日 + 整点。 */
 const LEGACY_FROM_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:00)?$/u
 
-/** 旧文件里的一段价。**读**路径只拿它挑出「今天仍在生效」的那一段——`from` 因此
- *  只用来排序，不再参与计价；缺 `from`（更旧的兜底段）按最早处理。 */
 function coerceLegacySegment(raw: unknown): { from: string; entry: PriceEntry } | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const segment = raw as Record<string, unknown>
@@ -157,9 +133,6 @@ function coerceLegacySegment(raw: unknown): { from: string; entry: PriceEntry } 
   return { from, entry: { rates, ...(slots.length > 0 ? { slots } : {}) } }
 }
 
-/** 旧形态的价段数组 → 生效时刻最晚的那一段。日期串是定宽且逐位可比的，所以
- *  字典序就是时间序（缺 `from` 的兜底段排在最前）。任一段读不懂 → null：我们
- *  无法知道坏的哪一段是不是最晚的那一段，保守起见整个 (route, model) 读作价格未知。 */
 function coerceLegacySegments(list: readonly unknown[]): PriceEntry | null {
   let best: { from: string; entry: PriceEntry } | null = null
   for (const item of list) {
@@ -170,8 +143,6 @@ function coerceLegacySegments(list: readonly unknown[]): PriceEntry | null {
   return best === null ? null : best.entry
 }
 
-/** 一个 (route, model) 的价：当前形态（四档价 + 可选 slots 的对象），或旧文件的
- *  价段数组。两者都读不懂 → null（价格未知）。 */
 function coerceEntry(raw: unknown): PriceEntry | null {
   if (Array.isArray(raw)) return coerceLegacySegments(raw)
   if (typeof raw !== 'object' || raw === null) return null
@@ -187,7 +158,6 @@ function coerceEntry(raw: unknown): PriceEntry | null {
   }
 }
 
-/** 一年里的一段放假日：两端都是真实日期且起不晚于止。 */
 function coerceHolidayRange(raw: unknown): HolidayRange | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const range = raw as Record<string, unknown>
@@ -196,13 +166,6 @@ function coerceHolidayRange(raw: unknown): HolidayRange | null {
   return isValidHolidayRange(parsed) ? parsed : null
 }
 
-/** 读路径的年历：畸形的年 / 区间丢弃（不致命），合法区间合并成不重叠的区间表。
- *
- *  每个区间**夹到它自己的年 key 内**：写路径（{@link parseCalendar}）拒绝跨年区间，
- *  而 client 把写规则用在读结果上，所以读路径放行一个跨年区间就等于让整份价文件
- *  存不进去、并让 client 的节假日集合为空（`workdays` 在节假日当天照高峰算，
- *  显示价与计费价分叉）。夹掉的部分按「年历里查不到这一天」退化——`workdays`
- *  退成周一至周五，宁可多按高峰算，绝不因此丢掉整年的年历。 */
 function coerceCalendar(raw: unknown, logger: Logger = console): HolidayCalendar {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
   const calendar: HolidayCalendar = {}
@@ -234,15 +197,12 @@ function coerceCalendar(raw: unknown, logger: Logger = console): HolidayCalendar
   return calendar
 }
 
-/** 年历在文件里按区间写，所以读（可能来自手写文件）与写都经过这一个合并，
- *  两种形态才收敛到同一份。 */
 function mergeHolidayDates(dates: readonly string[]): HolidayRange[] {
   const indexes = [...new Set(dates)].map(dayIndex).filter((index): index is number => index !== null)
   indexes.sort((left, right) => left - right)
   const ranges: HolidayRange[] = []
   for (const index of indexes) {
     const last = ranges[ranges.length - 1]
-    // 按天数索引比较，所以夏令时那两天既不会断开一段假期，也不会错并相邻两天。
     if (last !== undefined && index - (dayIndex(last.end) ?? index) === 1) last.end = dayKeyOfIndex(index)
     else ranges.push({ start: dayKeyOfIndex(index), end: dayKeyOfIndex(index) })
   }
@@ -288,11 +248,6 @@ export function coercePriceFile(value: unknown, logger: Logger = console): Price
     const priced: Record<string, PriceEntry> = {}
     for (const [model, raw] of Object.entries(models as Record<string, unknown>)) {
       if (model === '') continue
-      // 读不懂 → 整个 (route, model) 读作价格未知。**不猜**：手写的价要么读得出
-      // 四档价，要么这一行没有价（README 承诺的是「畸形文件只把受影响的
-      //  (路由, 模型) 降级为价格未知(¥0)」）。残留：该 (route, model) 因此在下一次
-      //  整表保存时不再出现在视图里（整表重写的既有语义），手写的坏行会被那个动作
-      //  永久删掉——接受的代价，错钱比丢一条手写价更严重。
       const entry = coerceEntry(raw)
       if (entry === null) {
         logger.error(`[tokbook] ${PRICING_FILE} 的「${route}」/「${model}」读不懂（既不是「四档价 + 可选 slots」的对象，也不是旧的价段数组）；整个 (路由, 模型) 读作价格未知`)
@@ -309,13 +264,6 @@ function emptyPriceFile(): PriceFile {
   return { table: {}, billing: {}, currency: {}, calendar: {}, revision: '' }
 }
 
-/** 读价文件。主文件**确实不存在**（ENOENT，不是别的读取错误）而 `pricing.json.bak`
- *  在时从备份恢复：{@link writePriceFile} 先 `rename(target, backup)` 再 `rename(tmp,
- *  target)`，两步之间崩溃就只剩 `.bak`，而缺失的主文件若读作空表，界面会显示
- *  「全部价格未知」，用户随手改一格就把空表整表写回、历史价全丢。
- *
- *  回退只在 ENOENT 上做（权限 / 占用错误读的是还在的文件，绝不拿备份盖它），
- *  也不在 JSON 语法错误上做（文件在、内容坏，按 `parseJson` 的既有语义读空表）。 */
 export async function readPriceFile(dir: string, logger: Logger = console): Promise<PriceFile> {
   const read = await readTextFile(dir, PRICING_FILE, logger)
   if (read.text === null) {
@@ -377,7 +325,6 @@ function parseEntry(value: unknown, where: string): { ok: true; entry: PriceEntr
   const known = new Set(['inputPerMillion', 'outputPerMillion', 'cacheReadPerMillion', 'cacheWritePerMillion', 'slots'])
   const extra = Object.keys(raw).find(key => !known.has(key))
   if (extra !== undefined) {
-    // 旧文件的 `from` 是这一屏最可能手写回来的字段，所以单独说一句它去哪儿了。
     const hint = extra === 'from' ? '：价表没有生效时间了，整份价就是当前价' : ''
     return { ok: false, error: `${where}含未知字段「${extra}」${hint}` }
   }
@@ -420,11 +367,8 @@ function parseEntry(value: unknown, where: string): { ok: true; entry: PriceEntr
   }
 }
 
-/** 一次 PUT body 的判定。 */
 export type PriceParse = { ok: true; file: PriceFile } | { ok: false; error: string }
 
-/** 严格解析 `$calendar`：`YYYY` → 放假日区间数组。区间之间允许相邻或重叠
- *  （会被合并），手写时不必自己收拾边界。 */
 function parseCalendar(value: unknown): { ok: true; calendar: HolidayCalendar } | { ok: false; error: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: `${PRICING_CALENDAR_KEY} 必须是对象（年份 → 放假日区间数组）` }
@@ -462,7 +406,6 @@ function parseCalendar(value: unknown): { ok: true; calendar: HolidayCalendar } 
   return { ok: true, calendar }
 }
 
-/** `{}`（或省掉 `cnyPerUsd`）= 未设汇率，合法——「不用美元面」。0 与负数一律拒：换算会除零。 */
 function parseFx(value: unknown): { ok: true; fx?: FxSetting } | { ok: false; error: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: `${PRICING_FX_KEY} 必须是对象（{ cnyPerUsd: 1 美元等于多少元 }）` }
@@ -477,7 +420,6 @@ function parseFx(value: unknown): { ok: true; fx?: FxSetting } | { ok: false; er
   return { ok: true, fx: { cnyPerUsd: raw.cnyPerUsd } }
 }
 
-/** `USD` 必须有可用汇率，这件事由 {@link parsePriceInput} 在两侧都读完后再判（这里看不到 `$fx`）。 */
 function parseCurrency(value: unknown): { ok: true; currency: CurrencyMap } | { ok: false; error: string } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: `${PRICING_CURRENCY_KEY} 必须是对象（路由 → "CNY" | "USD"）` }
@@ -496,7 +438,6 @@ function parseCurrency(value: unknown): { ok: true; currency: CurrencyMap } | { 
   return { ok: true, currency }
 }
 
-/** 严格解析一次 PUT 的完整目标文件：任何偏差都以出错位置拒绝。 */
 export function parsePriceInput(value: unknown): PriceParse {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, error: '价格表必须是 JSON 对象（路由 → 模型串 → 价段数组）' }
@@ -561,7 +502,6 @@ export function parsePriceInput(value: unknown): PriceParse {
     }
     if (Object.keys(priced).length > 0) table[route] = priced
   }
-  // 美元报价必须有汇率，否则那些价算不成人民币、整条读作价格未知；client 按同一判据各挡一道。
   for (const route of Object.keys(currency)) {
     if (fx === undefined) {
       return {
@@ -587,8 +527,6 @@ function slotBody(slot: PriceSlot): Record<string, unknown> {
   }
 }
 
-/** 价文件的文件体。键序（保留键在前，route 与 model 排序，时段按开始小时升序）
- *  与 client 的 writer 是同一份约定。 */
 function priceFileBody(file: PriceFile): Record<string, unknown> {
   const body: Record<string, unknown> = {}
   const billingRoutes = Object.keys(file.billing).sort((left, right) => left.localeCompare(right))
@@ -633,8 +571,6 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
   return body
 }
 
-/** 原子落盘整个价文件（临时文件 + rename；rename 前把旧文件挪成 `.bak`——
- *  Windows 覆盖 rename 间歇失败，而缺失的 `pricing.json` 绝不能读作空表）。 */
 export async function writePriceFile(dir: string, file: PriceFile, logger: Logger = console): Promise<void> {
   const target = join(dir, PRICING_FILE)
   const tmp = join(dir, `${PRICING_FILE}.tmp`)
@@ -650,18 +586,13 @@ export async function writePriceFile(dir: string, file: PriceFile, logger: Logge
   }
 }
 
-/** (route, model) 的当前价；null = 价格未知（无人定价）。 */
 export function entryAt(table: PricingTable, route: string | undefined, model: string): PriceEntry | null {
   if (route === undefined || route === '') return null
   return table[route]?.[model] ?? null
 }
 
-/** 未提供年历时的读法：**空集** = 那一年未知，`workdays` 因此退化为「周一至周五」，
- *  只会把法定节假日多算成高峰，绝不会少算。 */
 const NO_HOLIDAYS: ReadonlySet<string> = new Set()
 
-/** 该价在 `timeMs` 生效的例外时段，或 null = 基准价。任一时刻至多一个时段：
- *  写路径拒绝重叠对，读路径丢弃较晚的那个。 */
 export function slotAt(
   entry: PriceEntry,
   timeMs: number,
@@ -678,7 +609,6 @@ function slotRefAt(entry: PriceEntry, timeMs: number, holidays: ReadonlySet<stri
   return slot === null ? null : { start: slot.start, days: slot.days }
 }
 
-/** 基准价叠上当时生效的例外时段；时段只重述真正变化的档，其余档沿用基准价。 */
 export function ratesOfEntry(
   entry: PriceEntry,
   timeMs: number,
@@ -688,7 +618,6 @@ export function ratesOfEntry(
   return slot === null ? entry.rates : { ...entry.rates, ...slot.rates }
 }
 
-/** (route, model) 在 `timeMs` 的价，null = 价格未知。 */
 export function ratesAt(
   table: PricingTable,
   route: string | undefined,
@@ -700,9 +629,6 @@ export function ratesAt(
   return entry === null ? null : ratesOfEntry(entry, timeMs, holidays)
 }
 
-/** (route, model) 在 `timeMs` 的 rate 身份——当时生效的例外时段，或
- *  {@link UNPRICED_KEY}。只存身份、不存数字，改价后下次读即重算历史
- *  （年历改了同理：时段身份不变，但重算会按新节假日取价）。 */
 export function rateKeyAt(
   table: PricingTable,
   route: string | undefined,
@@ -714,10 +640,6 @@ export function rateKeyAt(
   return entry === null ? UNPRICED_KEY : { slot: slotRefAt(entry, timeMs, holidays) }
 }
 
-/** 一个 rate 身份的价格：在当前表里回查它命名的例外时段（rate 行以时段为键，
- *  故重算历史无需每条记录的时间戳）。定价路径只在一种情况下回查落空：时段被
- *  移动或删掉且折叠还没作废（价文件任何改动都会让 `pricingRevision` 变化、整份折叠
- *  重建，见 docs/CONTRACTS.md §2），以及按美元报价却没设汇率的通道（换算表里整条被丢）。 */
 export function priceOfKey(
   table: PricingTable,
   route: string | undefined,
@@ -748,7 +670,6 @@ export function costOf(totals: UsageTotals, prices: ModelPricing): number {
     + totals.cacheWriteTokens * cacheWrite) / M
 }
 
-/** 四档价整体乘一个率；**缺席的档保持缺席**（省略 ≠ 0：缓存两档省略时回落输入价）。 */
 function scaledRates(rates: ModelPricing, rate: number): ModelPricing {
   return {
     inputPerMillion: rates.inputPerMillion * rate,
@@ -758,11 +679,6 @@ function scaledRates(rates: ModelPricing, rate: number): ModelPricing {
   }
 }
 
-/**
- * **计价用的表**：把按美元报价的通道按汇率折成人民币，其余原样。币种只活在这一个缝上，
- * 成本层与折叠都不认识币种；没有汇率时**丢掉那些通道的价**（读作价格未知），绝不把
- * 美元数当人民币数。时段身份不受换算影响。取舍见 `docs/CONTRACTS.md` §2。
- */
 export function cnyTable(table: PricingTable, currency: CurrencyMap, fx: FxSetting | undefined): PricingTable {
   const usdRoutes = Object.keys(currency).filter(route => currency[route] === 'USD')
   if (usdRoutes.length === 0) return table

@@ -1,17 +1,10 @@
-/**
- * 触发按钮与浮窗共享的 view store（经 `apply` 创建、`inject` 分发）。
- * 两个字段有超出代码的口径，见 `pricingDirty` / `quotaAlert` 各自注释。
- */
-
 import type { TokBookOverview } from '../types.ts'
 
 export interface TokBookViewSnapshot {
   readonly open: boolean
   readonly overview: TokBookOverview | null
   readonly error: string | null
-  /** 未保存的价表改动；跨 unmount 存活，驱动 tab 小圆点。 */
   readonly pricingDirty: boolean
-  /** 最近已知的额度告急（宿主持久化快照，无网络）。 */
   readonly quotaAlert: boolean
 }
 

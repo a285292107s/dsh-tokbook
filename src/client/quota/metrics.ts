@@ -1,34 +1,22 @@
-/**
- * 订阅额度卡的纯规则：头部环概括的是哪个预算、月度额度如何变成窗口形行、已用百分比映射到什么色调。
- *
- * 无 React、无 fetch——`QuotaPanel.tsx` 拥有数据，`QuotaCard.tsx` 拥有标记。
- */
-
 import type { QuotaCard, QuotaWindowView } from '../../types.ts'
 
-/** 窗口条 / 仪表可着的色调。 */
 export type QuotaTone = 'ok' | 'warn' | 'danger'
 
-/** 已用百分比到色调。 */
 export function toneOf(pct: number): QuotaTone {
   if (pct >= 85) return 'danger'
   if (pct >= 60) return 'warn'
   return 'ok'
 }
 
-/** provider 报告的三个额度来源之和，也是无生效订阅账户的全部约束。 */
 export function balanceUsd(credits: QuotaCard['credits']): number {
   if (credits === undefined) return 0
   return (credits.monthlyUsd ?? 0) + (credits.purchasedUsd ?? 0) + (credits.freeUsd ?? 0)
 }
 
-/** 充值 + 免费额度：计划过期后仍存活、且在滚动窗口触发时 provider **优先**扣除的那部分余额。 */
 export function extraCreditsUsd(credits: NonNullable<QuotaCard['credits']>): number {
   return (credits.purchasedUsd ?? 0) + (credits.freeUsd ?? 0)
 }
 
-/** Command Code 月度额度的共享算术：剩余池（provider 报告的月度额度）、
- * 本周期已花、以及隐含总量（剩余 + 已花）。卡未报额度池时为 null。 */
 function allowanceState(card: QuotaCard): {
   remaining: number
   spent?: number
@@ -53,7 +41,6 @@ function allowanceState(card: QuotaCard): {
   }
 }
 
-/** Command Code 的月度额度池，以**窗口形**的 meter 行呈现（id `monthlyAllowance`）。需要真实的周期已花才能构成总量/百分比——只报了剩余池时无东西可画，故省略该行。 */
 export function monthlyAllowanceWindow(card: QuotaCard): QuotaWindowView | null {
   const a = allowanceState(card)
   if (a === null || a.spent === undefined || a.total === undefined) return null
@@ -68,12 +55,6 @@ export function monthlyAllowanceWindow(card: QuotaCard): QuotaWindowView | null 
   }
 }
 
-/**
- * 头部环概括的内容。环回答**固定的**问题——账户用掉了本月预算的多少——而不是恰好最紧的
- * 滚动窗口（「最差窗口」标题会让指代模糊）。只有完全没有月度度量时环才回落到最紧的滚动窗口
- * ——且 `cap` 随之命名那个窗口。非订阅 gate 的卡不画环：正文没有对应的窗口行，环会去概括
- * 一个卡上不显示的数字；余额没有分母，以金额形式展示。
- */
 export function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; cap: string } | undefined {
   if (card.gate !== undefined && card.gate !== 'subscription') return undefined
   const monthly = card.windows.find((w) => w.id === 'monthly')
@@ -92,11 +73,6 @@ export function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; c
   return { pct: worst.usagePercent, tone: toneOf(worst.usagePercent), cap: worst.label }
 }
 
-/**
- * 环**没有读数**时写在环里的话（环照旧只画轨道）。判据是「有没有环」，不是 gate：
- * 有订阅但端点一个窗口都没报的卡绝不能错说成「无订阅」；「过期」也只在 provider 真的报了
- * 一个已经过去的周期终点时才用——端点没这么说时，不替它把话升级。
- */
 export function headStateWord(card: QuotaCard | null): { word: string; alert: boolean } {
   if (card === null) return { word: '—', alert: false }
   if (card.state === 'error') return { word: '失败', alert: true }
@@ -110,7 +86,6 @@ export function headStateWord(card: QuotaCard | null): { word: string; alert: bo
   return { word: '无读数', alert: false }
 }
 
-/** 一个窗口的「重置」倒计时文本。 */
 export function resetLabel(window: QuotaWindowView): string {
   if (window.resetAt === null) return '—'
   const ms = window.resetAt - Date.now()
@@ -124,7 +99,6 @@ export function resetLabel(window: QuotaWindowView): string {
   return hours > 0 ? `${days} 天 ${hours} 小时后重置` : `${days} 天后重置`
 }
 
-/** 卡副标题的账户/计划上下文。计费重置住在窗口行上，故副标题只放身份。 */
 export function planContext(card: QuotaCard): string {
   const bits: string[] = []
   const account = card.account?.name
@@ -145,12 +119,10 @@ export function planContext(card: QuotaCard): string {
   return bits.join(' · ')
 }
 
-/** USD 金额格式（wire 上的金额已是 USD）。 */
 export function money(value: number): string {
   return `$${value.toFixed(2)}`
 }
 
-/** 拉取时间戳的 HH:mm，显示在卡的刷新控件旁。 */
 export function formatClock(epochMs: number): string {
   return new Date(epochMs).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }

@@ -1,20 +1,11 @@
-/**
- * host→browser 数据路径：在 host webserver 上注册 exact HTTP route。
- *
- * 所有 handler 守 method + same-origin（浏览器带 `Sec-Fetch-Site`；无该 header
- * 的非浏览器客户端放行），内部错误以 500 JSON body 作答，而不是未处理 rejection。
- * exact route 按 pathname 匹配，query 在 handler 内读。
- */
-
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
-  QUERY_FORCE, QUERY_MODEL, QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH, QUERY_SESSION,
-  ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_PRICING_LOOKUP, ROUTE_PRICING_SYNC, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE,
+  QUERY_FORCE, QUERY_MODEL, QUERY_PROVIDER, QUERY_RANGE, QUERY_REFRESH, QUERY_SESSION, QUERY_YEAR,
+  ROUTE_HOLIDAY_SYNC, ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_PRICING_LOOKUP, ROUTE_PRICING_SYNC, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE,
 } from './route-paths.ts'
-import { PROVIDER_RANGES, type PriceVerdict, type PricingLookupResult, type PricingSyncResult, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SessionUsageView, type SyncStatusView, type TokBookOverview } from './types.ts'
+import { PROVIDER_RANGES, type HolidayRefreshResult, type PriceVerdict, type PricingLookupResult, type PricingSyncResult, type PricingView, type ProviderRange, type ProviderUsageView, type QuotaCard, type QuotaView, type SessionUsageView, type SyncStatusView, type TokBookOverview } from './types.ts'
 import type { PriceParse } from './pricing.ts'
 
-/** 本插件用到的 host webserver 子集。 */
 export interface WebServerLike {
   register(route: {
     kind: 'exact' | 'prefix'
@@ -39,8 +30,6 @@ function refuse(res: ServerResponse, status: number, message: string): void {
   res.end(message)
 }
 
-/** 把概览 route 绑到新鲜快照提供方、同步状态 route 绑到内存探针、扫描 route 绑到强制
- *  同步触发器。返回合并 disposer。 */
 export function registerTokBookRoutes(
   webServer: WebServerLike | undefined,
   overview: () => TokBookOverview | Promise<TokBookOverview>,
@@ -62,7 +51,6 @@ export function registerTokBookRoutes(
     }
   }
 
-  /** 提供方只读内存——它是「追 walk」的廉价观察点（对外语义见 `route-paths.ts`）。 */
   const handleSyncState = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (req.method !== 'GET') return refuse(res, 405, 'method not allowed')
     if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
@@ -151,9 +139,6 @@ export function registerTokBookUsageRoute(
   })
 }
 
-/** 把会话词元 route 绑到单会话账本视图提供方，返回 disposer；缺 / 空 `?session=`
- *  按 400 答（与 `ROUTE_USAGE` 对 `range` 的纪律一致），会话没有账本行则是 200 的
- *  空视图——「这个会话没有任何计费调用」与「请求不合法」不是一回事。 */
 export function registerTokBookSessionRoute(
   webServer: WebServerLike | undefined,
   sessionView: (sessionId: string) => SessionUsageView | Promise<SessionUsageView>,
@@ -186,8 +171,6 @@ export function registerTokBookSessionRoute(
   })
 }
 
-/** 把额度 route 绑到概览快照提供方与单卡拉取器，返回 disposer；query 键语义以
- *  `route-paths.ts` 为准。 */
 export function registerTokBookQuotaRoute(
   webServer: WebServerLike | undefined,
   quotaView: () => QuotaView | Promise<QuotaView>,
@@ -224,9 +207,6 @@ export function registerTokBookQuotaRoute(
   })
 }
 
-/** 把 models.dev 价同步 route 绑到同步路径，返回 disposer。POST 落一份判决，
- *  慢网 15s 超时内一直是这条在飞；同 path 的 GET 按 405 拒——状态（上次成功日
- *  与失败原因）不单独成路由，它由价表视图的 `sync` 字段一并端出。 */
 export function registerTokBookPricingSyncRoute(
   webServer: WebServerLike | undefined,
   syncPricing: (force: boolean) => Promise<PricingSyncResult>,
@@ -254,12 +234,35 @@ export function registerTokBookPricingSyncRoute(
   })
 }
 
-/**
- * 把「按关键词查 models.dev 原厂价」route 绑到查价提供方，返回 disposer。
- * GET 只读、不触碰价文件；网络失败以 500 JSON 答，面板据此报「搜索失败」。
- * 关键词缺失按 400 答（与 `ROUTE_USAGE` 对 `range`、`ROUTE_SESSION` 对 `session`
- * 的纪律一致）——「没填关键词」与「搜不到」不是一回事。
- */
+export function registerTokBookHolidaySyncRoute(
+  webServer: WebServerLike | undefined,
+  refreshHolidays: (options: { force?: boolean; extraYears?: readonly string[] }) => Promise<HolidayRefreshResult>,
+): () => void {
+  if (webServer === undefined) return () => {}
+
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (req.method !== 'POST') return refuse(res, 405, 'method not allowed')
+    if (!isSameOriginFetch(req)) return refuse(res, 403, 'forbidden')
+    const query = new URL(req.url ?? '/', 'http://tokbook.local').searchParams
+    const force = query.get(QUERY_FORCE) === '1'
+    const extraYears = query.getAll(QUERY_YEAR).filter(year => /^\d{4}$/u.test(year))
+    try {
+      const result = await refreshHolidays({ force, extraYears })
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(result))
+    } catch (error) {
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
+  return webServer.register({
+    kind: 'exact',
+    path: ROUTE_HOLIDAY_SYNC,
+    handler: handle,
+  })
+}
+
 export function registerTokBookPricingLookupRoute(
   webServer: WebServerLike | undefined,
   lookup: (keyword: string) => Promise<PricingLookupResult>,
@@ -292,8 +295,6 @@ export function registerTokBookPricingLookupRoute(
   })
 }
 
-/** 读一个小 JSON 请求体（价格写路径会发一个）。有界，使恶意或破损 client
- *  无法让 host 无界缓冲。 */
 function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown } | { ok: false; tooLarge: boolean }> {
   return new Promise((resolveBody) => {
     const chunks: Buffer[] = []
@@ -304,7 +305,6 @@ function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown }
       size += chunk.length
       if (size > 256 * 1024) {
         settled = true
-        // 排空剩余，handler 仍能写 413；destroy 会在响应落地前拆掉 socket。
         req.resume()
         resolveBody({ ok: false, tooLarge: true })
         return
@@ -329,9 +329,6 @@ function readJsonBody(req: IncomingMessage): Promise<{ ok: true; body: unknown }
   })
 }
 
-/** 把价格表 route 绑到视图提供方与保存路径，返回 disposer。GET/PUT 的对外语义以
- *  `route-paths.ts` 为准；同一 path 注册两次会撞，故只挂一条 exact route 按 method
- *  分发。PUT **不回视图**——client 只读判决，而自动保存是最热的写路径。 */
 export function registerTokBookPricingRoutes(
   webServer: WebServerLike | undefined,
   pricingView: () => PricingView | Promise<PricingView>,

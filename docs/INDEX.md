@@ -1,6 +1,6 @@
 # 文档索引 — dsh-tokbook
 
-> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-10-17 · supersedes: —
+> **Doc meta** · role: index · language: zh-CN · status: current · last-reviewed: 2026-10-18 · supersedes: —
 
 本仓库所有文档文件的地图。动手前先读你要触及领域的条目,然后**只读那一份**。本文件
 的存在是为了让 [`AGENTS.md`](../AGENTS.md) 与你的第一跳保持精简:根文件只放面包屑,
@@ -17,9 +17,8 @@
 | [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts(契约) | current | **改 host 行为前读这一份**:术语与口径、**让数字保持诚实的不变量**、单写者与数据目录、不显然的默认值——只写**代码里读不出来、违反后不会报错但会把钱算错**的规则。路由 / wire 形状 / 配置键 / 数据文件清单都是代码(见它的指针表);路由路径**不得**在这份文档里复述 |
 | [`docs/DESIGN.md`](DESIGN.md) | reason(推理 / 背景) | current | 改架构、价格/计价、额度或界面结构前先读这一份。**只留从代码推不出来的抽象**:DSH 插件机制与 `dsh web` 的组合方式、**外置包契约与坑**(CJS factory / 禁 `default` 导出 / external 基线)、插槽语义与社区两条路线、**为什么是这个形状**(逐请求行 / 派生折叠可丢 / 本地日历日 / 单写者 / 精确 Fetch 路由)与每条的代价、额度门的外部证据(§3.1)、参考坐标。逐文件、逐字段、路由路径、尺寸数字都不在这里。顶部「阅读指南」区分历史与现状——**§9 已删,§8 只剩指针** |
 | [`docs/HMR.md`](HMR.md) | lessons(教训)/ reference(参考) | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
-| [`docs/LESSONS.md`](LESSONS.md) | lessons(教训) | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录 |
-| [`docs/COMMENTS.md`](COMMENTS.md) | reference(参考,注释规范) | current | **写或改 `src/**` 的注释前读这一份**:一条尺子(代码里读不出来 + 改了必须同步改)、四不写(改动史 / 代码已说的 / 数值推导 / 规则的第二份副本)、形态(一句话优先、文件头只写前提、解释名字=改名信号)与落笔前三问。一次全库注释审核的产物 |
-| [`docs/CONTEXT.md`](CONTEXT.md) | reference(参考,词汇表) | current | 用到本插件的词汇、或要新增术语时。**只收新词**——既有词(通道 / 用量未知 / 价格未知 …)一律指向 CONTRACTS,不在这里重复 |
+| [`docs/LESSONS.md`](LESSONS.md) | lessons(教训) | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录;也收 ARIA、账本探针、预览台 fixture 契约这类「不报错只是悄悄错」的判断 |
+| [`docs/CONTEXT.md`](CONTEXT.md) | reference(参考,词汇表+呈现口径) | current | 用到本插件的词汇、或要新增术语/改界面取值时。**只收新词与呈现口径**——既有词(通道 / 用量未知 / 价格未知 …)一律指向 CONTRACTS,不在这里重复;tokens 分档、对比度达标线、构造尺明度与纹路、片段拼接顺序在它的「取值与样式口径」一节 |
 | [`docs/adr/`](adr/) | reason(推理,决策记录) | current | 改**难逆转**的决定前(读路径 / 数据归属 / 归属口径)。ADR 只收「难逆转 + 没有上下文会令人惊讶 + 真权衡」三项同时成立的决策,其余理由进 DESIGN.md。**逐份看 `status`**:`0002` 是 `draft`(已定案但代码里还没有),别把它读成现状 |
 
 ## Doc meta 约定

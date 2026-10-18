@@ -1,4 +1,4 @@
-export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias mask 色 + mask blur。 */
+export const CSS_OVERLAY = `
 [data-plugin="dsh-tokbook"].dtpl-overlay{
   position:fixed;inset:0;z-index:1000;
   display:flex;align-items:center;justify-content:center;
@@ -19,8 +19,6 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
     inset 0 0 0 1px var(--dtpl-border);
   overflow:hidden;
 }
-/* 四角括号只画左上与右下两端，其余两角留空；画在 ::before/::after 而不是用 clip-path 切角——
-   切角会连子元素的焦点环一起裁掉，而 L 形边框不影响控件与焦点环。 */
 [data-plugin="dsh-tokbook"] .dtpl-card::before,
 [data-plugin="dsh-tokbook"] .dtpl-card::after{
   content:"";position:absolute;width:16px;height:16px;pointer-events:none;z-index:2;
@@ -42,8 +40,6 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   display:flex;align-items:center;gap:10px;min-width:0;
   font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;letter-spacing:.02em;
 }
-/* 工业徽记：黄底 + 墨色图形。这是**抽象替身**，不是鹰角商标的复刻。
-   徽记压一个 1px 墨边——恒定黄在任何底上都没有边界，不压边就糊成一团。 */
 [data-plugin="dsh-tokbook"] .dtpl-title-ico-chip{
   display:inline-flex;align-items:center;justify-content:center;flex:none;
   width:22px;height:22px;
@@ -62,15 +58,12 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
 [data-plugin="dsh-tokbook"] .dtpl-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-close-ico{width:16px;height:16px;}
 
-/* 不做药丸轨道：选择器是一条横排、项与项之间用竖发丝线分隔，当前项由**底部一条实条**标出。 */
 [data-plugin="dsh-tokbook"] .dtpl-tabs{
   display:flex;gap:0;flex:none;
   margin:0;padding:0 20px;
   border-bottom:1px solid var(--dtpl-border);
   position:relative;
 }
-/* 未选中项走 fg-2 而不是 fg-3：它是**控件的文字**，不是装饰。「当前页」的区别由字重 600 +
-   6% 洗色 + 底部那条 5px 黄块三样一起给。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab{
   position:relative;appearance:none;flex:1;border:0;background:transparent;
   height:30px;padding:0 12px;
@@ -84,14 +77,11 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   color:var(--dtpl-fg);font-weight:600;
   background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
 }
-/* 当前页标记：一条 5px 的黄块压在 tab 行的下边界上，**四条边都带 1px 墨边**——恒定黄在白底上
-   几乎没有边界，靠墨边成立；两个主题共用一套形态。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab[aria-selected="true"]::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:5px;
   background:var(--dtpl-brand);
   box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
-/* 未保存的价格表编辑：草稿跨 tab 存活，所以 tab 上挂一个点，直到保存或丢弃。 */
 [data-plugin="dsh-tokbook"] .dtpl-tab-dot{
   display:inline-block;width:6px;height:6px;margin-left:5px;
   background:var(--dtpl-brand);
@@ -99,8 +89,6 @@ export const CSS_OVERLAY = `/* 与 DSH 原生 modal 遮罩同一配方：alias m
   vertical-align:middle;
 }
 
-/* scrollbar-gutter:stable 常驻滚动条槽：用量明细的窗口一换，行数就从个位数跳到上千，
-   不留槽的话整块正文会横向挪 8px——比滚动条本身显眼得多。 */
 [data-plugin="dsh-tokbook"] .dtpl-body{
   flex:1;min-height:0;
   padding:18px 20px 20px;overflow:auto;overscroll-behavior:contain;

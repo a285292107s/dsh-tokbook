@@ -1,18 +1,6 @@
-/**
- * dsh-tokbook 的额度计划域：订阅额度 tab 展示的**官方**账户用量。
- *
- * tab 从不从本地账本估算——订阅 key 在所有工具/设备间共享，本机账本无法知道
- * 真实账户花费。两个内置 provider 的官方端点暴露的内容不同：Command Code 报告
- * 真实美元金额；OpenCode Go 只报告百分比 + 重置。wire 类型让金额可选。
- */
-
 import type { QuotaCard, QuotaGate, QuotaPlanInfo, QuotaWindowView } from './types.ts'
 
 export type { QuotaCard, QuotaView, QuotaWindowView } from './types.ts'
-
-// ---------------------------------------------------------------------------
-// 内置计划（仅展示身份——无预算、无价格）
-// ---------------------------------------------------------------------------
 
 export const OPENCODE_GO_PROVIDER = 'opencode-go'
 
@@ -23,7 +11,6 @@ export const BUILTIN_PLAN_TITLES: Readonly<Record<string, string>> = {
   [COMMAND_CODE_PROVIDER]: 'Command Code',
 }
 
-/** 已知的 Command Code 订阅计划 id → 展示名。 */
 export const COMMAND_CODE_PLAN_NAMES: Readonly<Record<string, string>> = {
   'individual-go': 'Go',
   'individual-goat': 'GOAT',
@@ -35,45 +22,23 @@ export const COMMAND_CODE_PLAN_NAMES: Readonly<Record<string, string>> = {
   'teams-pro': 'Teams Pro',
 }
 
-/** 各 provider 读取 API key 的默认环境变量。 */
 export const BUILTIN_KEY_ENV: Readonly<Record<string, string>> = {
   [OPENCODE_GO_PROVIDER]: 'OPENCODE_GO_API_KEY',
   [COMMAND_CODE_PROVIDER]: 'COMMANDCODE_API_KEY',
 }
 
-/** 最近一次已知窗口点亮侧栏告急点的用量百分比。90 是「你很快会注意到」，
- *  不是「已经死透」——exceeded 是另一回事。 */
 export const QUOTA_ALERT_PERCENT = 90
 
-/**
- * 一张官方额度卡是否值得 footer 触发器上持久的告急指示。只计 'ok' 卡：
- * unconfigured/error 卡没有窗口事实，从拉取失败里编出告急会狼来了。
- *
- * 非 `subscription` 卡也永不告急：其窗口不限制账户当前承受的任何限额。
- */
 export function isQuotaAlert(card: QuotaCard | null | undefined): boolean {
   if (card === null || card === undefined || card.state !== 'ok') return false
   if (card.gate !== undefined && card.gate !== 'subscription') return false
   return card.windows.some((window) => window.exceeded || window.usagePercent >= QUOTA_ALERT_PERCENT)
 }
 
-/**
- * 该 provider route 是否携带官方额度拉取。key 是否存在在拉取时检查；开关与
- * 无 key 的 `unconfigured` 语义见 docs/CONTRACTS.md §4。
- */
 export function isBuiltinQuotaPlan(provider: string): boolean {
   return provider === OPENCODE_GO_PROVIDER || provider === COMMAND_CODE_PROVIDER
 }
 
-/**
- * 订阅额度 tab 的卡片顺序：账户无生效订阅的卡沉到有生效订阅的之下，使 tab
- * 打开在真正还能花的计划上，而不是已退役的那个。
- *
- * 稳定切分，不是排序：`providers` 是宿主的展示顺序（见 `QuotaView.providers`），
- * 组内次序保持。还没有已知 gate 的 provider——仍在加载，或最近一次拉取失败——
- * 算作 active，与卡渲染的读法一致（缺席的 gate 意味着 `subscription`）；从缺失
- * 数据里猜「已退役」正是 gate 要防止的错误。
- */
 export function orderQuotaProviders(
   providers: readonly string[],
   gateOf: (provider: string) => QuotaGate | undefined,
@@ -88,25 +53,8 @@ export function orderQuotaProviders(
   return [...active, ...retired]
 }
 
-// ---------------------------------------------------------------------------
-// 用量 gate：此刻约束账户的是什么
-// ---------------------------------------------------------------------------
-
-/**
- * 无歧义地表示生效中计划的订阅状态。其他一切按计费周期而非按名字判定：provider
- * 自己文档化的取消流程在周期结束前保留访问权（「保持 active 直到当前计费周期
- * 结束」），因此像 `canceled` 这样的状态词仍可能意味着「生效至 `periodEnd`」。
- * 未知状态词按日期而非硬编码词表判定，也意味着 provider 的新词会降级到日期
- * 规则，而不是错误的卡。
- */
 export const QUOTA_IN_FORCE_STATUSES: readonly string[] = ['active', 'trialing']
 
-/**
- * 一个账户的用量被什么约束，由 provider 报告的计划身份
- * （`billing/subscriptions`）推出。完全没有计划身份 = 没有生效订阅的证据——
- * balance 门，这也是按量付费账户的诚实读法（正常、非错误状态：provider 卖
- * 这种）。
- */
 export function quotaGate(planInfo: QuotaPlanInfo | undefined, now: number = Date.now()): QuotaGate {
   if (planInfo === undefined) return 'balance'
   const status = planInfo.status?.trim().toLowerCase() ?? ''
@@ -116,8 +64,6 @@ export function quotaGate(planInfo: QuotaPlanInfo | undefined, now: number = Dat
   return 'balance'
 }
 
-/** epoch-ms 时刻的本地 `YYYY-MM-DD`。手写格式（不用 `toLocaleDateString`），
- *  使宿主拼好的句子不受宿主进程 locale 影响。 */
 export function dayText(epochMs: number): string {
   const date = new Date(epochMs)
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -125,11 +71,6 @@ export function dayText(epochMs: number): string {
   return `${String(date.getFullYear())}-${month}-${day}`
 }
 
-/**
- * `balance` 门卡上展示的一句话：滚动窗口为何不再描述任何东西，以及现在由什么
- * 约束。说出它所依据的证据——周期结束，或 provider 发来的原始状态词——使卡
- * 从不在空口上断言「已过期」（按量付费账户两者都不报，也不是过期）。
- */
 export function balanceGateNote(planInfo: QuotaPlanInfo | undefined, now: number = Date.now()): string {
   const periodEnd = planInfo?.periodEnd
   if (periodEnd !== undefined && periodEnd !== null && periodEnd > 0 && periodEnd <= now) {
@@ -142,41 +83,25 @@ export function balanceGateNote(planInfo: QuotaPlanInfo | undefined, now: number
   return '未检测到生效中的订阅——该账户由余额决定可用量（5 小时 / 本周窗口仅约束订阅内的月度额度）。'
 }
 
-// ---------------------------------------------------------------------------
-// 归一化助手（原始官方载荷 → wire 形状）
-// ---------------------------------------------------------------------------
-
-/** 把服务端百分比夹到 0–100；缺失/非法 → 0。 */
 export function clampPercent(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0
   return Math.max(0, Math.min(100, value))
 }
 
-/** 「小数字是倒计时秒数」这条既有口径的上限：一年（秒）。更大的数字一律按
- *  epoch ms 原样读。不设上限时，`1760000000`（2025 年的秒级 epoch）会被当成
- *  「距重置 1.76e9 秒」外推到 2081 年，`planInfoFromSubscriptions` →
- *  `quotaGate` 于是把**已经过期**的订阅报成生效中。 */
 const RESET_COUNTDOWN_MAX_SEC = 31_536_000
 
-/** 从原始 reset 值得到 epoch ms：*距重置的秒数*、毫秒数，或 ISO 日期。
- *  缺席/非法时为 null。 */
 export function resetEpoch(value: unknown, now: number = Date.now()): number | null {
   if (typeof value === 'string') {
     const parsed = Date.parse(value)
     return Number.isNaN(parsed) ? null : parsed
   }
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  // 启发式：只有落在真正的*秒级倒计时*量级内（不超过
-  // {@link RESET_COUNTDOWN_MAX_SEC}）且远小于以 ms 表示的 now 的值才当倒计时；
-  // 其余数字原样当 epoch ms——远端 API 也可能直接给 ms。
   if (value > 0 && value <= RESET_COUNTDOWN_MAX_SEC && Math.abs(value - now) > 4_294_967_296) {
     return now + value * 1000
   }
   return value
 }
 
-/** 从原始 `{used, cap, exceeded, resetAt}` 块（Command Code 形状）构建一行窗口。
- *  金额是真实美元。 */
 export function windowFromCreditsBlock(
   id: string,
   label: string,
@@ -200,10 +125,6 @@ export function windowFromCreditsBlock(
   }
 }
 
-/** 从 OpenCode Go 形状构建一行窗口——真实端点
- *  `{status, percent, resetsAt}`（百分比 + ISO 重置串；无金额）。兼容旧的内部
- *  写法 `{status, usagePercent, resetInSec}`，形状变更不会清空卡片。`ok` 以外
- *  的 status 意味着窗口已限流/耗尽。 */
 export function windowFromUsagePercent(
   id: string,
   label: string,
@@ -222,7 +143,6 @@ export function windowFromUsagePercent(
   }
 }
 
-/** 归一 Command Code `billing/subscriptions` 计划节点。 */
 export function planInfoFromSubscriptions(raw: { planId?: unknown; status?: unknown; currentPeriodEnd?: unknown } | undefined): QuotaPlanInfo | undefined {
   if (raw === undefined) return undefined
   const planId = typeof raw.planId === 'string' && raw.planId !== '' ? raw.planId : undefined
@@ -236,12 +156,6 @@ export function planInfoFromSubscriptions(raw: { planId?: unknown; status?: unkn
   return info
 }
 
-/** 原始额度卡可用（有窗口/数据）当且仅当官方拉取返回了值得展示的东西。
- *
- *  `account` **不算**内容：它只是 `/alpha/whoami` 成功的产物，是标题性信息而不是
- *  额度事实。把它算进去，whoami 200 而其余端点全失败时会得到一张既没有窗口也没有
- *  余额的 `ok` 空卡，还会按「最近已知」落盘（`fetchCommandCodeQuota` 的收尾只有
- *  这条判据；`noSubscriptionCard` 是答复出来的事实，不受影响）。 */
 export function hasQuotaContent(card: QuotaCard): boolean {
   return card.windows.length > 0
     || card.planInfo !== undefined
@@ -269,15 +183,6 @@ export function errorCard(provider: string, reason: string): QuotaCard {
   }
 }
 
-/**
- * 为 provider **已回答**、但答案是「没有生效订阅，且此端点也无可报告余额」的
- * 账户构建 `ok` 卡（OpenCode Go 403 的端点语义见 quota-official.ts 文件头）。
- *
- * 刻意 `state: 'ok'`：什么都没失败，标成「查询失败」会教用户调试错方向。缺陷
- * 移到 `gate: 'none'`——正是它阻止渲染方展示仪表，并把卡挡在自动刷新循环与
- * 告急点之外。卡完全不带窗口——这里没有可画的约束，编一个 0% 会读作「还剩
- * 很多」。
- */
 export function noSubscriptionCard(provider: string, note: string, now: number = Date.now()): QuotaCard {
   return {
     plan: provider,

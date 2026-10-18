@@ -1,21 +1,10 @@
-/**
- * 价格表 tab 的 route catalog：哪些 provider route 存在，各自当前可对哪些
- * model 计费。
- *
- * 真源是 profile 里声明的配置（`ctx.settings.describe()` 给出的活动值）与活的
- * 适配器 registry 联合；两个源都不知道的（账本计过费的 route、只带手写价格的
- * 串）由 `readPricingView` 补入。
- */
-
 import type { ModelEntry, RouteCatalogEntry } from './types.ts'
 
-/** 直连 DeepSeek 适配器（`dsh-llm-deepseek`）拥有的唯一 route。 */
 export const DEEPSEEK_ROUTE = 'deepseek-official'
 
 const PI_AI_NS = 'llm-pi-ai'
 const DEEPSEEK_NS = 'llm-deepseek'
 
-/** 按命名空间取活动配置值；由 host 的 `settings.describe()` 装配（见 index）。 */
 export interface SettingsLike {
   get(ns: string): unknown
 }
@@ -36,8 +25,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-/** settings 文档中的条目是 `{ id, name? }` 对象，裸字符串也算（手工精简过的
- *  节）。保留 name：模型选择器用它标行，价格表同样展示。 */
 function modelEntries(value: unknown): ModelEntry[] {
   if (!Array.isArray(value)) return []
   const out: ModelEntry[] = []
@@ -55,7 +42,6 @@ function modelEntries(value: unknown): ModelEntry[] {
   return out
 }
 
-/** 仅 settings 文档声明的 route 与 model。 */
 export function routesFromSettings(settings: SettingsLike | undefined): RouteCatalogEntry[] {
   if (settings === undefined) return []
   const entries: RouteCatalogEntry[] = []
@@ -69,8 +55,6 @@ export function routesFromSettings(settings: SettingsLike | undefined): RouteCat
       entries.push({ route, label: displayName !== '' ? displayName : '', models: modelEntries(raw?.models) })
     }
   }
-  // 直连适配器恰好拥有**一个** route，且不在文档里写 route key：命名空间的
-  // 存在本身即表示它已挂载。
   const deepseek = asRecord(settings.get(DEEPSEEK_NS))
   if (deepseek !== null) {
     entries.push({ route: DEEPSEEK_ROUTE, label: '', models: modelEntries(deepseek.models) })
@@ -78,9 +62,6 @@ export function routesFromSettings(settings: SettingsLike | undefined): RouteCat
   return entries
 }
 
-/** route → 展示名，不向任何适配器要模型列表：settings profile 的
- *  `displayName` 优先，其次已注册适配器的 provider 名。通道用量卡以此为题；
- *  两个源都不命名的 route 直接缺席，卡回落到 route key。 */
 export function routeLabels(
   settings: SettingsLike | undefined,
   llm: LlmLike | undefined,
@@ -102,8 +83,6 @@ export function routeLabels(
   return labels
 }
 
-/** 合并 settings route 与活的适配器 registry。文档未携带的 registry route 成为
- *  自己的一张卡。 */
 export async function collectRoutes(
   settings: SettingsLike | undefined,
   llm: LlmLike | undefined,
@@ -120,8 +99,6 @@ export async function collectRoutes(
     }
     return entry
   }
-  /** 加一个模型，保留某个源给出的第一个名字（settings 文档的名字是用户自己的
-   *  措辞，优先于适配器的）。 */
   const add = (models: Map<string, ModelEntry>, model: ModelEntry): void => {
     const seen = models.get(model.id)
     if (seen === undefined) models.set(model.id, model)
@@ -142,8 +119,6 @@ export async function collectRoutes(
   }
   for (const provider of providers) {
     const acc = ensure(provider.id, provider.name)
-    // 配置列表是用户的声明，优先；只有未声明模型的 route 才询问适配器
-    // （后者从自身 registry 回答，从不联网）。
     if (acc.models.size > 0 || llm === undefined) continue
     try {
       for (const model of await llm.listModels(provider.id)) {

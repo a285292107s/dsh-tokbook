@@ -1,36 +1,15 @@
-/**
- * 会话事件里的**用时**：把一步的墙钟拆成模型与工具两段，再补上首 token 与生成时长。
- *
- * 读法照搬宿主 `dsh-session-stats` 的同名折叠（`llmMs` / `ttftMs` / `decodeMs` / `toolMs`），
- * 只有一处不同：宿主的 `toolMs` 把步内每次配对**逐个相加**，这里取它们的**并集**——一步里
- * 几个工具调用可以并行，相加会把同一段墙钟数两遍（本机实测某会话因此虚高 7.75 倍）。
- *
- * 每段的起止事件：
- * - 墙钟 `step/start` → `step/end`
- * - 模型 `step/start` → `assistant/message`
- * - 首 token `step/start` → 流里第一个 token（**跨过**步内重试，所以它是距步骤开始）
- * - 生成 首个 token → `assistant/message`
- * - 工具 `tool/call` → `tool/result`，按 `callId` 配对，取并集
- *
- * 量不出来的一律**缺席**，不是 0：取消的步骤没有产出，重试耗尽的步骤没有产出、但墙钟还在。
- */
-
 import type { StepTiming } from './types.ts'
 import { type SessionEventLike, recordFromCompaction } from './usage-record.ts'
 
-/** 整数载荷读法。事件的 `turn` / `step` 都是整数；不是整数（含 `null`）就是没给。 */
 export function countOf(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined
 }
 
-/** 一步的计时锚点，按 `${turn}:${step}` 归位。 */
 interface Anchors {
   start: number
   end?: number
   message?: number
-  /** 模型这一步报的 output tokens；生成时长只在它可信时计入（同宿主）。 */
   outputTokens?: number
-  /** 首个 token 的时刻。 */
   firstToken?: number
   spans: { start: number; end: number; name: string }[]
 }
@@ -42,8 +21,6 @@ function stepKeyOf(event: SessionEventLike): string | undefined {
   return `${String(turn)}:${String(step)}`
 }
 
-/** 一个流片段是不是模型产出的 token（宿主 `dsh-llm` 的 `isTokenDelta`）。块起止、usage、
- *  finish 都不是——把它们当首 token 会把延迟读成「块开始」，TTFT 系统性偏小。 */
 function isTokenDelta(chunk: unknown): boolean {
   if (typeof chunk !== 'object' || chunk === null) return false
   const value = chunk as { type?: unknown; text?: unknown; argumentsDelta?: unknown; name?: unknown }
@@ -55,10 +32,6 @@ function isTokenDelta(chunk: unknown): boolean {
   }
 }
 
-/**
- * 打包段里第 n 个片段的时刻：整段只有 `time0` 与相邻差值 `dt`，所以只能从头累加出来。
- * 名字自带的工具调用段整段起于 `time0`（宿主 `runFirstTokenTime`）。
- */
 function runFirstToken(run: { type?: unknown; time0?: unknown; dt?: unknown; texts?: unknown; args?: unknown; name?: unknown }): number | undefined {
   const time0 = countOf(run.time0)
   if (time0 === undefined) return undefined
@@ -78,7 +51,6 @@ function runFirstToken(run: { type?: unknown; time0?: unknown; dt?: unknown; tex
   return undefined
 }
 
-/** 一条压缩流里首个 token 的时刻（宿主 `assistantStreamFirstTokenTime`）：读完就停。 */
 function streamFirstToken(stream: unknown): number | undefined {
   if (!Array.isArray(stream)) return undefined
   for (const record of stream) {
@@ -92,7 +64,6 @@ function streamFirstToken(stream: unknown): number | undefined {
   return undefined
 }
 
-/** output tokens 只在可信时才让生成时长入账（同宿主 `usageOutputTokens`）。 */
 function outputTokensOf(usage: unknown): number | undefined {
   if (typeof usage !== 'object' || usage === null) return undefined
   const value = (usage as { outputTokens?: unknown }).outputTokens
@@ -109,8 +80,6 @@ function anchorsOf(event: SessionEventLike, into: Map<string, Anchors>): void {
       return
     }
     case 'step/end': {
-      // 收尾事件是墙钟的右端。它在 `finally` 里落，所以完成 / 失败 / 取消 / 触顶的步都有它；
-      // 没有它的步（进程被打断）量不出墙钟，那就是「未计时」。
       const anchors = into.get(key)
       if (anchors !== undefined && anchors.end === undefined) anchors.end = event.time
       return
@@ -133,17 +102,13 @@ function anchorsOf(event: SessionEventLike, into: Map<string, Anchors>): void {
   }
 }
 
-/** 记账本行要用的用时索引。 */
 export interface SessionTimingIndex {
-  /** `${turn}:${step}` → 这一步的用时；没量到任何一段的步不在表里。 */
   steps: ReadonlyMap<string, StepTiming>
-  /** 账本 requestId → 这次压缩 provider 调用的墙钟（`compaction/start` → `compaction/summary`）。 */
   compactions: ReadonlyMap<string, number>
 }
 
 const EMPTY_TIMING: SessionTimingIndex = { steps: new Map(), compactions: new Map() }
 
-/** 从该会话的日志里量出每一步的用时。事件里没有的锚点就是不量，绝不拿邻近的事件顶替。 */
 export function timingIndexOf(sessionId: string, events: readonly SessionEventLike[]): SessionTimingIndex {
   const anchors = new Map<string, Anchors>()
   const calls = new Map<string, { time: number; name: string; key: string | undefined }>()
@@ -176,7 +141,6 @@ export function timingIndexOf(sessionId: string, events: readonly SessionEventLi
       const id = event.data?.compactionId
       const start = typeof id === 'string' ? compStarted.get(id) : undefined
       if (start === undefined) continue
-      // 身份不在这里重推：复用写入侧的投影，两条规则分叉即错。
       compactions.set(recordFromCompaction(event, sessionId).requestId, Math.max(0, event.time - start))
       continue
     }
@@ -191,10 +155,8 @@ export function timingIndexOf(sessionId: string, events: readonly SessionEventLi
   return steps.size === 0 && compactions.size === 0 ? EMPTY_TIMING : { steps, compactions }
 }
 
-/** 锚点折成一步的用时。一段都量不出来时返回 undefined——那一步是「未计时」，不是 0。 */
 function finishStep(anchors: Anchors): StepTiming | undefined {
   const { start, end, message, firstToken } = anchors
-  // 配对的工具调用不得越过这一步的收尾：会话被挂起再续上时，结果可能几天后才落盘。
   const spans = end === undefined ? anchors.spans : anchors.spans.filter((span) => span.end <= end)
   const timing: StepTiming = {}
   if (end !== undefined) timing.wallMs = Math.max(0, end - start)
@@ -206,7 +168,6 @@ function finishStep(anchors: Anchors): StepTiming | undefined {
     }
   }
   if (spans.length > 0) {
-    // 并集：并行调用的重叠段只算一次（见文件头）。
     let low = spans[0]!.start
     let high = spans[0]!.end
     let slow = spans[0]!

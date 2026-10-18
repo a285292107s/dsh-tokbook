@@ -1,24 +1,16 @@
-/**
- * 价格表 tab 的行原语：一条 (通道, 模型) 的价编辑器与它的详情面。
- *
- * 改价一律走格里的输入框：每个 (通道, 模型) 只有一份**当前价**——四档基准价，加上
- * 叠在它上面的峰谷时段。四档全空 = 这条没有价，它的记录按 ¥0 计并列为价格未知。
- * 谁被选中由面板决定（两个下拉），所以本文件不持有选择状态——只通过小回调下发改动。
- */
-
 import { memo, useEffect, useState } from 'react'
 import { DAY_SET_HINTS, DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange } from '../../price-format.ts'
-import type { BillingNature, DaySet, PriceCurrency } from '../../types.ts'
+import type { BillingNature, DaySet, HolidaySyncView, PriceCurrency } from '../../types.ts'
 import { counterpartOf, unitOf, type MoneyView } from './currency.ts'
 import {
   calendarYearTally, defaultCalendarYear, duplicateSlot, effectiveSlots, fieldState,
-  inheritedCell, isBlankSlot, dayLabel, modelDirty, newHoliday, newSlot, priceIssue, ratesInForce,
+  inheritedCell, isBlankSlot, dayLabel, missingYearDrafts, modelDirty, newHoliday, newSlot,
+  priceIssue, ratesInForce,
   readHolidays, slotRange, withSlotEnd, withSlotStart,
   type CalendarDraft, type CalendarEntries, type CalendarHolidayDraft, type HolidayRead, type InForceRates, type ModelDraft,
   type RateField, type SlotDraft,
 } from './draft.ts'
 
-/** 行的四个价单元格。单位随通道报价币种——格子里的数就是文件里的数。 */
 const CELLS: ReadonlyArray<{ field: RateField; label: string }> = [
   { field: 'input', label: '输入' },
   { field: 'output', label: '输出' },
@@ -29,32 +21,20 @@ const CELLS: ReadonlyArray<{ field: RateField; label: string }> = [
 const START_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
 const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour + 1)
 
-/** 24 小时条的格子与刻度。刻度只标 0/6/12/18/24 五处——24 格各标一次在窄处必然互相压字，
- *  而那五处已经够读出「这一段落在一天里的哪儿」。 */
 const HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
 const HOUR_TICKS: readonly number[] = [0, 6, 12, 18, 24]
 
-/**
- * 法定节假日年历：价表里唯一**全局**的一份数据（不属于任何 route / model）。
- *
- * 它只服务一件事——把 `workdays` 时段里的法定节假日摘出去。国家每年底公布一次安排，
- * 所以这份数据按年收录；缺年告警会自己报出来并一步补上。放假日的**调休上班日**不必收录：
- * 调休只把周末变成上班，而周末无论上不上班都是闲时。
- *
- * 一年一组、**一段假期一行**，输入的形状照抄官方通知（「起 ~ 止 + 共 N 天」）——
- * 非法日期与跨年区间由控件挡住，抄错由每行后面的天数对着通知核。
- */
-export function CalendarEditor({ entries, missingYears, dirty, expanded, onExpandedChange, onChange }: {
+export function CalendarEditor({ entries, missingYears, autoYears, dirty, expanded, sync, onAutoRefresh, syncing, onExpandedChange, onChange }: {
   entries: CalendarEntries
-  /** 账本覆盖到、而这里没有的年份（host 算好的）。 */
   missingYears: readonly string[]
-  /** 年历是否还没落盘。 */
+  autoYears?: readonly string[]
   dirty: boolean
-  /** 展开与否由调用处持有：这一屏顶部的缺年告警要能把年历打开（它说的就是这里的事）。 */
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
-  /** 改一年；`null` = 删掉那一年。 */
   onChange: (year: string, next: CalendarDraft | null) => void
+  sync?: HolidaySyncView
+  onAutoRefresh?: () => void
+  syncing?: boolean
 }) {
   const [addingTouched, setAddingTouched] = useState(false)
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -65,7 +45,6 @@ export function CalendarEditor({ entries, missingYears, dirty, expanded, onExpan
   const yearText = typed ?? defaultYear
   const kept = years.filter(year => reads.get(year)!.some(read => read.kind === 'ok'))
   const broken = years.filter(year => reads.get(year)!.some(read => read.kind === 'bad'))
-  /** 缺的年份里草稿也还没有的那些：「补上」只补这一组（已经建成组的不必再来一遍）。 */
   const gaps = missingYears.filter(year => !entries.has(year))
 
   useEffect(() => {
@@ -74,7 +53,6 @@ export function CalendarEditor({ entries, missingYears, dirty, expanded, onExpan
     setFocusId(null)
   }, [focusId])
 
-  /** 年份格里的问题，或 null。清空不是问题——那一刻的读数是默认年。 */
   const addingProblem = ((): string | null => {
     const year = yearText.trim()
     if (year === '') return null
@@ -83,13 +61,11 @@ export function CalendarEditor({ entries, missingYears, dirty, expanded, onExpan
     return null
   })()
 
-  /** 离开年份格：把清空掉的格子填回默认年——屏幕上任何时候都看得见将加的是哪一年。 */
   const leaveYear = (): void => {
     setAddingTouched(true)
     setTyped(current => (current !== null && current.trim() === '' ? null : current))
   }
 
-  /** 加一年 = 建一组，并先给一段空假期，好让人直接开始填日期。清空 = 用默认年。 */
   const submitAdding = (): void => {
     setAddingTouched(true)
     if (addingProblem !== null) return
@@ -101,23 +77,19 @@ export function CalendarEditor({ entries, missingYears, dirty, expanded, onExpan
     setAddingTouched(false)
   }
 
-  /** 缺的年份一次补齐并展开：告警喊的那件事，本来就是这个动作。 */
   const fillGaps = (): void => {
-    const first = gaps.length > 0 ? newHoliday() : null
-    for (const year of gaps) {
-      const holiday = year === gaps[0] && first !== null ? first : newHoliday()
-      onChange(year, { year, holidays: [holiday] })
-    }
+    const drafts = missingYearDrafts(entries, gaps)
+    for (const draft of drafts) onChange(draft.year, draft)
     onExpandedChange(true)
-    setFocusId(first === null ? null : dateFieldId(first, 'start'))
+    const first = drafts[0]?.holidays[0]
+    setFocusId(first === undefined ? null : dateFieldId(first, 'start'))
   }
+
+  const autoLine = describeAutoSync(sync, syncing === true)
+  const needsManual = sync !== undefined && (sync.state === 'failed' || sync.state === 'missing')
 
   return (
     <section className="dtpl-price-cal" id="price-calendar" data-dirty={dirty} data-open={expanded} aria-label="法定节假日年历">
-      {/* 头 = 一整条按钮：它既是这一节的名字，也是它的开关。所以给它按钮该有的样子——
-          闭合的边、悬停洗色、右端那枚朝向随开合翻转的三角，以及一句「展开 / 收起」。
-          这一屏其余的行都是「被读的内容」，只有这一条是「能按的东西」。
-          缺年的「补上」是这条带子上的**次要动作**，与开关同高并排，不另起一行。 */}
       <div className="dtpl-price-cal-head">
         <button
           type="button"
@@ -128,26 +100,59 @@ export function CalendarEditor({ entries, missingYears, dirty, expanded, onExpan
           <span className="dtpl-price-cal-caret" aria-hidden="true" />
           <span className="dtpl-price-cal-title">法定节假日年历</span>
           <span className="dtpl-price-cal-sum">{summarizeCalendar(kept)}</span>
+          {autoYears !== undefined && autoYears.length > 0 && (
+            <span
+              className="dtpl-price-cal-auto"
+              title="这些年份没写在 pricing.json 里，是从 holiday-cn 自动拉来并缓存到本机的；手写有那一年时以手写的为准。"
+            >
+              {autoYears.join('、')} 自动
+            </span>
+          )}
           {broken.length > 0 && (
             <span className="dtpl-price-cal-warn">{broken.join('、')} 年写不出来</span>
           )}
           <span className="dtpl-price-cal-hint" aria-hidden="true">{expanded ? '收起' : '展开'}</span>
         </button>
-        {/* 缺年这件事由这一屏顶部的告警**说一遍**（那里离眼睛更近），这里只留动作：
-            说两遍同一句话会把一个提醒读成一串噪音。 */}
         {missingYears.length > 0 && gaps.length > 0 && (
-          <button type="button" className="dtpl-price-cal-fix" onClick={fillGaps}
-            title={`这些年的「法定工作日」时段会按周一至周五全额计，落在法定节假日的工作日被多算高峰价。补上那一年，或展开年历手动加一年。`}>
-            <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>
-            {gaps.length > 2 ? `补上缺的 ${String(gaps.length)} 年` : `补上 ${gaps.join('、')} 年`}
-          </button>
+          onAutoRefresh === undefined
+            ? (
+              <button type="button" className="dtpl-price-cal-fix" onClick={fillGaps}
+                title="这些年的「法定工作日」时段会按周一至周五全额计，落在法定节假日的工作日被多算高峰价。补上那一年，或展开年历手动加一年。">
+                <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>
+                {gaps.length > 2 ? `补上缺的 ${String(gaps.length)} 年` : `补上 ${gaps.join('、')} 年`}
+              </button>
+            )
+            : (
+              <button
+                type="button"
+                className="dtpl-price-cal-fix"
+                disabled={syncing === true}
+                onClick={onAutoRefresh}
+                title="从 holiday-cn 拉这几年的法定节假日安排（它每日抓国务院公告）。手写过的年份不受影响。"
+              >
+                <span className="dtpl-price-add-plus" aria-hidden="true">↻</span>
+                {syncing === true ? '拉取中…' : `自动拉取 ${gaps.join('、')} 年`}
+              </button>
+            )
         )}
       </div>
+      {autoLine !== null && (
+        <p className="dtpl-price-cal-auto-line" data-tone={autoLine.tone}>
+          {autoLine.text}
+          {needsManual && onAutoRefresh !== undefined && (
+            <button type="button" className="dtpl-price-ghost" onClick={onAutoRefresh} disabled={syncing === true}>
+              {syncing === true ? '重试中…' : '重试'}
+            </button>
+          )}
+        </p>
+      )}
       {expanded && (
         <div className="dtpl-price-cal-body">
           <p className="dtpl-price-cal-note">
             一年一组，一段假期一行：填开始与结束日期，含两端。只收录放假日——调休上班日落在周末，
             而周末本来就是闲时。每行后面的天数是拿来对通知里「共 N 天」的：对不上就是抄错了。
+            标着<b>「自动」</b>的年份没写在这里，是启动时从 holiday-cn 拉来并缓存的；你手写过哪一年，
+            哪一年就以你的为准。
           </p>
           {years.map(year => (
             <CalendarYearGroup
@@ -204,7 +209,6 @@ function dateFieldId(holiday: CalendarHolidayDraft, side: 'start' | 'end'): stri
 
 function CalendarYearGroup({ entry, reads, onChange, onRemove }: {
   entry: CalendarDraft
-  /** 与 `entry.holidays` 一一对应的读数（重叠这类要整组才算得出的问题在里面）。 */
   reads: readonly HolidayRead[]
   onChange: (next: CalendarDraft) => void
   onRemove: () => void
@@ -343,28 +347,47 @@ function summarizeCalendar(years: readonly string[]): string {
   return `${years.join('、')} 已收录`
 }
 
-/** 一格价。桌面上的格名由 `.dtpl-price-cols` 那行**共用的**列头给（四档重复三遍只会让
- *  这份表读起来像三个表单），所以格名本身只在窄屏出现——那里 2×2 折行，列头不再指向任何一列。 */
+function describeAutoSync(
+  sync: HolidaySyncView | undefined,
+  running: boolean,
+): { text: string; tone: 'ok' | 'warn' | 'err' } | null {
+  if (sync === undefined) return null
+  if (running) return { text: '正在拉取节假日安排…', tone: 'ok' }
+  if (sync.state === 'failed') {
+    return {
+      text: `上次没拉到${sync.lastError === null ? '' : `（${sync.lastError}）`}，现在用的还是上次的数据；展开年历可以自己填，手写的永远优先。`,
+      tone: 'err',
+    }
+  }
+  if (sync.state === 'missing') {
+    return {
+      text: sync.uncovered.length > 0
+        ? `${sync.uncovered.join('、')} 年还没有节假日数据（上游可能还没公布）。展开可以手动填。`
+        : '还没有节假日数据。展开可以手动填。',
+      tone: 'err',
+    }
+  }
+  return null
+}
+
 function RateCell({ id, label, value, state, context, placeholder, note, onEdit, view }: {
   id: string
   label: string
   value: string
   state: 'ok' | 'empty' | 'bad'
   context: string
-  /** 为空时显示的沿用鬼影（同一种货币）；缺省 = `—`（还没填）。 */
   placeholder?: string
   note?: string
   onEdit?: (next: string) => void
-  /** 只用来在提示里报另一种货币的读数。 */
   view: MoneyView
 }) {
   const errorId = `${id}-err`
   const message = state === 'bad' ? '须为非负数字' : undefined
-  // 美元通道附上人民币读数（那是计入金额的数），人民币通道附上美元读数（只是给你看）。
   const counterpart = counterpartOf(view, value)
   const tip = state === 'bad'
     ? `${label}必须是非负数字（${unitOf(view)}）`
-    : [note, counterpart].filter((text): text is string => text !== undefined && text !== null).join(' · ') || undefined
+    : [value.trim() !== '' ? `${label}：${value}` : undefined, note, counterpart]
+      .filter((text): text is string => text !== undefined && text !== null).join(' · ') || undefined
   return (
     <div className="dtpl-price-cell" data-state={state}>
       <label className="dtpl-price-cell-k" htmlFor={id}>{label}</label>
@@ -383,7 +406,6 @@ function RateCell({ id, label, value, state, context, placeholder, note, onEdit,
         aria-describedby={message !== undefined ? errorId : undefined}
         onChange={(event) => onEdit?.(event.target.value)}
         onKeyDown={(event) => {
-          // Enter 离开单元格（值已暂存）。
           if (event.key === 'Enter') event.currentTarget.blur()
         }}
       />
@@ -392,16 +414,7 @@ function RateCell({ id, label, value, state, context, placeholder, note, onEdit,
   )
 }
 
-/** 这一屏的**主读数**：此刻正在计费的价。读者打开这一屏要知道的是「我现在按多少钱在花」，
- *  而不是「有哪些格子可以填」——所以它在价之上，四档并排、走 24px。
- *
- *  它报的常常与下面第一行一样（没有时段在生效时就是基准价），那**不是**冗余：这两行说的
- *  是两件事——这一行说「此刻计费的是谁」，那一行说「你写进文件的是什么」。有峰谷时段生效
- *  时两者不同，这个读数就是唯一说得出差别的地方，所以它必须在场、而不是被折叠掉。
- *  数值与格子同源（`ratesInForce` 的折叠结果），缓存两档没单独定价时按生效的输入价计
- *  （`inheritedCell` 与宿主 `costOf` 的同一条规则）。它是纯展示：改价仍然只在下面的表里。 */
 function LiveRates({ live, records, view }: { live: InForceRates | null; records: number; view: MoneyView }) {
-  // 留空的档落到别处取值这件事，只有在这个读数里说得清：它报的是**正在计费**的数。
   const shown = (field: RateField): string => {
     if (live === null) return ''
     const own = live.values[field].trim()
@@ -416,7 +429,6 @@ function LiveRates({ live, records, view }: { live: InForceRates | null; records
         <span className="dtpl-price-live-unit">{unitOf(view)}</span>
       </div>
       {live === null ? (
-        // 「按 ¥0 计」是对**已有记录**说的；一条从没被调用过的模型说这句话是假的。
         <p className="dtpl-price-live-none">
           {records > 0 ? '还没有价：这些记录按 ¥0 计（价格未知）' : '还没有价：它还没有被调用过'}
         </p>
@@ -434,28 +446,21 @@ function LiveRates({ live, records, view }: { live: InForceRates | null; records
               )
             })}
           </div>
-          <p className="dtpl-price-live-note">
-            {live.slot === null
-              ? '按基准价计：没有峰谷时段正在生效'
-              : `正在按峰谷时段「${dayLabel(live.slot)}」计`}
-          </p>
+          {live.slot !== null && (
+            <p className="dtpl-price-live-note">正在按峰谷时段「{dayLabel(live.slot)}」计</p>
+          )}
         </>
       )}
     </div>
   )
 }
 
-/** 24 小时上谁在生效：基准价一行铺满（它是**默认**，所以走淡轨），每个**带价的**峰谷时段
- *  各占一行、只把它覆盖的小时点成实心墨。
- *  文字标签说不出「这一天还剩哪几小时没被覆盖」——这条说得出来。
- *  零覆盖的时段不画（`effectiveSlots`）：它们不改写任何档，画出来只会显得有洞。 */
 function DayBand({ price }: { price: ModelDraft }) {
   const slots = effectiveSlots(price).map(slot => {
     const { start, end } = slotRange(slot)
     const ok = isHourRange({ start, end })
     return { id: slot.id, label: dayLabel(slot), start: ok ? start : 0, end: ok ? end : 0 }
   })
-  // 没成段的时段在表里已经红着报错，这里不画灯。
   const drawn = slots.filter(row => row.end > row.start)
   return (
     <div
@@ -489,31 +494,23 @@ function DayBand({ price }: { price: ModelDraft }) {
   )
 }
 
-/** 一行读数（基准价或一个峰谷时段）：左边的生效范围，右边四档价。
- *  零覆盖的时段与计价无关（`isBlankSlot`），整行降级并直说这一点——空着不写文件是设计，不是待办。 */
 function PriceRow({ slot, index, price, view, onChange, onRemove, onDuplicate }: {
-  /** `null` = 基准价那一行（它没有峰谷时段的那些控件）。 */
   slot: SlotDraft | null
   index: number
-  /** 这一行自己的基准价：留空的档从它（缓存两档再往下落到它的输入价）沿用。 */
   price: ModelDraft
   view: MoneyView
-  /** 整份价的新值：这一行只改自己那一段，替换由它交给调用处（基准价行改的是顶层四档）。 */
   onChange: (next: ModelDraft) => void
   onRemove: () => void
   onDuplicate: () => void
 }) {
   const context = slot === null ? '这条价的基准价' : `第 ${String(index + 1)} 个峰谷时段`
-  // 删除要两下：它改的是金额，账本没有撤销。聚焦离开即取消。
   const [confirming, setConfirming] = useState(false)
   const inert = slot !== null && isBlankSlot(slot)
   const hours = slot === null ? null : (() => {
     const range = slotRange(slot)
     return isHourRange(range) ? range.end - range.start : null
   })()
-  // 这一行唯一带价的时段：删掉它，这行就没有峰谷时段了，全部小时退回基准价。
   const lastPriced = slot !== null && !inert && effectiveSlots(price).length === 1
-  /** 改这一行的某个字段。基准价行改的是顶层四档，时段行只换回自己那一段。 */
   const edit = (field: RateField, text: string): void => {
     if (slot === null) {
       onChange({ ...price, [field]: text })
@@ -521,7 +518,6 @@ function PriceRow({ slot, index, price, view, onChange, onRemove, onDuplicate }:
     }
     replaceSlot({ ...slot, [field]: text })
   }
-  /** 换掉自己那一段（时段行的钟点、日档与四档都走这一条）。 */
   const replaceSlot = (next: SlotDraft): void => {
     onChange({ ...price, slots: price.slots.map(item => (item.id === next.id ? next : item)) })
   }
@@ -619,11 +615,8 @@ function PriceRow({ slot, index, price, view, onChange, onRemove, onDuplicate }:
   )
 }
 
-/** 四档价是一张**表**：列头只写一遍，基准价与每个峰谷时段各占一行。
- *  格名重复三遍会让三个生效范围读成三张互不相干的表单，而它们其实是同一个人的同一份价。 */
 function PriceTable({ price, view, onChange }: {
   price: ModelDraft
-  /** 这条通道的报价币种与汇率。 */
   view: MoneyView
   onChange: (next: ModelDraft) => void
 }) {
@@ -684,22 +677,13 @@ function PriceTable({ price, view, onChange }: {
   )
 }
 
-/** 选中模型的详情面：身份 | 报价币种 | 计费性质 | 此刻计费的价 | 这份价的表。
- *
- *  它是这一屏的**主体**（两个下拉在上面选谁），所以没有折叠：四档基准价、峰谷时段、
- *  加时段的按钮常驻。身份行是这一块唯一一行摘要——精确模型串（账本的计费键）与账本
- *  记录数都在这里。 */
 export const ModelDetail = memo(function ModelDetail({ route, row, billing, baseline, holidays, currency, rate, onCurrency, onRowChange, onBilling }: {
   route: string
   row: ModelDraft
   billing: BillingNature
-  /** 上次写入时的行签名：据此推导「还没落盘」（整块的左侧墨条）。 */
   baseline: ReadonlyMap<string, string>
-  /** 年历当前的放假日集合：`workdays` 时段在节假日那天不生效，行内「当前价」据此现算。 */
   holidays: ReadonlySet<string>
-  /** 这条通道的报价币种（`$currency`）：四档价格子里的数就是它。 */
   currency: PriceCurrency
-  /** 价文件的汇率；null = 未设，美元价换算不成人民币（因此也切不过去）。 */
   rate: number | null
   onCurrency: (currency: PriceCurrency) => void
   onRowChange: (route: string, model: string, next: ModelDraft) => void
@@ -709,9 +693,9 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
   const dirty = modelDirty(route, row, baseline)
   const issue = priceIssue(row)
   const live = ratesInForce(row, holidays)
-  // 这个判断必须落到 DOM（data-exact），不能让样式去猜（见 styles/pricing 的 [data-exact]）。
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
   const countText = row.records > 0 ? `${String(row.records)} 次请求` : '没记过'
+  const unpriced = row.unpriced !== undefined && row.unpriced > 0 && live !== null ? row.unpriced : 0
 
   return (
     <section className="dtpl-price-detail" data-dirty={dirty} aria-label={`${row.model} 的价格`}>
@@ -721,53 +705,67 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
           {named && <span className="dtpl-price-exact" title={row.model}>{row.model}</span>}
         </span>
         <span className="dtpl-price-reqs">{countText}</span>
-        <span className="dtpl-price-currency">
-          <span className="dtpl-price-currency-k">报价币种</span>
-          <span className="dtpl-price-switch" role="group" aria-label="报价币种">
-            <button
-              type="button"
-              aria-pressed={currency === 'CNY'}
-              title="这条通道的价按人民币记（¥/百万词元）。切过来会把现有价按汇率换算成人民币，金额不变"
-              onClick={() => onCurrency('CNY')}
+        {unpriced > 0 && (
+          <span
+            className="dtpl-price-unpriced"
+            title={`账本里有 ${String(unpriced)} 条记录按这份价折算不出金额（按美元报价却没设汇率，或那些记录落在没有价的档上）：它们按 ¥0 计入金额，所以金额偏低。`}
+          >
+            其中 {String(unpriced)} 条按 ¥0 计
+          </span>
+        )}
+        <span className="dtpl-price-route-facts">
+          <span className="dtpl-price-head-k">这条通道</span>
+          <span className="dtpl-price-currency">
+            <span className="dtpl-price-head-k">报价币种</span>
+            <span className="dtpl-price-switch" role="group" aria-label="报价币种">
+              <button
+                type="button"
+                aria-pressed={currency === 'CNY'}
+                title="这条通道的价按人民币记（¥/百万词元）。切过来会把现有价按汇率换算成人民币，金额不变"
+                onClick={() => onCurrency('CNY')}
+              >
+                ¥
+              </button>
+              <button
+                type="button"
+                aria-pressed={currency === 'USD'}
+                disabled={rate === null}
+                title={rate === null
+                  ? '先在上面那格填汇率（1 美元 = ? 元）：美元报价的价没有汇率就算不成人民币'
+                  : `按美元记这条通道的价（$/百万词元）：现有价按 1 美元 = ${String(rate)} 元换算成美元，人民币金额不变`}
+                onClick={() => onCurrency('USD')}
+              >
+                $
+              </button>
+            </span>
+          </span>
+          <span className="dtpl-price-currency">
+            <span className="dtpl-price-head-k">计费性质</span>
+            <span
+              className="dtpl-price-switch"
+              role="group"
+              aria-label={`${route} 的计费性质`}
+              title="按量 = 金额是实际支出；订阅 = 金额是按此处价格折算的订阅价值（非现金）"
             >
-              ¥
-            </button>
-            <button
-              type="button"
-              aria-pressed={currency === 'USD'}
-              disabled={rate === null}
-              title={rate === null
-                ? '先在上面那格填汇率（1 美元 = ? 元）：美元报价的价没有汇率就算不成人民币'
-                : `按美元记这条通道的价（$/百万词元）：现有价按 1 美元 = ${String(rate)} 元换算成美元，人民币金额不变`}
-              onClick={() => onCurrency('USD')}
-            >
-              $
-            </button>
+              <button type="button" aria-pressed={billing === 'metered'} onClick={() => onBilling(route, 'metered')}>
+                按量
+              </button>
+              <button type="button" aria-pressed={billing === 'subscription'} onClick={() => onBilling(route, 'subscription')}>
+                订阅
+              </button>
+            </span>
           </span>
         </span>
-        <div
-          className="dtpl-price-switch"
-          role="group"
-          aria-label={`${route} 的计费性质`}
-          title="按量 = 金额是实际支出；订阅 = 金额是按此处价格折算的订阅价值（非现金）"
-        >
-          <button type="button" aria-pressed={billing === 'metered'} onClick={() => onBilling(route, 'metered')}>
-            按量
-          </button>
-          <button type="button" aria-pressed={billing === 'subscription'} onClick={() => onBilling(route, 'subscription')}>
-            订阅
-          </button>
-        </div>
       </div>
       <LiveRates live={live} records={row.records} view={view} />
       <PriceTable price={row} view={view} onChange={(next) => onRowChange(route, row.model, next)} />
-      <p className="dtpl-price-note">
-        {live !== null
-          ? '留空 = 沿用基准价；没被峰谷时段覆盖的小时按基准价计。清空四档 = 删掉这条价。'
-          : row.records > 0
+      {live === null && (
+        <p className="dtpl-price-note">
+          {row.records > 0
             ? '四档价全空 = 这条没有价：它的记录按 ¥0 计，并列为价格未知。'
             : '四档价全空 = 这条没有价。它还没被调用过，所以没有金额受影响。'}
-      </p>
+        </p>
+      )}
       {issue !== null && (
         <p className="dtpl-price-issue" role="alert">{row.model}:{issue}</p>
       )}

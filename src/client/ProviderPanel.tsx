@@ -1,15 +1,3 @@
-/**
- * 用量明细：用量总览页往下滚的第二段——**选定窗口**内同一批用量的三种切法——按模型 / 按工作区 /
- * 按通道（三层信息形的分法见 provider 片段页头段）。
- *
- * 数据来自 `GET /tokbook/usage?range=…`（一次拉回三种切法 + 窗口合计）。刻意独立于总览
- * store——总览失败时这一段仍可用。
- *
- * **新鲜度**靠共享的账本时钟（`ledger-clock.ts`）：它每 3 s 探一次宿主的账本代数，只有
- * 这个数真的变了才重拉当前窗口。从前这一段只在首次挂载时读一次，会话还在跑时数字就一直
- * 冻在打开那一刻。
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type {
@@ -23,7 +11,6 @@ import { isNoPrice, ModelRows, WorkspaceRows } from './Breakdowns.tsx'
 import { ShareRing } from './ShareRing.tsx'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
 
-/** 窗口 id，按展示顺序。`all` = 全账本，不收窄下界。 */
 const RANGE_IDS: ReadonlyArray<ProviderRange> = ['today', 'yesterday', 'last7', 'last30', 'all']
 
 const RANGE_LABELS: Record<ProviderRange, string> = {
@@ -34,7 +21,6 @@ const RANGE_LABELS: Record<ProviderRange, string> = {
   all: '全部',
 }
 
-/** 窗口词 = 分区词的前半（命名规矩见 ledger 片段 .dtpl-bd-head 段）。 */
 const RANGE_WORDS: Record<ProviderRange, string> = {
   today: '今天',
   yesterday: '昨天',
@@ -43,17 +29,10 @@ const RANGE_WORDS: Record<ProviderRange, string> = {
   all: '全部账本',
 }
 
-/** 未选择过时的默认窗口。 */
 const DEFAULT_RANGE: ProviderRange = 'last7'
 
-/**
- * 时间跨度存放处。这是**视图偏好**（每台浏览器自己决定默认看哪个窗口），不是账本数据，
- * 所以进 localStorage 而不是宿主配置：无需契约、无需重启、不同浏览器可各选各的
- * （同一个理由见 `QuotaPanel` 的自动刷新间隔）。
- */
 const RANGE_KEY = 'dsh-tokbook.usage-range'
 
-/** 读回上次选的窗口。只认合法值——存储里的旧值或坏值一律回落到默认，不让它决定控件显示什么。 */
 function readRange(): ProviderRange {
   try {
     const saved = localStorage.getItem(RANGE_KEY)
@@ -61,12 +40,10 @@ function readRange(): ProviderRange {
       ? saved as ProviderRange
       : DEFAULT_RANGE
   } catch {
-    // 隐私模式等拿不到存储：回落到默认窗口。
     return DEFAULT_RANGE
   }
 }
 
-/** 切法，按展示顺序（也是子 tab 顺序）。 */
 type Slice = 'model' | 'workspace' | 'provider'
 
 const SLICE_IDS: ReadonlyArray<Slice> = ['model', 'workspace', 'provider']
@@ -77,9 +54,6 @@ const SLICE_LABELS: Record<Slice, string> = {
   provider: '按通道',
 }
 
-/**
- * 各切法的右端旁注：**排序口径 + 占比环的分母**。环心只写读数，「占谁的多少」必须写在旁边。
- */
 const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
   model: {
     text: '词元从多到少 · 环为占本窗口',
@@ -95,14 +69,11 @@ const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
   },
 }
 
-/** 列头一行式的写法（含「甲 · 乙」分隔的理由）见 ledger 片段 .dtpl-bd-cols 段。
- *  按通道那一面没有列头：卡头铭牌就是它的列头，再来一行会与卡头打架。 */
 const COLUMNS: Partial<Record<Slice, { id: string; nums: string }>> = {
   model: { id: '模型 · 通道', nums: '词元 · 金额' },
   workspace: { id: '工作区 · 目录', nums: '词元 · 金额' },
 }
 
-/** 一个载荷里有行的切法（无行的切法不贡献子 tab）。 */
 function cutsOf(view: ProviderUsageView): Slice[] {
   return SLICE_IDS.filter((id) =>
     id === 'model' ? view.byModel.length > 0
@@ -110,7 +81,6 @@ function cutsOf(view: ProviderUsageView): Slice[] {
         : view.providers.length > 0)
 }
 
-/** 价表无法计费的 (通道, 模型)：卡头的 unpricedModels 与按模型面的行在此对上键。 */
 function unpricedKeysOf(view: ProviderUsageView): ReadonlySet<string> {
   const keys = new Set<string>()
   for (const card of view.providers) {
@@ -119,7 +89,6 @@ function unpricedKeysOf(view: ProviderUsageView): ReadonlySet<string> {
   return keys
 }
 
-/** 四桶齐全的 totals——渲染对它做算术（`totalsTokens`，`src/types.ts`），所以四个桶必须在场且是数。 */
 function isBucketTotals(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
   const totals = raw as Partial<UsageTotals>
@@ -129,15 +98,6 @@ function isBucketTotals(raw: unknown): boolean {
     && typeof totals.outputTokens === 'number'
 }
 
-/**
- * 用量明细载荷的形状判定：只盖渲染**真正会解引用**的字段——`cutsOf` / `unpricedKeysOf`
- * 无条件遍历三个数组与卡内的 `models` / `unpricedModels`，页头读四个合计，`RANGE_WORDS[view.range]`
- * 读 `range`，两种行清单对 `totals` 做算术并按 `model` / `provider` 排序。
- * 不合法就走面板已有的错误态（错误条 + 重试），绝不把半成品塞进 state——渲染期抛错会让这一条
- * list 型 slot 被宿主摘掉（浮窗从此打不开）。
- * 判据按 host 的组装处与类型：`usageByRange`（`src/index.ts`）、`ProviderUsageView`
- * （`src/types.ts`，`providerLabels` 缺席由渲染侧 `?? {}` 兜）。只给符号名，不写行号。
- */
 function readUsageView(raw: unknown): ProviderUsageView | null {
   if (typeof raw !== 'object' || raw === null) return null
   const source = raw as Partial<ProviderUsageView>
@@ -148,7 +108,6 @@ function readUsageView(raw: unknown): ProviderUsageView | null {
   for (const row of source.byModel) {
     if (typeof row !== 'object' || row === null) return null
     const model = row as Partial<CostedModelRow>
-    // `model` / `provider` 是排序键（`localeCompare`），缺席会在渲染期抛。
     if (typeof model.model !== 'string' || typeof model.provider !== 'string' || !isBucketTotals(model.totals)) return null
   }
   for (const row of source.byWorkspace) {
@@ -167,40 +126,25 @@ function readUsageView(raw: unknown): ProviderUsageView | null {
   return source as ProviderUsageView
 }
 
-/** 用量明细那一节本体；每个已加载的窗口有缓存，切回来不重新拉取。 */
-/**
- * 上次读到的窗口视图，按窗口留着最近几份。面板随 tab 切换 / 浮窗关闭整块卸载，而
- * 「打开就是上一次的读数」是这一段该有的手感：留着旧数只为**先画出来**，挂载后的那次
- * 拉取照常把它换成新的（与词元页的 `lastViews` 同一处置）。
- *
- * 上界按窗口数给：一个窗口一份，五种窗口全存也不到 100 KB 的视图。
- */
 const lastViews = new Map<ProviderRange, ProviderUsageView>()
 
-/** 跨挂载记住切法（按模型 / 按工作区 / 按通道）：同一个理由。 */
 let lastSlice: Slice = 'model'
 
 export function ProviderPanel() {
   const [range, setRange] = useState<ProviderRange>(readRange)
   const [slice, setSlice] = useState<Slice>(lastSlice)
   const [views, setViews] = useState<ReadonlyMap<ProviderRange, ProviderUsageView>>(() => new Map(lastViews))
-  /** 最近一次**已知**的可用切法。加载中不清空：换窗口时 tab 条因此不闪、也不整块消失。 */
   const [cuts, setCuts] = useState<readonly Slice[]>([])
   const [error, setError] = useState<string | null>(null)
   const activeRef = useRef(0)
-  // 缓存的 ref 镜像，使 `load` 保持引用稳定（每次成功拉取都换新引用
-  // 会重跑 fetch effect）。
   const viewsRef = useRef(views)
   viewsRef.current = views
-  /** 当前选中的窗口（账本变化时重拉的是它，不是闭包里那份可能已过期的）。 */
   const rangeRef = useRef(range)
   rangeRef.current = range
 
   const load = useCallback(async (target: ProviderRange, force?: boolean) => {
-    // 清错误条在缓存短路之前：命中缓存同样是「这一次读到了」，别的窗口上一轮的失败不该留在屏上。
     setError(null)
     if (!force && viewsRef.current.has(target)) {
-      // 命中缓存 = 屏上换了一份数据：在飞请求的成败同样不该落到这一份上（它属于刚离开的那个窗口）。
       activeRef.current += 1
       return
     }
@@ -209,9 +153,8 @@ export function ProviderPanel() {
       const res = await fetch(`${ROUTE_USAGE}?${QUERY_RANGE}=${target}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const raw = await res.json() as unknown
-      if (token !== activeRef.current) return // 被更新的切换取代
+      if (token !== activeRef.current) return
       const view = readUsageView(raw)
-      // 形状不对按一次读失败处理：错误态是重试的入口，而半成品进缓存会让渲染期抛错。
       if (view === null) throw new Error('响应不是一份用量明细视图')
       setViews((current) => {
         const next = new Map(current)
@@ -226,28 +169,22 @@ export function ProviderPanel() {
     }
   }, [])
 
-  // 每个选中的窗口拉取一次（换窗口时）。`range` 变了就先画缓存里那份（如果留过），
-  // 后台再拉新的：切回来不该从骨架屏开始。
   useEffect(() => {
     void load(range)
   }, [range, load])
 
-  // 账本又落行了：重拉**当前**窗口。`force` 绕过缓存短路——这一跳的意义就是拿新数字。
   useEffect(() => subscribeLedgerChanges(() => {
     if (document.hidden) return
     void load(rangeRef.current, true)
   }), [load])
 
-  // 面板卸载（tab 切换）时推进 active token，防止在飞的响应更新已卸载面板。
   useEffect(() => () => { activeRef.current += 1 }, [])
 
-  // 用户选的窗口立刻落盘：面板随 tab 切换/浮窗关闭卸载，组件状态活不过那一刻。
   const chooseRange = useCallback((next: ProviderRange) => {
     setRange(next)
     try {
       localStorage.setItem(RANGE_KEY, next)
     } catch {
-      // 存不下不影响这一次选择，只是下次打开回到默认窗口。
     }
   }, [])
 
@@ -258,17 +195,13 @@ export function ProviderPanel() {
 
   const view = views.get(range)
   const moneyOf = (value: number): string => formatMoney(value)
-  // 金额按现价折算，只在够近的窗口里是有效的刻度（见 types 的 `rangeCarriesMoney`）。
   const showMoney = rangeCarriesMoney(range)
   const busy = view === undefined && error === null
   const available = view === undefined ? cuts : cutsOf(view)
 
-  // 切法始终重新推导、绝不直接信任：换窗口可能清空当前选中的那一面，空面板不能对着用户。
   const active: Slice = available.includes(slice) ? slice : available[0] ?? 'model'
   const note = SLICE_NOTES[active]
   const cols = COLUMNS[active]
-  // 切法条：窗口没数据可看时（错误态）整条收掉——一条点不动的切法条加一个空面板，
-  // 读起来像「这里没有行」，而真相是这一次没读到。
   const showCuts = view !== undefined ? available.length > 0 : busy
 
   const onTablistKeyDown = (e: ReactKeyboardEvent): void => {
@@ -300,8 +233,6 @@ export function ProviderPanel() {
                 </button>
               ))}
             </div>
-            {/* 金额按当前价折算，所以它只在够近的窗口里是有效的刻度。窗口本身要说出这件事：
-                否则在「全部」里金额列凭空消失，读起来像坏了。 */}
             {!showMoney && (
               <span
                 className="dtpl-usage-money-note"
@@ -313,7 +244,6 @@ export function ProviderPanel() {
           </div>
         </div>
         {view !== undefined ? (
-          // 窗口合计与当前切法无关——三种切法加起来就是它。
           <span className="dtpl-hero-facts dtpl-usage-facts">
             <span className="dtpl-hero-fact"><b>{view.totalRequests}</b> 请求</span>
             <i aria-hidden="true">·</i>
@@ -366,7 +296,6 @@ export function ProviderPanel() {
               ))}
             </div>
           ) : (
-            // 首次加载：切法还不知道——没有工作区注册表的宿主只有两面。
             <span className="dtpl-sk dtpl-usage-cuts-sk" aria-hidden="true" />
           )}
           <span className="dtpl-sec-aside" title={note.title}>{note.text}</span>
@@ -390,8 +319,6 @@ export function ProviderPanel() {
         role="tabpanel"
         id="dtpl-usage-panel"
         aria-busy={busy}
-        // 只在切法条真的挂着时才指向它：错误态整条收掉，指向不存在的 id 比不指更糟
-        // （同一条判据见 `LedgerOverlay` 的 tab 条注释）。
         aria-labelledby={showCuts && available.length > 0 ? `dtpl-usage-tab-${active}` : undefined}
       >
         {view === undefined
@@ -406,12 +333,10 @@ export function ProviderPanel() {
   )
 }
 
-/** 按通道那一面：一张卡一个 provider。 */
 function ProviderCards({ cards, labels, money, showMoney }: {
   cards: readonly ProviderUsageCard[]
   labels: Record<string, string>
   money: (value: number) => string
-  /** 这个窗口给不给金额（判据同 `ModelRows`）。 */
   showMoney: boolean
 }) {
   return (
@@ -423,16 +348,10 @@ function ProviderCards({ cards, labels, money, showMoney }: {
   )
 }
 
-/**
- * 一张 provider 卡：头部命名通道的方式与价格表 tab 一致——settings 的 `displayName` 优先
- * （否则适配器的 provider 名），route key 作为副标题。计费是 route 级事实、两桶口径见
- * CONTRACTS §2。
- */
 function ProviderCard({ card, money, labels, showMoney }: {
   card: ProviderUsageCard
   money: (value: number) => string
   labels: Record<string, string>
-  /** 这个窗口给不给金额（判据同 `ModelRows`）。 */
   showMoney: boolean
 }) {
   const cardTokens = card.tokens
@@ -467,8 +386,6 @@ function ProviderCard({ card, money, labels, showMoney }: {
           <span className="dtpl-provider-tokens">{formatTokens(cardTokens)}</span>
           {showMoney && (
             <span className="dtpl-provider-cost">
-              {/* 订阅通道的实际支出是结构性的零（计费是 route 级事实，钱全在价值桶）——
-                  报「¥0.00」是同义反复，不是读数；按量卡即使为 0 也报，那是量出来的。 */}
               {!subscription && <span className="dtpl-provider-spend">{money(card.spend)}</span>}
               {card.subscriptionValue > 0 && (
                 <span className="dtpl-provider-value" title="订阅通道：这些用量按量付费本来要花的钱（非实际扣款）">{money(card.subscriptionValue)} 订阅价值</span>
@@ -479,7 +396,6 @@ function ProviderCard({ card, money, labels, showMoney }: {
       </header>
       <div className="dtpl-provider-models">
         {card.models.map((m) => {
-          // 与按模型面同一条判据：价表计不了费且这个窗口里没有一条已定价的记录。
           const noPrice = isNoPrice(m.cost, card.unpricedModels.includes(m.model))
           return (
             <div className="dtpl-row" key={m.model}>
@@ -490,8 +406,6 @@ function ProviderCard({ card, money, labels, showMoney }: {
                 </div>
               </div>
               <div className="dtpl-model-nums">
-                {/* 这一面没有列头（见 `COLUMNS` 注释），所以读屏文本自带列名；占比环的
-                    分母是**这张卡**，环心的读屏前缀也这么念。 */}
                 <span className="dtpl-val">
                   <span className="dtpl-sr">词元 </span>{formatTokens(m.tokens)}
                 </span>
@@ -517,7 +431,6 @@ function ProviderCard({ card, money, labels, showMoney }: {
   )
 }
 
-/** 首次拉取进行中的占位：按**当前切法**的形状占位，数据到达时高度不跳。 */
 function PanelSkeleton({ slice }: { slice: Slice }) {
   if (slice === 'provider') {
     return (

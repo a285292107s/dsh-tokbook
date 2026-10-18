@@ -1,7 +1,3 @@
-/**
- * profile 配置：声明形状严格校验；plan 覆盖宽松纠错（笔误不得拖垮宿主）。
- */
-
 import type { PlanConfig, TokBookConfig } from './types.ts'
 
 export function validateConfig(config: TokBookConfig): void {
@@ -21,7 +17,6 @@ export function validateConfig(config: TokBookConfig): void {
   }
 }
 
-/** 丢掉未知键与畸形字段，而不是抛错。 */
 export function coercePlanConfig(value: unknown): PlanConfig | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>

@@ -1,41 +1,26 @@
-/**
- * 价格表 tab 的数据装配：视图渲染的卡片，由三个各知部分真相的源的并集构成——
- * route catalog（settings profiles ∪ 活的适配器 registry）、账本计过费的每个
- * route 与 model、价文件命名的一切。因此从配置中消失的 route——或只带手写
- * 价格的 route——仍可见、可编辑，其金额不会变成孤儿。
- *
- * 与拥有价**文件**本身（读、写、解析）的 `./pricing.ts` 分开。
- */
-
+import { MODELS_DEV_URL } from './models-dev.ts'
 import { billingOf, rateKeyAt, readPriceFile } from './pricing.ts'
-import { readPricingSyncState } from './pricing-sync-state.ts'
+import { PRICING_SYNC_RETRY_MS, readPricingSyncState } from './pricing-sync-state.ts'
 import type {
-  HolidayCalendar, PriceEntry, PriceSlot, PricingEntryInput, PricingModelView,
-  PricingRouteView, PricingSlotInput, PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
+  HolidayCalendar, HolidaySyncView, PriceEntry, PriceSlot, PricingEntryInput, PricingModelView,
+  PricingRouteView, PricingSlotInput, PricingSyncView, PricingTable, PricingView, RouteCatalogEntry, UsageRecord,
 } from './types.ts'
 
 interface Logger {
   error(...args: unknown[]): void
 }
 
-/** 账本对一个 (route, model) 计过什么。`unpriced` 按当前表判定，与成本层
- *  定价规则（`rateKeyAt`）一致，故计数与金额一致。 */
 export interface LedgerModelUsage {
   records: number
   firstAt: number
-  /** 按当前价折算不出金额的请求（整行没有价，或按美元报价却没设汇率）。
-   *  它们计 ¥0，并由价格表的分组摘要报出。 */
   unpriced: number
 }
 
-/** 账本计过什么，按 route 与 (route, model)。 */
 export interface LedgerUsage {
   byRouteModel: ReadonlyMap<string, ReadonlyMap<string, LedgerModelUsage>>
   byRoute: ReadonlyMap<string, number>
 }
 
-/** 把账本行折成价格视图的用量透镜。失败尝试命名 route 但没有计费调用，故
- *  不进；未归属行无法定价，也不进。 */
 export function ledgerUsageOf(
   records: readonly UsageRecord[],
   table: PricingTable,
@@ -73,11 +58,6 @@ function earliestRecordAt(ledger: LedgerUsage): number | null {
   return earliest
 }
 
-/**
- * 账本覆盖到、而年历里没有的年份——从那一年起到今年。这些年的 `workdays` 会
- * 退化成「周一至周五全额高峰」（法定节假日多算），所以价格表 tab 把它显式报出来：
- * 这是这套设计里唯一要人记得做的事（国家每年底公布一次安排），必须自己喊。
- */
 function missingCalendarYears(ledger: LedgerUsage, calendar: HolidayCalendar, now: number): string[] {
   const earliest = earliestRecordAt(ledger)
   if (earliest === null) return []
@@ -104,7 +84,6 @@ function slotInput(slot: PriceSlot): PricingSlotInput {
   }
 }
 
-/** 表里的一份价 → wire 形态（wire 不带任何快照，client 按当前时刻现算生效时段）。 */
 function entryInput(entry: PriceEntry): PricingEntryInput {
   const slots = (entry.slots ?? []).map(slotInput)
   return {
@@ -123,13 +102,14 @@ export async function readPricingView(
   catalog: readonly RouteCatalogEntry[],
   ledger: LedgerUsage,
   logger: Logger = console,
+  holidays?: { readonly calendar: HolidayCalendar; readonly autoOnly: readonly string[]; readonly sync: HolidaySyncView },
+  syncView?: PricingSyncView,
 ): Promise<PricingView> {
   const [file, syncState] = await Promise.all([readPriceFile(dir, logger), readPricingSyncState(dir)])
   interface ModelAcc {
     configured: boolean
     records: number
     name?: string
-    /** 账本自身的事实，行有一条记录后在场。 */
     firstAt?: number
     unpriced?: number
   }
@@ -154,7 +134,6 @@ export async function readPricingView(
         continue
       }
       row.configured = true
-      // 配置里的名字优先于适配器目录的名字；账本与价文件从不给串命名。
       if (row.name === undefined && name !== undefined) row.name = name
     }
   }
@@ -182,8 +161,6 @@ export async function readPricingView(
       if (!models.has(model)) models.set(model, { configured: false, records: 0 })
     }
   }
-  // 只出现在 `$billing` / `$currency` 里的路由也有卡片：价表 tab 的保存是整份重写，
-  // 没有卡片就没有草稿行，这些手写的键会在下一次自动保存时静默消失。
   for (const route of [...Object.keys(file.billing), ...Object.keys(file.currency)]) ensure(route)
 
   const now = Date.now()
@@ -215,12 +192,27 @@ export async function readPricingView(
     })
   }
   cards.sort((left, right) => right.records - left.records || left.route.localeCompare(right.route))
+  const calendar = holidays?.calendar ?? file.calendar
+  const autoOnly = holidays?.autoOnly ?? []
   return {
     routes: cards,
-    calendar: file.calendar,
-    calendarMissing: missingCalendarYears(ledger, file.calendar, now),
+    calendar,
+    calendarMissing: missingCalendarYears(ledger, calendar, now),
+    ...(autoOnly.length > 0 ? { calendarAuto: [...autoOnly] } : {}),
+    ...(holidays !== undefined ? { holidaySync: holidays.sync } : {}),
     ...(file.fx !== undefined ? { fx: file.fx } : {}),
-    sync: { lastSyncDay: syncState.lastSyncDay, lastError: syncState.lastError },
+    sync: syncView ?? {
+      source: { label: 'models.dev', url: MODELS_DEV_URL },
+      refreshDays: 1,
+      retryMinutes: Math.round(PRICING_SYNC_RETRY_MS / 60_000),
+      state: syncState.lastError !== null ? 'failed' : syncState.lastAttemptAt === null ? 'missing' : 'ok',
+      gaps: 0,
+      lastSuccessDay: syncState.lastSyncDay,
+      lastAdded: syncState.lastAdded,
+      lastAttemptAt: syncState.lastAttemptAt,
+      lastError: syncState.lastError,
+      nextAttemptAt: syncState.nextAttemptAt,
+    },
     dataDir: dir,
     updatedAt: now,
   }

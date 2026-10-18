@@ -1,6 +1,4 @@
-export const CSS_METHOD = `/* 统计口径文档 */
-/* 阅读层级：导语 → 三事实条 → 编号小节。全篇没有一块染色面板，层级由**边框、填充与字重**表达，
-   色相只留给真正的状态（warn / err）。 */
+export const CSS_METHOD = `
 [data-plugin="dsh-tokbook"] .dtpl-doc{max-width:none;}
 [data-plugin="dsh-tokbook"] .dtpl-doc code{
   font-family:var(--dtpl-mono);
@@ -11,17 +9,13 @@ export const CSS_METHOD = `/* 统计口径文档 */
   white-space:nowrap;
 }
 
-/* 导语：两三行短句。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede{
   display:flex;flex-direction:column;gap:3px;
   margin:0 0 12px;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede p{margin:0;}
-/* 导语里的加重点是**这次要读的那句**，靠字重与墨色，不靠色相。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede b{color:var(--dtpl-fg);font-weight:600;}
 
-/* 三事实条：来源 / 精度 / 范围。三条是**同类**的方法事实（都在说「怎么记」），所以三格等权。
-   悬停时受光边提亮——它是可读的说明卡，不是装饰块。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-facts{
   display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
   margin-bottom:16px;
@@ -49,7 +43,6 @@ export const CSS_METHOD = `/* 统计口径文档 */
   font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg);
 }
 
-/* 编号小节标题：1/2/3/4 装在一枚工业徽记里——与节标题前那枚同一记号（配方见 tokens 第五节）。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-sec{margin-bottom:16px;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-title{
   display:flex;align-items:center;gap:8px;
@@ -96,8 +89,6 @@ export const CSS_METHOD = `/* 统计口径文档 */
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 
-/* 记了哪些调用：一张判定表。第一列是用户视角的「情况」（行表头），后两列是两个维度的判定。
-   判定沿用同一套芯片语言——描边 = 有数、静默 = 无数；色相不参与，层级由边框与字重给。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge{
   width:100%;table-layout:fixed;border-collapse:collapse;
   margin:0 0 8px;
@@ -115,7 +106,6 @@ export const CSS_METHOD = `/* 统计口径文档 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:first-child{width:52%;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(2),
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(3){width:24%;}
-/* 行表头在视觉上是正文，不是列头：粗体落在句子自己（-what）身上。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge tbody th{font-weight:400;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge-what{
   display:block;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:600;color:var(--dtpl-fg);
@@ -127,7 +117,6 @@ export const CSS_METHOD = `/* 统计口径文档 */
   margin:0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge-note b{color:var(--dtpl-fg);font-weight:600;}
-/* 窄处判定列会挤出格子：给判定列让出宽度并收紧内边距，而不是让芯片换行或截断。 */
 @media (max-width:640px){
   [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:first-child{width:46%;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(2),
@@ -210,8 +199,6 @@ export const CSS_METHOD = `/* 统计口径文档 */
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-map-note:first-of-type{margin-top:2px;}
 
-/* 跨 tab 提示：订阅额度是另一套官方口径。它是一条**旁注**，不是重点色面板——
-   1px 边框 + 一条与正文同色的引线。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-quota{
   display:flex;flex-direction:column;gap:3px;
   margin:0 0 14px;padding:10px 13px;
@@ -241,9 +228,6 @@ export const CSS_METHOD = `/* 统计口径文档 */
   background:transparent;border:0;padding:0;
 }
 
-/* 文档脚注。三处『!important』**来源没有记录在案**（LESSONS.md 里也没有这一条），已证的效果只有一个：
-   锁住这一行的字号 / 行高 / 墨色。撤它之前只差一次实测：量『.dtpl-doc-foot』的 computed font-size，
-   仍是 11px 就删掉。 */
 [data-plugin="dsh-tokbook"] .dtpl-doc-foot{
   margin-top:12px;padding-top:10px;
   border-top:1px solid var(--dtpl-border);

@@ -1,11 +1,3 @@
-// 纯逻辑冒烟测试:聚合 / 计价 / 额度。不碰 DSH 运行时,不需要真 host。
-//
-// 约定:**一条不变量一个断言**——同一条规则不在别处重复;边界用例用表驱动压成一行,
-// 表里一行 = 一个用例,不各写一段。需要真数据目录的不变量(折叠重建 / refile / 跨实例
-// 去重 / 重启基线)在 `selfcheck-rebuild.ts`,这里不重测。
-//
-// Run: node --experimental-strip-types scripts/smoke.ts
-//      加 `--only <节名子串>` 只跑命中的那几节(改一处计价规则不必读完整套输出)。
 import { mkdir, mkdtemp, rename, rm, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -24,9 +16,9 @@ import {
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import { normalizeModelId, parseCatalog, searchCatalog } from '../src/models-dev.ts'
 import { mergeCatalogIntoTable } from '../src/pricing-sync.ts'
-import { readPricingSyncState, writePricingSyncState } from '../src/pricing-sync-state.ts'
+import { PRICING_SYNC_RETRY_MS, readPricingSyncState, shouldSyncNow, writePricingSyncState, type PricingSyncState } from '../src/pricing-sync-state.ts'
 import {
-  baselinesOf, calendarYearTally, composePriceBody, defaultCalendarYear, draftFromView, duplicateSlot,
+  adoptYear, baselinesOf, calendarYearTally, composePriceBody, defaultCalendarYear, draftFromView, duplicateSlot,
   fxSignature, fxValue, inheritedCell, isBlankSlot, isUnpriced, modelDirty,
   newHoliday, newSlot, priceIssue, priceUnknown,
   ratesInForce, readHolidays, slotRange, stagedChanges, withCalendar, withFx, withRouteCurrency,
@@ -37,7 +29,8 @@ import {
   convertText, counterpartOf, parseAmount, unitOf,
   type MoneyView,
 } from '../src/client/pricing/currency.ts'
-import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, dayIndex, dayKeyOfIndex, holidaySet, slotsOverlap } from '../src/price-format.ts'
+import { autoHolidayState, autoOnly, mergeHolidayCalendars, parseHolidayYear } from '../src/holiday-cn.ts'
+import { MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, dayIndex, dayKeyOfIndex, daySetCovers, holidaySet, slotsOverlap } from '../src/price-format.ts'
 import { collectRoutes, DEEPSEEK_ROUTE, routesFromSettings } from '../src/route-catalog.ts'
 import { parseRecord, serializeRecord, coerceRecord, recordOfEvent, recordFromRetry, type SessionEventLike } from '../src/usage-record.ts'
 import { dayFileNameOf, UsageLog } from '../src/usage-log.ts'
@@ -51,7 +44,7 @@ import {
 import {
   resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage,
 } from '../src/quota-official.ts'
-import type { BillingNature, PricingEntryInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
+import type { BillingNature, HolidayCalendar, PricingEntryInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
 import { settleTiming, totalsTokens, UNPRICED_KEY } from '../src/types.ts'
 import { buildSessionUsageView, joinOfEvents, type SessionJoin } from '../src/session-usage.ts'
 
@@ -65,16 +58,12 @@ function check(name: string, cond: boolean, detail?: unknown): void {
   }
 }
 
-/** 只吞日志的 seam:`{ error: () => {} }` 那类。 */
 const quiet = { error: () => {} }
 
-// 节过滤。跑全套是**提交门**,不是编辑循环的门:改一条取价规则却要读完整套输出,
-// 那点输出就是白花的 token。`--only` 只筛节,不改任何断言。
 const only = ((): string | null => {
   const flag = process.argv.indexOf('--only')
   if (flag === -1) return null
   const value = process.argv[flag + 1]
-  // 缺值时空串会让 `name.includes('')` 恒真、静默跑全套——那与「只跑这一节」相反,直接报错。
   if (value === undefined || value === '') {
     console.error('--only 需要一个节名子串:node scripts/smoke.ts --only <节名子串>')
     process.exit(1)
@@ -83,7 +72,6 @@ const only = ((): string | null => {
 })()
 
 let ranSections = 0
-/** 打印节名,并回答这一节该不该跑。 */
 function section(name: string): boolean {
   if (only !== null && !name.includes(only)) return false
   ranSections += 1
@@ -91,12 +79,9 @@ function section(name: string): boolean {
   return true
 }
 
-// 「价格表草稿 / 没有价的行 / 价格表写路径」三节说的是同一件事:一条路由、一个模型、一份价。
-// 形状只在这里写一遍——三份副本不会各自报错,只会各自**漂**,而漂掉的那一份是静默的。
 const modelRow = (price: Partial<ModelDraft> = {}): ModelDraft =>
   ({ model: 'm', configured: true, records: 0, input: '', output: '', cacheRead: '', cacheWrite: '', slots: [], ...price })
 
-/** 把一行装进一份单路由草稿;`ids` 只在要真实路由名 / 模型名 / $billing 时才给。 */
 const draftOfRow = (row: ModelDraft, ids: { route?: string; model?: string; billing?: BillingNature } = {}): PriceState => {
   const route = ids.route ?? 'r'
   const model = ids.model ?? row.model
@@ -128,8 +113,6 @@ if (section('记录往返 / 事件投影')) {
     billedRec?.kind === undefined && billedRec?.model === 'deepseek-chat' && billedRec?.usage?.inputTokens === 10 && billedRec.provider === 'deepseek'
     && failRec?.kind === 'failure' && failRec.failureCode === 'RATE_LIMIT' && failRec.usage === undefined)
 
-  // 通道没上报用量的计费调用(中途取消的请求 / 没回报用量的 summarize)**仍写一行**:
-  // 丢行比「未上报用量」更不可查。
   const interrupted = { type: 'assistant/message', time: 1730000000000, seq: 9, data: { message: { id: 'a2', source: { provider: 'deepseek', model: 'deepseek-chat' } }, interrupted: true } }
   const bareSummary = { type: 'compaction/summary', time: 1730000000000, seq: 11, data: { provider: 'deepseek', model: 'deepseek-chat' } }
   const interruptedRec = recordOfEvent(interrupted as never, 's1', 'deepseek-chat', true)
@@ -182,12 +165,10 @@ if (section('手写价表:取价 / 费率身份 / 容错')) {
     rateKeyAt(table, 'deepseek-official', 'deepseek-v4-flash', after)?.unpriced === undefined
     && rateKeyAt(table, 'deepseek-official', 'deepseek-v4-flash', after)?.slot === null
     && rateKeyAt(table, 'deepseek-official', 'never-priced', after).unpriced === true)
-  // 汇率是价文件里第三个保留键，但它与计价无关：解析出来只是给价格表的读写面用。
   const noFx = parsePriceInput({ r: {} })
   check('$fx 是保留键、只服务读写面:解析得出汇率,省略 = 未设汇率',
     file.file.fx?.cnyPerUsd === 7.15 && noFx.ok && noFx.file.fx === undefined)
 
-  // 金额只存身份、读取时回查当前表 → 一次改价重算全部历史(不改账本行)。
   const edited: PricingTable = {
     'deepseek-official': { 'deepseek-v4-flash': { rates: { inputPerMillion: 1.2, outputPerMillion: 3.6 } } },
   }
@@ -200,7 +181,6 @@ if (section('手写价表:取价 / 费率身份 / 容错')) {
       { inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.5, cacheWritePerMillion: 1 }) - 6.2) < 1e-9
     && costOf({ requests: 1, inputTokens: 0, outputTokens: 0, cacheReadTokens: 1_000_000, cacheWriteTokens: 0, compactions: 0, failures: 0 }, { inputPerMillion: 3, outputPerMillion: 9 }) === 3)
 
-  // 写路径拒绝它读不懂的表(每类一条代表);读路径反过来:畸形只掉受影响的那一格。
   const refuses: [string, unknown, string][] = [
     ['价里的未知字段(旧文件的 from)', { r: { m: { inputPerMillion: 1, outputPerMillion: 2, from: '2026-09-01' } } }, '未知字段'],
     ['旧的价段数组形态(写路径只接受一份现价)', { r: { m: [{ inputPerMillion: 1, outputPerMillion: 2 }] } }, '必须是对象'],
@@ -222,8 +202,6 @@ if (section('手写价表:取价 / 费率身份 / 容错')) {
   check('读路径宽容:畸形的 (路由, 模型) 只降级它自己,整份文件仍读得出',
     lenient.table.r?.good?.rates.inputPerMillion === 1 && lenient.table.r?.bad === undefined
     && Object.keys(coercePriceFile('nope', quiet).table).length === 0)
-  // 旧文件的价段数组仍读得进来:取生效时刻最晚的那一段——它就是今天仍在生效的价,更早的段
-  // 不再参与计价。日期串定宽且逐位可比,所以字典序就是时间序;缺 from 的兜底段排最前。
   const legacy = coercePriceFile({ r: { m: [
     { from: '2026-08-01', inputPerMillion: 5, outputPerMillion: 20 },
     { inputPerMillion: 4, outputPerMillion: 16 },
@@ -231,12 +209,9 @@ if (section('手写价表:取价 / 费率身份 / 容错')) {
   ] } }, quiet).table.r?.m
   check('旧价段数组读作「最后一段」(缺 from 的兜底段排最前)',
     legacy?.rates.inputPerMillion === 1 && legacy.rates.cacheReadPerMillion === 0.02)
-  // 手写坏了的汇率同样只掉它自己：它不是价,一个数写错不该让整张价表读不出来。
   const lenientFx = coercePriceFile({ [PRICING_FX_KEY]: { cnyPerUsd: -1 }, r: { m: { inputPerMillion: 1, outputPerMillion: 2 } } }, quiet)
   check('读路径宽容:畸形的 $fx 只掉它自己(读作未设汇率),价照读',
     lenientFx.fx === undefined && lenientFx.table.r?.m?.rates.inputPerMillion === 1)
-  // 但「一段读不懂」不能只丢掉那一段:我们无从知道坏的哪一段是不是最晚的那一段
-  // (它的 from 也读不出来),所以整个 (路由, 模型) 降级为价格未知,并留 error 日志。
   const brokenLogs: string[] = []
   const broken = coercePriceFile({ r: {
     good: [{ from: '2026-01-01', inputPerMillion: 1, outputPerMillion: 4 }, { from: 'nope', inputPerMillion: 9, outputPerMillion: 9 }],
@@ -260,7 +235,6 @@ if (section('手写价表:取价 / 费率身份 / 容错')) {
       && back.table['deepseek-official']?.['deepseek-v4-flash']?.rates.cacheReadPerMillion === 0.15
       && back.fx?.cnyPerUsd === 7.15)
 
-    // 价格表 tab 的卡片 = 路由目录 ∪ 账本 ∪ 价格文件。
     const view = await readPricingView(
       dir,
       [
@@ -286,8 +260,6 @@ if (section('手写价表:取价 / 费率身份 / 容错')) {
     check('价格文件里留着一条已被配置删掉的路由(卡片是并集,不是目录)',
       (await readPricingView(dir, [], { byRouteModel: new Map(), byRoute: new Map() }, quiet)).routes.some(c => c.route === 'deepseek-official'))
 
-    // 旧文件的价段数组在视图层就收敛成一份现价:取生效时刻最晚的那一段(今天仍在生效的价),
-    // 更早的段不再参与计价。视图与写入形态从此只剩一份价,文件要等下一次保存才变。
     await writeFile(join(dir, PRICING_FILE), JSON.stringify({
       'deepseek-official': { 'deepseek-v4-flash': [
         { inputPerMillion: 5, outputPerMillion: 20 },
@@ -308,8 +280,6 @@ if (section('手写价表:取价 / 费率身份 / 容错')) {
       && ratesAt(legacySave.file.table, 'deepseek-official', 'deepseek-v4-flash', dayMillis('2026-01-01', 9))?.inputPerMillion === 1,
       legacySave !== null && !legacySave.ok ? legacySave.error : undefined)
 
-    // 只出现在 $billing / $currency 里的路由也要有卡片:保存是整表重写、以卡片为真源,
-    // 没有卡片的那两条键会在下一次自动保存时静默消失(「磁盘 ≡ 草稿」对手写文件也成立)。
     await writeFile(join(dir, PRICING_FILE), JSON.stringify({
       [PRICING_BILLING_KEY]: { 'ghost-route': 'subscription' },
       [PRICING_CURRENCY_KEY]: { 'usd-ghost': 'USD' },
@@ -333,15 +303,11 @@ if (section('手写价表:取价 / 费率身份 / 容错')) {
 }
 
 if (section('日历日轴与价文件读入:UTC 日号互逆、BOM 不是畸形')) {
-  // 日号与日键必须互逆;轴定在 UTC 日,所以这条对任何时区都成立——本地零点除以一天只在
-  // UTC 以东恰好落对日号,UTC 以西(如 America/Los_Angeles)会让整份年历错一天。
   const days = ['1969-12-31', '1970-01-01', '1970-01-02', '2000-02-29', '2026-02-15', '2026-12-31', '2100-01-01']
   const drifted = days.filter(day => dayKeyOfIndex(dayIndex(day)!) !== day)
   check('日号与日键互逆(含 1970 前后、闰年与世纪年)', drifted.length === 0, drifted)
   check('epoch 日号 0 是 1970-01-01(轴是一个具体的 UTC 日,不是「本地零点的时刻」)', dayKeyOfIndex(0) === '1970-01-01')
 
-  // 手写工具链会给 UTF-8 加 BOM(PowerShell 5.1 的 Set-Content -Encoding utf8、编辑器的
-  // 「UTF-8 with BOM」):那一个字符不该把整张价表读成空表。
   const bomDir = await mkdtemp(join(tmpdir(), 'tokbook-bom-'))
   try {
     const body = JSON.stringify({ r: { m: { inputPerMillion: 1, outputPerMillion: 2 } } })
@@ -355,9 +321,6 @@ if (section('日历日轴与价文件读入:UTC 日号互逆、BOM 不是畸形'
     await rm(bomDir, { recursive: true, force: true })
   }
 
-  // 价文件缺失 = writePriceFile 的两步 rename(先挪成 .bak、再落新文件)之间崩了。
-  // 主文件**确实不存在**(ENOENT)而 .bak 在时从备份恢复——否则界面显示「全部价格未知」,
-  // 用户随手改一格就把空表整表写回,历史价全丢。只有 ENOENT 才算「文件没了」。
   const bakDir = await mkdtemp(join(tmpdir(), 'tokbook-bak-'))
   try {
     const body = JSON.stringify({ r: { m: { inputPerMillion: 1, outputPerMillion: 4 } } })
@@ -373,8 +336,6 @@ if (section('日历日轴与价文件读入:UTC 日号互逆、BOM 不是畸形'
     const brokenJson = await readPriceFile(bakDir, quiet)
     check('主文件在但 JSON 坏了:按既有语义读空表,不回退备份(文件在,内容坏)',
       brokenJson.table.r === undefined && brokenJson.revision !== '')
-    // 主文件名在磁盘上做成目录:stat 成功、readFile 报 EISDIR——这是「存在但读不到」,
-    // 不是「不存在」,绝不拿备份盖一份还在的文件。
     await rm(join(bakDir, PRICING_FILE), { force: true })
     await mkdir(join(bakDir, PRICING_FILE))
     const unreadable = await readPriceFile(bakDir, quiet)
@@ -408,7 +369,6 @@ if (section('账本透镜:价格表说这一行值多少')) {
 }
 
 if (section('峰谷时段:基准价之上的第二层取价')) {
-  // 2026-09-14 是周一,2026-09-20 是周日。
   const parsed = parsePriceInput({
     'deepseek-official': { 'deepseek-v4-flash': {
       inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
@@ -433,7 +393,6 @@ if (section('峰谷时段:基准价之上的第二层取价')) {
     && ratesAt(table, route, model, mondayTrough)?.inputPerMillion === 1
     && ratesAt(table, route, model, sunday)?.inputPerMillion === 1.5
     && ratesAt(table, route, model, sunday)?.cacheReadPerMillion === 0.02
-    // 同一条价的时段轴与记录时刻无关:换一年同一天同小时仍按同一时段
     && ratesAt(table, route, model, dayMillis('2027-09-13', 10))?.inputPerMillion === 2)
 
   const slotRefuses: [string, boolean][] = [
@@ -466,7 +425,6 @@ if (section('峰谷时段:基准价之上的第二层取价')) {
     await rm(slotDir, { recursive: true, force: true })
   }
 
-  // 按这一条价的时段计出来的金额走的是时段价,不是基准价。
   const records: UsageRecord[] = [{ requestId: 'peak-1', time: mondayPeak, sessionId: 's1', provider: route, model, usage: { inputTokens: 1_000_000, outputTokens: 0 } }]
   const resolveRate = (record: UsageRecord) => rateKeyAt(table, record.provider, record.model, record.time)
   const costed = attachCosts({ ...summarizeRecords(records, resolveRate), dataDir: 'x' }, table)
@@ -475,8 +433,6 @@ if (section('峰谷时段:基准价之上的第二层取价')) {
 }
 
 if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
-  // 2026 年国庆：10-01(周四) ~ 10-07(周三)。10-01 与 10-02 是工作日里的放假日，
-  // 10-03/10-04 是周末，10-08(周四) 是恢复上班后的第一个工作日。
   const calendar = { 2026: [{ start: '2026-10-01', end: '2026-10-07' }] }
   const holidays = holidaySet(calendar)
   const parsed = parsePriceInput({
@@ -499,8 +455,6 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
     && ratesAt(table, 'r', 'm', dayMillis('2026-09-30', 15), holidays)?.inputPerMillion === 3
     && ratesAt(table, 'r', 'm', dayMillis('2026-10-01', 15), holidays)?.inputPerMillion === 3)
 
-  // 年历缺那一年的读法：空集 = 那一年未知，weekdays 与 workdays 收成同一档
-  // （法定节假日被按高峰多算，不少算）。
   check('年历查不到那一年时 workdays 退化成周一至周五(安全方向:多算不少算)',
     ratesAt(table, 'r', 'm', dayMillis('2026-10-01', 10), new Set())?.inputPerMillion === 2
     && ratesAt(table, 'r', 'm', dayMillis('2027-10-01', 10), holidays)?.inputPerMillion === 2)
@@ -527,13 +481,10 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
       && ratesAt(back.table, 'r', 'm', dayMillis('2026-10-01', 10), holidaySet(back.calendar))?.inputPerMillion === 1
       && ratesAt(back.table, 'r', 'm', dayMillis('2026-09-30', 10), holidaySet(back.calendar))?.inputPerMillion === 2)
 
-    // 手写的跨年区间:写路径拒它,client 又把写规则用在读结果上——读路径放行一个跨年区间,
-    // 就等于让整份价文件存不进去(任何价格改动都被整表 PUT 拒掉),并让节假日集合为空,
-    // `workdays` 在节假日当天照高峰算(显示价 ≠ 计费价)。所以读路径把它夹回自己的年。
     await writeFile(join(calDir, PRICING_FILE), JSON.stringify({
       [PRICING_CALENDAR_KEY]: {
         2026: [{ start: '2025-12-31', end: '2026-01-02' }],
-        2027: [{ start: '2026-01-01', end: '2026-01-02' }], // 整段都不在它标称的 2027 里
+        2027: [{ start: '2026-01-01', end: '2026-01-02' }],
       },
       r: { m: { inputPerMillion: 1, outputPerMillion: 4 } },
     }), 'utf8')
@@ -556,8 +507,6 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
     await rm(calDir, { recursive: true, force: true })
   }
 
-  // 草稿侧同一条规则:年历改一段假期,行内「此刻的价」当场跟着走;草稿产出的
-  // 年历也必须被宿主接受(client ⊆ host)。
   const draft = draftOfRow(modelRow({
     input: '1', output: '2', slots: [newSlot({ days: 'workdays', start: '9', end: '12', input: '2' })],
   }))
@@ -574,7 +523,6 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
     accepted.ok && accepted.file.calendar['2026']?.[0]?.start === '2026-10-01'
     && new Set(Object.keys(accepted.file.calendar)).size === 1)
 
-  // 填完了却错的三条：跨年、起晚于止、两段重叠。它们在草稿这一侧就拒（并说出是第几段）。
   check('年历里填完却错的段在草稿这一侧就被拒:跨年 / 起晚于止 / 两段重叠',
     composePriceBody(withCalendar(draft, yearOf(newHoliday({ start: '2026-12-30', end: '2027-01-02' })))).ok === false
     && composePriceBody(withCalendar(draft, yearOf(newHoliday({ start: '2026-10-07', end: '2026-10-01' })))).ok === false
@@ -583,8 +531,6 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
       newHoliday({ start: '2026-10-03', end: '2026-10-05' }),
     ))).ok === false)
 
-  // 还没写完的（整组没填 / 只填了一头）是占位：不落盘，也不把同一份文件里的价冻住——
-  // 年历与价共用一个文件，为一行占位拒掉整笔写入就是拿错的代价去罚没错的东西。
   const placeholder = composePriceBody(withCalendar(draft, new Map([
     ['2026', { year: '2026', holidays: [
       newHoliday({ start: '2026-10-01', end: '2026-10-07' }),
@@ -597,8 +543,6 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
     && Object.keys((placeholder.body[PRICING_CALENDAR_KEY] ?? {}) as Record<string, unknown>).join() === '2026'
     && parsePriceInput(placeholder.body).ok)
 
-  // 每段的天数含两端，是拿来对通知里「每条假期共 N 天」的那个数；一年的总数就是各段之和
-  // （重叠已经算错，所以不必再去重）。只填一头是「还没写完」，整组没填是「还没写」。
   const rows = [
     newHoliday({ start: '2026-02-15', end: '2026-02-23' }),
     newHoliday({ start: '2026-10-01', end: '2026-10-08' }),
@@ -613,8 +557,6 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
     && reads[2]!.kind === 'partial' && reads[3]!.kind === 'empty'
     && tally.ranges === 2 && tally.days === 17)
 
-  // 不填年份时加哪一年：一年都没填过日期 → 今年（先把眼下这一年记上）；填过 → 下一年
-  // （安排提前一年公布）；下一年的安排早记好了 → 再往后找一个空位（不填也得点得动）。
   const today = new Date(2026, 8, 23)
   const blank = (year: string): CalendarEntries => new Map([[year, { year, holidays: [newHoliday()] }]])
   const filled = (year: string, start: string, end: string): CalendarEntries =>
@@ -626,11 +568,10 @@ if (section('法定节假日年历:workdays 把放假日摘出高峰')) {
     && defaultCalendarYear(filled('2027', '2027-01-01', '2027-01-03'), today) === '2028')
 }
 
-
 if (section('费率身份:改时段就地重算;悬空身份只在成本层现形')) {
   const route = 'deepseek-official'
   const model = 'deepseek-v4-flash'
-  const inside = dayMillis('2026-09-14', 10)   // 周一 10:00,落在 09:00–12:00 工作时段里
+  const inside = dayMillis('2026-09-14', 10)
   const slot = (start: number, inputPerMillion: number, days: 'daily' | 'weekdays' = 'weekdays') => ({
     days, start, end: 12, rates: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
   })
@@ -651,10 +592,6 @@ if (section('费率身份:改时段就地重算;悬空身份只在成本层现�
     && priceOfKey(table([slot(9, 2, 'daily')]), route, model, key) === null
     && ratesAt(table([]), route, model, inside)?.inputPerMillion === 1 && priceOfKey(table([]), route, model, key) === null)
 
-  // 回查落空要在**成本层**现形:身份取自旧表(start 9),计价用改过时段的新表(start 8)——
-  // 那条历史按 ¥0 计并列进 unpricedModels。生产里折叠与计价读同一张表,所以这条路径只为
-  // 「按美元报价却没设汇率」的通道现形(`cnyTable` 整条丢掉,见「价格表币种」一节);
-  // 改了时段之后仍是就地重算:旧的费率行随签名作废重建,由新表按记录时刻重新解身份。
   const records: UsageRecord[] = [{ requestId: 'peak-1', time: inside, sessionId: 's1', provider: route, model, usage: { inputTokens: 1_000_000, outputTokens: 0 } }]
   const resolve = (record: UsageRecord) => rateKeyAt(table([slot(9, 2)]), record.provider, record.model, record.time)
   const orphaned = attachCosts({ ...summarizeRecords(records, resolve), dataDir: 'x' }, table([slot(8, 2)]))
@@ -701,20 +638,17 @@ if (section('价格表草稿:没写完的不算、不脏、不写')) {
     && withSlotEnd(newSlot({ start: '14', end: '18' }), '12').start === '11'
     && withSlotStart(newSlot({ start: '9', end: '18' }), '10').end === '18')
 
-  // 行头的四个数字只读,读的是**此刻计费所用的价**:基准价叠上此刻生效的峰谷时段。
   const peakRow = modelRow({
     input: '1', output: '4', cacheRead: '0.2', cacheWrite: '',
     slots: [newSlot({ days: 'weekdays', start: '9', end: '12', input: '2' })],
   })
-  const peak = ratesInForce(peakRow, new Set(), dayMillis('2026-09-14', 10))     // 周一 10:00,落在 09:00–12:00 里
+  const peak = ratesInForce(peakRow, new Set(), dayMillis('2026-09-14', 10))
   const offPeak = ratesInForce(peakRow, new Set(), dayMillis('2026-09-14', 13))
   check('此刻价 = 基准价叠上此刻生效的峰谷时段(留空的档沿用基准价),没生效时段时就是基准价',
     peak?.slot?.start === '9' && peak.values.input === '2' && peak.values.output === '4'
     && peak.values.cacheRead === '0.2' && peak.values.cacheWrite === ''
     && offPeak?.slot === null && offPeak.values.input === '1' && offPeak.values.cacheRead === '0.2')
 
-  // 四档全空 = 这条没有价:清空就是删掉它(那份价不进 body,它的记录回到价格未知)。
-  // 只填了一半的行**不是**没有价:它是「填了却写不出去」,照旧算脏并挡住这一笔。
   check('清空四档 = 删掉这条价(不写进 body);只填一半的行照旧算脏、写不出去',
     isUnpriced(modelRow()) === true && priceUnknown(modelRow()) === true
     && isUnpriced(modelRow({ input: '1' })) === false
@@ -730,14 +664,12 @@ if (section('没有价的行:按 ¥0 计,播种不补价')) {
     calendar: {}, calendarMissing: [], dataDir: 'x', updatedAt: 0,
   })
 
-  // 播种**不补价**:视图里有价就照抄,没有价就是空行。
   const priced = draftFromView(rowView({ inputPerMillion: 2, outputPerMillion: 8 })).routes.get('r')!.models.get('m')!
   const bare = draftFromView(rowView(undefined)).routes.get('r')!.models.get('m')!
   check('播种不补价:视图里有价就落进四格,没有价就是空(要价得自己填)',
     priced.input === '2' && priced.output === '8' && isUnpriced(bare) === true
     && modelDirty('r', priced, baselinesOf(rowView({ inputPerMillion: 2, outputPerMillion: 8 })).models) === false)
 
-  // 价格未知 = 草稿里没有价,或账本透镜报出有记录按当前价折算不出金额(按美元报价却没设汇率那种)。
   check('价格未知只由「草稿里没有价」与「host 报出折算不出的记录」两条触发',
     priceUnknown(modelRow()) === true
     && priceUnknown(modelRow({ input: '1', output: '4' })) === false
@@ -745,9 +677,6 @@ if (section('没有价的行:按 ¥0 计,播种不补价')) {
 }
 
 if (section('价格表写路径:草稿写出去的 body 一定被宿主接受')) {
-  // 不变量:**client 产出 ⊆ host 接受**(`docs/CONTRACTS.md` §2)。规则在两侧各写一份的
-  // 代价正是「草稿认为能存、写入被拒」,所以这里不重列规则,而是把
-  // 「草稿 → body → host 解析」真的跑一遍——两侧各写各的检查时,只有往返能发现缺口。
   const draftOf = (route: string, model: string, price: Partial<ModelDraft>, billing: BillingNature = 'metered'): PriceState =>
     draftOfRow(modelRow({ ...price, model }), { route, model, billing })
   const roundTrip = (draft: PriceState): ReturnType<typeof parsePriceInput> => {
@@ -771,16 +700,12 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
   check('每一份草稿产出的 body 都被宿主接受',
     refused.length === 0, refused.map(([label, draft]) => [label, composePriceBody(draft)]))
 
-  // 旧文件的形态写不进去:生效时刻那一轴已经没了。宿主说的原因必须能让人找到那一步——
-  // `from` 报「未知字段」并直说价表没有生效时间了,数组报「必须是对象」。
   const withFrom = parsePriceInput({ r: { m: { inputPerMillion: 1, outputPerMillion: 4, from: '2026-09-01' } } })
   const asArray = parsePriceInput({ r: { m: [{ from: '2026-09-01', inputPerMillion: 1, outputPerMillion: 4 }] } })
   check('旧形态的 body 被拒,而且报错说得出它为什么不是一份价',
     withFrom.ok === false && withFrom.error.includes('未知字段') && withFrom.error.includes('生效时间')
     && asArray.ok === false && asArray.error.includes('必须是对象'))
 
-  // 反向:宿主拒绝的键规则不能是「草稿以为能存」的那种。长度上限与保留键前缀同源于
-  // `price-format.ts`,所以草稿这一侧就报得出位置与原因,而不是整份文件被拒。
   const longRoute = 'r'.repeat(MAX_ROUTE_LENGTH + 1)
   const longModel = 'm'.repeat(MAX_MODEL_LENGTH + 1)
   const keyRefusals: [string, PriceState, string][] = [
@@ -796,7 +721,6 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
   check('草稿自己在本地就报出宿主的键规则与长度上限(带位置与原因)',
     notRefused.length === 0, notRefused.map(([label, draft]) => [label, composePriceBody(draft)]))
 
-  // 写不出去的档必须让这一行保持脏:否则工具栏说「已保存」,而那一格还红着。
   const cacheBaseline = baselinesOf({
     routes: [{
       route: 'r', label: 'r', billing: 'metered', records: 0,
@@ -811,35 +735,146 @@ if (section('价格表写路径:草稿写出去的 body 一定被宿主接受'))
     && composePriceBody(draftOf('r', 'm', { input: '1', output: '4', cacheRead: 'abc' })).ok === false)
 }
 
+if (section('models.dev 补价:节流、失败退避与状态说法')) {
+  const DAY = 86_400_000
+  const now = Date.parse('2026-10-18T12:00:00+08:00')
+  const today = dayKeyOf(now)
+  const stateOf = (patch: Partial<PricingSyncState>): PricingSyncState => ({
+    lastSyncDay: null, lastAttemptAt: null, lastError: null, nextAttemptAt: null, lastAdded: null, ...patch,
+  })
+
+  check('当天已成功 → 自动那条不拉,手动 force 照拉',
+    shouldSyncNow(stateOf({ lastSyncDay: today, lastAttemptAt: now - 3_600_000 }), now, false) === false
+    && shouldSyncNow(stateOf({ lastSyncDay: today }), now, true) === true)
+
+  check('失败后处于退避期 → 自动那条不拉(手动 force 仍可立即重试)',
+    shouldSyncNow(stateOf({ lastAttemptAt: now - 60_000, lastError: 'offline', nextAttemptAt: now + 3_600_000 }), now, false) === false
+    && shouldSyncNow(stateOf({ lastAttemptAt: now - 60_000, lastError: 'offline', nextAttemptAt: now + 3_600_000 }), now, true) === true)
+  check('退避期过了 → 自动那条重新尝试',
+    shouldSyncNow(stateOf({ lastAttemptAt: now - 3 * 3_600_000, lastError: 'offline', nextAttemptAt: now - 60_000 }), now, false) === true)
+  check(`失败退避是 ${String(Math.round(PRICING_SYNC_RETRY_MS / 60_000))} 分钟:刚失败那一刻被挡住,过了才放行`,
+    shouldSyncNow(stateOf({ lastAttemptAt: now, lastError: 'offline', nextAttemptAt: now + PRICING_SYNC_RETRY_MS }), now + 1_000, false) === false
+    && shouldSyncNow(stateOf({ lastAttemptAt: now, lastError: 'offline', nextAttemptAt: now + PRICING_SYNC_RETRY_MS }), now + PRICING_SYNC_RETRY_MS + 1_000, false) === true)
+  check('成功那一笔写出的状态不带退避(下次按当天节流判,不按旧退避判)',
+    (() => {
+      const success = stateOf({ lastSyncDay: today, lastAttemptAt: now, nextAttemptAt: null })
+      return shouldSyncNow(success, now, false) === false
+        && shouldSyncNow(success, now + DAY, false) === true
+    })())
+
+  check('缺失的尝试时刻读作 null → 视为「随时可试」(旧状态文件不会把同步永久冻住)',
+    shouldSyncNow(stateOf({ lastSyncDay: '2026-10-01', lastAttemptAt: null, nextAttemptAt: null }), now, false) === true)
+}
+
+if (section('自动年历:holiday-cn 只补洞,不覆盖手写,也不写进价文件')) {
+  const year2026 = {
+    year: 2026,
+    days: [
+      { name: '元旦', date: '2026-01-01', isOffDay: true },
+      { name: '元旦', date: '2026-01-02', isOffDay: true },
+      { name: '春节', date: '2026-02-14', isOffDay: false },
+      { name: '春节', date: '2026-02-15', isOffDay: true },
+      { name: '春节', date: '2026-02-16', isOffDay: true },
+    ],
+  }
+  const parsed = parseHolidayYear(year2026, '2026')
+  check('只收 isOffDay 的那些天,相邻日并成一段(调休上班日不进年历)',
+    parsed !== null
+    && parsed.length === 2
+    && parsed[0]!.start === '2026-01-01' && parsed[0]!.end === '2026-01-02'
+    && parsed[1]!.start === '2026-02-15' && parsed[1]!.end === '2026-02-16',
+    parsed)
+
+  check('读不懂的载荷答 null,未公布的年份答空数组(两者处置不同)',
+    parseHolidayYear({ year: 2026 }, '2026') === null
+    && parseHolidayYear(null, '2026') === null
+    && parseHolidayYear({ year: 2026, days: [] }, '2026')?.length === 0)
+
+  check('载荷里的 year 与请求的年份不符时不采',
+    parseHolidayYear({ year: 2025, days: [{ date: '2026-01-01', isOffDay: true }] }, '2026') === null)
+
+  const manual: HolidayCalendar = { 2026: [{ start: '2026-10-01', end: '2026-10-07' }] }
+  const auto: HolidayCalendar = {
+    2026: [{ start: '2026-01-01', end: '2026-01-02' }],
+    2027: [{ start: '2027-01-01', end: '2027-01-01' }],
+  }
+  const merged = mergeHolidayCalendars(manual, auto)
+  check('手写有那一年就整年用手写的,自动只补手写没有的年份',
+    merged[2026]!.length === 1 && merged[2026]![0]!.start === '2026-10-01'
+    && merged[2027]![0]!.start === '2027-01-01')
+  check('「哪几年是自动来的」只列手写没有的那些',
+    autoOnly(manual, auto)['2026'] === undefined && autoOnly(manual, auto)['2027'] !== undefined)
+
+  const mergedView = mergeHolidayCalendars(manual, auto)
+  const autoDraft = draftFromView({
+    routes: [], calendar: mergedView,
+    calendarAuto: Object.keys(autoOnly(manual, auto)), calendarMissing: [],
+    sync: { lastSyncDay: null, lastError: null }, dataDir: 'x', updatedAt: 0,
+  })
+  check('播种时自动年份进草稿(屏上看得见),但被记进 autoYears',
+    autoDraft.calendar.has('2027') && autoDraft.autoYears.has('2027') && !autoDraft.autoYears.has('2026'))
+  const autoBody = composePriceBody(autoDraft)
+  check('自动年份不写回 pricing.json——只有手写的那一年进去(写回去就固化成手写数据)',
+    autoBody.ok && JSON.stringify(autoBody.body['$calendar']) === JSON.stringify(manual), autoBody)
+  const manualDraft = draftFromView({
+    routes: [], calendar: manual, calendarMissing: [],
+    sync: { lastSyncDay: null, lastError: null }, dataDir: 'x', updatedAt: 0,
+  })
+  const manualBody = composePriceBody(manualDraft)
+  check('手写年份照旧写回文件',
+    manualBody.ok && JSON.stringify(manualBody.body['$calendar']) === JSON.stringify(manual),
+    manualBody)
+
+  const adopted = adoptYear(autoDraft, '2027')
+  const adoptedBody = composePriceBody(adopted)
+  check('用户手改过自动年份之后,那一年就算手写并写回文件',
+    !adopted.autoYears.has('2027')
+    && adoptedBody.ok && adoptedBody.body['$calendar'] !== undefined, adoptedBody)
+
+  const holidays = holidaySet(merged)
+  check('合并后的年历真的影响 workdays 判定(假日的『法定工作日』时段不生效)',
+    daySetCovers('workdays', 4, '2026-10-01', holidays) === false
+    && daySetCovers('workdays', 4, '2026-09-24', holidays) === true)
+
+  const DAY = 86_400_000
+  const now = Date.parse('2026-10-18T12:00:00+08:00')
+  const cacheWith = (patch: Parameters<typeof autoHolidayState>[0]) => patch
+  const have2026 = { years: { '2026': { ranges: [{ start: '2026-01-01', end: '2026-01-03' }], fetchedAt: now - 3_600_000 } } }
+  check('刚拉成功 → ok(界面说「无需手动填写」)',
+    autoHolidayState(cacheWith(have2026), ['2026'], now).state === 'ok')
+  check('拉失败但手里有旧数据 → failed(界面说「仍是上次的,可以重试/手填」)',
+    autoHolidayState(cacheWith({ ...have2026, lastAttemptAt: now - 60_000, lastError: 'offline' }), ['2026'], now).state === 'failed')
+  check('超过一天没拉成功 → stale(界面说「数据仍可用」)',
+    autoHolidayState(cacheWith({ years: { '2026': { ranges: [{ start: '2026-01-01', end: '2026-01-01' }], fetchedAt: now - 3 * DAY } }, lastAttemptAt: now - 3 * DAY }), ['2026'], now).state === 'stale')
+  check('一年都没有 → missing(这才是该劝手动填的那一档)',
+    autoHolidayState(cacheWith({ years: {}, lastAttemptAt: now - 60_000, lastError: 'offline' }), ['2026'], now).state === 'missing'
+    && autoHolidayState(cacheWith({ years: { '2026': { ranges: [], fetchedAt: now } } }), ['2026'], now).state === 'missing')
+  check('要的年份全是手写时算 ok,不劝用户去拉',
+    autoHolidayState(cacheWith({ years: {} }), [], now).state === 'ok')
+}
+
 if (section('价格表币种:按通道报价币种记,汇率只用来折成人民币')) {
   const USD: MoneyView = { route: 'USD', cnyPerUsd: 7.15 }
   const CNY: MoneyView = { route: 'CNY', cnyPerUsd: 7.15 }
   const NO_RATE: MoneyView = { route: 'USD', cnyPerUsd: null }
 
-  // 格子里的数就是文件里的数:没有透镜,所以敲什么存什么。半输入(`1.`)与极小价的指数写法
-  // 都算数;十六进制不算——`Number('0x10')` 是 16,一个「必须是数字」的格子不该把它读成 16。
   check('价的写法:十进制与指数收,半输入收,十六进制 / 负数 / 千分位不收',
     parseAmount('0.28') === 0.28 && parseAmount('1.') === 1 && parseAmount('.5') === 0.5
     && parseAmount('1e-7') === 1e-7 && parseAmount('') === null && parseAmount('abc') === null
     && parseAmount('-1') === null && parseAmount('0x10') === null && parseAmount('1_000') === null)
 
-  // 悬停那一眼:美元通道报人民币(那是**计入金额**的数,等号),人民币通道报美元(只是给你读,约等号)。
-  // 没有汇率 / 原文不是数 → 什么也不报,绝不按 1 算。
   check('提示里的另一种货币:美元→人民币是等号,人民币→美元是约等号,换不出来就不报',
     counterpartOf(USD, '0.15') === '= ¥1.0725/百万词元'
     && counterpartOf(CNY, '1.005') === '≈ $0.140559/百万词元'
     && counterpartOf(NO_RATE, '0.15') === null && counterpartOf(USD, 'abc') === null
     && unitOf(USD) === '$/百万词元' && unitOf(CNY) === '¥/百万词元')
 
-  // 切换报价币种换算**已有的**数:人民币金额(6 位小数内)不变,而且换得回来。
   check('切换报价币种换算已有的数,来回一趟回到原值;换不出来(没汇率)就不动',
     convertText(USD, '0.15', 'CNY') === '1.0725' && convertText(CNY, '1.0725', 'USD') === '0.15'
     && convertText(USD, '', 'CNY') === '' && convertText(USD, 'abc', 'CNY') === null
     && convertText(NO_RATE, '0.15', 'CNY') === null
     && convertText(USD, '0.15', 'USD') === '0.15')
 
-  // 计价那一步:美元通道乘汇率进人民币表,人民币通道原样;**没有汇率就丢掉美元通道**
-  // (读作价格未知),绝不把美元数当人民币——那会差一个数量级,而账本会当真金白银算。
   const table: PricingTable = {
     'usd-route': { m: { rates: { inputPerMillion: 0.15, outputPerMillion: 0.6, cacheReadPerMillion: 0.02 } } },
     'cny-route': { m: { rates: { inputPerMillion: 1, outputPerMillion: 4 } } },
@@ -854,7 +889,6 @@ if (section('价格表币种:按通道报价币种记,汇率只用来折成人�
     cnyTable(table, { 'usd-route': 'USD' }, undefined)['usd-route'] === undefined
     && cnyTable(table, { 'usd-route': 'USD' }, undefined)['cny-route'] !== undefined)
 
-  // 草稿这一侧:报价币种从视图播种,换币种算一处脏(价跟着换),只改汇率不弄脏任何一行。
   const view: PricingView = {
     routes: [
       { route: 'usd-route', label: 'u', billing: 'subscription', currency: 'USD', records: 3, models: [
@@ -881,14 +915,12 @@ if (section('价格表币种:按通道报价币种记,汇率只用来折成人�
     && fxSignature('7.150') === fxSignature('7.15') && fxValue('') === null && fxValue('0') === null
     && withRouteCurrency(seeded, 'cny-route', 'USD', null) === seeded)
 
-  // wire:美元通道写进 `$currency`、人民币通道不写;汇率照旧。宿主同一套解析收下它。
   const body = composePriceBody(seeded)
   check('$currency 随保存 body 出去且被宿主接受:只写美元那几条,人民币不写',
     body.ok && JSON.stringify(body.body[PRICING_CURRENCY_KEY]) === JSON.stringify({ 'usd-route': 'USD' })
     && body.body[PRICING_FX_KEY] !== undefined && parsePriceInput(body.body).ok
     && JSON.stringify(parsePriceInput(body.body).file.currency) === JSON.stringify({ 'usd-route': 'USD' }))
 
-  // 美元报价**必须有汇率**:清掉汇率那条路被挡住,而不是写下去之后金额整条读作未知。
   const noRate = composePriceBody(withFx(seeded, ''))
   const rateFreeState = withFx(withRouteCurrency(seeded, 'usd-route', 'CNY', 7.15), '')
   check('有美元通道时清空汇率挡住整笔保存(理由指到汇率与那条通道)',
@@ -896,7 +928,6 @@ if (section('价格表币种:按通道报价币种记,汇率只用来折成人�
     && composePriceBody(rateFreeState).ok
     && composePriceBody(rateFreeState).body[PRICING_FX_KEY] === undefined)
 
-  // 填了却写不出去的汇率照旧挡住整笔(与四档价里那一格红着是同一条尺子)。
   const badRates = ['abc', '0', '-1'].filter((text) => {
     const composed = composePriceBody(withFx(seeded, text))
     return composed.ok || !composed.error.includes('汇率')
@@ -905,7 +936,6 @@ if (section('价格表币种:按通道报价币种记,汇率只用来折成人�
     && composePriceBody(withFx(rateFreeState, '  ')).ok
     && composePriceBody(withFx(rateFreeState, '')).body[PRICING_FX_KEY] === undefined)
 
-  // 宿主侧的严格解析:坏 `$currency` 与「美元但没有汇率」各自以出错位置拒绝。
   const usdOnly = { 'usd-route': { m: { inputPerMillion: 0.15, outputPerMillion: 0.6 } } }
   const malformed: [Record<string, unknown>, string][] = [
     [{ [PRICING_CURRENCY_KEY]: 7.15 }, PRICING_CURRENCY_KEY],
@@ -924,12 +954,10 @@ if (section('价格表币种:按通道报价币种记,汇率只用来折成人�
   check('美元报价没有汇率 → 宿主拒绝整笔(而不是写进去让金额变成未知)',
     !noFx.ok && noFx.error.includes('汇率'))
 
-  // 读路径宽容:畸形的 `$currency` 只掉它自己,价照读(与 `$fx` 同一条尺子)。
   const lenient = coercePriceFile({ [PRICING_CURRENCY_KEY]: { r: 'EUR', ok: 'USD' } }, quiet)
   check('读路径宽容:坏币种只掉那条,合法的那条留着',
     lenient.currency.ok === 'USD' && lenient.currency.r === undefined)
 
-  // 美元通道的数**原样**落盘、原样读回来:它不是人民币,写路径上也不该被换算。
   const usdDir = await mkdtemp(join(tmpdir(), 'tokbook-fx-'))
   try {
     const body = composePriceBody(seeded)
@@ -948,7 +976,6 @@ if (section('价格表币种:按通道报价币种记,汇率只用来折成人�
     await rm(usdDir, { recursive: true, force: true })
   }
 
-  // 鬼影与说明里的数:留空的档报的是**同一种货币**下的沿用量,与格子同一单位。
   const showRow = modelRow({ input: '0.15', output: '0.6', cacheRead: '' })
   const shown = inheritedCell(showRow, null, 'cacheRead')
   check('留空档的鬼影与说明用同一种货币(不换算),cache 档回落到输入价',
@@ -978,15 +1005,12 @@ if (section('折叠自证有效:天级水位线看不见往日的追加')) {
     cases.every(([, actual, expected]) => actual === expected),
     cases.filter(([, actual, expected]) => actual !== expected).map(([label]) => label))
 
-  // 一次瞬时读失败(EMFILE/EBUSY/EACCES)不能让那一天永久少算:读不到 ≠ 这天没有记录。
-  // 降级为空但**不记下版本戳**,于是折叠的 `files` 里没有这一天,而它在 `upto` 水位线之内
-  // ——下一次读就据第二段判据整份作废重折,文件恢复可读后自愈。
   const readDir = await mkdtemp(join(tmpdir(), 'tokbook-unreadable-'))
   const dayA = 'usage-2026-03-01.jsonl'
   const dayB = 'usage-2026-03-02.jsonl'
   try {
     await writeFile(join(readDir, dayA), `${serializeRecord({ requestId: 'r-a', time: dayMillis('2026-03-01', 9), sessionId: 's', provider: 'p', model: 'm', usage: { inputTokens: 1000, outputTokens: 10 } })}\n`, 'utf8')
-    await mkdir(join(readDir, dayB)) // 同名目录:stat 成功、readFile 报 EISDIR
+    await mkdir(join(readDir, dayB))
     const first = await buildSummary(readDir, () => new Date(2026, 2, 3), () => UNPRICED_KEY, quiet)
     const written = await readRollup(readDir, quiet, '')
     const liveStamps = new Map<string, string>()
@@ -1059,8 +1083,6 @@ if (section('工作区:按目录累计用量')) {
     { id: 'w-wiki', title: 'wiki', path: resolve('tokbook-smoke', 'wiki') },
     { id: 'w-cold', title: 'cold', path: resolve('tokbook-smoke', 'cold') },
   ]
-  // 同一目录的另一种写法(分隔符 + `.`)算同一个工作区;没注册的目录与日志已消失的会话
-  // 落进唯一的「未归属」行;只失败过的已注册工作区不出现。
   const cwd = new Map<string, string>([
     ['s-new', harness + sep + '.'],
     ['s-old', resolve('tokbook-smoke', 'wiki')],
@@ -1094,8 +1116,6 @@ if (section('端到端:真形状的 DSH 事件 → JSONL 账本 → 聚合 → �
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-'))
   try {
     const log = new UsageLog(dir, quiet)
-    // request/context → 两条计费 assistant/message → 一条通道没上报用量的 → summarize
-    // → llm/retry 与 turn/end 两次失败 → 又一次没上报用量的 summarize。
     const events: SessionEventLike[] = [
       { type: 'request/context', time: dayMillis('2026-02-01', 9), seq: 0, data: { provider: 'deepseek', model: 'deepseek-chat' } },
       { type: 'assistant/message', time: dayMillis('2026-02-01', 9), seq: 1, data: { message: { id: 'msg-1', source: { provider: 'deepseek', model: 'deepseek-chat' } }, usage: { inputTokens: 1200, outputTokens: 300, cacheReadTokens: 500 } } },
@@ -1126,8 +1146,6 @@ if (section('端到端:真形状的 DSH 事件 → JSONL 账本 → 聚合 → �
       summary.total.inputTokens === 2180 && summary.total.outputTokens === 1000 && summary.total.requests === 5
       && summary.total.compactions === 2 && summary.total.failures === 2 && summary.total.usageUnknown === 2
       && costed.totalCost > 0 && summary.byDay.length === 1 && totalsTokens(summary.byDay[0]!.totals) === 3780)
-    // 聚合身份是 (通道, 模型):没归属的失败行(带着最后已知的模型、却没有 provider 头)自成一
-    // 行,绝不并进计费行。
     check('聚合身份是 (通道, 模型):同一模型经两条通道不合并,没归属的失败行自成一格',
       summary.byModel.length === 3
       && summary.byModel.some(r => r.provider === 'deepseek' && r.model === 'deepseek-chat' && r.totals.requests === 3 && r.totals.usageUnknown === 1)
@@ -1164,7 +1182,6 @@ if (section('新鲜度门:什么时候值得重走历史')) {
 
 if (section('持久化列表与历史回填')) {
   const inspect = async () => ({ meta: { id: 'x' }, events: [] })
-  // `list()` 只回带 header 的裸快照,是真实形状;调用方必须归一化(浮窗那次 HTTP 500 的成因)。
   const bare = await listPersistenceSnapshots({ inspect, list: async () => [{ id: 's1' }, { version: 1 }] as never[] })
   const preferred = await listPersistenceSnapshots({
     inspect,
@@ -1200,8 +1217,6 @@ if (section('历史回填 syncHistory')) {
     const again = await syncHistory({ persistence, log, recordCompaction: true })
     check('回填把 2 条请求 + 1 次压缩 + 2 次失败记成 5 行,再跑一次不重复写(幂等)',
       result.added === 5 && result.skipped === 0 && result.failedSessions === 0 && again.added === 0 && again.skipped === 5)
-    // 格式迁移会稠密重排信封 seq:压缩/失败行的身份必须取自事件自带的 id,
-    // 否则同一事件会被记成两行(压缩成本与失败计数都会偏)。
     const shifted = events.map(event => ({ ...event, seq: event.seq + 4096 }))
     const afterMigration = await syncHistory({
       persistence: {
@@ -1213,7 +1228,6 @@ if (section('历史回填 syncHistory')) {
     })
     check('信封 seq 被格式迁移重排后回填不重复写(身份取自事件自带 id)',
       afterMigration.added === 0 && afterMigration.skipped === 5 && afterMigration.failedSessions === 0)
-    // 一个会话读不动时跳过它并计数,不弄坏其余会话。
     const partial = await syncHistory({
       persistence: {
         listSnapshots: async () => [{ header: { id: 'bad', version: 1 }, revision: 'rev-b' }, { header: { id: 'sess-1', version: 1 }, revision: 'rev-1' }],
@@ -1227,8 +1241,6 @@ if (section('历史回填 syncHistory')) {
       recordCompaction: true,
     })
     check('读不动的会话被跳过并计数,其余照常走完', partial.failedSessions === 1 && partial.skipped === 5)
-    // 0.1.7 起的持久化面没有 inspect/listSnapshots:`list()` 给快照,
-    // `open(id,'read')` 给只读句柄。回填必须走这条路,且句柄读完就关。
     const accesses: string[] = []
     const handles: string[] = []
     const v4 = {
@@ -1245,7 +1257,6 @@ if (section('历史回填 syncHistory')) {
     check('新持久化面(list + open/read、无 inspect)照样回填,句柄只读且读完即关',
       viaHandles.added === 0 && viaHandles.skipped === 5 && viaHandles.failedSessions === 0
       && accesses.join(',') === 'sess-1:read' && handles.join(',') === 'sess-1')
-    // 两条读法都没有时,该会话计失败而不是把整轮 walk 掀掉。
     const neither = await syncHistory({
       persistence: { list: async () => [{ header: { id: 'sess-1' }, revision: 'rev-1' }] },
       log,
@@ -1258,7 +1269,6 @@ if (section('历史回填 syncHistory')) {
 }
 
 if (section('通道卡片与按模型切法')) {
-  // 同一个模型串经两条通道计费必须分开:卡片按通道分区,(通道, 模型) 在卡内唯一。
   const records: UsageRecord[] = [
     { requestId: 'r1', time: dayMillis('2026-03-01', 9), sessionId: 's1', provider: 'deepseek-official', model: 'deepseek-v4-flash', usage: { inputTokens: 1000, outputTokens: 200 } },
     { requestId: 'r2', time: dayMillis('2026-03-01', 9), sessionId: 's2', provider: 'opencode-go', model: 'deepseek-v4-flash', usage: { inputTokens: 500, outputTokens: 50 } },
@@ -1280,7 +1290,6 @@ if (section('通道卡片与按模型切法')) {
     cards.length === 2 && cards[0]?.provider === 'deepseek-official' && cards[1]?.provider === 'opencode-go'
     && deepseek?.requests === 1 && opencode?.requests === 2 && deepseek?.tokens === 1200 && opencode?.tokens === 1090
     && deepseek?.models.length === 1 && opencode?.models.length === 2 && deepseek?.unpricedModels.length === 0)
-  // 按模型切法就是各卡模型行摊平:两种切法同源,同一窗口的两个合计数必然相等。
   const modelRows = window.byModel
   const four = (t: { inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }): number =>
     t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens + t.outputTokens
@@ -1289,7 +1298,6 @@ if (section('通道卡片与按模型切法')) {
     && modelRows.reduce((sum, r) => sum + four(r.totals), 0) === cards.reduce((sum, c) => sum + c.tokens, 0))
   const unpriced = aggregateWindow([{ requestId: 'r5', time: dayMillis('2026-03-01', 11), sessionId: 's3', provider: 'mystery', model: 'brand-new-x', usage: { inputTokens: 10, outputTokens: 10 } }], null, () => undefined, pricing, (r) => rateKeyAt(pricing, r.provider, r.model, r.time)).providers
   check('没定价的模型按 ¥0 计,并在卡上列出来', unpriced[0]?.unpricedModels.join() === 'brand-new-x' && unpriced[0]?.cost === 0 && unpriced[0]?.models[0]?.cost === 0)
-  // 没有工作区注册表的宿主:按工作区这一面**不存在**(空),不是「全部未归属」。
   check('没有工作区注册表时按工作区是空的,而不是把记录全塞进未归属',
     window.byWorkspace.length === 0 && window.providers.reduce((sum, c) => sum + c.requests, 0) === 3)
 }
@@ -1353,9 +1361,6 @@ if (section('额度:窗口归一化')) {
   const info = planInfoFromSubscriptions({ planId: 'individual-goat', status: 'active', currentPeriodEnd: epoch })
   check('计划身份:保留 id / 状态 / 周期末,空对象不产出计划',
     info?.planId === 'individual-goat' && info?.status === 'active' && info?.periodEnd === epoch && planInfoFromSubscriptions({}) === undefined)
-  // 「小数字是倒计时秒数」需要上限:1_760_000_000 是 2025 年的秒级 epoch,不设上限会被
-  // 当成「距重置 1.76e9 秒」外推到 2081 年,于是一个**已经过期**的订阅被 quotaGate 报成
-  // 生效中(门决定告急点与卡片正文)。
   const secondsEpoch = 1_760_000_000
   check('秒级 epoch 原样当毫秒读(不倒计时外推),过期订阅因此不再被报成生效中',
     resetEpoch(secondsEpoch, epoch) === secondsEpoch
@@ -1384,7 +1389,6 @@ if (section('额度:门只从答复推导,绝不从失败推导')) {
     && (balanceGateNote(undefined, now) ?? '').includes('余额')
     && dayText(new Date(2026, 0, 5).getTime()) === '2026-01-05')
 
-  // 端点没答复:卡上没有门,也就没有一句关于订阅状态的话——绝不对着订阅期的账户说「没订阅」。
   const failed = errorCard('commandcode', '官方接口返回 HTTP 500。')
   check('失败的卡不设门、不谈订阅状态;没配置的卡同理;「没有订阅」是答复出来的状态(门 + 说明一起给)',
     failed.gate === undefined && failed.gateNote === undefined && !(failed.message ?? '').includes('未检测到生效中的订阅')
@@ -1463,12 +1467,10 @@ if (section('额度:Command Code 的门只从答复的端点读(桩 HTTP)')) {
     }) as typeof fetch
   }
   try {
-    // 订阅端点 500 = 「不知道」,不是「没订阅」:窗口照旧渲染,一个字的计划断言都不许说。
     mock({ subscriptions: 'fail', credits: 'ok' })
     const unknown = await fetchCommandCodeQuota({ plan: { apiKey: 'k' } })
     check('订阅端点失败 → 不设门、不宣称套餐状态,但保留窗口与计划名',
       unknown.gate === undefined && unknown.gateNote === undefined && unknown.windows.length === 1 && unknown.planInfo?.planId === 'individual-goat')
-    // `balance` 门承诺一个余额;余额没取到时不能印 `$0.00`,降级成和 Go 一样的「没什么可画」。
     mock({ subscriptions: 'lapsed', credits: 'fail' })
     const noBalance = await fetchCommandCodeQuota({ plan: { apiKey: 'k' } })
     mock({ subscriptions: 'lapsed', credits: 'ok' })
@@ -1491,7 +1493,6 @@ if (section('额度:OpenCode Go 的权益状态(桩 HTTP)')) {
   }
   const key = { resolve: async () => 'test-key' }
   try {
-    // 403 = key 有效但没有 Go 订阅:通道答复了,所以是一个状态,不是「查询失败」,也不该重试。
     respond(403, { error: 'no subscription' })
     const noSub = await fetchOpenCodeGoQuota({ credentials: key })
     respond(401, { error: 'invalid-key' })
@@ -1501,7 +1502,6 @@ if (section('额度:OpenCode Go 的权益状态(桩 HTTP)')) {
       && noSub.fetchedAt !== undefined && isQuotaAlert(noSub) === false
       && badKey.state === 'error' && badKey.gate === undefined)
 
-    // 真实形状:usage.rolling / weekly / monthly,percent + resetsAt(ISO)→ 三个窗口按顺序。
     const now = Date.parse('2026-08-14T07:00:00Z')
     const parsed = parseOpenCodeGoUsage({
       usage: {
@@ -1525,7 +1525,6 @@ if (section('额度:OpenCode Go 的权益状态(桩 HTTP)')) {
 if (section('双桶金额:spend vs subscriptionValue')) {
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-dualbucket-'))
   try {
-    // 同一个模型串经三条通道:分桶由价格文件的 $billing 决定,什么也没声明的通道按 metered。
     const pricing: PricingTable = {
       'deepseek-official': { 'deepseek-v4-flash': { rates: { inputPerMillion: 2, outputPerMillion: 8 } } },
       'opencode-go': { 'deepseek-v4-flash': { rates: { inputPerMillion: 2, outputPerMillion: 8 } } },
@@ -1562,14 +1561,12 @@ if (section('双桶金额:spend vs subscriptionValue')) {
 }
 
 if (section('models.dev 同步:归一化 / 门槛 / 手写价保护')) {
-  // --- 归一化:models.dev 与账本各写各的,落到同一个键 ---
   check('归一化剥 vendor/ 前缀、:变体、[1m] 与 @,转小写',
     normalizeModelId('deepseek/deepseek-v4-flash') === 'deepseek-v4-flash'
     && normalizeModelId('Qwen/Qwen3.8-Max-0902:free') === 'qwen3.8-max-0902'
     && normalizeModelId('xai/grok-4.6[1m]') === 'grok-4.6'
     && normalizeModelId('z-ai/glm-5.3@preview') === 'glm-5.3-preview')
 
-  // --- 目录解析:只采信原厂 slug;畸形条目跳过 ---
   const catalogValue = {
     deepseek: { models: { 'deepseek-v4-flash': { name: 'DeepSeek V4 Flash', modalities: { input: ['text'], output: ['text'] }, cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
     'alibaba-cn': { models: { 'deepseek-v4-flash': { name: '转售价', modalities: { output: ['text'] }, cost: { input: 0.14, output: 0.28 } } } },
@@ -1590,7 +1587,6 @@ if (section('models.dev 同步:归一化 / 门槛 / 手写价保护')) {
     anthropic: { models: { 'gpt-x': { modalities: { output: ['text'] }, cost: { input: 1, output: 3 } } } },
   }).has('gpt-x') === false)
 
-  // --- 合并:四道门槛 ---
   const table: PricingTable = {
     commandcode: { 'gpt-5.6-luna': { rates: { inputPerMillion: 0.2, outputPerMillion: 1.2 } } },
     zai: { 'glm-5.3-flash': { rates: { inputPerMillion: 1.065, outputPerMillion: 3.55 } } },
@@ -1616,7 +1612,6 @@ if (section('models.dev 同步:归一化 / 门槛 / 手写价保护')) {
   check('跳过数 = 非美元 + 无条目 + 空目录通道 = 3,added 只数真写进去的',
     report.skipped === 3 && report.added === 1)
 
-  // --- 状态文件:日节流的持久化 ---
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-modelsdev-'))
   try {
     check('状态读:缺失/畸形读作「从未同步」(最坏是多同步一次)',
@@ -1632,7 +1627,6 @@ if (section('models.dev 同步:归一化 / 门槛 / 手写价保护')) {
 }
 
 if (section('models.dev 查价:模糊搜索 / 排序 / 采信边界')) {
-  // --- 采信目录(与「同步」一节同一份) ---
   const catalog = parseCatalog({
     deepseek: { models: { 'deepseek-v4-flash': { name: 'DeepSeek V4 Flash', modalities: { output: ['text'] }, cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
     openai: { models: { 'gpt-x': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } } } },
@@ -1641,17 +1635,14 @@ if (section('models.dev 查价:模糊搜索 / 排序 / 采信边界')) {
       'gpt-5.6-luna': { name: 'GPT-5.6 Luna', modalities: { output: ['text'] }, cost: { input: 0.2, output: 1.2, cache_write: 0.25 } },
       'gemini-3.8-flash': { modalities: { output: ['text'] }, cost: { input: 1, output: 2 } },
     } },
-    // 转售商与分裂价:与同步一节同一批,这里应同样搜不到
     'alibaba-cn': { models: { 'deepseek-v4-flash': { name: '转售价', modalities: { output: ['text'] }, cost: { input: 0.14, output: 0.28 } } } },
     crossmodel: { models: { 'gemini-3.8-flash': { modalities: { output: ['text'] }, cost: { input: 0.75, output: 3.75 } } } },
   })
 
-  // --- 关键词同样走 normalizeModelId:vendor/前缀、:变体、[1m]、@ 都能落到候选集 ---
   check('带 vendor 前缀与长上下文标记的关键词搜到同一条',
     searchCatalog(catalog, 'deepseek/deepseek-v4-flash[1m]').map((m) => m.key).join(',') === 'deepseek-v4-flash'
     && searchCatalog(catalog, 'z-ai/glm-5.3@preview').length === 0)
 
-  // --- 排序:精确命中 > 前缀 > 词级包含 > 名字兜底 ---
   const ranked = searchCatalog(catalog, 'deepseek-v4-flash')
   check('精确命中排第一', ranked[0]?.key === 'deepseek-v4-flash' && ranked.length === 1)
   check('候选带四档价与原厂身份', ranked[0]?.entry.provider === 'deepseek'
@@ -1663,13 +1654,11 @@ if (section('models.dev 查价:模糊搜索 / 排序 / 采信边界')) {
   const qwen = searchCatalog(catalog, 'qwen')
   check('搜不到就返回空(不返回转售价)', qwen.length === 0)
 
-  // --- 采信边界:转售价 / 分裂价 / 已弃用条目同样搜不到 ---
   const reseller = searchCatalog(catalog, 'deepseek-v4-flash')
   check('候选池里没有转售价条目', reseller.every((m) => m.entry.provider !== 'alibaba-cn'))
   const split = searchCatalog(catalog, 'gpt-x')
   check('分裂价整键弃采,搜不到', split.length === 0)
 
-  // --- 空关键词 / 上限 ---
   check('空关键词不搜', searchCatalog(catalog, '').length === 0 && searchCatalog(catalog, '   ').length === 0)
   const many = parseCatalog({
     openai: { models: {
@@ -1688,26 +1677,18 @@ if (section('models.dev 查价:模糊搜索 / 排序 / 采信边界')) {
 }
 
 if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0')) {
-  /** 一组事件 → `buildSessionUsageView` 要的 join 资料。生产里它由 `sessionJoin` 按日志
-   *  revision 缓存（读一次日志、算一次索引），这里只有事件、没有持久化面，所以就地算。 */
   const joinOf = (events: readonly SessionEventLike[] | null, sessionId = 'sess-t'): SessionJoin =>
     (events === null
       ? { turn: null, timing: null, span: null, labels: new Map() }
       : joinOfEvents(sessionId, events))
 
-  /** 一条打包的文本流(messages.dev 那种「首段 + 相邻差值」的紧凑形状)。 */
   const packed = (time0: number, texts: string[], dt: number[]) =>
     ({ type: 'text-chunks', time0, index: 0, dt, texts })
 
-  /** 三步的会话,每步各压一种形态:
-   *  1) 正常一步 —— 首 token、生成、一次工具调用俱全;
-   *  2) 并行两个工具 —— 逐对相加会超过墙钟,取并集才对;
-   *  3) 重试耗尽 —— 有 step/end 没有 assistant/message,所以只有墙钟,没有模型段。 */
   const base = dayMillis('2026-03-01', 9)
   const events: SessionEventLike[] = [
     { type: 'turn/start', time: base, seq: 0, data: { turn: 1 } },
     { type: 'step/start', time: base, seq: 1, data: { turn: 1, step: 1 } },
-    // 首个 token 在 +1000ms:stream 里第一条是块起止(不算 token),打包段从 time0 累加 dt。
     {
       type: 'assistant/message', time: base + 5_000, seq: 2, data: {
         turn: 1, step: 1, usage: { inputTokens: 100, outputTokens: 80 },
@@ -1723,7 +1704,6 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
     { type: 'assistant/message', time: base + 12_000, seq: 7, data: { turn: 1, step: 2, usage: { inputTokens: 50, outputTokens: 20 }, message: { id: 'm2', source: { provider: 'deepseek', model: 'deepseek-chat' } } } },
     { type: 'tool/call', time: base + 12_100, seq: 8, data: { turn: 1, step: 2, callId: 'c2', name: 'grep', arguments: {} } },
     { type: 'tool/call', time: base + 12_200, seq: 9, data: { turn: 1, step: 2, callId: 'c3', name: 'glob', arguments: {} } },
-    // 两个调用并行:第一个结束早、第二个结束晚,并集 = 12_100 → 15_000 = 2.9s(逐对相加是 4.9s)。
     { type: 'tool/result', time: base + 14_000, seq: 10, data: { turn: 1, step: 2, message: { source: { kind: 'tool', callId: 'c2' } } } },
     { type: 'tool/result', time: base + 15_000, seq: 11, data: { turn: 1, step: 2, message: { source: { kind: 'tool', callId: 'c3' } } } },
     { type: 'step/end', time: base + 15_000, seq: 12, data: { turn: 1, step: 2 } },
@@ -1732,10 +1712,8 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
     { type: 'llm/retry', time: base + 21_000, seq: 14, data: { retryId: 'r1', turn: 1, step: 3, provider: 'deepseek', retry: 1, maxRetries: 3, delayMs: 500, failure: { code: 'TRANSPORT' } } },
     { type: 'step/end', time: base + 30_000, seq: 15, data: { turn: 1, step: 3 } },
     { type: 'turn/end', time: base + 31_000, seq: 16, data: { turn: 1, reason: { kind: 'done' } } },
-    // 会话在末事件之后挂起几小时:跨度要含这一段,「引擎工作」不含。
     { type: 'session/title', time: base + 4 * 3_600_000, seq: 17, data: {} },
   ]
-  // 账本行由事件投影而来(与写入侧同一条规则):m1 / m2 两次产出 + 一条重试失败行。
   const records = events
     .map((event) => recordOfEvent(event, 'sess-t', 'deepseek-chat', false))
     .filter((record): record is UsageRecord => record !== null)
@@ -1747,16 +1725,13 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
   const [one, two, three] = rows
 
   check('一步一行,三步都在同一轮下', rows.length === 3 && view.turns.length === 1)
-  // 墙钟 = step/start → step/end;模型 = step/start → assistant/message。
   check('步骤 1:墙钟 6s、模型 5s、首 token 1s(块起止不算 token)、生成 4s',
     one?.timing?.wallMs === 6_000 && one?.timing?.llmMs === 5_000
     && one?.timing?.ttftMs === 1_000 && one?.timing?.decodeMs === 4_000)
   check('步骤 1:一次工具调用 0.9s', one?.timing?.toolMs === 900 && one?.timing?.toolCalls === 1)
-  // 并集而不是逐对相加:相加会得到 4.9s,越过了那一步 5s 的墙钟。
   check('步骤 2:并行两个工具取并集 2.9s(相加会是 4.9s)',
     two?.timing?.toolMs === 2_900 && two?.timing?.toolCalls === 2)
   check('步骤 2:最慢的那次是 2.8s 的 glob', two?.timing?.slowTool?.name === 'glob' && two?.timing?.slowTool?.ms === 2_800)
-  // 重试耗尽的步没有产出:墙钟还在,模型那一段**缺席**——它不是 0,是没得可量。
   check('步骤 3(重试耗尽):只有墙钟 10s,没有模型段、没有首 token',
     three?.timing?.wallMs === 10_000 && three?.timing?.llmMs === undefined
     && three?.timing?.ttftMs === undefined && three?.timing?.toolMs === undefined)
@@ -1767,16 +1742,12 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
       return t.wallMs >= (t.llmMs ?? 0) + (t.toolMs ?? 0)
     }))
 
-  // 会话级:跨度取日志首末事件(含挂起那几小时),工作量只数模型 + 工具。
   check('会话跨度含挂起时间(4 小时)',
     view.spanMs === 4 * 3_600_000)
-  // 引擎工作只数模型 5s + 2s 与工具 0.9s + 2.9s = 10.8s:第 3 步那 10s 花在重试与退避上,
-  // 没有产出可归属,所以它进跨度、不进工作量——这正是两个数并排要让人看见的差额。
   check('引擎工作不含重试退避那 10s(5 + 2 + 0.9 + 2.9 = 10.8s)', view.workMs === 10_800)
   check('分组用时不另存一份,settleTiming 现加等于逐行相加',
     settleTiming(rows).llmMs + settleTiming(rows).toolMs === view.workMs)
 
-  // 日志读不到:跨度与用时都缺席,但账本读数照出——不猜、不用账本首末记录顶替。
   const blind = buildSessionUsageView({
     sessionId: 'sess-t', records, join: joinOf(null),
     pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
@@ -1785,7 +1756,6 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
     blind.spanMs === undefined && blind.workMs === undefined
     && blind.unattributed.every((row) => row.timing === undefined))
 
-  // 压缩行的用时取自 compaction/start → summary 那一段,报成模型用时(它就是那次调用)。
   const compBase = dayMillis('2026-03-02', 9)
   const compEvents: SessionEventLike[] = [
     { type: 'compaction/start', time: compBase, seq: 0, data: { compactionId: 'c1', turn: null } },
@@ -1801,9 +1771,6 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
   check('压缩归轮间,用时是 start → summary 那 20s(报成模型用时,不另记墙钟)',
     compView.betweenTurns !== null && compRow?.timing?.llmMs === 20_000 && compRow.timing.wallMs === undefined)
 
-  // 重试过的步在账本里有**两行**(那次重试的失败行 + 最终产出那行),而 (turn, step) 只有一个、
-  // step/start → step/end 也只有一个区间。按行各报一次就会把同一步的用时加两遍,
-  // 「引擎工作」于是可能超过「会话跨度」(本机 163 个会话有这种重复行)。
   const retryEvents: SessionEventLike[] = [
     { type: 'turn/start', time: base, seq: 0, data: { turn: 1 } },
     { type: 'step/start', time: base, seq: 1, data: { turn: 1, step: 1 } },
@@ -1813,7 +1780,6 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
   ]
   const retryView = buildSessionUsageView({
     sessionId: 'sess-r',
-    // 两行都 join 到 1:1:失败行(重试投影出来的身份)与产出行(消息 id)。
     records: [
       { requestId: recordFromRetry(retryEvents[2]!, 'sess-r', '').requestId, time: base + 2_000, sessionId: 'sess-r', model: 'deepseek-chat', kind: 'failure', failureCode: 'TRANSPORT' },
       { requestId: 'm9', time: base + 8_000, sessionId: 'sess-r', model: 'deepseek-chat', provider: 'deepseek', usage: { inputTokens: 10, outputTokens: 5 } },
@@ -1828,7 +1794,6 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
     retryView.workMs === 8_000 && retryView.spanMs === 9_000)
 }
 
-// 子代理：按会话血缘把下级折成一段，每个**直接**子代理一行、含自己的整棵子树；主合计不并入。
 if (section('会话子代理:整棵子树归一个直接子代理,fork 不算子代理')) {
   const base = dayMillis('2026-03-03', 9)
   const sessions = [
@@ -1836,7 +1801,6 @@ if (section('会话子代理:整棵子树归一个直接子代理,fork 不算子
     { header: { id: 'sub-a', parentSession: 'sess-p', origin: 'subagent' } },
     { header: { id: 'sub-a-1', parentSession: 'sub-a', origin: 'subagent' } },
     { header: { id: 'sub-b', parentSession: 'sess-p', origin: 'subagent' } },
-    // 用户手动 fork 的会话也带 parentSession，但 origin 缺席——它不是子代理。
     { header: { id: 'fork-x', parentSession: 'sess-p' } },
     { header: { id: 'other' } },
   ]
@@ -1864,17 +1828,14 @@ if (section('会话子代理:整棵子树归一个直接子代理,fork 不算子
   const subagents = view.subagents
   check('主合计仍是本会话自己的 100 词元,不并入子代理', view.totalTokens === 100)
   check('两个直接子代理各自一行', subagents?.count === 2 && subagents.rows.length === 2)
-  // sub-a 的 200 与它派出的 sub-a-1 的 300 折进同一行；sub-a-1 不单独占行。
   check('整棵子树折进直接子代理:sub-a 500 = 200 + 300,子代理合计 550',
     subagents?.rows[0]?.sessionId === 'sub-a' && subagents.rows[0].tokens === 500
     && subagents?.totalTokens === 550)
   check('「含 N 个下级」只数它自己的后代', subagents?.rows[0]?.descendants === 1 && subagents?.rows[1]?.descendants === 0)
   check('两个直接子代理按词元降序排列', subagents?.rows[1]?.sessionId === 'sub-b' && subagents?.rows[1]?.tokens === 50)
-  // fork 的 999 与无关会话都不进这一段:只认 origin === 'subagent'。
   check('fork 与无关会话都不算子代理', subagents?.rows.every((row) => row.sessionId !== 'fork-x' && row.sessionId !== 'other') === true)
   check('父会话目录里的创建标签随行到达,缺席时留空', subagents?.rows[0]?.label === '审查计价' && subagents?.rows[1]?.label === '')
   check('整段价格未知时行不报 ¥0 读数', subagents?.rows.every((row) => row.priced === false) === true)
-  // 读不到会话血缘(独立查看器没有持久化面)时整段缺席,不能填成「0 个子代理」。
   const noLineage = buildSessionUsageView({
     sessionId: 'sess-p', records, join: joinOfEvents('sess-p', parentEvents),
     pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
@@ -1882,7 +1843,6 @@ if (section('会话子代理:整棵子树归一个直接子代理,fork 不算子
   check('没有会话清单时子代理一段缺席(不知道 ≠ 没有)', noLineage.subagents === undefined)
 }
 
-// 过滤后一节都没命中,是这里最坏的一种结果:它一条断言都没跑,却和「全绿」长得一模一样。
 if (only !== null && ranSections === 0) {
   console.error(`\nno section matches --only ${JSON.stringify(only)}`)
   process.exit(1)
@@ -1895,7 +1855,6 @@ if (only !== null && ranSections === 0) {
     : `\n${ranSections} section(s) passed (--only ${JSON.stringify(only)})`)
 }
 
-/** 额度卡的 ok 主体:告急判定只读这些窗口与门。 */
 function okCard(windows: { exceeded: boolean; usagePercent: number }[], gate?: 'subscription' | 'balance' | 'none') {
   return {
     plan: 'opencode-go', title: 'OpenCode Go', state: 'ok' as const,

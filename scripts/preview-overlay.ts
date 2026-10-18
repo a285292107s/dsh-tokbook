@@ -1,57 +1,14 @@
-/**
- * dsh-tokbook 浮窗的两种开发载体（dev-only，never shipped）。
- *
- * **预览模式（默认）**—— fixture 台：stubs `window.__ModuleLoader__`, provides the
- * baseline modules (react, jsx-runtime, react-dom/client) the real DSH module
- * table would inject, defines the DSH `--dsw-alias-*` tokens (light + dark),
- * stubs every route the client fetches（六个 `ROUTE_*`，路径从 `src/route-paths.ts` 取）,
- * then mounts the REAL
- * built bundle (`lib/client.js`) through its real `apply()` path and opens the
- * overlay.
- *
- * **独立查看器模式（`--ledger [dir]`）**—— 同一个页面壳、同一份 client bundle，但
- * `/tokbook/*` 由**真的 host 插件**作答：`lib/index.js` 的 `TokenUsageBook` 挂在本
- * 进程的 cordis 根 context 上（DSH 自己的测试也这么起根 ctx），经一个 5 行的
- * `webServer` shim 注册路由，直接读本机账本目录（省略 `dir` 用插件自己的默认值：
- * `$DSH_HOME/tokbook`，否则 `~/.dsh/tokbook`）。不提供 `sessionPersistence`，所以它
- * **只看已入账的历史**——「重新扫描」回报 skipped，不摄取新会话。
- *
- * **fixture 清单要跟着 client 一起改。** 路径不是手抄的（六个 `ROUTE_*` 从
- * `src/route-paths.ts` import，路径写错这件事因此不存在），但**每一路载荷**是手写的：
- * client 换数据源时（例如通道用量 tab 从总览 payload 改成自己的 `ROUTE_USAGE`），漏掉
- * 一路 fixture 不会报错。为了让它别报成一句指错方向的话，未知的 `/tokbook/*` 在这里
- * **显式 404**——落到页面 HTML 会让 client 报「Unexpected token '<'」，既不说缺的是
- * 哪一路，也不说缺在预览台。这条只在预览模式成立：独立查看器由真 host 作答。
- *
- * Query flags: ?dark=1 dark skin, ?tab=ledger|quota|pricing|method（值就是 tab 的 id
- * 后缀，见 LedgerOverlay 的 `dtpl-tab-*`）,
- * ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none quota-tab
- * fixture + auto-switch to the quota tab,
- * ?view=tokens 词元页（`conversation.view` 那个视图）：显形一个**宿主式的对话正文容器**
- * （真宿主给的那两个变量 `--dsh-chat-content-width` / `--dsh-composer-height` 与飘浮输入框
- * 都按真形状给），把词元页渲染进去。这一页走 `ROUTE_SESSION`，形状由
- * `TOKBOOK_SESSION_SCENARIO=rich|one|empty` 选（默认 rich）。
- *
- * 无头校验（playwright 等）在导航前设 `window.__PREVIEW_NO_AUTO = true` 可关掉那个
- * auto-open 循环：它每 100ms 点一次，会跟校验脚本自己的点击抢，而且只认 URL 上的 ?tab=，
- * 顺序点好几个面时对不上。
- *
- * 整台的形状由 **TOKBOOK_MODE 环境变量**选（不是 query flag），一个进程 = 一种形状：
- * `empty` 四路都空（概览 / 用量明细 / 订阅额度 / 价格表各自的空态），`err` 四路都回
- * 500（照 host 的 catch 形状），`sync` / `syncerr` 是诊断带的两态——屏上停在
- * 「正在重新扫描…」与「上次重新扫描失败：…」。要看另一种就换 env 重启。
- */
 import { build } from 'esbuild'
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { QUERY_PROVIDER, QUERY_RANGE, QUERY_SESSION, ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE } from '../src/route-paths.ts'
+import { QUERY_MODEL, QUERY_PROVIDER, QUERY_RANGE, QUERY_SESSION, QUERY_YEAR, ROUTE_HOLIDAY_SYNC, ROUTE_OVERVIEW, ROUTE_PRICING, ROUTE_PRICING_LOOKUP, ROUTE_PRICING_SYNC, ROUTE_QUOTA, ROUTE_RESCAN, ROUTE_SESSION, ROUTE_SYNC, ROUTE_USAGE } from '../src/route-paths.ts'
+import { MODELS_DEV_URL } from '../src/models-dev.ts'
 import { PROVIDER_RANGES } from '../src/types.ts'
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 
-/** `--ledger [dir]` 切到独立查看器模式（见文件头）；省略 dir 用插件自己的默认数据目录。 */
 const argv = process.argv.slice(2)
 const ledgerIndex = argv.findIndex((arg) => arg === '--ledger' || arg.startsWith('--ledger='))
 const LEDGER = ledgerIndex !== -1
@@ -64,12 +21,8 @@ const ledgerDir = ledgerValue === undefined || ledgerValue === '' || ledgerValue
   ? undefined
   : ledgerValue
 
-/** 整台的形状（`empty` / `err` / `sync` / `syncerr`，见文件头）：一个进程一种形状，
- *  所以在这里读一次而不是按请求读。 */
 const MODE = process.env.TOKBOOK_MODE ?? ''
 
-/** `lib/` 是构建产物。client 半区**按请求读盘**（见下），这里读一次只为在没构建时
- *  给出那句有用的报错，并作为读盘失败时的退路。 */
 const clientPath = join(root, 'lib', 'client.js')
 let clientJs
 try {
@@ -79,7 +32,6 @@ try {
   process.exit(1)
 }
 
-/** Bundle react + react-dom as the "baseline module table" for the loader. */
 const baseline = await build({
   stdin: {
     contents: `
@@ -104,15 +56,6 @@ const baseline = await build({
 })
 const baselineJs = baseline.outputFiles[0].text
 
-/* ── 独立查看器：真 host 插件挂在真 cordis 根 context 上 ───────────────────── */
-
-/**
- * 独立查看器不用 fixture：把 `lib/index.js` 的 `TokenUsageBook` 挂在根 context 上，
- * 只补它要的 `webServer` 服务。本插件把那个缝缩成了 `register({kind,path,handler})`
- * （`src/routes.ts` 的 `WebServerLike`），所以 shim 就是一张 path → handler 的表，
- * node:http 按 pathname 派发。缺席的 `sessionPersistence` 让 `ensureFresh()` 立即
- * 返回、`rescan()` 回报 skipped——只看已入账的历史，不摄取新会话。
- */
 const ledgerRoutes = new Map()
 if (LEDGER) {
   let host
@@ -133,15 +76,11 @@ if (LEDGER) {
   ctx.plugin(host.default, ledgerDir === undefined ? {} : { path: ledgerDir })
 }
 
-/** `YYYY-MM-DD`，**本地日**：与 `localDayKey()` 同源。**不能**走 `toISOString()`（UTC 日）——
- *  那会让 UTC+8 的凌晨那几小时里「今天」那一行落到前一天，hero 整块归零、预览看不到有数据
- *  的样子。日期键是 UI 的口径，fixture 必须照它算。 */
 function localDay(date) {
   const pad = (n) => String(n).padStart(2, '0')
   return `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-/** Deterministic-ish daily rows for the last 14 days. */
 function days(n) {
   const rows = []
   const base = new Date()
@@ -165,8 +104,6 @@ function days(n) {
         failures: seed % 7 === 0 ? 1 : 0,
         usageUnknown: seed % 3 === 0 ? 1 : 0,
       },
-      // 今日（最后一行）两个桶都非零，所以 hero 的两条金额行都能看到；其余日子
-      // 有一部分是纯按量日（订阅桶为 0），用来看「只列非零桶」那条规则。
       spend: Math.round((tokens / 2_400_000) * 100) / 100,
       subscriptionValue: seed % 3 === 0 ? Math.round((tokens / 6_000_000) * 100) / 100 : 0,
     })
@@ -178,16 +115,6 @@ const mk = (inputTokens, cacheReadTokens, outputTokens, requests = 1) => ({
   requests, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens: 0,
 })
 
-/**
- * 概览载荷。**键集合与 `TokBookOverview`（`src/types.ts`）逐字对齐**：host 发的是
- * `src/index.ts` 那次瘦身后的形状（omit 掉 pricing / rateRows / byHour / byModel /
- * unpricedModels）。**不许**多带 host 不发的键——多一个听着无害，实际是把一整类 bug 藏起来：
- * client 若读了一个**只在 preview 里存在**的键，这里一切正常，到真宿主才炸。fixture 只端
- * host 端得出来的形状。
- *
- * 按模型 / 按工作区**不在这里**：两者是窗口的切法，随 `ROUTE_USAGE` 走（见下面的
- * USAGE_CARDS）；价格未知同理只在用量明细的通道卡与价格表里可见。
- */
 const overview = {
   total: { ...mk(1_920_000, 6_310_000, 486_000, 214), compactions: 6, failures: 3, usageUnknown: 5 },
   byDay: days(14),
@@ -211,66 +138,38 @@ const emptyOverview = {
   lastEventAt: null, syncStatus: 'idle', syncError: null,
 }
 
-/** 诊断带的两态（`TOKBOOK_MODE=sync|syncerr`）。这两态在预览台里**必须够得着**：
- *  否则概览恒报 `done`、探针也恒答 `done`——而「正在重新扫描…」与「上次重新扫描失败：…」
- *  正是数据变旧时用户唯一会读到的两句话。 */
 const runningOverview = { ...overview, syncStatus: 'running' }
 const syncErrorText = 'EACCES: permission denied, scandir C:\\Users\\28529\\.dsh\\sessions'
 const syncErrOverview = { ...overview, syncStatus: 'error', syncError: syncErrorText }
 
-/* ── pricing-tab fixtures ── */
-/** Pricing-tab fixture: the route cards the 价格表 tab renders. One card per
- *  route, one row per model, each carrying its **current price** (基准价四档 +
- *  例外时段). The states worth looking at are all here: 有价（含峰谷时段）,
- *  价格未知（整行没有价）, 有价但 host 报出折算不出的记录（按美元报价却没设汇率
- *  那种，行上带「价格未知」）, a configured:false string (the config no longer
- *  lists it), a 订阅 route, a 0 价 route, and a route that only exists because
- *  the price file names it.
- *
- *  每张卡的 `records` 必须**等于该卡各行之和**：host 用同一次折叠同时算出这两个
- *  数（`ledgerUsageOf`），单独编一个总量会端出 host 产不出的形状——卡片头上写着
- *  「N 次请求」，下面各行的数加起来却是另一个数。 */
 const PRICING_FIXTURE = {
   routes: [
     {
       route: 'deepseek-official', label: 'DeepSeek', billing: 'metered', records: 7058,
       models: [
-        // 带峰谷时段的一条：工作日高峰另定，其余时间按基准价。
         { model: 'deepseek-v4-flash', configured: true, records: 322, unpriced: 0,
           price: { inputPerMillion: 1, outputPerMillion: 4, cacheReadPerMillion: 0.02,
             slots: [
               { days: 'weekdays', start: 9, end: 12, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
               { days: 'workdays', start: 14, end: 18, inputPerMillion: 2, outputPerMillion: 8, cacheReadPerMillion: 0.04 },
             ] } },
-        // 只重述输出价的一条时段（留空的档沿用基准价）。
         { model: 'deepseek-v4-flash-vision-exp', configured: true, records: 3092, unpriced: 0,
           price: { inputPerMillion: 1.5, outputPerMillion: 4.5, cacheWritePerMillion: 0.05,
             slots: [{ days: 'weekends', start: 0, end: 24, outputPerMillion: 6 }] } },
-        // **有价、行上仍带「价格未知」**：host 报出这些记录折算不出金额——生产里唯一的来路是
-        // 「按美元报价却没设汇率」的通道（换算表里整条被丢）。价位仍在，读作 ¥0 的那些记录不算在内。
         { model: 'deepseek-v4.1-flash', configured: true, records: 899, unpriced: 12,
           price: { inputPerMillion: 3, outputPerMillion: 8 } },
-        // 目录给了展示名:身份行随之走比例体(精确串才走等宽),而且它**没有徽标**——
-        // 正是「有没有名字」与「有没有徽章」必须分开判的那一格(见 styles/pricing 的 [data-exact])。
         { model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', configured: true, records: 2745, unpriced: 0,
           price: { inputPerMillion: 4.5, outputPerMillion: 13.5, cacheWritePerMillion: 0.15 } },
-        // 账本没记过这条串(还没调用过):有价就有四个数字,记录数为「没记过」。
         { model: 'deepseek-flash', configured: true, records: 0, unpriced: 0,
           price: { inputPerMillion: 1, outputPerMillion: 4, cacheWritePerMillion: 0.02 } },
-        // 有价、但账本没记过。
         { model: 'deepseek-v4-flash-vision', configured: true, records: 0, unpriced: 0,
           price: { inputPerMillion: 1.5, outputPerMillion: 4.5 } },
-        // 没有价:四格是「—」,行读作价格未知(它的记录按 ¥0 计)。
         { model: 'deepseek-v4.2-flash-preview', configured: true, records: 0, unpriced: 0 },
       ],
     },
     {
-      // **按美元报价的通道**（`$currency`）：价里的数就是厂商给的美元价，人民币金额由 `$fx`
-      // 折出来。这一条让「美元报价 + 人民币计价」两件事同时可看、可点。
       route: 'commandcode', label: 'commandcode', billing: 'subscription', currency: 'USD', records: 3240,
       models: [
-        // **最长的一个身份串**（命名空间前缀 + 长版本串）：留着它当宽度压力用例——身份行整列宽
-        // 都归名字，别让后来的改动把长串挤到第二行。
         { model: 'deepseek/deepseek-v4-flash', configured: false, records: 2964, unpriced: 0,
           price: { inputPerMillion: 0.14, outputPerMillion: 0.56, cacheReadPerMillion: 0.0028,
             slots: [
@@ -282,7 +181,6 @@ const PRICING_FIXTURE = {
     {
       route: 'dots-ai', label: '小红书', billing: 'metered', records: 644,
       models: [
-        // 一条 0 价的价:金额量出来就是 0.00,不是「价格未知」。
         { model: 'dots3-note-prev', configured: true, records: 644, unpriced: 0,
           price: { inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 } },
       ],
@@ -292,18 +190,12 @@ const PRICING_FIXTURE = {
       models: [
         { model: 'glm-5.3-flash', configured: true, records: 243, unpriced: 0,
           price: { inputPerMillion: 0.8, outputPerMillion: 2.8 } },
-        // 没有价、但有账:整行没有价,写不出去的记录按 ¥0 计——「全部计 ¥0」是「价格未知」
-        // 徽标的事,界面里也不该动用警示色。
         { model: 'mimo-v2.5', configured: true, records: 83, unpriced: 83 },
-        // 配置里已经没有这条串了,只有账本记得它:界面上不再播报这个身份事实,照样可定价。
         { model: 'retired-model', configured: false, records: 41, unpriced: 41 },
-        // 没有价、账本也从没调用过它:刚加进配置、还没定价的一条串。行上四个格子是「—」,
-        // 判定带说的是「还没有价」——而不是「它的请求都按 ¥0 记」(那些请求不存在,那是一句假话)。
         { model: 'glm-5.4-air', configured: true, records: 0, unpriced: 0 },
       ],
     },
     {
-      // 配置里已删掉、但账本/价格文件还记得的路由。
       route: 'private-relay', label: 'private-relay', billing: 'metered', records: 42,
       models: [
         { model: 'deepseek-v4-flash', configured: false, records: 42, unpriced: 0,
@@ -311,8 +203,6 @@ const PRICING_FIXTURE = {
       ],
     },
   ],
-  // 年历只收录了去年：今年的安排还没公布——**缺年**是这套数据唯一要人记得补的状态，
-  // 所以 fixture 默认就停在它上面（头里那句告警 + 一颗「补上」都看得见）。
   calendar: {
     2025: [
       { start: '2025-01-28', end: '2025-02-04' },
@@ -320,46 +210,79 @@ const PRICING_FIXTURE = {
     ],
   },
   calendarMissing: ['2026'],
-  // 汇率（`$fx`）：价格表的美元读写面靠它换算。默认给一个真值，好让「切到美元看四档价」
-  // 这条路径一打开就在；把它清空就是「未设汇率」那一态（美元开关停用）。
   fx: { cnyPerUsd: 7.15 },
-  // models.dev 补价的状态：client 挂载即读它（`sync.lastError`），所以这一路**必须有**——
-  // host 的 `readPricingView` 无条件给，fixture 少这一个键会让整块面板在渲染期抛错。
-  sync: { lastSyncDay: null, lastError: null },
   dataDir: 'C:\\Users\\28529\\.dsh\\tokbook',
   updatedAt: Date.now(),
 }
 
-/* ── pricing writes (fixture-level) ─────────────────────────────────────── */
-/**
- * The preview accepts the 价格表 tab's whole-file PUT and merges it into the
- * fixture, so the staged save and its re-seed can be exercised in the browser
- * (nothing is persisted, and the merge is a fixture approximation of the host's
- * own read path — not a reimplementation of it).
- */
 const pricingState = {
   routes: PRICING_FIXTURE.routes,
   calendar: PRICING_FIXTURE.calendar,
-  // 汇率与年历同档：PUT 整体替换它（清空 → `$fx` 被省掉 → 这里成为 undefined，正是
-  // 「未设汇率」在 wire 上的样子）。
+  auto: {},
+  autoFetched: [],
+  autoAttemptAt: null,
+  autoError: null,
+  syncDay: null,
+  syncLastAdded: null,
+  syncLastAttemptAt: null,
+  syncLastError: null,
+  syncNextAttemptAt: null,
   fx: PRICING_FIXTURE.fx,
 }
 
 function pricingView() {
+  const calendar = { ...pricingState.auto, ...pricingState.calendar }
+  const manualYears = new Set(Object.keys(pricingState.calendar))
+  const autoOnly = Object.keys(pricingState.auto).filter((year) => !manualYears.has(year)).sort()
+  const wanted = PRICING_FIXTURE.calendarMissing.filter((year) => !manualYears.has(year))
+  const covered = wanted.filter((year) => (pricingState.auto[year]?.length ?? 0) > 0)
+  const uncovered = wanted.filter((year) => !covered.includes(year))
   return {
     ...PRICING_FIXTURE,
-    // 报价币种在 host 的 wire 上逐卡必有（缺席 = 人民币）；fixture 里只给美元那条标出来，
-    // 其余的在这里补默认，端出的形状与 host 一致。
     routes: pricingState.routes.map((card) => ({ currency: 'CNY', ...card })),
-    calendar: pricingState.calendar,
+    calendar,
+    ...(autoOnly.length > 0 ? { calendarAuto: autoOnly } : {}),
+    holidaySync: {
+      source: { label: 'holiday-cn', url: `${HOLIDAY_CN_BASE}/` },
+      refreshDays: 1,
+      state: wanted.length === 0
+        ? 'ok'
+        : covered.length === 0
+          ? 'missing'
+          : pricingState.autoError !== null
+            ? 'failed'
+            : 'ok',
+      covered,
+      uncovered,
+      lastAttemptAt: pricingState.autoAttemptAt,
+      lastError: pricingState.autoError,
+    },
     fx: pricingState.fx,
-    // 年历写进来的年份就不再是缺的（host 那条「账本覆盖到而年历没有」的规则，这里按同一形状答）。
-    calendarMissing: PRICING_FIXTURE.calendarMissing.filter((year) => pricingState.calendar[year] === undefined),
+    sync: {
+      source: { label: 'models.dev', url: MODELS_DEV_URL },
+      refreshDays: 1,
+      retryMinutes: 60,
+      state: pricingState.syncLastError !== null
+        ? 'failed'
+        : pricingState.syncLastAttemptAt === null
+          ? 'missing'
+          : pricingState.syncDay === localDay(new Date())
+            ? 'ok'
+            : 'stale',
+      lastSuccessDay: pricingState.syncDay,
+      lastAdded: pricingState.syncLastAdded,
+      gaps: pricingState.routes
+        .filter((card) => card.currency === 'USD')
+        .reduce((sum, card) => sum + card.models.filter((row) => row.price === undefined).length, 0),
+      lastAttemptAt: pricingState.syncLastAttemptAt,
+      lastError: pricingState.syncLastError,
+      nextAttemptAt: pricingState.syncNextAttemptAt,
+    },
+    calendarMissing: PRICING_FIXTURE.calendarMissing.filter((year) => calendar[year] === undefined),
     updatedAt: Date.now(),
   }
 }
 
-/** Merge a `PUT /tokbook/pricing` body (the WHOLE price file). */
 function withPricingWrite(body) {
   const billing = body.$billing ?? {}
   const currency = body.$currency ?? {}
@@ -369,14 +292,11 @@ function withPricingWrite(body) {
   for (const card of pricingState.routes) {
     const models = card.models.map((row) => {
       const price = body[card.route]?.[row.model]
-      // 没写这份价的那些行在 host 上就是「没有价」——wire 上省略 `price`。
       return { ...row, price: price === undefined ? undefined : price }
     })
     routes.push({ ...card, billing: billing[card.route] ?? 'metered', currency: usd(card.route), models })
     seen.add(card.route)
   }
-  // A route the catalog does not carry but the body prices: it becomes a card
-  // of its own, the way the host's own view union does it.
   for (const [route, models] of Object.entries(body)) {
     if (route.startsWith('$') || seen.has(route)) continue
     routes.push({
@@ -389,42 +309,87 @@ function withPricingWrite(body) {
     })
   }
   pricingState.routes = routes
-  // 年历随同一笔 PUT 整体替换（空 = 客户端把 `$calendar` 省了，此时年历真的空了）。
-  pricingState.calendar = body.$calendar ?? {}
-  // 汇率同理：客户端只在汇率可写时才带上 `$fx`，省掉就是「未设汇率」。
+  pricingState.calendar = { ...pricingState.auto, ...(body.$calendar ?? {}) }
   pricingState.fx = body.$fx
 }
 
-/* ── quota-tab fixtures ─────────────────────────────────────────────────── */
-/** Scenarios selected with ?quota=<mode> on the preview URL. */
+const LOOKUP_FIXTURE = [
+  { provider: 'deepseek', modelId: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', cost: { input: 0.14, output: 0.56, cacheRead: 0.0028 } },
+  { provider: 'deepseek', modelId: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', cost: { input: 0.2, output: 0.8 } },
+  { provider: 'deepseek', modelId: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', cost: { input: 0.6, output: 2.4, cacheWrite: 0.04 } },
+  { provider: 'deepseek', modelId: 'deepseek-reasoner', name: 'DeepSeek Reasoner', cost: { input: 0.55, output: 2.19 } },
+  { provider: 'alibaba', modelId: 'qwen3-max', name: 'Qwen3 Max', cost: { input: 0.35, output: 1.4 } },
+  { provider: 'alibaba', modelId: 'qwen3-coder', name: 'Qwen3 Coder', cost: { input: 0.3, output: 1.2 } },
+  { provider: 'moonshotai', modelId: 'kimi-k3', name: 'Kimi K3', cost: { input: 0.5, output: 2 } },
+  { provider: 'zai', modelId: 'glm-5.3-flash', name: 'GLM 5.3 Flash', cost: { input: 0.09, output: 0.36 } },
+  { provider: 'zai', modelId: 'glm-5.3', name: 'GLM 5.3', cost: { input: 0.6, output: 2.2 } },
+]
+
+function normalizeKey(modelId) {
+  const afterSlash = modelId.slice(modelId.lastIndexOf('/') + 1)
+  const beforeColon = afterSlash.split(':')[0] ?? ''
+  const trimmed = beforeColon.trim().replace(/@/g, '-').toLowerCase()
+  return trimmed.endsWith('[1m]') ? trimmed.slice(0, -'[1m]'.length).trim() : trimmed
+}
+
+function lookupCandidates(keyword) {
+  const kw = normalizeKey(keyword)
+  if (kw === '') return []
+  const scored = []
+  for (const item of LOOKUP_FIXTURE) {
+    const key = normalizeKey(item.modelId)
+    let score = 0
+    if (key === kw) score += 1000
+    else if (key.startsWith(kw)) score += 700
+    else if (key.includes(kw)) score += 500
+    if (item.name.toLowerCase().includes(kw)) score += 200
+    if (score > 0) scored.push({ item, key, score })
+  }
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, 8).map(({ item, key }) => ({ ...item, key }))
+}
+
+const HOLIDAY_CN_BASE = 'https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master'
+
+async function fetchHolidayYear(year) {
+  const response = await fetch(`${HOLIDAY_CN_BASE}/${year}.json`, { signal: AbortSignal.timeout(10_000) })
+  if (!response.ok) throw new Error(`holiday-cn/${year}.json 答 HTTP ${String(response.status)}`)
+  const body = await response.json()
+  const days = Array.isArray(body.days) ? body.days : []
+  const dates = days
+    .filter((day) => day && day.isOffDay === true && typeof day.date === 'string' && day.date.slice(0, 4) === year)
+    .map((day) => day.date)
+    .sort()
+  const ranges = []
+  for (const date of dates) {
+    const last = ranges[ranges.length - 1]
+    if (last !== undefined) {
+      const next = new Date(`${last.end}T00:00:00`)
+      next.setDate(next.getDate() + 1)
+      const expected = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+      if (expected === date) { last.end = date; continue }
+    }
+    ranges.push({ start: date, end: date })
+  }
+  return ranges
+}
+
 const QUOTA_MODES = {
-  /** commandcode (amount windows + usage + credits) + opencode-go (% only). */
   rich: ['commandcode', 'opencode-go'],
-  /** Two ok cards with different window shapes (no usage/credits). */
   percent: ['opencode-go'],
-  /** commandcode ok; opencode-go unconfigured (state chip + hint). */
   mix: ['commandcode', 'opencode-go'],
-  /** Both providers unconfigured. */
   unconfigured: ['commandcode', 'opencode-go'],
-  /** Both providers errored. */
   error: ['commandcode', 'opencode-go'],
-  /** commandcode with a lapsed subscription (balance gate: no ring, no windows). */
   balance: ['commandcode'],
-  /** commandcode pay-as-you-go (balance gate, no plan identity reported). */
   payg: ['commandcode'],
-  /** opencode-go with a valid key but no Go subscription (gate none). */
   nosub: ['opencode-go'],
-  /** opencode-go retired *and* first in the host list: it must sink below the
-   *  active Command Code card, with the host order otherwise untouched. */
   retiredfirst: ['opencode-go', 'commandcode'],
-  /** No configured providers (empty state). */
   none: [],
 }
 const serverState = { quota: 'rich' }
 
 function now() { return Date.now() }
 
-/** Quota cards keyed by provider for the selected mode. */
 function quotaCards(mode) {
   const t = now()
   const commandcode = {
@@ -468,8 +433,6 @@ function quotaCards(mode) {
     plan: 'opencode-go', title: 'OpenCode Go', state: 'error',
     message: '无法连接官方接口（网络错误）。',
   }
-  // A plan that ended: the API still reports the plan identity, but there is no
-  // in-force subscription left, so the account is gated by its balance alone.
   const lapsedCommand = {
     plan: 'commandcode',
     title: 'GOAT',
@@ -483,8 +446,6 @@ function quotaCards(mode) {
     windows: [],
     fetchedAt: t - 42_000,
   }
-  // Pay-as-you-go: no plan identity at all, which is a normal account shape —
-  // the provider sells one — not an expired plan.
   const paygCommand = {
     plan: 'commandcode',
     title: 'Command Code',
@@ -496,9 +457,6 @@ function quotaCards(mode) {
     windows: [],
     fetchedAt: t - 90_000,
   }
-  // OpenCode Go with a valid key and no subscription: the endpoint answers 403
-  // ("valid key, no Go subscription"), which is a state, not a failure — and
-  // this endpoint reports no balance, so there is no number to show at all.
   const noSubOpen = {
     plan: 'opencode-go',
     title: 'OpenCode Go',
@@ -521,13 +479,6 @@ function quotaCards(mode) {
   }
 }
 
-/* ── 用量明细 tab fixtures ─────────────────────────────────────────────── */
-/**
- * `GET /tokbook/usage?range=…` —— 同一批窗口记录的**三种切法**：按模型（各卡模型
- * 行摊平）、按工作区、按通道（卡）。窗口边界是 host 侧的事实，预览不复刻，只让五个
- * 窗口落在**看得见差别**的状态上：今日是一张小按量卡，昨天多一张订阅卡，两个长窗口
- * 才是全集——外加卡片能报的两种降级事实（价格未知模型、没上报用量的调用）。
- */
 const usageModel = (model, tokens, { spend = 0, value = 0, requests = 1, billing } = {}) => ({
   model,
   totals: {
@@ -556,9 +507,6 @@ const usageCard = (provider, models, extra = {}) => ({
   ...extra,
 })
 
-/** 按工作区那一面的 fixture 行（tokens = 四桶之和）。第一行故意跨两条计费性质的路由
- *  （实际支出 + 订阅价值同时非零），因为工作区不像模型行那样被限定在单个金额桶里；
- *  收尾的「未归属」（id ''）是对账行。窗口越短，可见的行越少。 */
 const WORKSPACE_ROWS = [
   { id: 'w-harness', title: 'deepseek-harness', path: 'C:\\Users\\28529\\Desktop\\deepseek-harness', totals: { ...mk(1_510_000, 6_100_000, 402_000, 198), failures: 2 }, tokens: 8_012_000, spend: 3.87, subscriptionValue: 1.2, lastAt: Date.now() - 3 * 60_000 },
   { id: 'w-wiki', title: 'zzz wiki', path: 'C:\\Users\\28529\\Desktop\\zzz wiki', totals: mk(800_000, 900_000, 120_000, 34), tokens: 1_820_000, spend: 0, subscriptionValue: 2.4, lastAt: Date.now() - 5 * 3_600_000 },
@@ -590,8 +538,6 @@ const USAGE_CARDS = {
       usageModel('deepseek/deepseek-v4-flash', 6_840_000, { value: 5.1, requests: 240, billing: 'subscription' }),
       usageModel('z-ai/glm-5.3-flash', 412_000, { value: 0.31, requests: 22, billing: 'subscription' }),
     ], { usageUnknown: 2 }),
-    // 这张卡同时带「价格未知」与「没上报用量」两种降级事实，因为一条 route 上
-    // 两者可以并存（未定价的新模型 + 中途取消的请求）。
     usageCard('opencode-go', [
       usageModel('glm-5.3-flash', 1_820_000, { value: 2.4, requests: 34, billing: 'subscription' }),
       usageModel('mimo-v2.5', 178_000, { requests: 7, billing: 'subscription' }),
@@ -599,17 +545,12 @@ const USAGE_CARDS = {
   ],
 }
 USAGE_CARDS.last30 = USAGE_CARDS.last7
-/** 全账本：与近 30 天同一批卡（fixture 不造第五份数据），窗口词仍不同。 */
 USAGE_CARDS.all = USAGE_CARDS.last30
 
 const USAGE_LABELS = { deepseek: 'DeepSeek', commandcode: 'Command Code', 'opencode-go': 'OpenCode Go' }
 
-/** 窗口 → 可见的工作区行数（越短的窗口越少行——与卡片那一面同步收窄）。 */
 const WORKSPACES_BY_RANGE = { today: 2, yesterday: 2, last7: 4, last30: 4, all: 4 }
 
-/** 按模型那一面 = 各卡模型行摊平（与 host 的 `aggregateWindow` 同源），所以三种切法的合计相等。
- *  **故意倒着摊**（不按任何键排）：模型清单按词元降序是**展示层**的事，这份乱序 fixture 正好
- *  证明排序真的发生在那里。 */
 function modelRows(cards) {
   return cards.slice().reverse().flatMap((card) => card.models.map((model) => ({
     provider: card.provider,
@@ -629,7 +570,6 @@ function usageView(range) {
     toDay: '2026-09-14',
     updatedAt: Date.now(),
     providerLabels: USAGE_LABELS,
-    // 页头「窗口合计」四个数：与按模型 / 按通道同源（host 侧就是各卡求和）。
     totalTokens: providers.reduce((sum, card) => sum + card.tokens, 0),
     totalRequests: providers.reduce((sum, card) => sum + card.requests, 0),
     totalSpend: providers.reduce((sum, card) => sum + card.spend, 0),
@@ -640,7 +580,6 @@ function usageView(range) {
   }
 }
 
-/** 空窗口（`TOKBOOK_MODE=empty`）：三种切法一行都没有 → 用量明细自己的空态。 */
 function emptyUsageView(range) {
   return {
     ...usageView(range),
@@ -649,29 +588,11 @@ function emptyUsageView(range) {
   }
 }
 
-/* ── 会话词元页（`conversation.view` 那个视图）fixtures ───────────────────── */
-/**
- * `GET /tokbook/session?session=` —— 单会话 · 全生命周期的词元与钱。键集合与
- * `SessionUsageView`（`src/types.ts`）逐字对齐。
- *
- * 形状不是随手编的：这一页只有**真实会话才会同时出现**的那些形态才值得看，所以 fixture
- * 刻意把它们都摆在一起——
- *   · 十几轮（两格小图要画满「轮次」这条轴，且峰值不在首轮）；
- *   · 缓存读取与新增词元量级差几十倍（页面明说两格各自归一，这正是它存在的理由）；
- *   · 压缩 summarize 落在**轮间**、一次失败行带失败码、一行价格未知（按 ¥0 计）、
- *     一行用量未知（通道没上报 usage，桶全空）；
- *   · 两张预览的形状不同（有的轮次有提问/回答、有的没有）——块头那两行预览要能各自消失。
- *
- * `TOKBOOK_SESSION_SCENARIO` 选另外两种形状：`empty`（一行都没有 → 空态）、
- * `one`（只有一轮，最小可读形状）。默认 `rich`。
- */
 const SESSION_SCENARIO = process.env.TOKBOOK_SESSION_SCENARIO ?? 'rich'
 
-/** 会话 fixture 的时间基准（额度那节另有一个 `now()` 函数，作用域不同，故这里换个名）。 */
 const t0 = Date.now()
 const minute = 60_000
 
-/** 一行账本（= 一步）。四桶 + 钱 + 用时；`usage` 缺席就是「用量未知」这件事本身。 */
 function step(turn, step, model, provider, ageMinutes, usage, extra = {}) {
   const { timing, ...rest } = extra
   const base = {
@@ -684,8 +605,6 @@ function step(turn, step, model, provider, ageMinutes, usage, extra = {}) {
   }
   const seed = turn * 10 + step
   if (usage === null) {
-    // 用量未知：四个桶一个都不加（`tokens` 也照实是 0），但这一行**仍然计一次调用**。
-    // 用时照给：通道没上报 usage 不等于这一段没花时间，两者在真会话里是各自独立的缺口。
     return {
       ...base,
       usage: undefined,
@@ -706,21 +625,10 @@ function step(turn, step, model, provider, ageMinutes, usage, extra = {}) {
   }
 }
 
-/**
- * 若干行的引擎工作（= host 的 `settleTiming`，同一加法）。用时**不按组存**——它是各步那两段的
- * 和，渲染层与这里都现加，块头那个数才不会与展开后逐行加起来对不上。
- */
 function workOf(rows) {
   return rows.reduce((sum, row) => sum + (row.timing?.llmMs ?? 0) + (row.timing?.toolMs ?? 0), 0)
 }
 
-/**
- * 一步的用时（fixture 用）。**从 output tokens 反推**而不是写死：这样「首 token + 生成 = 模型」
- * 与「速度 = 输出 / 生成」两条关系在预览里就是成立的，看到的形状跟真会话一致。
- *
- * `extra.timing` 显式传 `null` 的那一行**没有**用时——那是「未计时」那一档；传一个对象就是
- * 那一档的替身（比如只有墙钟、没有产出的失败步，见 rich 场景）。
- */
 function fixtureTiming(outputTokens, seed) {
   const decodeMs = Math.round(outputTokens / 190 * 1000) + (seed % 7) * 130
   const ttftMs = 900 + (seed % 11) * 420
@@ -742,7 +650,6 @@ function fixtureTiming(outputTokens, seed) {
   return result
 }
 
-/** 一个会话里跨轮次复用的模型串（真实会话几乎总是反复用同一两个模型）。 */
 const M_FAST = 'deepseek-v4-flash'
 const M_DEEP = 'deepseek-v4.1-flash'
 const M_SPEEULESS = 'z-ai/glm-5.3-flash'
@@ -788,16 +695,14 @@ const SESSIONS = {
     }
   })(),
   rich: (() => {
-    // 十几轮 + 一次轮间压缩 + 一次失败 + 两行降级（用量未知 / 价格未知）。
     const turns = []
-    // 每轮：1–3 步，缓存读的量级压着新增（几十倍），峰值放在第 6 轮（不在首尾）。
     const shape = [
       { n: 1, cache: 9_800, fresh: 1_900 },
       { n: 2, cache: 21_400, fresh: 2_600 },
       { n: 3, cache: 44_100, fresh: 3_400 },
       { n: 4, cache: 88_300, fresh: 5_100 },
       { n: 5, cache: 152_000, fresh: 7_200 },
-      { n: 6, cache: 214_000, fresh: 12_400 }, // 峰值
+      { n: 6, cache: 214_000, fresh: 12_400 },
       { n: 7, cache: 186_000, fresh: 6_800 },
       { n: 8, cache: 141_000, fresh: 4_900 },
       { n: 9, cache: 98_000, fresh: 3_600 },
@@ -819,12 +724,9 @@ const SESSIONS = {
           cacheReadTokens: Math.round(turn.cache * 0.38),
         }),
       ]
-      // 第 4 轮多一步（一条重读大文件的回复），让「一轮不止一步」看得见。
       if (turn.n === 4) {
         rows.push(step(4, 3, M_DEEP, 'deepseek', age - 2, { inputTokens: 1_200, outputTokens: 2_900, cacheReadTokens: 40_000 }, { cost: 0.12 }))
       }
-      // 第 3 轮夹一条失败行（带失败码）：形状与其他行同源，只是多了芯片与零词元。
-      // 用时只给墙钟——重试耗尽的步**没有产出**，也就没有模型那一段可归属（它耗在重试与退避上）。
       if (turn.n === 3) {
         rows.push(step(3, 3, M_FAST, 'deepseek', age - 2, null, {
           kind: 'failure', failureCode: 'rate_limited', usage: undefined, timing: { wallMs: 42_000 },
@@ -833,13 +735,8 @@ const SESSIONS = {
       const group = groupOf(turn.n, rows)
       turns.push(group)
     }
-    // 轮间：一次压缩 summarize（确定不属于任何轮次）。它的用时是 compaction/start→summary
-    // 那一段，按写入侧那条 requestId 挂在这一行上；那一段就是这一次 summarize 模型调用
-    // （没有流落盘，所以分不出首 token / 生成），故模型用时与墙钟同值——与 host 同算法。
     const betweenRows = [step(0, 0, M_FAST, 'deepseek', 6, { inputTokens: 34_000, outputTokens: 1_800, cacheReadTokens: 120_000 }, { kind: 'compaction', cost: 0.08, bucket: 'spend', timing: { llmMs: 20_600 } })]
     const betweenTurns = groupOf(null, betweenRows)
-    // 轮次未知：一行价格未知（按 ¥0 计，桶名自己说两句）。它读作「不知道属于哪一轮」，
-    // 用时也未知（`null`）——这一行的形状就是「什么都拿不到」那一档。
     const unattributed = [step(0, 0, M_SPEEULESS, 'opencode-go', 20, { inputTokens: 1_200, outputTokens: 300, cacheReadTokens: 0 }, { bucket: 'unpriced', cost: 0, timing: null })]
     const total = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 1, failures: 1, usageUnknown: 1 }
     for (const g of [...turns, betweenTurns]) {
@@ -851,10 +748,7 @@ const SESSIONS = {
     }
     total.inputTokens += 1_200
     total.outputTokens += 300
-    // 首记 / 末记从所有行上量（两端跨整段轴，是抬头「首记 / 末记」那两个数的来源）。
     const times = [...turns.flatMap((g) => g.rows), ...betweenRows, ...unattributed].map((row) => row.time)
-    // 引擎工作 = 各步模型 + 工具（与 host 同一条加法：settleTiming）；跨度取一个比工作量大得多的
-    // 值——这两个数**并排**才是它们的用处（差额就是没在算的时间），fixture 里也要保持这个关系。
     const workMs = workOf([...turns.flatMap((g) => g.rows), ...betweenRows])
     return {
       sessionId: 'sess-rich',
@@ -876,8 +770,6 @@ const SESSIONS = {
   })(),
 }
 
-/** 一轮的聚合（tokens / spend / totals）：与 host 的 `groupOf` 同一算法，fixture 自己算。
- *  用时**不在这里合计**——它是各步那两段的和，渲染层用 `settleTiming` 现加（唯一算法）。 */
 function groupOf(turn, rows) {
   const totals = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 0, failures: 0, usageUnknown: 0 }
   let tokens = 0
@@ -904,14 +796,11 @@ function groupOf(turn, rows) {
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x')
   if (url.pathname === '/client.js') {
-    /* **按请求读盘**：不能只在启动时快照一次，否则 `pnpm build` 之后必须重启本进程才看得见
-       新 bundle（那条坑会被读成「改动没生效」）。读失败（build 正在写那个文件）就沿用上一次
-       的好副本，不拿一个读到一半的 bundle 去糊页面。 */
     try {
       const fresh = readFileSync(clientPath, 'utf8')
       if (fresh !== clientJs) console.log('[preview] lib/client.js 变了，已在服务新构建产物')
       clientJs = fresh
-    } catch { /* build 正在写：沿用上一次的好副本 */ }
+    } catch { }
     res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' })
     res.end(clientJs)
     return
@@ -921,9 +810,6 @@ const server = createServer((req, res) => {
     res.end(baselineJs)
     return
   }
-  // 独立查看器：`/tokbook/*` 一律由真插件注册的 handler 作答；真插件没注册的
-  // `/tokbook/*` 显式 404，免得 client 拿到 HTML 兜底、把「Unexpected token '<'」
-  // 报成加载失败。
   if (LEDGER) {
     const handler = ledgerRoutes.get(url.pathname)
     if (handler !== undefined) {
@@ -940,14 +826,8 @@ const server = createServer((req, res) => {
     }
   }
 
-  /* ── fixture 路由：只服务预览模式（独立查看器在上面就返回了，走不到这里） ──
-     路径全部从 `src/route-paths.ts` 取，所以「host / client 换了路径、预览台还在照着旧
-     字符串 stub」这件事不可能发生。`MODE` 的四种形状在这里同时作用在四路上。 */
   if (url.pathname === ROUTE_OVERVIEW) {
     if (MODE === 'err') {
-      /* 真 host 的失败是 **500 + 错误体**（`src/routes.ts` 的 catch）。这里必须跟着回 500：
-         回 200 + `{error}` 会让客户端把它当成一份合法总览去渲染（`byDay.find` 抛错、整个浮窗
-         消失），而那个形状真 host 从不发送——预览台的 err 模式反而看不见真正的错误界面。 */
       res.writeHead(500, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ error: 'HTTP 500' }))
       return
@@ -961,10 +841,6 @@ const server = createServer((req, res) => {
     return
   }
   if (url.pathname === ROUTE_SYNC) {
-    // 预览台没有真的在跑的 walk：探针照 host 的形状答。`sync` / `syncerr` 让它答
-    // running / error——client 的追同步循环（500ms × 60 次后放弃）与诊断带因此可达。
-    // `ledger` 是账本代数：预览台的数据是固定的，所以它恒为 0（面板据此永不重拉，
-    // 正是「没有新行」的样子）。
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({
       status: MODE === 'sync' ? 'running' : MODE === 'syncerr' ? 'error' : 'done',
@@ -979,7 +855,6 @@ const server = createServer((req, res) => {
     res.end('{}')
     return
   }
-  // 通道用量 tab：`?range=` 是唯一入参，非法/缺失就照 host 的 400 回。
   if (url.pathname === ROUTE_USAGE) {
     const range = url.searchParams.get(QUERY_RANGE)
     if (!(PROVIDER_RANGES as readonly string[]).includes(range ?? '')) {
@@ -996,7 +871,6 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(MODE === 'empty' ? emptyUsageView(range) : usageView(range)))
     return
   }
-  // Pricing tab: the route-card view (GET) + the whole-file write (PUT).
   if (url.pathname === ROUTE_PRICING) {
     if (req.method === 'PUT') {
       let body = ''
@@ -1023,7 +897,84 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(MODE === 'empty' ? { ...pricingView(), routes: [] } : pricingView()))
     return
   }
-  // 会话词元页：单会话视图。`?session=` 缺失就照 host 的 400 回（shape 由 env 选，见上）。
+  if (url.pathname === ROUTE_PRICING_SYNC) {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'method not allowed' }))
+      return
+    }
+    const force = url.searchParams.get('force') === '1'
+    if (!force && pricingState.syncDay === localDay(new Date())) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ added: 0, skipped: 0, syncedAt: Date.now(), throttled: true, reasons: {} }))
+      return
+    }
+    const added = 2
+    const skipped = 1
+    pricingState.syncDay = localDay(new Date())
+    pricingState.syncLastAdded = added
+    pricingState.syncLastAttemptAt = Date.now()
+    pricingState.syncLastError = null
+    pricingState.syncNextAttemptAt = null
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({
+      added, skipped, syncedAt: Date.now(), reasons: { 'opencode-go/mimo-v2.5': '通道不是美元报价' },
+    }))
+    return
+  }
+  if (url.pathname === ROUTE_PRICING_LOOKUP) {
+    if (req.method !== 'GET') {
+      res.writeHead(405, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'method not allowed' }))
+      return
+    }
+    const keyword = url.searchParams.get(QUERY_MODEL)
+    if (keyword === null || keyword.trim() === '') {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: `missing "${QUERY_MODEL}"` }))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ keyword, candidates: lookupCandidates(keyword) }))
+    return
+  }
+  if (url.pathname === ROUTE_HOLIDAY_SYNC) {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'method not allowed' }))
+      return
+    }
+    const asked = url.searchParams.getAll(QUERY_YEAR).filter((year) => /^\d{4}$/u.test(year))
+    const targets = asked.length > 0 ? asked : PRICING_FIXTURE.calendarMissing
+    void (async () => {
+      const fetched = []
+      const unpublished = []
+      const failed = {}
+      let changed = false
+      for (const year of targets) {
+        try {
+          const ranges = await fetchHolidayYear(year)
+          fetched.push(year)
+          if (ranges.length === 0) {
+            unpublished.push(year)
+            continue
+          }
+          const before = JSON.stringify(pricingState.auto[year] ?? [])
+          pricingState.auto[year] = ranges
+          if (before !== JSON.stringify(ranges)) changed = true
+        } catch (error) {
+          failed[year] = error instanceof Error ? error.message : String(error)
+        }
+      }
+      pricingState.autoFetched.push(...fetched)
+      pricingState.autoAttemptAt = Date.now()
+      const failures = Object.values(failed)
+      pricingState.autoError = failures.length > 0 ? failures[0] : null
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ fetched, unpublished, failed, changed, refreshedAt: Date.now() }))
+    })()
+    return
+  }
   if (url.pathname === ROUTE_SESSION) {
     if (url.searchParams.get(QUERY_SESSION) === null) {
       res.writeHead(400, { 'content-type': 'application/json' })
@@ -1039,7 +990,6 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(SESSIONS[SESSION_SCENARIO]))
     return
   }
-  // Quota tab: list (no provider) → enabled routes; per-provider → card.
   if (url.pathname === ROUTE_QUOTA) {
     if (MODE === 'err') {
       res.writeHead(500, { 'content-type': 'application/json' })
@@ -1047,8 +997,6 @@ const server = createServer((req, res) => {
       return
     }
     const provider = url.searchParams.get(QUERY_PROVIDER)
-    // 一次只写一次头：先 writeHead(200) 再按需 writeHead(404) 会让 200 那个状态先落地，
-    // 读到它的人会以为找不到 provider 也回 200。
     const payload = provider === null
       ? { providers: MODE === 'empty' ? [] : (QUOTA_MODES[serverState.quota] ?? []) }
       : quotaCards(serverState.quota)[provider]
@@ -1061,9 +1009,6 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify(payload))
     return
   }
-  /* 没有任何一路 fixture 认领这个 `/tokbook/*`。这必须是**显式 404**：落到下面的页面
-     HTML 会让 client 把「Unexpected token '<'」报成加载失败——既指错方向，也不说缺的是
-     哪一路。这一段就是把「fixture 清单要跟着 client 一起改」那条从静默变成一句话。 */
   if (url.pathname.startsWith('/tokbook/')) {
     res.writeHead(404, { 'content-type': 'application/json' })
     res.end(JSON.stringify({
@@ -1075,7 +1020,6 @@ const server = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html' })
   const quotaMode = url.searchParams.get('quota')
   if (quotaMode !== null) serverState.quota = quotaMode
-  // 独立查看器的背景文字直说这个进程在读什么——免得把真账本当预览 fixture 看。
   const backdrop = LEDGER
     ? `<h1>dsh-tokbook — 独立查看器</h1>
     <p>直接读本机账本目录（不摄取会话日志）。数据目录见浮窗的「统计口径」tab。</p>
@@ -1102,11 +1046,7 @@ const server = createServer((req, res) => {
   .fake-app h1{font-size:18px;margin:0 0 12px;}
   .fake-app p{font-size:14px;line-height:24px;color:#61666b;margin:0 0 8px;}
   body.dark .fake-app p{color:#cfd3d6;}
-  /* ── 宿主式的对话正文（词元页的容器）─────────────────────────────────────
-     高度、列宽、飘浮输入框这三样是词元页真实几何的前提（SessionShell / session.ts
-     都按它们算），所以按真宿主的形状给，而不是把它当一个普通 div。
-     --dsh-chat-content-width：宿主给对话正文的那条列（未调列宽时词元页跟它同宽）。
-     --dsh-composer-height：飘浮输入框的高度（词元页用它给底部留位）。 */
+
   .dsh-view-host{position:fixed;inset:0;display:flex;flex-direction:column;z-index:2;}
   .dsh-view-host[hidden]{display:none;}
   .dsh-view-ring{
@@ -1122,9 +1062,7 @@ const server = createServer((req, res) => {
   }
   .dsh-view-tab[data-active="true"]{color:var(--dsw-alias-label-primary,#0f1115);font-weight:600;box-shadow:inset 0 -2px 0 currentColor;}
   .dsh-view-body{position:relative;flex:1 1 0;min-height:0;--dsh-chat-content-width:920px;--dsh-composer-height:152px;}
-  /* 视图区 = 宿主给的视图环容器：它的 flex 子项是**视图根**（插件自己那个 .dtpl-tok）。
-     slot 的落点 div 夹在中间，所以它自己得把这一段高度与 flex 关系**传下去**——
-     否则 .dtpl-tok 的 flex:1 1 0 对着一个 auto 高度的块父级解析，整页塌成 0 高再溢出。 */
+
   .dsh-view-area{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;}
   .dsh-view-area > [data-slot="conversation.view"]{flex:1 1 0;min-height:0;display:flex;flex-direction:column;}
   .dsh-composer{
@@ -1135,7 +1073,7 @@ const server = createServer((req, res) => {
     border:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));font-size:13px;
   }
   body.dark .dsh-composer{background:var(--dsw-alias-bg-layer-1,#1c1d20);}
-  /* ── DSH alias tokens, as the theme service would define them ── */
+
   :root{
     --dsw-alias-bg-base:#ffffff;
     --dsw-alias-bg-layer-1:#ffffff;
@@ -1151,11 +1089,7 @@ const server = createServer((req, res) => {
     --dsw-alias-label-dimmed:#b4b8bc;
     --dsw-alias-label-primary-foreground:#ffffff;
     --dsw-alias-label-primary-inverted:#ffffff;
-    /* 品牌强调色必须按 **DSH 的真实取值**给：浅色皮肤 = neutral-bluish-1000（等于墨色），
-       深色皮肤 = neutral-bluish-50。DSH 里这一档是「身份色」，恰好等于主文字色——**不能**
-       用插件自己 CSS 兜底里那个蓝（#4d6bfe），否则焦点环、侧栏入口那点在预览里是蓝的、
-       在真宿主里是墨的：拿预览验颜色会得出相反的结论（accent 不是自由强调色）。
-       宿主另有一个还在推的 -new-color 蓝（#4176e6）。 */
+
     --dsw-alias-brand-primary:#0f1115;
     --dsw-alias-button-primary-fill:#4d6bfe;
     --dsw-alias-button-primary-hover:#3f5ce0;
@@ -1171,8 +1105,7 @@ const server = createServer((req, res) => {
     --dsw-elevation-prominent:0 8px 40px rgb(0 0 0 / 18%);
     --dsw-elevation-stroke-color:rgb(0 0 0 / 8%);
     --dsw-mask-blur:blur(2px);
-    /* 形状关键字（超椭圆），不是长度：DSH 真实给的是 superellipse(1.5)。填一个长度会让人
-       以为 --dsw-corner-shape 是半径（tokens 片段那条注释正是为这个坑写的）。 */
+
     --dsw-corner-shape:superellipse(1.5);
     --ds-font-family-code:"SF Mono","JetBrains Mono",Consolas,"Liberation Mono",monospace;
   }
@@ -1207,7 +1140,7 @@ const server = createServer((req, res) => {
   }
 </style>
 <script>
-  // ── Minimal DSH loader + slots host (preview only) ──
+
   window.__MOUNTED__ = [];
   window.__ModuleLoader__ = {
     load({ factory }) {
@@ -1228,10 +1161,7 @@ const server = createServer((req, res) => {
   <div class="fake-app">
     ${backdrop}
   </div>
-  <!-- 宿主式的对话正文容器：词元页（conversation.view）就渲染在这里。
-       这层的几何按真宿主给（见样式里的 .dsh-view-host-*），词元页自己那份
-       SessionShell 才有真实的列宽 / 滚动 / 手柄可量。view=tokens 之外它始终隐藏，
-       所以浮窗那三个面（?tab=…）的预览与之前一模一样。 -->
+
   <div class="dsh-view-host" id="view-host" hidden>
     <div class="dsh-view-ring">
       <button type="button" class="dsh-view-tab">对话</button>
@@ -1252,25 +1182,18 @@ const server = createServer((req, res) => {
         inject(name, callback) { callback(); return () => {}; },
         register(options, component) { mounted.push({ options, component }); return () => {}; },
       },
-      // The client entry registers its cleanup hooks through ctx.effect
-      // (cordis runs the returned disposer on unload). The preview never
-      // unloads, so a no-op registration is all the harness needs — without it
-      // apply throws and nothing mounts at all.
+
       effect() { return () => {}; },
     };
     window.__PLUGIN_EXPORTS__.apply(ctx);
-    // 三个 slot 的落点不同：sidebar.footer.action / shell.overlay 落在 #root，
-    // **conversation.view（词元页）落在宿主式的对话正文里**——它有自己的列宽变量、
-    // 自己的滚动容器与飘浮输入框，只挂到 #root 会把这一页的几何整条抽掉。
+
     const root = document.getElementById('root');
     const viewHost = document.getElementById('view-host');
-    // 词元页渲染进**视图区**（.dsh-view-area），不是 #view-host 本身：视图区才是宿主给
-    // 视图根的那个 flex 容器，词元页的 .dtpl-tok 挂进去才拿得到确定高度（见那层 CSS 的注释）。
+
     const viewArea = viewHost === null ? null : viewHost.querySelector('.dsh-view-area');
     for (const { options, component } of mounted) {
       const isView = options.name === 'conversation.view';
-      // 视图环的 slot 是**会话作用域**的：宿主解析出 sessionId 再交给 inject，
-      // 组件同时也从 props 拿同一份（这里两处都给，与真宿主一致）。
+
       const ownerShare = options.name === 'sidebar.footer.action'
         ? { wide: true }
         : isView ? 'preview-session-1' : {};
@@ -1281,9 +1204,7 @@ const server = createServer((req, res) => {
       window.__DSH_REQUIRE_CACHE__['react-dom/client'].createRoot(host)
         .render(window.__DSH_REQUIRE_CACHE__['react'].createElement(component, share));
     }
-    // 独立查看器 = 独立悬浮窗口的真实场景（没有宿主皮肤）：给浮窗根挂设备皮属性
-    // （styles/device.ts + tokens.ts 第八节），主题跟 ?dark。浮窗关掉会重开、元素会换，
-    // 所以挂观察器而不是找一次。
+
     if (${LEDGER}) {
       const deviceTheme = params.has('dark') ? 'dark' : 'light';
       const tagDevice = () => {
@@ -1295,18 +1216,9 @@ const server = createServer((req, res) => {
       new MutationObserver(tagDevice).observe(document.body, { childList: true, subtree: true });
       tagDevice();
     }
-    // React 18 mounts concurrently, so the trigger does not exist yet when this
-    // script runs and its listeners attach a beat later: look it up on every
-    // attempt, and click it only while the overlay is still absent (the trigger
-    // TOGGLES — a second click would close it again).
+
     const tabFlag = params.has('tab') ? params.get('tab') : (params.has('quota') ? 'quota' : null);
-    // 无头校验（playwright）用 window.__PREVIEW_NO_AUTO=true 关掉这个自动循环：
-    // 它每 100ms 点一次，会跟校验脚本自己的点击抢（先开浮窗、再切 tab），
-    // 而且它只认 URL 上的 ?tab=——校验要顺序点好几个面时根本对不上。
-    // 注意：这是普通 <script>（不是 module），顶层的 return 是语法错误。
-    // 词元页（?view=tokens）：宿主式的对话正文容器显形，浮窗保持收起（不抢同一个触发器）。
-    // 同时把预览台自己的外壳（说明文字 + 侧栏那枚 footer 按钮）收掉——它是**预览台的**东西，
-    // 不是宿主的一部分，留着会混进这一页的版面，量间距时也会算错。
+
     if (params.get('view') === 'tokens') {
       viewHost.hidden = false;
       for (const el of [document.querySelector('.fake-app'), root]) {
@@ -1342,4 +1254,3 @@ server.listen(port, '127.0.0.1', () => {
   console.log(`  整台的形状由 **环境变量** 选（一个进程 = 一种形状）：TOKBOOK_MODE=empty|err|sync|syncerr（当前：${MODE === '' ? '有数据' : MODE}）。`)
   console.log(`  lib/client.js 按请求读盘：pnpm build 之后刷新页面即可，不用重启本进程。`)
 })
-
