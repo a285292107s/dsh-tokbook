@@ -316,8 +316,6 @@ src/
       pricing.ts      价格表(选择带 / 四档价 / 峰谷时段 / 年历 / 汇率)
       shared.ts       跨面共用原语(面板材质 / 只读文本 / 选中态)
       device.ts       设备皮(独立查看器的仪器外壳;只在 data-dtpl-device 下生效)
-    assets.d.ts       hero 插画的模块声明(构建期内联为 data URI)
-    assets/           构建期内联的静态资源(hero-yanagi.jpg)
     FooterButton.tsx  sidebar.footer.action 触发器(额度告急时多一个点)
     LedgerOverlay.tsx shell.overlay 浮窗外壳(四 tab + 焦点/快捷键)
     LedgerView.tsx    用量总览 tab

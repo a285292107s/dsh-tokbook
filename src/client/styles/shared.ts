@@ -94,7 +94,7 @@ export const CSS_SHARED = `
   [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transition:height var(--dtpl-dur-move) var(--dtpl-ease-move),background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);}
   [data-plugin="dsh-tokbook"] .dtpl-bar-label{transition:bottom var(--dtpl-dur-move) var(--dtpl-ease-move),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);}
   [data-plugin="dsh-tokbook"] .dtpl-body > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;}
-  [data-plugin="dsh-tokbook"] .dtpl-hero > :not(.dtpl-hero-art){animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:.06s;}
+  [data-plugin="dsh-tokbook"] .dtpl-hero > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:.06s;}
   [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{animation:dtpl-draw var(--dtpl-dur-draw) var(--dtpl-ease-move) both;}
 }
 @media (prefers-reduced-motion:no-preference) and (max-width:640px){

@@ -200,7 +200,6 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
       ) : (
         <>
           <div className="dtpl-hero">
-            <div className="dtpl-hero-art" aria-hidden="true" />
             <div className="dtpl-hero-top">
               <div className="dtpl-hero-lead">
                 <span className="dtpl-hero-head">

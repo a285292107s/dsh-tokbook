@@ -1,5 +1,3 @@
-import heroArt from './assets/hero-yanagi.jpg'
-
 import { CSS_TOKENS } from './styles/tokens.ts'
 import { CSS_FOOTER } from './styles/footer.ts'
 import { CSS_OVERLAY } from './styles/overlay.ts'
@@ -12,11 +10,8 @@ import { CSS_PRICING } from './styles/pricing.ts'
 import { CSS_SHARED } from './styles/shared.ts'
 import { CSS_DEVICE } from './styles/device.ts'
 
-const HERO_ART_VAR = '[data-plugin="dsh-tokbook"]{--dtpl-hero-art:url("' + heroArt + '");}'
-
 const CSS = [
   CSS_TOKENS,
-  HERO_ART_VAR,
   CSS_FOOTER,
   CSS_OVERLAY,
   CSS_LEDGER,

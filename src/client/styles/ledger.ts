@@ -27,22 +27,6 @@ export const CSS_LEDGER = `
   border-color:color-mix(in srgb,var(--dtpl-fg) 78%,transparent);
 }
 
-[data-plugin="dsh-tokbook"] .dtpl-hero-art{
-  position:relative;flex:none;
-  margin:-16px -16px 0;
-  aspect-ratio:940/237;
-  max-height:140px;
-  background-image:var(--dtpl-hero-art);
-  background-position:center 40%;
-  background-size:cover;
-  background-repeat:no-repeat;
-}
-[data-plugin="dsh-tokbook"] .dtpl-hero-art::after{
-  content:"";position:absolute;left:0;right:0;bottom:0;
-  height:36px;pointer-events:none;z-index:1;
-  background:linear-gradient(to bottom, transparent, var(--dtpl-panel-bg));
-}
-
 [data-plugin="dsh-tokbook"] .dtpl-hero-top{
   display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
 }
@@ -407,7 +391,7 @@ export const CSS_LEDGER = `
   background-size:200% 100%;
   animation:dtpl-shimmer 1.4s ease infinite;
 }
-[data-plugin="dsh-tokbook"] .dtpl-sk-hero{height:250px;}
+[data-plugin="dsh-tokbook"] .dtpl-sk-hero{height:186px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-tile{height:68px;}
 [data-plugin="dsh-tokbook"] .dtpl-sk-chart{height:159px;}
