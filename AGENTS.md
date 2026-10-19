@@ -59,8 +59,8 @@ dsh-tokbook 是面向 DeepSeek Harness(DSH)的**跨会话 Token 用量账本**�
 
 - `pnpm test` = smoke(聚合 / 计价 / 额度)+ selfcheck(账本不变量)+ selfcheck:ui(界面静态禁令);
   只想查一处:`pnpm smoke --only <节名子串>`,或单独跑 `pnpm selfcheck` / `pnpm selfcheck:ui`;
-- `pnpm typecheck` 只查 `src/`。`pnpm build` **不是检查,是产物**——改 `src/` 要在宿主或预览台里
-  看见它才需要跑(见「修改源码」);命令与产物的完整说明见 `README.zh.md` · 构建。
+- `pnpm typecheck` 只查 `src/`。`pnpm build` **不是检查,是产物**——`lib/` 随 git 发布,所以改完
+  `src/` 就要跑一次并提交产物(见「修改源码」);命令与产物的完整说明见 `README.zh.md` · 构建。
 
 该自己决定去跑的只有一种:改**钱或账本的不变量**(`src/pricing.ts` 的取价规则,折叠 / 去重 / refile
 这类读代码读不出结论的路径),动手前先读 `docs/CONTRACTS.md`。`scripts/*.ts` 由 Node 类型剥离运行、
@@ -68,8 +68,8 @@ dsh-tokbook 是面向 DeepSeek Harness(DSH)的**跨会话 Token 用量账本**�
 
 ## 修改源码
 
-- 源码唯一真源在 `src/`(host `src/*.ts`,browser `src/client/*.tsx`);`lib/` 是 gitignore 的构建
-  产物——改 `src/` 再 `pnpm build`,不要手改或提交 `lib/`。
+- 源码唯一真源在 `src/`(host `src/*.ts`,browser `src/client/*.tsx`);`lib/` 是随 git 发布的构建
+  产物——改 `src/` 后 `pnpm build`,把 `lib/` 一起提交;不要手改 `lib/`。
 - host 改动经 profile 的 `dsh-hmr` 行热替换,browser 改动刷新页面生效;确切保证见 `README.zh.md`
   (构建 / 对着源码检出开发)与 `docs/HMR.md`。
 - 「别养巨型单文件」:单一职责文件 ~400 行就该审视拆不拆(600+ 行且混多类关注点必须拆),但

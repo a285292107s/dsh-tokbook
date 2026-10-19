@@ -1,5 +1,5 @@
 node_modules/
-lib/
+lib/tsconfig.tsbuildinfo
 *.tgz
 .DS_Store
 .dsh/

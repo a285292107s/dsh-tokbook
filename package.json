@@ -48,7 +48,7 @@
     "selfcheck": "node --experimental-strip-types scripts/selfcheck-rebuild.ts",
     "selfcheck:ui": "node --experimental-strip-types scripts/selfcheck-ui.ts",
     "test": "pnpm smoke && pnpm selfcheck && pnpm selfcheck:ui",
-    "prepare": "pnpm build"
+    "prepublishOnly": "pnpm build"
   },
   "license": "MIT",
   "repository": {

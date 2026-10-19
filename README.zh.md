@@ -51,7 +51,7 @@ token 与「什么时候用哪个」见 [`docs/CONTEXT.md`](docs/CONTEXT.md) 的
 
 ## 安装
 
-需要 DSH(`dsh --version`)与 PATH 上的 **pnpm 11**——下面那个白名单键是 pnpm 11 的写法。
+需要 DSH(`dsh --version`)与 PATH 上的 **pnpm 11**。
 
 ```sh
 dsh plugin --profile web add github:a285292107s/dsh-tokbook
@@ -60,20 +60,8 @@ dsh plugin --profile web add github:a285292107s/dsh-tokbook
 `web` 只是**你要装进去的那个 profile**:**换成你自己的名字**。该 profile 还不存在时,这条命令会
 顺手初始化它。本文其余地方写 `web` 也是同一个意思。
 
-本仓库发布的是**源码而不是构建产物**:`lib/` 是 gitignore 的构建产物,所以 pnpm 在安装时通过包的
-`prepare` 脚本现场构建。pnpm 默认不允许依赖跑构建脚本,所以第一次会停下并打印它要的那一行——
-**必须把它加进** profile 的 `pnpm-workspace.yaml` 再跑一次同样的命令:光重跑一次只会原样再失败
-一次。(如果你发现那个键已经在那儿、值写着 `set this to true or false`,那是之前某次已经解析过的
-安装留下的——把它翻成 `true` 就行。)
-
-```yaml
-# $DSH_HOME/profiles/web/pnpm-workspace.yaml
-allowBuilds:
-  dsh-tokbook@https://codeload.github.com/a285292107s/dsh-tokbook/tar.gz/<commit>: true
-```
-
-那个键**不是包名**:它是「包名 @ 这次解析到的那个确切 commit」。所以照 pnpm 打印的原样粘贴,
-别自己敲;`main` 一动它就过期,升级之后要重新批一次。
+仓库里带着构建好的 `lib/`(随 git 发布),所以安装时**不需要 pnpm 跑构建脚本**,也不需要先改 profile
+的 `pnpm-workspace.yaml`。改完 `src/` 要 `pnpm build`,再把 `lib/` 一起提交(见「构建」)。
 
 pnpm 还会报一句 peer dependency `@deepseek-ai/cordis` 缺失的警告。**那是预期的、无害的**:
 cordis 由 DSH 自己提供,插件解析到的就是同一个实例。
@@ -350,7 +338,7 @@ scripts/
 
 docs/                      文档树(地图:docs/INDEX.md):CONTRACTS 契约 / DESIGN 推理 / HMR / LESSONS / CONTEXT / adr
 cordis.patch.example.yml   profile 挂载行的示例(见「安装」)
-lib/                       构建产物(gitignore):lib/index.js + lib/client.js + lib/types/**/*.d.ts
+lib/                       构建产物(随 git 发布):lib/index.js + lib/client.js + lib/types/**/*.d.ts
 ```
 
 ## 构建
@@ -366,7 +354,7 @@ pnpm test         # smoke(投影 + 聚合 + 取价 + 草稿 + 额度)+ selfcheck
 ```
 
 产物:`lib/index.js`(host)、`lib/client.js`(browser)、`lib/types/**/*.d.ts`(声明);external 清单见 `scripts/build-client.mjs`。
-`prepare` 也指向 `pnpm build`——那是给从 git 安装的用户用的(pnpm 在安装时现场构建),`pnpm install` 因此会顺带构建一次。
+`lib/` 随 git 发布,`prepublishOnly` 在发布 npm 包前再构建一次;从 git 安装不再跑构建脚本,所以改完 `src/` 要 `pnpm build` 并把 `lib/` 一起提交。
 
 ## 对着源码检出开发
 

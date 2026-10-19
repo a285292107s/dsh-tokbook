@@ -24,20 +24,10 @@ Needs DSH (`dsh --version`) and **pnpm 11** on your `PATH`.
 dsh plugin --profile web add github:a285292107s/dsh-tokbook
 ```
 
-`web` is the profile you install into — substitute your own. The repo ships source, not build output, so
-pnpm builds the package during install. pnpm refuses to run a dependency's build script until you allow
-it, so the first run stops and prints the exact key it wants: add that line to the profile's
-`pnpm-workspace.yaml` and run the same command again. Re-running on its own fails the same way.
-
-```yaml
-# $DSH_HOME/profiles/web/pnpm-workspace.yaml
-allowBuilds:
-  dsh-tokbook@https://codeload.github.com/a285292107s/dsh-tokbook/tar.gz/<commit>: true
-```
-
-That key names the package **together with the commit pnpm resolved**: paste what pnpm printed, and expect
-to re-approve whenever `main` moves. The peer-dependency warning about `@deepseek-ai/cordis` is expected —
-DSH provides cordis and the plugin resolves that same instance.
+`web` is the profile you install into — substitute your own. The repo carries the built `lib/`, so installing
+runs no build script and needs no `allowBuilds` edit in the profile's `pnpm-workspace.yaml`. Rebuild
+(`pnpm build`) and commit `lib/` after changing `src/` (see Development). The peer-dependency warning about
+`@deepseek-ai/cordis` is expected — DSH provides cordis and the plugin resolves that same instance.
 
 Then mount the plugin. It is a plain external plugin, not a `dsh.bundle` layer, so the profile names it in
 `cordis.patch.yml`:
@@ -174,8 +164,8 @@ unknown (¥0).
 
 ## Development
 
-Source of truth is `src/` — host in `src/*.ts`, browser in `src/client/*.tsx`; `lib/` is a gitignored
-build artifact.
+Source of truth is `src/` — host in `src/*.ts`, browser in `src/client/*.tsx`; `lib/` is the build output
+committed to git so installs run no build script.
 
 ```sh
 pnpm install

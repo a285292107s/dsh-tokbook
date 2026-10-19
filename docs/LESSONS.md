@@ -1,6 +1,6 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-18 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-19 · supersedes: —
 
 > 本文件是**踩坑记录的累积**，供后续维护 / 继续开发时对照；条目按 **现象 → 根因 → 修复 / 正确做法**
 > 组织。**DSH 源码路径均相对同一处检出**——那台机器上 `C:\Users\28529\Desktop\deepseek-harness`，
@@ -148,7 +148,7 @@
 
 ## 5. 构建与安装要点
 
-命令清单与产物见 [`../README.zh.md`](../README.zh.md)「构建」。这里只留会踩的三条:
+命令清单与产物见 [`../README.zh.md`](../README.zh.md)「构建」。这里只留会踩的四条:
 
 - **`pnpm watch` 只跑 `tsc --watch`,不重建 `lib/client.js`**——改了源码要手动 `pnpm build`;
   想要自动重建得改 watch 脚本。
@@ -158,6 +158,11 @@
   `.inject`);`dsh.client` 必须 `platform:'web'`、`./client` 能解析到 `lib/client.js`,且
   `BASELINE_EXTERNALS` 要是 DSH `PLATFORM_MODULES` 的**子集**——只列本插件真的 import 的那几个
   (它同时是一道判死表外 import 的门禁,照全集抄会把这道门关掉)。细节见 DESIGN §7。
+- **`lib/` 随 git 发布,安装时不再跑 `prepare`**。pnpm 11 会拦下 git 依赖的构建脚本
+  (`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`),而 DSH 官方插件管理器只把「Ignored build scripts」
+  合成放行按钮,这条错误被当成普通失败——用户在界面上没有放行入口。所以仓库提交构建产物,
+  `package.json` 只在 `prepublishOnly` 里构建;改完 `src/` 忘了 `pnpm build` / 提交 `lib/`,
+  装上的就是旧代码。
 
 ---
 

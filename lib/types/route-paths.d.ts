@@ -1,0 +1,17 @@
+export declare const ROUTE_OVERVIEW = "/tokbook/overview";
+export declare const ROUTE_SYNC = "/tokbook/sync";
+export declare const ROUTE_RESCAN = "/tokbook/rescan";
+export declare const ROUTE_USAGE = "/tokbook/usage";
+export declare const ROUTE_QUOTA = "/tokbook/quota";
+export declare const ROUTE_PRICING = "/tokbook/pricing";
+export declare const ROUTE_PRICING_SYNC = "/tokbook/pricing-sync";
+export declare const ROUTE_PRICING_LOOKUP = "/tokbook/pricing-lookup";
+export declare const ROUTE_HOLIDAY_SYNC = "/tokbook/holiday-sync";
+export declare const ROUTE_SESSION = "/tokbook/session";
+export declare const QUERY_SESSION = "session";
+export declare const QUERY_RANGE = "range";
+export declare const QUERY_PROVIDER = "provider";
+export declare const QUERY_REFRESH = "refresh";
+export declare const QUERY_FORCE = "force";
+export declare const QUERY_MODEL = "model";
+export declare const QUERY_YEAR = "year";
