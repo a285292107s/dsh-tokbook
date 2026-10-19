@@ -87,8 +87,7 @@ export const CSS_OVERLAY = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-tab-dot{
   display:inline-block;width:6px;height:6px;margin-left:5px;
-  background:var(--dtpl-brand);
-  box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
+  background:var(--dtpl-fg);
   vertical-align:middle;
 }
 

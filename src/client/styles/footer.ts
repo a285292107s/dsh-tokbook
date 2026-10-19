@@ -33,6 +33,6 @@ export const CSS_FOOTER = `
 }
 
 [data-plugin="dsh-tokbook"] :focus-visible{
-  outline:2px solid var(--dtpl-accent);outline-offset:2px;
+  outline:2px solid var(--dtpl-focus);outline-offset:2px;
 }
 `

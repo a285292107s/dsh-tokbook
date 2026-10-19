@@ -5,7 +5,7 @@ export const CSS_SHARED = `
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-body ::selection{
-  background:color-mix(in srgb,var(--dtpl-brand) 55%,transparent);
+  background:color-mix(in srgb,var(--dtpl-brand) 22%,transparent);
 }
 
 @media (max-width:640px){

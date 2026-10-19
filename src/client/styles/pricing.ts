@@ -455,26 +455,28 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-calarm{
   display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
   padding:6px 8px;
-  background:color-mix(in srgb,var(--dtpl-warn) 12%,transparent);
+  background:var(--dtpl-panel-bg);
+  border:1px solid var(--dtpl-border);
+  box-shadow:inset 3px 0 0 var(--dtpl-warn);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-calarm-text{
   flex:1 1 auto;min-width:0;margin:0;
-  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-warn-ink);overflow-wrap:anywhere;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg);overflow-wrap:anywhere;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-calarm-act{
   appearance:none;box-sizing:border-box;flex:none;
   display:inline-flex;align-items:center;gap:6px;
   min-height:26px;padding:2px 10px;
-  border:1px solid color-mix(in srgb,var(--dtpl-warn) 45%,transparent);
+  border:1px solid var(--dtpl-border);
   border-radius:var(--dtpl-radius);
-  background:color-mix(in srgb,var(--dtpl-warn) 14%,transparent);
-  color:var(--dtpl-warn-ink);
+  background:transparent;
+  color:var(--dtpl-fg);
   font:inherit;font-size:var(--dtpl-fs-label);cursor:pointer;white-space:nowrap;
   transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-calarm-act:hover{
-  border-color:var(--dtpl-warn-ink);
-  background:color-mix(in srgb,var(--dtpl-warn) 24%,transparent);
+  border-color:color-mix(in srgb,var(--dtpl-fg) 28%,transparent);
+  background:var(--dtpl-wash-hover);
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-price-select{

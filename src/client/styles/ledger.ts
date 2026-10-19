@@ -205,10 +205,10 @@ export const CSS_LEDGER = `
     color-mix(in srgb,var(--dtpl-fg) 78%,transparent) 0%,
     color-mix(in srgb,var(--dtpl-fg) 68%,transparent) 50%,
     color-mix(in srgb,var(--dtpl-fg) 58%,transparent) 100%);
-  box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
+  box-shadow:inset 0 0 0 1px var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar-fill.is-peak::before{
-  top:1px;height:3%;background:var(--dtpl-on-brand);
+  top:1px;height:3%;background:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar.is-zero::after{
   content:"";position:absolute;left:calc(50% - 1px);bottom:0;width:2px;height:3px;
@@ -223,8 +223,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak{color:var(--dtpl-fg);font-weight:600;}
 [data-plugin="dsh-tokbook"] .dtpl-bar-label.is-peak::before{
   content:"";display:inline-block;width:4px;height:8px;vertical-align:-1px;
-  margin-right:5px;background:var(--dtpl-brand);
-  box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
+  margin-right:5px;background:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bar.is-zero .dtpl-bar-label{display:none;}
 [data-plugin="dsh-tokbook"] .dtpl-trend-axis{

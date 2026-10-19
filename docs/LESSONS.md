@@ -53,7 +53,7 @@
 [data-plugin="dsh-tokbook"].dtpl-footer:active{ ... }
 [data-plugin="dsh-tokbook"].dtpl-footer.dtpl-rail{ width:36px;height:36px;border-radius:50%; }
 [data-plugin="dsh-tokbook"].dtpl-footer[aria-pressed="true"]{ color:var(--dsw-alias-brand-primary); }
-[data-plugin="dsh-tokbook"].dtpl-footer:focus-visible{ outline:2px solid var(--dtpl-accent); }
+[data-plugin="dsh-tokbook"].dtpl-footer:focus-visible{ outline:2px solid var(--dtpl-focus); }
 ```
 
 **真正的子元素**（`[data-plugin]` 的子孙）保持后代选择器即可：

@@ -15,11 +15,11 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-err:var(--dsw-alias-state-error-primary,#cf222e);
   --dtpl-warn-ink:color-mix(in srgb,var(--dtpl-warn) 55%,var(--dtpl-fg));
 
-  --dtpl-accent:var(--dsw-alias-brand-primary,#1f2328);
+  --dtpl-focus:var(--dsw-alias-brand-primary,#1f2328);
 
   --dtpl-footer-focus:var(--dsw-alias-label-primary,#1f2328);
 
-  --dtpl-brand:#e0b84a;
+  --dtpl-brand:#c99a2e;
   --dtpl-on-brand:#24211e;
 
   --dtpl-metal:
@@ -78,9 +78,9 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-border:rgba(0,0,0,.12);
   --dtpl-hairline:rgba(0,0,0,.08);
   --dtpl-ok:#1a7f37;
-  --dtpl-warn:#9a6700;
-  --dtpl-err:#cf222e;
-  --dtpl-accent:#1f2328;
+  --dtpl-warn:#b45309;
+  --dtpl-err:#c0242c;
+  --dtpl-focus:#1f2328;
   --dtpl-footer-focus:#1f2328;
   --dtpl-casing:#c9c5bf;
   --dtpl-casing-ink:#24211e;
@@ -104,9 +104,9 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-border:rgba(255,255,255,.14);
   --dtpl-hairline:rgba(255,255,255,.10);
   --dtpl-ok:#3fb950;
-  --dtpl-warn:#f59e0b;
+  --dtpl-warn:#f97316;
   --dtpl-err:#ff6b61;
-  --dtpl-accent:#f9fafb;
+  --dtpl-focus:#f9fafb;
   --dtpl-footer-focus:#f9fafb;
   --dtpl-casing:#2a2d33;
   --dtpl-casing-ink:#f9fafb;
