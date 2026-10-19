@@ -86,19 +86,19 @@ export const CSS_SHARED = `
 }
 
 @media (prefers-reduced-motion:no-preference){
-  [data-plugin="dsh-tokbook"].dtpl-overlay{animation:dtpl-fade .2s ease-out;}
-  [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop .24s cubic-bezier(.26,.7,.24,1);}
+  [data-plugin="dsh-tokbook"].dtpl-overlay{animation:dtpl-fade var(--dtpl-dur-enter) var(--dtpl-ease-move);}
+  [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop var(--dtpl-dur-move) var(--dtpl-ease-move);}
   [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transform-origin:bottom;}
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill{animation:dtpl-bar-grow .2s cubic-bezier(.26,.7,.24,1) both;animation-delay:calc((var(--dtpl-offset,0) + var(--dtpl-i,0)) * 12ms);}
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar.is-zero::after{animation:dtpl-fade .2s both;animation-delay:calc((var(--dtpl-offset,0) + var(--dtpl-i,0)) * 12ms);}
-  [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transition:height .28s cubic-bezier(.26,.7,.24,1),background-color .12s ease;}
-  [data-plugin="dsh-tokbook"] .dtpl-bar-label{transition:bottom .28s cubic-bezier(.26,.7,.24,1),color .12s ease;}
-  [data-plugin="dsh-tokbook"] .dtpl-body > *{animation:dtpl-rise .24s cubic-bezier(.26,.7,.24,1) both;}
-  [data-plugin="dsh-tokbook"] .dtpl-hero > :not(.dtpl-hero-art){animation:dtpl-rise .26s cubic-bezier(.26,.7,.24,1) both;animation-delay:.06s;}
-  [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{animation:dtpl-draw .45s cubic-bezier(.3,.6,.3,1) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill{animation:dtpl-bar-grow var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:calc((var(--dtpl-offset,0) + var(--dtpl-i,0)) * 12ms);}
+  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar.is-zero::after{animation:dtpl-fade var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:calc((var(--dtpl-offset,0) + var(--dtpl-i,0)) * 12ms);}
+  [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transition:height var(--dtpl-dur-move) var(--dtpl-ease-move),background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);}
+  [data-plugin="dsh-tokbook"] .dtpl-bar-label{transition:bottom var(--dtpl-dur-move) var(--dtpl-ease-move),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);}
+  [data-plugin="dsh-tokbook"] .dtpl-body > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-hero > :not(.dtpl-hero-art){animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:.06s;}
+  [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{animation:dtpl-draw var(--dtpl-dur-draw) var(--dtpl-ease-move) both;}
 }
 @media (prefers-reduced-motion:no-preference) and (max-width:640px){
-  [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-sheet .22s cubic-bezier(.32,.72,0,1);}
+  [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-sheet var(--dtpl-dur-move) var(--dtpl-ease-move);}
 }
 @keyframes dtpl-fade{from{opacity:0}}
 @keyframes dtpl-rise{from{opacity:0;transform:translateY(6px)}}

@@ -7,7 +7,7 @@ export const CSS_FOOTER = `
   cursor:pointer;overflow:hidden;
   color:var(--dsw-alias-label-primary,#1f2328);
   font-family:inherit;font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);white-space:nowrap;
-  transition:background .15s ease,color .15s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"].dtpl-footer:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));}
 [data-plugin="dsh-tokbook"].dtpl-footer:active{background:var(--dsw-alias-interactive-bg-active,rgba(0,0,0,.1));}

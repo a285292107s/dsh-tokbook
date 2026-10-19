@@ -19,10 +19,10 @@ export const CSS_PRICING = `
   border:1px solid var(--dtpl-border);border-radius:var(--dtpl-radius);
   background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
   color:var(--dtpl-fg);font:inherit;cursor:pointer;text-align:left;
-  transition:background .12s ease,border-color .12s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-toggle:hover{
-  background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
+  background:var(--dtpl-wash-hover);
   border-color:color-mix(in srgb,var(--dtpl-fg) 28%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-toggle:active{
@@ -32,7 +32,7 @@ export const CSS_PRICING = `
   flex:none;width:0;height:0;
   border-left:5px solid currentColor;
   border-top:4px solid transparent;border-bottom:4px solid transparent;
-  transition:transform .15s ease;
+  transition:transform var(--dtpl-dur-move) var(--dtpl-ease-move);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal[data-open="true"] .dtpl-price-cal-caret{
   transform:rotate(90deg);
@@ -60,7 +60,7 @@ export const CSS_PRICING = `
   background:color-mix(in srgb,var(--dtpl-warn) 12%,transparent);
   color:var(--dtpl-warn-ink);
   font:inherit;font-size:var(--dtpl-fs-label);cursor:pointer;white-space:nowrap;
-  transition:background .12s ease,border-color .12s ease,color .12s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal-fix:hover{
   border-color:var(--dtpl-warn-ink);
@@ -89,7 +89,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{
   width:118px;text-align:left;
   border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
-  transition:border-color .12s ease;
+  transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -114,7 +114,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-newyear{
   width:72px;text-align:center;
   border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
-  transition:border-color .12s ease;
+  transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-newyear:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -152,7 +152,7 @@ export const CSS_PRICING = `
   width:80px;flex:none;text-align:center;
   border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
   font-size:var(--dtpl-fs-lead);
-  transition:border-color .12s ease;
+  transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -269,13 +269,13 @@ export const CSS_PRICING = `
   height:24px;padding:0 11px;
   color:var(--dtpl-fg);font:inherit;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:400;
   white-space:nowrap;cursor:pointer;
-  transition:background .15s ease,color .15s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-switch button + button{border-left:.5px solid var(--dtpl-hairline);}
-[data-plugin="dsh-tokbook"] .dtpl-price-switch button:hover{background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-price-switch button:hover{background:var(--dtpl-wash-hover);}
 [data-plugin="dsh-tokbook"] .dtpl-price-switch button[aria-pressed="true"]{
   color:var(--dtpl-fg);font-weight:600;
-  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
+  background:var(--dtpl-wash-on);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-switch button[aria-pressed="true"]::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
@@ -305,7 +305,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-rows{display:flex;flex-direction:column;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-row{
   padding:6px 0;
-  transition:background .12s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-row + .dtpl-price-row{border-top:1px solid var(--dtpl-hairline);}
 [data-plugin="dsh-tokbook"] .dtpl-price-row:hover{background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);}
@@ -343,16 +343,16 @@ export const CSS_PRICING = `
   background:transparent;color:var(--dtpl-fg);
   font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:500;
   font-variant-numeric:tabular-nums;text-align:right;
-  transition:border-color .12s ease,background-color .12s ease;
+  transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint),background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-input:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 42%,transparent);
-  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+  background:var(--dtpl-wash-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-input::placeholder{color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-price-input:focus{
   outline:none;border-color:var(--dtpl-fg);
-  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
+  background:var(--dtpl-wash-on);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-cell .dtpl-price-input:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 42%,transparent);
@@ -370,10 +370,10 @@ export const CSS_PRICING = `
   min-height:24px;padding:2px 8px;
   border:0;border-radius:var(--dtpl-radius);
   color:var(--dtpl-fg);font:inherit;font-size:var(--dtpl-fs-label);letter-spacing:.08em;cursor:pointer;white-space:nowrap;
-  transition:background-color .12s ease;
+  transition:background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-add:hover{
-  background:color-mix(in srgb,var(--dtpl-fg) 9%,transparent);
+  background:var(--dtpl-wash-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost{
   appearance:none;box-sizing:border-box;
@@ -382,14 +382,14 @@ export const CSS_PRICING = `
   border:1px solid var(--dtpl-hairline);border-radius:var(--dtpl-radius);
   background:transparent;color:var(--dtpl-fg);
   font:inherit;font-size:var(--dtpl-fs-label);letter-spacing:.08em;cursor:pointer;white-space:nowrap;
-  transition:background .12s ease,border-color .12s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-add-plus{
   flex:none;width:12px;text-align:center;letter-spacing:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost:not(:disabled):hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 30%,transparent);
-  background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);
+  background:var(--dtpl-wash-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost:not(:disabled):active{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -403,11 +403,11 @@ export const CSS_PRICING = `
   display:inline-flex;align-items:center;
   height:24px;padding:0 6px;
   color:var(--dtpl-fg-2);font:inherit;font-size:var(--dtpl-fs-label);cursor:pointer;
-  transition:color .12s ease,background-color .12s ease;
+  transition:color var(--dtpl-dur-quick) var(--dtpl-ease-tint),background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost:hover{
   color:var(--dtpl-fg);
-  background:color-mix(in srgb,var(--dtpl-fg) 9%,transparent);
+  background:var(--dtpl-wash-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-ghost:active{
   background:color-mix(in srgb,var(--dtpl-fg) 14%,transparent);
@@ -470,7 +470,7 @@ export const CSS_PRICING = `
   background:color-mix(in srgb,var(--dtpl-warn) 14%,transparent);
   color:var(--dtpl-warn-ink);
   font:inherit;font-size:var(--dtpl-fs-label);cursor:pointer;white-space:nowrap;
-  transition:background .12s ease,border-color .12s ease,color .12s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-calarm-act:hover{
   border-color:var(--dtpl-warn-ink);
@@ -488,15 +488,15 @@ export const CSS_PRICING = `
   background-position:calc(100% - 8px) 11px,calc(100% - 4px) 11px;
   background-size:4px 4px,4px 4px;background-repeat:no-repeat;
   font-variant-numeric:tabular-nums;
-  transition:border-color .12s ease,background-color .12s ease;
+  transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint),background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-select:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 42%,transparent);
-  background-color:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+  background-color:var(--dtpl-wash-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-select:focus{
   outline:none;border-color:var(--dtpl-fg);
-  background-color:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
+  background-color:var(--dtpl-wash-on);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-select option{
   background:var(--dtpl-card);color:var(--dtpl-fg);
@@ -530,7 +530,7 @@ export const CSS_PRICING = `
   text-decoration:underline;text-underline-offset:3px;
   text-decoration-color:color-mix(in srgb,currentColor 40%,transparent);
   cursor:pointer;white-space:nowrap;
-  transition:text-decoration-color .12s ease;
+  transition:text-decoration-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-actions-link:not(:disabled):hover{
   text-decoration-color:currentColor;
@@ -545,11 +545,11 @@ export const CSS_PRICING = `
   background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
   color:var(--dtpl-fg);font:inherit;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
   cursor:pointer;white-space:nowrap;
-  transition:background .12s ease,border-color .12s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tool:not(:disabled):hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 28%,transparent);
-  background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
+  background:var(--dtpl-wash-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tool:not(:disabled):active{
   background:color-mix(in srgb,var(--dtpl-fg) 14%,transparent);

@@ -1,6 +1,6 @@
 # 领域词汇 — dsh-tokbook
 
-> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-10-18 · supersedes: —
+> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-10-19 · supersedes: —
 
 本文件只收**新引入、且会被反复用错**的词。既有词汇**不在这里重复**，它们各有单一真源：
 
@@ -157,6 +157,17 @@
   tokens 在最前（其余片段全在引用它），shared 必须排在各页之后（它的窄屏与动效配方要压住各页自己的
   默认值），device 压轴（它整段只在 `[data-dtpl-device]` 根上生效，宿主里静默）。顺序打乱不会报错，
   只是某几页的窄屏或动效悄悄不再生效。
+- **转场与状态回洗各有刻度，别在规则里写裸值。** 时长四档 `--dtpl-dur-quick|enter|move|draw`
+  （100/200/300/450ms）、缓动两条 `--dtpl-ease-tint`（颜色、边框、背景，取宿主 `--ds-ease-in-out`）
+  与 `--dtpl-ease-move`（位移、尺寸、描画）。选缓动按「动的是什么」而不是按组件：同一元素上背景的
+  100ms 与高度的 300ms 各走各的。循环动画（`dtpl-spin`/`dtpl-pulse`/`dtpl-shimmer`）、一次性过冲
+  反馈（`dtpl-refresh-pop`）与交错延迟（`12ms`/`.06s`）不在刻度内，写裸值是对的。
+  悬停与当前项的底色同样只有两档：`--dtpl-wash-hover`（4%）与 `--dtpl-wash-on`（6%）。
+  只收敛**取值等于这两档**的站点——3%/5%/7%~14% 各有其处（行悬停最轻、`bd-tab` 选中是 5%），
+  不是同一个语义；承载读数的明度（`52/72/100` 那几档、柱高、相位段、轨道、占比环）**一律不碰**，
+  它们与状态回洗在代码里长得一模一样（都是同一族 `color-mix` 百分比），只认站点不认数值。
+- **读数面的层级也是刻度：受光边 `--dtpl-sheen`/`--dtpl-sheen-hover`、悬停抬升
+  `--dtpl-lift`/`--dtpl-lift-hover`。** 卡片悬停不再各写一套 shadow 栈。
 - **hero 图走 import，不走静态目录。** client 半区只有一个产物（`lib/client.js`），没有能挂相对 URL 的
   静态目录，所以 esbuild 把图内联成 data URI，由 `--dtpl-hero-art` 交给 CSS。拼那一行必须是普通字符串：
   换成模板字符串时，注入的整张样式表会被提前闭合，后面所有规则静默消失（实测底图声明只剩名字，

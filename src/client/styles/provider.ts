@@ -30,13 +30,13 @@ export const CSS_PROVIDER = `
   height:24px;padding:0 11px;
   font:inherit;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:500;
   color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
-  transition:background .15s ease,color .15s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-range-tab + .dtpl-range-tab{border-left:.5px solid var(--dtpl-hairline);}
-[data-plugin="dsh-tokbook"] .dtpl-range-tab:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-range-tab:hover{color:var(--dtpl-fg);background:var(--dtpl-wash-hover);}
 [data-plugin="dsh-tokbook"] .dtpl-range-tab.dtpl-range-active{
   color:var(--dtpl-fg);font-weight:600;
-  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
+  background:var(--dtpl-wash-on);
 }
 [data-plugin="dsh-tokbook"] .dtpl-range-tab.dtpl-range-active::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
@@ -48,16 +48,16 @@ export const CSS_PROVIDER = `
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dtpl-sheen),
     var(--dtpl-metal),
-    0 4px 14px -6px rgba(0,0,0,.18);
-  transition:box-shadow .18s ease,border-color .18s ease;
+    var(--dtpl-lift);
+  transition:box-shadow var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-card:hover{
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent),
+    var(--dtpl-sheen-hover),
     var(--dtpl-metal),
-    0 6px 20px -6px rgba(0,0,0,.24);
+    var(--dtpl-lift-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-provider-head{
   display:grid;

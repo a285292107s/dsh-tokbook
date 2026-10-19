@@ -15,7 +15,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-hero::after{
   content:"";position:absolute;width:14px;height:14px;pointer-events:none;z-index:2;
   border-color:color-mix(in srgb,var(--dtpl-fg) 55%,transparent);
-  transition:border-color .2s ease;
+  transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-hero::before{
   top:0;left:0;border-top:2px solid;border-left:2px solid;
@@ -122,7 +122,7 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-stat{
   display:flex;flex-direction:column;gap:3px;min-width:0;
   padding:10px 14px 11px;
-  transition:background .15s ease,border-left-color .15s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-left-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-stat + .dtpl-stat{border-left:1px solid var(--dtpl-border);}
 [data-plugin="dsh-tokbook"] .dtpl-stat:hover{
@@ -245,7 +245,7 @@ export const CSS_LEDGER = `
   padding:3px 14px 8px;
   font:inherit;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;
   color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
-  transition:color .15s ease,background .15s ease;
+  transition:color var(--dtpl-dur-quick) var(--dtpl-ease-tint),background var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-bd-tab + .dtpl-bd-tab{border-left:.5px solid var(--dtpl-hairline);}
 [data-plugin="dsh-tokbook"] .dtpl-bd-tab:hover{color:var(--dtpl-fg);}
@@ -370,7 +370,7 @@ export const CSS_LEDGER = `
   height:30px;padding:0 12px;
   border:1px solid var(--dtpl-border);background:transparent;color:var(--dtpl-fg);
   font:inherit;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;cursor:pointer;
-  transition:background .15s ease,border-color .15s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-rescan:hover:not(:disabled){
   background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);
@@ -395,7 +395,7 @@ export const CSS_LEDGER = `
   border:1px solid color-mix(in srgb,var(--dtpl-err) 45%,transparent);
   background:transparent;color:var(--dtpl-err);
   font:inherit;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);cursor:pointer;
-  transition:background .15s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-retry:hover{background:color-mix(in srgb,var(--dtpl-err) 12%,transparent);}
 

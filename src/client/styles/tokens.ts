@@ -25,7 +25,13 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-metal:
     inset 0 1px 0 0 color-mix(in srgb,#fff 7%,transparent),
     inset 0 -1px 0 0 color-mix(in srgb,#000 12%,transparent);
+  --dtpl-sheen:inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent);
+  --dtpl-sheen-hover:inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent);
+  --dtpl-lift:0 4px 14px -6px rgba(0,0,0,.18);
+  --dtpl-lift-hover:0 6px 20px -6px rgba(0,0,0,.24);
   --dtpl-panel-bg:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
+  --dtpl-wash-hover:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+  --dtpl-wash-on:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
   --dtpl-paper:
     linear-gradient(180deg,
       color-mix(in srgb,var(--dtpl-fg) 1.2%,transparent) 0%,
@@ -35,6 +41,13 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
 
   --dtpl-radius:0px;
   --dtpl-mono:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);
+
+  --dtpl-ease-tint:var(--ds-ease-in-out,cubic-bezier(.4,0,.2,1));
+  --dtpl-ease-move:cubic-bezier(.05,.7,.1,1);
+  --dtpl-dur-quick:100ms;
+  --dtpl-dur-enter:200ms;
+  --dtpl-dur-move:300ms;
+  --dtpl-dur-draw:450ms;
 
   --dtpl-fs-micro:10px;
   --dtpl-fs-label:12px;

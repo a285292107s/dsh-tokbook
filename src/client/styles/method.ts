@@ -26,15 +26,15 @@ export const CSS_METHOD = `
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dtpl-sheen),
     var(--dtpl-metal);
-  transition:box-shadow .18s ease,border-color .18s ease;
+  transition:box-shadow var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-fact:hover{
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent),
+    var(--dtpl-sheen-hover),
     var(--dtpl-metal),
-    0 3px 12px -5px rgba(0,0,0,.18);
+    var(--dtpl-lift);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-fact-k{
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);font-weight:500;
@@ -72,15 +72,15 @@ export const CSS_METHOD = `
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dtpl-sheen),
     var(--dtpl-metal);
-  transition:box-shadow .18s ease,border-color .18s ease;
+  transition:box-shadow var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-bucket:hover{
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent),
+    var(--dtpl-sheen-hover),
     var(--dtpl-metal),
-    0 3px 12px -5px rgba(0,0,0,.18);
+    var(--dtpl-lift);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-bucket-name{
   font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:600;color:var(--dtpl-fg);

@@ -18,13 +18,13 @@ export const CSS_QUOTA = `
   height:24px;padding:0 11px;
   font:inherit;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:500;
   color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
-  transition:background .15s ease,color .15s ease;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt + .dtpl-quota-autorefresh-opt{border-left:.5px solid var(--dtpl-hairline);}
-[data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt:hover{color:var(--dtpl-fg);background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt:hover{color:var(--dtpl-fg);background:var(--dtpl-wash-hover);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt.dtpl-quota-autorefresh-on{
   color:var(--dtpl-fg);font-weight:600;
-  background:color-mix(in srgb,var(--dtpl-fg) 6%,transparent);
+  background:var(--dtpl-wash-on);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-autorefresh-opt.dtpl-quota-autorefresh-on::after{
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
@@ -39,16 +39,16 @@ export const CSS_QUOTA = `
   border:1px solid var(--dtpl-border);
   background:var(--dtpl-panel-bg);
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb,#fff 6%,transparent),
+    var(--dtpl-sheen),
     var(--dtpl-metal),
-    0 4px 14px -6px rgba(0,0,0,.18);
-  transition:box-shadow .18s ease,border-color .18s ease;
+    var(--dtpl-lift);
+  transition:box-shadow var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-card:hover{
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb,#fff 10%,transparent),
+    var(--dtpl-sheen-hover),
     var(--dtpl-metal),
-    0 6px 20px -6px rgba(0,0,0,.24);
+    var(--dtpl-lift-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-head{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -75,9 +75,9 @@ export const CSS_QUOTA = `
   display:inline-flex;align-items:center;justify-content:center;
   width:28px;height:28px;padding:0;
   border:none;background:transparent;color:var(--dtpl-fg-2);
-  cursor:pointer;transition:background .15s ease,color .15s ease;
+  cursor:pointer;transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
-[data-plugin="dsh-tokbook"] .dtpl-quota-refresh:hover:not(:disabled){background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-quota-refresh:hover:not(:disabled){background:var(--dtpl-wash-hover);color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh:disabled{opacity:.45;cursor:default;}
 [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim{
   display:inline-flex;align-items:center;justify-content:center;
@@ -102,7 +102,7 @@ export const CSS_QUOTA = `
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill{
   fill:none;stroke:currentColor;stroke-width:4;stroke-linecap:round;
   transform:rotate(-90deg);transform-origin:50% 50%;
-  transition:stroke-dasharray .4s ease;
+  transition:stroke-dasharray var(--dtpl-dur-draw) var(--dtpl-ease-move);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-n{
   position:absolute;inset:0;display:flex;flex-direction:column;
@@ -162,7 +162,7 @@ export const CSS_QUOTA = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill{
   display:block;position:relative;height:100%;
-  transition:width .4s ease,background-color .2s ease;
+  transition:width var(--dtpl-dur-draw) var(--dtpl-ease-move),background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill::before{
   content:"";position:absolute;left:0;right:0;top:0;height:1px;
@@ -243,7 +243,7 @@ export const CSS_QUOTA = `
 }
 
 @media (prefers-reduced-motion:no-preference){
-  [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill{animation:dtpl-draw .5s cubic-bezier(.3,.6,.3,1) both;}
-  [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill{animation:dtpl-width-in .45s cubic-bezier(.3,.6,.3,1) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill{animation:dtpl-draw var(--dtpl-dur-draw) var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill{animation:dtpl-width-in var(--dtpl-dur-draw) var(--dtpl-ease-move) both;}
 }
 `
