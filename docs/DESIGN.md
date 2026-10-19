@@ -286,9 +286,9 @@ bundle 外的。多列几个看起来无害，实际会让一个越界的 import
 
 ## 8. 接入 `web` profile 的步骤（外置）
 
-**操作步骤的真源是 [`../README.zh.md`](../README.zh.md)「安装」**——`dsh plugin add`、patch
-里那一行，以及「普通插件 vs `dsh.bundle` 包」的取舍都在那里。client 改动怎么生效（`rev` 不可变缓存、
-刷新 / 重启 + 硬刷新 / link 安装）见 [`HMR.md`](HMR.md)。
+**操作步骤的真源是 [`../README.zh.md`](../README.zh.md)「安装」**——`dsh plugin add`、它自动选中的
+bundle 层，以及 client 改动怎么生效（`rev` 不可变缓存、刷新 / 重启 + 硬刷新 / link 安装）见
+[`HMR.md`](HMR.md)。
 
 > 本节原有的一遍外置接入走查（与 README 重复）和一段 HMR 复述（与 HMR.md 重复）已于 2026-09-16
 > 删除；要追溯读 git 历史。

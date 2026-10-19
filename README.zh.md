@@ -60,28 +60,24 @@ dsh plugin --profile web add github:a285292107s/dsh-tokbook
 `web` 只是**你要装进去的那个 profile**:**换成你自己的名字**。该 profile 还不存在时,这条命令会
 顺手初始化它。本文其余地方写 `web` 也是同一个意思。
 
+这个包是 **`dsh.bundle` 组合包**:`package.json` 的 `dsh.bundle.patch` 指向包内的
+`cordis.patch.yml`,安装成功后 DSH 自动把它选进 profile 的 bundle 列表,由那一层插入 `tokbook` 行
+——**不要**再手写 `insert` 挂载行。数据目录默认 `$DSH_HOME/tokbook/`,这个插件**不配置也会开始
+记账**;只有要改什么才加 `config:` 块(见[配置](#配置)),覆盖示例见
+[`cordis.patch.example.yml`](cordis.patch.example.yml)。
+
+重启 `dsh web` 并刷新浏览器。入口按钮在侧边栏底部,浮窗是一个 shell overlay。
+
 仓库里带着构建好的 `lib/`(随 git 发布),所以安装时**不需要 pnpm 跑构建脚本**,也不需要先改 profile
 的 `pnpm-workspace.yaml`。改完 `src/` 要 `pnpm build`,再把 `lib/` 一起提交(见「构建」)。
 
 pnpm 还会报一句 peer dependency `@deepseek-ai/cordis` 缺失的警告。**那是预期的、无害的**:
 cordis 由 DSH 自己提供,插件解析到的就是同一个实例。
 
-然后把这个插件挂进 profile。它是**普通外部插件**(不是 `dsh.bundle` 层),所以 profile 里要按包名点名:
-
-```yaml
-# $DSH_HOME/profiles/<你的 profile>/cordis.patch.yml
-- insert:
-    - id: tokbook
-      name: 'dsh-tokbook'
-```
-
-挂载行就这些就够:数据目录默认 `$DSH_HOME/tokbook/`,这个插件**不配置也会开始记账**。只有要改
-什么才加 `config:` 块(见[配置](#配置))。
-
-重启 `dsh web` 并刷新浏览器。入口按钮在侧边栏底部,浮窗是一个 shell overlay。挂载行的示例见
-[`cordis.patch.example.yml`](cordis.patch.example.yml)。
-
 从本地检出安装则用 `dsh plugin --profile web add .`。
+
+**从旧的普通插件装法迁过来**:profile 的 `cordis.patch.yml` 里此前有一条手写的 `insert` 行
+(`id: tokbook`)。选中这个 bundle 前先删掉它,否则 profile 里会留下两行同 id 的 `tokbook`。
 
 重载链活着时(见 [`docs/HMR.md`](docs/HMR.md)),`pnpm build` 会经 `dsh-hmr` 行热替换 **host** 半区;
 browser 刷新页面拾取,链没活着时硬刷新永远是兜底。
@@ -337,7 +333,8 @@ scripts/
   selfcheck-ui.ts          界面禁令静态检查:死类双向 / 色值 / 虚线 / 圆角 / 宿主变量白名单 / 动效·焦点·窄屏分支 / ARIA 引用
 
 docs/                      文档树(地图:docs/INDEX.md):CONTRACTS 契约 / DESIGN 推理 / HMR / LESSONS / CONTEXT / adr
-cordis.patch.example.yml   profile 挂载行的示例(见「安装」)
+cordis.patch.yml           bundle 层:选中后由 DSH 插入 tokbook 行(见「安装」)
+cordis.patch.example.yml   给那一行改 config 的覆盖示例
 lib/                       构建产物(随 git 发布):lib/index.js + lib/client.js + lib/types/**/*.d.ts
 ```
 

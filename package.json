@@ -1,7 +1,7 @@
 {
   "name": "dsh-tokbook",
   "description": "Cross-session token-usage ledger for DeepSeek Harness (DSH). Host half folds provider usage into a durable book; browser half shows it via a sidebar footer button + shell overlay.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "keywords": [
     "dsh",
     "deepseek-harness",
@@ -26,9 +26,13 @@
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": ["@deepseek-ai/dsh-client-ui-slots"]
@@ -37,7 +41,8 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
-    "lib/types/**/*.d.ts"
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml"
   ],
   "scripts": {
     "build": "tsc -b tsconfig.json && node scripts/build-client.mjs",

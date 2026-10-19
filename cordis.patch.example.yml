@@ -1,10 +1,13 @@
-# Example mount row for $DSH_HOME/profiles/web/cordis.patch.yml.
-# dsh-tokbook is a plain external plugin (not a dsh.bundle layer), so the profile
-# must reference it by package name once installed.
+# Example config override for the row dsh-tokbook's own bundle patch inserts
+# (id: tokbook). Install or select the bundle first, then append this to
+# $DSH_HOME/profiles/<profile>/cordis.patch.yml only when you want to change
+# a config key.
 #
-#   dsh plugin --profile web add <path|npm|git specifier>
-#
-# Then append:
-- insert:
-    - id: tokbook
-      name: 'dsh-tokbook'
+# `config` is replaced wholesale, so restate every key you want to keep.
+- id: tokbook
+  config:
+    path: D:/data/tokbook
+    recordCompaction: true
+    plans:
+      opencode-go:
+        enabled: false

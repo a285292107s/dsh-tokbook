@@ -24,24 +24,25 @@ Needs DSH (`dsh --version`) and **pnpm 11** on your `PATH`.
 dsh plugin --profile web add github:a285292107s/dsh-tokbook
 ```
 
-`web` is the profile you install into — substitute your own. The repo carries the built `lib/`, so installing
-runs no build script and needs no `allowBuilds` edit in the profile's `pnpm-workspace.yaml`. Rebuild
-(`pnpm build`) and commit `lib/` after changing `src/` (see Development). The peer-dependency warning about
-`@deepseek-ai/cordis` is expected — DSH provides cordis and the plugin resolves that same instance.
+`web` is the profile you install into — substitute your own. This package is a **`dsh.bundle` package**:
+`dsh.bundle.patch` in `package.json` points at the bundled `cordis.patch.yml`, and DSH selects that layer
+into the profile after a successful install. Its patch inserts the `tokbook` row, so **do not** add an
+`insert` row by hand. The data directory defaults to `$DSH_HOME/tokbook/` and collection starts with no
+configuration; add a `config:` block only to change something (see Configuration), with an override
+example in [`cordis.patch.example.yml`](cordis.patch.example.yml).
 
-Then mount the plugin. It is a plain external plugin, not a `dsh.bundle` layer, so the profile names it in
-`cordis.patch.yml`:
+Restart `dsh web` and refresh — the entry button appears at the bottom of the sidebar
+(`sidebar.footer.action`).
 
-```yaml
-# $DSH_HOME/profiles/<your profile>/cordis.patch.yml
-- insert:
-    - id: tokbook
-      name: 'dsh-tokbook'
-```
+The repo carries the built `lib/`, so installing runs no build script and needs no `allowBuilds` edit in
+the profile's `pnpm-workspace.yaml`. Rebuild (`pnpm build`) and commit `lib/` after changing `src/` (see
+Development). The peer-dependency warning about `@deepseek-ai/cordis` is expected — DSH provides cordis
+and the plugin resolves that same instance. To install from a local checkout, use
+`dsh plugin --profile web add .`.
 
-That row is all you need: the data directory defaults to `$DSH_HOME/tokbook/` and collection starts with
-no configuration. Restart `dsh web` and refresh — the entry button appears at the bottom of the sidebar
-(`sidebar.footer.action`). To install from a local checkout, use `dsh plugin --profile web add .`.
+**Migrating from the old plain-plugin install:** the profile's `cordis.patch.yml` may still carry a
+hand-written `insert` row (`id: tokbook`). Remove it before selecting this bundle, or the profile ends
+up with two `tokbook` rows that share one id.
 
 ## What it records
 
