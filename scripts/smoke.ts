@@ -8,10 +8,11 @@ import {
 import { aggregateWindow, pathKey } from '../src/window-usage.ts'
 import {
   billingOf, cnyTable, coercePriceFile, costOf, dayKeyOf, dayStartMs,
-  entryAt, parsePriceInput, priceOfKey, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY,
-  PRICING_FILE, PRICING_FX_KEY,
+  entryAt, mergeUncoveredUsdCells, parsePriceInput, priceOfKey, PRICING_BACKUP_GENERATIONS,
+  PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY,
+  PRICING_FILE, PRICING_FX_KEY, PRICING_LOCK_FILE,
   rateKeyAt, ratesAt,
-  readPriceFile, slotAt, writePriceFile, type PricingTable,
+  readPriceFile, slotAt, withPricingFileLock, writePriceFile, type PriceFile, type PricingTable,
 } from '../src/pricing.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import { normalizeModelId, parseCatalog, searchCatalog } from '../src/models-dev.ts'
@@ -980,6 +981,76 @@ if (section('价格表币种:按通道报价币种记,汇率只用来折成人�
   const shown = inheritedCell(showRow, null, 'cacheRead')
   check('留空档的鬼影与说明用同一种货币(不换算),cache 档回落到输入价',
     shown.value === '0.15' && shown.note?.includes('0.15') === true)
+}
+
+if (section('价格表保存:美元补价格不被整表重写抹掉 + 多代 .bak + 跨进程锁')) {
+  const diskUsd: PriceFile = {
+    table: {
+      'usd-route': {
+        kept: { rates: { inputPerMillion: 0.15, outputPerMillion: 0.6 } },
+        edited: { rates: { inputPerMillion: 0.1, outputPerMillion: 0.4 } },
+      },
+      'cny-route': { manual: { rates: { inputPerMillion: 2, outputPerMillion: 8 } } },
+    },
+    billing: {}, currency: { 'usd-route': 'USD' }, calendar: {}, revision: '',
+  }
+  const incoming: PriceFile = {
+    table: {
+      'usd-route': { edited: { rates: { inputPerMillion: 0.2, outputPerMillion: 0.9 } } },
+    },
+    billing: {}, currency: { 'usd-route': 'USD' }, calendar: {}, revision: '',
+  }
+  const merged = mergeUncoveredUsdCells(diskUsd, incoming)
+  check('美元通道:磁盘有、body 没提到的补价格被保留;body 改过的照 body;人民币格不受影响',
+    merged.table['usd-route']?.kept?.rates.inputPerMillion === 0.15
+    && merged.table['usd-route']?.edited?.rates.inputPerMillion === 0.2
+    && merged.table['cny-route'] === undefined)
+  check('没有需要保留的格子时原样返回 incoming(不无谓复制)',
+    mergeUncoveredUsdCells({ table: {}, billing: {}, currency: {}, calendar: {}, revision: '' }, incoming) === incoming)
+
+  const bakDir = await mkdtemp(join(tmpdir(), 'tokbook-bak-'))
+  try {
+    const one: PriceFile = { table: { r: { m: { rates: { inputPerMillion: 1, outputPerMillion: 1 } } } }, billing: {}, currency: {}, calendar: {}, revision: '' }
+    for (let gen = 1; gen <= PRICING_BACKUP_GENERATIONS + 2; gen += 1) {
+      await writePriceFile(bakDir, { ...one, table: { r: { m: { rates: { inputPerMillion: gen, outputPerMillion: gen } } } } }, quiet)
+    }
+    const genRead = async (name: string): Promise<number | null> => {
+      try {
+        const text = await readFile(join(bakDir, name), 'utf8')
+        return (JSON.parse(text) as { r: { m: { inputPerMillion: number } } }).r.m.inputPerMillion
+      } catch {
+        return null
+      }
+    }
+    check(`多代 .bak 滚动:留最近 ${String(PRICING_BACKUP_GENERATIONS)} 代(各自向前一代),更早的滚掉`,
+      await genRead(`${PRICING_FILE}.bak`) === PRICING_BACKUP_GENERATIONS + 1
+      && await genRead(`${PRICING_FILE}.bak.1`) === PRICING_BACKUP_GENERATIONS
+      && await genRead(`${PRICING_FILE}.bak.${String(PRICING_BACKUP_GENERATIONS - 1)}`) === 2
+      && await genRead(`${PRICING_FILE}.bak.${String(PRICING_BACKUP_GENERATIONS + 1)}`) === null)
+  } finally {
+    await rm(bakDir, { recursive: true, force: true })
+  }
+
+  const lockDir = await mkdtemp(join(tmpdir(), 'tokbook-lock-'))
+  try {
+    const order: string[] = []
+    const critical = (tag: string, ms: number): Promise<void> => withPricingFileLock(lockDir, async () => {
+      order.push(`${tag}:enter`)
+      await new Promise(resolve => setTimeout(resolve, ms))
+      order.push(`${tag}:exit`)
+    }, quiet)
+    await Promise.all([critical('a', 120), critical('b', 40)])
+    const aIn = order.indexOf('a:enter')
+    const aOut = order.indexOf('a:exit')
+    const bIn = order.indexOf('b:enter')
+    const bOut = order.indexOf('b:exit')
+    check('跨进程锁文件把两个并发写入串行化(一个 enter/exit 夹完,另一个才进),且锁文件事后清掉',
+      aIn >= 0 && bIn >= 0 && aOut >= 0 && bOut >= 0
+      && !((aIn < bIn && bIn < aOut) || (bIn < aIn && aIn < bOut))
+      && await stat(join(lockDir, PRICING_LOCK_FILE)).then(() => false).catch(() => true))
+  } finally {
+    await rm(lockDir, { recursive: true, force: true })
+  }
 }
 
 if (section('折叠自证有效:天级水位线看不见往日的追加')) {

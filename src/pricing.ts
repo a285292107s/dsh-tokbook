@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   DAY_SETS, MAX_MODEL_LENGTH, MAX_ROUTE_LENGTH, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY,
@@ -14,6 +14,61 @@ import type {
 import { UNPRICED_KEY } from './types.ts'
 
 export const PRICING_FILE = 'pricing.json'
+
+export const PRICING_LOCK_FILE = 'pricing.json.lock'
+
+const PRICING_LOCK_STALE_MS = 30_000
+
+const PRICING_LOCK_WAIT_MS = 5_000
+
+const PRICING_LOCK_POLL_MS = 40
+
+async function lockIsStale(lockPath: string): Promise<boolean> {
+  try {
+    const info = await stat(lockPath)
+    return Date.now() - info.mtimeMs > PRICING_LOCK_STALE_MS
+  } catch {
+    return true
+  }
+}
+
+async function acquirePricingLock(lockPath: string): Promise<boolean> {
+  const deadline = Date.now() + PRICING_LOCK_WAIT_MS
+  for (;;) {
+    try {
+      const handle = await open(lockPath, 'wx')
+      await handle.writeFile(String(process.pid), 'utf8')
+      await handle.close()
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return false
+      if (await lockIsStale(lockPath)) {
+        await unlink(lockPath).catch(() => undefined)
+        continue
+      }
+      if (Date.now() >= deadline) return false
+      await new Promise(resolve => setTimeout(resolve, PRICING_LOCK_POLL_MS))
+    }
+  }
+}
+
+export async function withPricingFileLock<T>(
+  dir: string,
+  work: () => Promise<T>,
+  logger: Logger = console,
+): Promise<T> {
+  const lockPath = join(dir, PRICING_LOCK_FILE)
+  await mkdir(dir, { recursive: true })
+  const acquired = await acquirePricingLock(lockPath)
+  if (!acquired) {
+    logger.warn?.('[tokbook] could not acquire the pricing.json lock within timeout; writing without the cross-process guard')
+  }
+  try {
+    return await work()
+  } finally {
+    if (acquired) await unlink(lockPath).catch(() => undefined)
+  }
+}
 
 export {
   DAY_SETS, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY, PRICING_FX_KEY,
@@ -527,6 +582,27 @@ function slotBody(slot: PriceSlot): Record<string, unknown> {
   }
 }
 
+export function mergeUncoveredUsdCells(current: PriceFile, incoming: PriceFile): PriceFile {
+  const usdRoutes = new Set(Object.keys(current.currency).filter(route => current.currency[route] === 'USD'))
+  let table: PricingTable = incoming.table
+  for (const route of usdRoutes) {
+    const onDisk = current.table[route]
+    if (onDisk === undefined) continue
+    const inBody = incoming.table[route] ?? {}
+    const restored: Record<string, PriceEntry> = { ...inBody }
+    let changed = false
+    for (const [model, entry] of Object.entries(onDisk)) {
+      if (restored[model] !== undefined) continue
+      restored[model] = entry
+      changed = true
+    }
+    if (!changed) continue
+    if (table === incoming.table) table = { ...incoming.table }
+    table[route] = restored
+  }
+  return table === incoming.table ? incoming : { ...incoming, table }
+}
+
 function priceFileBody(file: PriceFile): Record<string, unknown> {
   const body: Record<string, unknown> = {}
   const billingRoutes = Object.keys(file.billing).sort((left, right) => left.localeCompare(right))
@@ -571,6 +647,16 @@ function priceFileBody(file: PriceFile): Record<string, unknown> {
   return body
 }
 
+export const PRICING_BACKUP_GENERATIONS = 3
+
+async function rotateBackups(dir: string): Promise<void> {
+  const backup = join(dir, `${PRICING_FILE}.bak`)
+  for (let index = PRICING_BACKUP_GENERATIONS - 1; index >= 1; index -= 1) {
+    await rename(join(dir, `${PRICING_FILE}.bak.${String(index)}`), join(dir, `${PRICING_FILE}.bak.${String(index + 1)}`)).catch(() => undefined)
+  }
+  await rename(backup, join(dir, `${PRICING_FILE}.bak.1`)).catch(() => undefined)
+}
+
 export async function writePriceFile(dir: string, file: PriceFile, logger: Logger = console): Promise<void> {
   const target = join(dir, PRICING_FILE)
   const tmp = join(dir, `${PRICING_FILE}.tmp`)
@@ -578,6 +664,7 @@ export async function writePriceFile(dir: string, file: PriceFile, logger: Logge
   try {
     await mkdir(dirname(target), { recursive: true })
     await writeFile(tmp, `${JSON.stringify(priceFileBody(file), null, 2)}\n`, 'utf8')
+    await rotateBackups(dir)
     await rename(target, backup).catch(() => undefined)
     await rename(tmp, target)
   } catch (error) {

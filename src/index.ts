@@ -16,7 +16,7 @@ import {
 } from './stats.ts'
 import { aggregateWindow, type WorkspaceRef } from './window-usage.ts'
 import {
-  cnyTable, parsePriceInput, rateKeyAt, readPriceFile, writePriceFile,
+  cnyTable, mergeUncoveredUsdCells, parsePriceInput, rateKeyAt, readPriceFile, withPricingFileLock, writePriceFile,
   type PriceFile, type PriceParse,
 } from './pricing.ts'
 import { dayKeyOf, holidaySet } from './price-format.ts'
@@ -612,10 +612,12 @@ export class TokenUsageBook extends Service {
   async savePricing(body: unknown): Promise<PriceParse> {
     const parsed = parsePriceInput(body)
     if (!parsed.ok) return parsed
-    return this.withPriceFileLock(async () => {
-      await writePriceFile(this.dir, parsed.file, this.logger)
-      return parsed
-    })
+    return this.withPriceFileLock(() => withPricingFileLock(this.dir, async () => {
+      const current = await readPriceFile(this.dir, this.logger)
+      const merged = mergeUncoveredUsdCells(current, parsed.file)
+      await writePriceFile(this.dir, merged, this.logger)
+      return { ok: true, file: merged }
+    }, this.logger))
   }
 
   async syncPricing(force = false): Promise<PricingSyncResult> {
@@ -632,7 +634,7 @@ export class TokenUsageBook extends Service {
           fetchCatalog(),
           readCachedRecords(this.dir, this.logger),
         ])
-        const report = await this.withPriceFileLock(async () => {
+        const report = await this.withPriceFileLock(() => withPricingFileLock(this.dir, async () => {
           const file = await readPriceFile(this.dir, this.logger)
           const { table, report } = mergeCatalogIntoTable(
             file.table, file.currency, billedRouteModels(records), catalog,
@@ -642,7 +644,7 @@ export class TokenUsageBook extends Service {
             await writePriceFile(this.dir, next, this.logger)
           }
           return report
-        })
+        }, this.logger))
         await writePricingSyncState(this.dir, {
           lastSyncDay: today,
           lastAdded: report.added,
