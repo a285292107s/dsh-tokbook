@@ -410,6 +410,7 @@ export class TokenUsageBook extends Service {
       resolve,
       todaySpend: this.todaySpendOf(records, now, table, billing, resolve),
       updatedAt: now,
+      providerLabels: routeLabels(this.settings(), this.llm(), this.logger),
     })
   }
 

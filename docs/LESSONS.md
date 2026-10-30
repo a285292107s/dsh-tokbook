@@ -1,6 +1,6 @@
 # dsh-tokbook 开发经验与踩坑记录（LESSONS）
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-19 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-23 · supersedes: —
 
 > 本文件是**踩坑记录的累积**，供后续维护 / 继续开发时对照；条目按 **现象 → 根因 → 修复 / 正确做法**
 > 组织。**DSH 源码路径均相对同一处检出**——那台机器上 `C:\Users\28529\Desktop\deepseek-harness`，
@@ -609,7 +609,32 @@ sheet 尤其糟：它整块贴底，关闭钮是**唯一**的显式退出（Esca
 
 ---
 
-## 20. 一页速查（Checklist）
+## 20. 收起的明细别挂进 DOM——长会话的词元页会冻住
+
+### 现象
+
+- 点开词元页要等几秒，而且不是「骨架屏在等请求」：请求回来之后整条主线程被占满，滚动、点按都没反应。
+- 短会话完全看不出来：几十步时只有几千个节点，卡顿掉在感知阈值以下。
+
+### 根因
+
+- 轮块收起只是 CSS（`.dtpl-tok-steps` 的 `grid-template-rows:0fr` + `overflow:hidden`），步骤行
+  **照样在 DOM 里**。节点数随步数线性涨：本机那份 127 轮 / 3821 步的会话是 **17 万个节点**，两次长任务
+  合计 **2.8 s**（0.9 s 建元素、1.9 s 布局），而屏上默认只画 127 个轮块头。
+- 顺带一个误导：这类卡顿在「请求耗时」里看不见（预览台里请求是即时的），只看 DOM 节点数与长任务。
+
+### 正确做法
+
+- 步骤行只在展开时挂载：`open && rows.map(...)`。同一份载荷节点降到 **5.5 k**、长任务只剩 **0.1 s**。
+- **装行的容器要常驻**：`.dtpl-tok-steps` 这个 0fr 网格元素即使空着也留在 DOM 里，展开时新挂的行才有
+  上一帧的 `0fr` 可过渡；把容器也一起卸载掉，高度过渡就没了（新插进 DOM 的元素不参与过渡）。
+- 量法：真载荷喂 `scripts/preview-overlay.ts`（临时把 `SESSIONS` 指到抓下来的那份 JSON），无头
+  `playwright-cli` 里挂 `PerformanceObserver('longtask')`，再数 `[data-slot="conversation.view"] *`
+  的节点数——比盯着屏猜「卡不卡」准。
+
+---
+
+## 21. 一页速查（Checklist）
 
 - [ ] 选择器：元素自身带 `data-plugin` → 用复合 `[data-plugin].class`；真子元素 → 用后代 `[data-plugin] .class`。
 - [ ] 改 UI（client）后：`pnpm build` 落盘 `lib/client.js` → 刷新浏览器取新 rev（client-hmr 活着时可能 ≤500ms 自动热更，加分项非保证）。
@@ -643,3 +668,4 @@ sheet 尤其糟：它整块贴底，关闭钮是**唯一**的显式退出（Esca
   否则 PUT 在途的键入会被标成「已保存」、重写被跳过，**静默丢字**。
 - [ ] 数字：不足 1% 不取整成 0、99.x 不凑成 100、金额解析只收十进制、换算结果写盘前取整（见 §18）。
 - [ ] 触屏热区按 44px 档给；验证靠量尺寸或触屏仿真，别靠鼠标点得中（见 §19）。
+- [ ] 折叠区只挂展开时的内容；装行的网格容器要常驻（否则高度过渡没了）。用长任务与节点数量卡不卡（见 §20）。

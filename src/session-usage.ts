@@ -19,6 +19,7 @@ export interface SessionUsageInput {
   resolve: RateResolver
   todaySpend: number
   updatedAt: number
+  providerLabels?: Record<string, string>
 }
 
 export interface SessionLineageLike {
@@ -443,6 +444,7 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
     unattributed: sortEntries(unattributed).map(entry => entry.row),
     todaySpend: input.todaySpend,
     ...spanOf(span, all.map(entry => entry.row)),
+    ...(input.providerLabels === undefined ? {} : { providerLabels: input.providerLabels }),
     ...(subagents === undefined ? {} : { subagents }),
   }
 }

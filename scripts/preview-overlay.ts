@@ -766,6 +766,7 @@ const SESSIONS = {
       todaySpend: 4.99,
       spanMs: 14 * 60 * minute,
       workMs,
+      providerLabels: USAGE_LABELS,
     }
   })(),
 }

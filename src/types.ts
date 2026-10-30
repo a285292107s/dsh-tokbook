@@ -491,6 +491,7 @@ export interface SessionUsageView {
   todaySpend: number
   spanMs?: number
   workMs?: number
+  providerLabels?: Record<string, string>
   subagents?: SessionSubagentsView
 }
 

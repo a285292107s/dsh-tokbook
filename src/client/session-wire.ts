@@ -31,8 +31,18 @@ export function readSessionView(raw: unknown): SessionUsageView | null {
     todaySpend: num(source.todaySpend),
     spanMs: optionalMs(source.spanMs),
     workMs: optionalMs(source.workMs),
+    providerLabels: readLabels(source.providerLabels),
     subagents: readSubagents(source.subagents),
   }
+}
+
+function readLabels(raw: unknown): Record<string, string> | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const labels: Record<string, string> = {}
+  for (const [route, label] of Object.entries(raw)) {
+    if (route !== '' && typeof label === 'string' && label !== '') labels[route] = label
+  }
+  return Object.keys(labels).length === 0 ? undefined : labels
 }
 
 function readSubagents(raw: unknown): SessionSubagentsView | undefined {

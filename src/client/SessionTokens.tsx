@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { SessionUsageView, UsageTotals } from '../types.ts'
+import { settleTiming } from '../types.ts'
+import type { SessionStepRow, SessionUsageView, UsageTotals } from '../types.ts'
 import { QUERY_SESSION, ROUTE_SESSION } from '../route-paths.ts'
 import { formatDateTime, formatDuration, formatMoney, formatShare, formatTokens } from './format.ts'
 import { UsageGlyph } from './icons.tsx'
 import { ledgerClockSupported, subscribeLedgerChanges } from './ledger-clock.ts'
 import { SessionShell } from './SessionShell.tsx'
 import { SubagentSection } from './session-subagents.tsx'
-import { MixBand, TimeBar, TurnBlocks, TurnChart, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
+import { MixBand, TurnBlocks, TurnChart, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
+import { PHASE_LABEL, TimeBar, sumSegments } from './session-timing.tsx'
 import { readSessionView } from './session-wire.ts'
 
 const POLL_MS = 15_000
@@ -139,41 +141,132 @@ function Block({ i, children }: { i: number; children: ReactNode }) {
   return <div className="dtpl-tok-block" style={{ '--dtpl-tok-i': i } as BlockStyle}>{children}</div>
 }
 
-function SessionTiming({ workMs, spanMs, firstAt, lastAt }: { workMs: number; spanMs: number; firstAt: number; lastAt: number }) {
+function toolWord(name: string): string {
+  return name === '' ? '未具名工具' : name
+}
+
+function spanAside(view: SessionUsageView): string | null {
+  const first = recordTime(view.firstAt)
+  const last = recordTime(view.lastAt)
+  return first === '—' && last === '—' ? null : `${first} → ${last}`
+}
+
+type TimingExtreme = { key: string; label: string; where: string; figure: string }
+
+function timingExtremes(groups: readonly { label: string; rows: readonly SessionStepRow[] }[]): {
+  extremes: readonly TimingExtreme[]
+  untimed: number
+  toolCalls: number
+} {
+  let untimed = 0
+  let toolCalls = 0
+  let slowest: { where: string; ms: number } | null = null
+  let slowTool: { where: string; ms: number } | null = null
+  let busiest: { where: string; steps: number } | null = null
+  for (const group of groups) {
+    if (group.rows.length > 0 && (busiest === null || group.rows.length > busiest.steps)) {
+      busiest = { where: group.label, steps: group.rows.length }
+    }
+    for (const row of group.rows) {
+      const timing = row.timing
+      if (timing === undefined) {
+        untimed += 1
+        continue
+      }
+      toolCalls += timing.toolCalls ?? 0
+      const at = row.step === undefined ? group.label : `${group.label} 第 ${String(row.step)} 步`
+      if (timing.wallMs !== undefined && (slowest === null || timing.wallMs > slowest.ms)) {
+        slowest = { where: at, ms: timing.wallMs }
+      }
+      const slow = timing.slowTool
+      if (slow !== undefined && (slowTool === null || slow.ms > slowTool.ms)) {
+        slowTool = { where: toolWord(slow.name), ms: slow.ms }
+      }
+    }
+  }
+  const extremes: TimingExtreme[] = []
+  if (slowest !== null) {
+    extremes.push({ key: 'slowest', label: '最慢一步', where: slowest.where, figure: formatDuration(slowest.ms) })
+  }
+  if (slowTool !== null) {
+    extremes.push({ key: 'slowtool', label: '最慢工具', where: slowTool.where, figure: formatDuration(slowTool.ms) })
+  }
+  if (busiest !== null) {
+    extremes.push({ key: 'busiest', label: '最忙一轮', where: busiest.where, figure: `${String(busiest.steps)} 步` })
+  }
+  if (toolCalls > 0) extremes.push({ key: 'calls', label: '工具调用', where: '', figure: `${String(toolCalls)} 次` })
+  return { extremes, untimed, toolCalls }
+}
+
+function SessionTiming({ view }: { view: SessionUsageView }) {
+  const workMs = view.workMs!
+  const spanMs = view.spanMs!
   const idleMs = spanMs - workMs
+  const groups: { label: string; rows: readonly SessionStepRow[] }[] = view.turns.map((group) => ({
+    label: `第 ${String(group.turn)} 轮`, rows: group.rows,
+  }))
+  if (view.betweenTurns !== null) groups.push({ label: '轮间', rows: view.betweenTurns.rows })
+  if (view.unattributed.length > 0) groups.push({ label: '轮次未知', rows: view.unattributed })
+  const segments = sumSegments(groups.flatMap((group) => [...group.rows]))
+  const { extremes, untimed } = timingExtremes(groups)
+  const aside = spanAside(view)
+  const ledger = workMs > 0 && idleMs >= 0
+    ? `会话跨度 ${formatDuration(spanMs)} = 引擎工作 ${formatDuration(workMs)} + 没在算 ${formatDuration(idleMs)}`
+    : `会话跨度 ${formatDuration(spanMs)}｜引擎工作 ${untimed > 0 ? `${String(untimed)} 步未计时，无法合计` : '没有量到用时'}`
   return (
     <section aria-label="会话时间">
-      <h2 className="dtpl-sec-title">会话时间</h2>
+      <h2 className="dtpl-sec-title">
+        会话时间
+        {aside !== null && <span className="dtpl-sec-aside">{aside}</span>}
+      </h2>
       <div className="dtpl-tok-timing">
-        <div className="dtpl-tok-timing-grid">
-          <div className="dtpl-stat" role="listitem">
-            <span className="dtpl-stat-k">引擎工作</span>
-            <span className="dtpl-stat-v">{formatDuration(workMs)}</span>
-          </div>
-          <div className="dtpl-stat" role="listitem">
-            <span className="dtpl-stat-k">会话跨度</span>
-            <span className="dtpl-stat-v">{formatDuration(spanMs)}</span>
-          </div>
+        <div className="dtpl-tok-timing-lead">
+          <span className="dtpl-total-k">引擎工作</span>
+          <span className="dtpl-hero-figure">
+            <span className="dtpl-total-num">{formatDuration(workMs)}</span>
+            <span className="dtpl-tok-timing-lead-k">占会话跨度 {formatShare(workMs, spanMs)}</span>
+          </span>
         </div>
-        {idleMs > 0 && (
-          <TimeBar
-            tone="hero"
-            scale={spanMs}
-            reads={[
-              { key: 'work', kind: 'work', label: '引擎工作', value: formatDuration(workMs) },
-              { key: 'idle', kind: 'idle', label: '没在算', value: formatDuration(idleMs) },
-            ]}
-            segments={[
-              { key: 'work', value: workMs, kind: 'work' },
-              { key: 'idle', value: idleMs, kind: 'idle' },
-            ]}
-          />
+        {segments.length > 0
+          ? (
+            <div className="dtpl-tok-timing-comp">
+              <span className="dtpl-tok-timing-comp-k">引擎工作在算什么</span>
+              <TimeBar
+                tone="hero"
+                scale={workMs}
+                segments={segments}
+                reads={segments.map((segment) => ({
+                  key: segment.key,
+                  kind: segment.kind,
+                  label: PHASE_LABEL[segment.kind],
+                  value: formatDuration(segment.value),
+                }))}
+              />
+            </div>
+          )
+          : (
+            <div className="dtpl-tok-timing-comp">
+              <span className="dtpl-tok-timing-comp-k">引擎工作在算什么</span>
+              <p className="dtpl-tok-timing-gap">拆不开：这个会话没有量到模型与工具的起止事件。</p>
+            </div>
+          )}
+        <p className="dtpl-tok-timing-ledger">{ledger}</p>
+        {extremes.length > 0 && (
+          <span className="dtpl-tok-timing-marks">
+            {extremes.map((extreme) => (
+              <span className="dtpl-tok-timing-mark" key={extreme.key}>
+                {extreme.label}
+                {extreme.where !== '' && <span className="dtpl-tok-timing-where">{extreme.where}</span>}
+                <b>{extreme.figure}</b>
+              </span>
+            ))}
+          </span>
         )}
-        <span className="dtpl-hero-facts">
-          <span className="dtpl-hero-fact">首记 <b>{recordTime(firstAt)}</b></span>
-          <i aria-hidden="true">·</i>
-          <span className="dtpl-hero-fact">末记 <b>{recordTime(lastAt)}</b></span>
-        </span>
+        {untimed > 0 && (
+          <p className="dtpl-tok-timing-gap">
+            这个会话还有 <b>{String(untimed)}</b> 步量不到起止事件{segments.length > 0 ? '，上面那条构成尺不含它们' : ''}。
+          </p>
+        )}
       </div>
     </section>
   )
@@ -239,12 +332,7 @@ function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap
       )}
       {view.workMs !== undefined && view.spanMs !== undefined && (
         <Block i={2}>
-          <SessionTiming
-            workMs={view.workMs}
-            spanMs={view.spanMs}
-            firstAt={view.firstAt}
-            lastAt={view.lastAt}
-          />
+          <SessionTiming view={view} />
         </Block>
       )}
       <Block i={3}><TurnChart turns={view.turns} previews={previews} /></Block>
@@ -254,6 +342,7 @@ function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap
           betweenTurns={view.betweenTurns}
           unattributed={view.unattributed}
           previews={previews}
+          providerLabels={view.providerLabels}
         />
       </Block>
       <Block i={5}><Footer total={view.total} unpriced={view.unpriced} timing={hasTiming(view)} /></Block>

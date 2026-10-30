@@ -47,13 +47,17 @@ function timedTotal(rows: readonly SessionStepRow[]): { workMs?: number } {
   return { workMs: shape.llmMs + shape.toolMs }
 }
 
-export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
+export function TurnBlocks({ turns, betweenTurns, unattributed, previews, providerLabels }: {
   turns: readonly SessionUsageGroup[]
   betweenTurns: SessionUsageGroup | null
   unattributed: readonly SessionStepRow[]
   previews: PreviewMap
+  providerLabels?: Readonly<Record<string, string>>
 }) {
+  const labels = providerLabels ?? {}
+  const [order, setOrder] = useState<TurnOrder>('oldest')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>())
+  const ordered = order === 'newest' ? [...turns].reverse() : turns
   const turnScale = Math.max(1, ...[...turns, ...(betweenTurns === null ? [] : [betweenTurns])]
     .map((group) => groupTotals(group).workMs ?? 0))
   const toggle = (key: string): void => {
@@ -65,8 +69,23 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
     })
   }
   return (
-    <section aria-label="按轮次明细">
-      <h2 className="dtpl-sec-title">按轮次明细</h2>
+    <section aria-label="轮次明细">
+      <h2 className="dtpl-sec-title">
+        轮次明细
+        <span className="dtpl-tok-order" role="group" aria-label="轮次排序">
+          {TURN_ORDERS.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              className={`dtpl-range-tab${order === entry.id ? ' dtpl-range-active' : ''}`}
+              aria-pressed={order === entry.id}
+              onClick={() => setOrder(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </span>
+      </h2>
       <div className="dtpl-tok-note dtpl-tok-legend">
         <span className="dtpl-tok-legend-figure">
           <TimeBar
@@ -85,7 +104,7 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
         </span>
         <span className="dtpl-tok-legend-say">步骤尺铺满整行；只有轮块头那条的长度说量级</span>      </div>
       <div className="dtpl-tok-turns">
-        {turns.map((group) => (
+        {ordered.map((group) => (
           <TurnBlock
             key={turnKey(group)}
             blockKey={turnKey(group)}
@@ -96,6 +115,7 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
             expanded={expanded}
             onToggle={toggle}
             turnScale={turnScale}
+            providerLabels={labels}
           />
         ))}
       </div>
@@ -112,6 +132,7 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
               expanded={expanded}
               onToggle={toggle}
               turnScale={turnScale}
+              providerLabels={labels}
             />
           )}
           {unattributed.length > 0 && (
@@ -125,6 +146,7 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
               expanded={expanded}
               onToggle={toggle}
               turnScale={turnScale}
+              providerLabels={labels}
             />
           )}
         </div>
@@ -133,11 +155,41 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews }: {
   )
 }
 
+type TurnOrder = 'oldest' | 'newest'
+
+const TURN_ORDERS: ReadonlyArray<{ id: TurnOrder; label: string }> = [
+  { id: 'oldest', label: '最早在前' },
+  { id: 'newest', label: '最新在前' },
+]
+
 function turnKey(group: SessionUsageGroup): string {
   return `turn:${String(group.turn)}`
 }
 
-function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expanded, onToggle, turnScale }: {
+interface ModelLabel {
+  text: string
+  title: string
+}
+
+function routeWord(provider: string, labels: Readonly<Record<string, string>>): string {
+  if (provider === '') return '通道未知'
+  return labels[provider] ?? provider
+}
+
+function modelPairOf(row: SessionStepRow, labels: Readonly<Record<string, string>>): string {
+  return `${routeWord(row.provider, labels)}/${row.model === '' ? '模型未知' : row.model}`
+}
+
+function turnModelOf(rows: readonly SessionStepRow[], labels: Readonly<Record<string, string>>): ModelLabel {
+  const pairs = new Set<string>()
+  for (const row of rows) pairs.add(modelPairOf(row, labels))
+  if (pairs.size === 0) return { text: '模型未知', title: '' }
+  const [first] = pairs
+  if (pairs.size === 1) return { text: first!, title: '' }
+  return { text: `${first!} 等 ${String(pairs.size)} 个`, title: [...pairs].join(' · ') }
+}
+
+function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expanded, onToggle, turnScale, providerLabels }: {
   blockKey: string
   label: string
   totals: BlockTotals
@@ -148,15 +200,23 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
   expanded: ReadonlySet<string>
   onToggle: (key: string) => void
   turnScale: number
+  providerLabels: Readonly<Record<string, string>>
 }) {
   const open = expanded.has(blockKey)
   const columns = timingColumnsOf(rows)
   const phases = sumSegments(rows)
+  const model = turnModelOf(rows, providerLabels)
+  const waitMs = phases.find((phase) => phase.kind === 'wait')?.value ?? 0
+  const generateMs = phases.find((phase) => phase.kind === 'generate')?.value ?? 0
+  const waitOverGenerates = waitMs > generateMs
   const phaseReads: TimeBarRead[] = phases.map((phase) => ({
     key: phase.key,
     kind: phase.kind,
     label: PHASE_LABEL[phase.kind],
     value: formatDuration(phase.value),
+    ...(waitOverGenerates && phase.kind === 'wait'
+      ? { isOver: true }
+      : {}),
   }))
   return (
     <div className={`dtpl-tok-turn${loose === true ? ' is-loose' : ''}`}>
@@ -164,7 +224,7 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
         type="button"
         className="dtpl-tok-turn-head"
         aria-expanded={open}
-        title={note}
+        title={waitOverGenerates ? `${note === undefined ? '' : `${note}\n`}这一轮等首 token 比生成还久` : note}
         onClick={() => onToggle(blockKey)}
       >
         <span className="dtpl-tok-turn-k">{label}</span>
@@ -198,6 +258,9 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
             </>
           )}
         </span>
+        <span className="dtpl-tok-turn-model" title={model.title !== '' ? model.title : undefined}>
+          {model.text}
+        </span>
         <span className="dtpl-tok-turn-cue" aria-hidden="true">▾</span>
         {phases.length > 0 && (
           <>
@@ -221,7 +284,9 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
       {rows.length > 0 && (
         <div className="dtpl-tok-steps" data-open={open}>
           <div className="dtpl-tok-steps-inner">
-            {rows.map((row) => <StepRow key={row.requestId} row={row} columns={columns} />)}
+            {open && rows.map((row) => (
+              <StepRow key={row.requestId} row={row} columns={columns} providerLabels={providerLabels} />
+            ))}
           </div>
         </div>
       )}
@@ -246,9 +311,10 @@ function speedOf(row: SessionStepRow): number | null {
   return tokensPerSecond(row.usage?.outputTokens, row.timing?.decodeMs)
 }
 
-function StepRow({ row, columns }: {
+function StepRow({ row, columns, providerLabels }: {
   row: SessionStepRow
   columns: { metrics: typeof TIMING_METRICS[number][]; speed: boolean }
+  providerLabels: Readonly<Record<string, string>>
 }) {
   const usage = row.usage
   const chip = chipOf(row)
@@ -260,7 +326,7 @@ function StepRow({ row, columns }: {
           {row.step === undefined ? '步骤未知' : `第 ${String(row.step)} 步`}
         </span>
         <span className="dtpl-tok-step-time">{formatDateTime(num(row.time))}</span>
-        <span className="dtpl-tok-step-model">{row.model === '' ? '模型未知' : row.model}</span>
+        <span className="dtpl-tok-step-model">{modelPairOf(row, providerLabels)}</span>
         {chip !== null && <em className="dtpl-tok-chip" data-kind={chip.kind}>{chip.word}</em>}
       </div>
       <CostCell row={row} />

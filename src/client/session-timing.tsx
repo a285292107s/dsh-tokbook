@@ -1,10 +1,13 @@
 import type { SessionStepRow, StepTiming } from '../types.ts'
 
+type TimeSegment = { key: string; value: number; kind: 'model' | 'wait' | 'generate' | 'tool' }
+
 export interface TimeBarRead {
   key: string
   kind: TimeSegment['kind']
   label: string
   value: string
+  isOver?: boolean
 }
 
 export const PHASE_LABEL: Record<'wait' | 'generate' | 'model' | 'tool', string> = {
@@ -22,20 +25,11 @@ export const LEGEND_SHAPE: ReadonlyArray<{ kind: 'wait' | 'generate' | 'tool'; s
   ] as const
 ).map((phase) => ({ ...phase, label: PHASE_LABEL[phase.kind] }))
 
-type TimeSegment = { key: string; value: number; kind: 'model' | 'wait' | 'generate' | 'tool' | 'work' | 'idle' }
-
-export interface TimeBarRead {
-  key: string
-  kind: TimeSegment['kind']
-  label: string
-  value: string
-}
-
 export function TimeReads({ reads }: { reads: readonly TimeBarRead[] }) {
   return (
     <span className="dtpl-tok-reads">
       {reads.map((read) => (
-        <span className="dtpl-tok-read" key={read.key}>
+        <span className="dtpl-tok-read" key={read.key} data-over={read.isOver === true ? '' : undefined}>
           <span className="dtpl-tok-read-mark" data-kind={read.kind} aria-hidden="true" />
           <span>{read.label}</span>
           <b>{read.value}</b>
