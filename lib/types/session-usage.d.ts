@@ -13,6 +13,7 @@ export interface SessionUsageInput {
     resolve: RateResolver;
     todaySpend: number;
     updatedAt: number;
+    providerLabels?: Record<string, string>;
 }
 export interface SessionLineageLike {
     header: {

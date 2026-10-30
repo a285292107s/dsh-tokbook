@@ -1,9 +1,15 @@
 import type { SessionStepRow, StepTiming } from '../types.ts';
+type TimeSegment = {
+    key: string;
+    value: number;
+    kind: 'model' | 'wait' | 'generate' | 'tool';
+};
 export interface TimeBarRead {
     key: string;
     kind: TimeSegment['kind'];
     label: string;
     value: string;
+    isOver?: boolean;
 }
 export declare const PHASE_LABEL: Record<'wait' | 'generate' | 'model' | 'tool', string>;
 export declare const LEGEND_SHAPE: ReadonlyArray<{
@@ -11,17 +17,6 @@ export declare const LEGEND_SHAPE: ReadonlyArray<{
     share: number;
     label: string;
 }>;
-type TimeSegment = {
-    key: string;
-    value: number;
-    kind: 'model' | 'wait' | 'generate' | 'tool' | 'work' | 'idle';
-};
-export interface TimeBarRead {
-    key: string;
-    kind: TimeSegment['kind'];
-    label: string;
-    value: string;
-}
 export declare function TimeReads({ reads }: {
     reads: readonly TimeBarRead[];
 }): import("react").JSX.Element;

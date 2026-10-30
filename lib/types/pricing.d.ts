@@ -1,5 +1,7 @@
 import type { BillingMap, BillingNature, CurrencyMap, FxSetting, HolidayCalendar, ModelPricing, PriceEntry, PriceSlot, PricingTable, RateKey, UsageTotals } from './types.ts';
 export declare const PRICING_FILE = "pricing.json";
+export declare const PRICING_LOCK_FILE = "pricing.json.lock";
+export declare function withPricingFileLock<T>(dir: string, work: () => Promise<T>, logger?: Logger): Promise<T>;
 export { DAY_SETS, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY, PRICING_FX_KEY, dayKeyOf, dayStartMs, } from './price-format.ts';
 interface Logger {
     error(...args: unknown[]): void;
@@ -23,6 +25,8 @@ export type PriceParse = {
     error: string;
 };
 export declare function parsePriceInput(value: unknown): PriceParse;
+export declare function mergeUncoveredUsdCells(current: PriceFile, incoming: PriceFile): PriceFile;
+export declare const PRICING_BACKUP_GENERATIONS = 3;
 export declare function writePriceFile(dir: string, file: PriceFile, logger?: Logger): Promise<void>;
 export declare function entryAt(table: PricingTable, route: string | undefined, model: string): PriceEntry | null;
 export declare function slotAt(entry: PriceEntry, timeMs: number, holidays?: ReadonlySet<string>): PriceSlot | null;
