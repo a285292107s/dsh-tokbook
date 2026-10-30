@@ -12,8 +12,8 @@ interface JudgeRow {
 
 const JUDGE_ROWS: readonly JudgeRow[] = [
   {
-    what: '你发问、模型回复了',
-    detail: '对话里每一次正常问答，一次一记。',
+    what: '你发问、模型回复',
+    detail: '每次模型调用记一次——一轮里模型连着调工具，就会记好几次。',
     requests: '计 1 次',
     tokens: '四桶累加',
   },
@@ -117,7 +117,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
             <ul className="dtpl-doc-gap-list">
               <li>
                 <span className="dtpl-doc-gap-item-name">自动生成的会话标题</span>
-                <span className="dtpl-doc-gap-item-desc">给新对话起标题的小请求没有走常规记录通道，本账本拿不到那次用量。每个新会话发生一次，是最大的固定漏项。</span>
+                <span className="dtpl-doc-gap-item-desc">给对话起标题的小请求没有走常规记录通道，本账本拿不到那次用量。会话每有新发言都可能再生成一次，是最大的固定漏项。</span>
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">中途取消 / 出错的请求</span>
@@ -139,7 +139,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">金额是现价刻度</span>
-                <span className="dtpl-doc-gap-item-desc">按你在价格表页写的<b>当前价</b>(¥ / 百万词元)逐条折算后累加;同一个模型串在不同<b>通道</b>可以是不同的价。一份价管全部历史,所以它衡量的是「最近用掉的词元值多少钱」——<b>不是</b>当时那笔账单(厂商改过价,历史那几天的金额就按现价重算)。刻度只在够近的窗口里成立:金额只在近 30 天及更短的窗口里给,<b>全部账本</b>只给词元。</span>
+                <span className="dtpl-doc-gap-item-desc">按你在价格表页写的<b>当前价</b>（¥ 或 $ / 百万词元，美元报价按汇率折成人民币）逐条折算后累加；同一个模型串在不同<b>通道</b>可以是不同的价。一份价管全部历史，所以它衡量的是「最近用掉的词元值多少钱」——<b>不是</b>当时那笔账单（厂商改过价，历史那几天的金额就按现价重算）。刻度只在够近的窗口里成立：浮窗的用量明细只在近 30 天及更短的窗口里给金额，<b>全部账本</b>只给词元；会话「词元」页不按窗口切，它按整场会话给金额。</span>
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">两个金额桶，不是一笔支出</span>
@@ -188,7 +188,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
       {overview !== null && overview.dataDir !== '' && (
         <div className="dtpl-doc-data">
           <p className="dtpl-doc-data-line">
-            账本已记录 <b>{overview.records}</b> 次调用，最近一次在 <b>{overview.lastEventAt === null ? '—' : formatDateTime(overview.lastEventAt)}</b>。
+            账本里已有 <b>{overview.records}</b> 条记录，最近一次在 <b>{overview.lastEventAt === null ? '—' : formatDateTime(overview.lastEventAt)}</b>。
           </p>
           <p className="dtpl-doc-data-dir">数据目录：<code>{overview.dataDir}</code></p>
         </div>
