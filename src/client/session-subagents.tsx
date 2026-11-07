@@ -22,43 +22,53 @@ export function SubagentSection({ view, sessionTokens }: { view: SessionSubagent
   const share = formatShare(view.totalTokens, sessionTokens + view.totalTokens)
   const nested = view.rows.reduce((sum, row) => sum + row.descendants, 0)
   const priced = view.rows.some((row) => row.priced)
+  const peak = view.rows.reduce((best, row) => Math.max(best, row.tokens), 0)
   const notes: string[] = []
   if (view.usageUnknown > 0) notes.push(`其中 ${view.usageUnknown} 次调用没上报用量，词元没有加进任何桶`)
   if (view.failures > 0) notes.push(`失败 ${view.failures} 次（没有产出，不产生词元）`)
   if (view.unpriced.length > 0) notes.push(`价格未知：${view.unpriced.join(' · ')}——这些行按 ¥0 计`)
   return (
-    <section aria-label="子代理">
-      <h2 className="dtpl-sec-title">子代理</h2>
+    <section className="dtpl-tok-sec" aria-label="子代理">
+      <div className="dtpl-tok-sec-h">
+        <h2 className="dtpl-tok-sec-k">子代理</h2>
+        <span className="dtpl-tok-sec-aside">
+          {view.count} 个直接子代理{nested > 0 ? ` · 含 ${nested} 个下级` : ''}
+        </span>
+      </div>
       <div className="dtpl-tok-sub">
         <div className="dtpl-tok-sub-sum">
-          <div className="dtpl-stat" role="listitem">
-            <span className="dtpl-stat-k">子代理四桶合计</span>
-            <span className="dtpl-stat-v">{formatTokens(view.totalTokens)}</span>
-            <span className="dtpl-stat-p">
-              {view.count} 个直接子代理{nested > 0 ? ` · 含 ${nested} 个下级` : ''} · 占本会话 + 子代理 {share}
+          <div className="dtpl-tok-sub-cell">
+            <span className="dtpl-tok-sub-k">子代理四桶合计</span>
+            <span className="dtpl-tok-sub-v">{formatTokens(view.totalTokens)}</span>
+            <span className="dtpl-tok-sub-p">
+              占本会话 + 子代理 {share}。主合计不并入它们。
             </span>
           </div>
-          <div className="dtpl-stat" role="listitem">
-            <span className="dtpl-stat-k">子代理实际支出</span>
-            <span className="dtpl-stat-v">{priced ? formatMoney(view.spend) : '—'}</span>
-            <span className="dtpl-stat-p">
+          <div className="dtpl-tok-sub-cell">
+            <span className="dtpl-tok-sub-k">子代理实际支出</span>
+            <span className="dtpl-tok-sub-v">{priced ? formatMoney(view.spend) : '—'}</span>
+            <span className="dtpl-tok-sub-p">
               {priced
                 ? (view.subscriptionValue > 0 ? `另有订阅价值 ${formatMoney(view.subscriptionValue)}` : '按现价折算')
                 : '价格未知：这些行按 ¥0 计'}
             </span>
           </div>
         </div>
-        <div className="dtpl-tok-sub-list">
-          {view.rows.map((row) => {
+        <div className="dtpl-tok-sub-rows">
+          {view.rows.map((row, index) => {
             const cost = costOf(row)
             return (
               <div className="dtpl-tok-sub-row" key={row.sessionId} title={rowDetail(row)}>
+                <span className="dtpl-tok-sub-i">{index + 1}</span>
                 <span className="dtpl-tok-sub-name">
                   <span className="dtpl-tok-sub-label">{labelOf(row)}</span>
                   {row.descendants > 0 && <span className="dtpl-tok-sub-extra">含 {row.descendants} 个下级</span>}
                 </span>
-                <span className="dtpl-tok-sub-tokens">{formatTokens(row.tokens)} 词元</span>
+                <span className="dtpl-tok-sub-track">
+                  <i style={{ width: `${String(peak > 0 ? Math.round((row.tokens / peak) * 100) : 0)}%` }} />
+                </span>
                 <span className="dtpl-tok-sub-share">占 {formatShare(row.tokens, view.totalTokens)}</span>
+                <span className="dtpl-tok-sub-tokens">{formatTokens(row.tokens)}</span>
                 <span className="dtpl-tok-sub-cost" data-kind={cost.kind}>{cost.text}</span>
               </div>
             )

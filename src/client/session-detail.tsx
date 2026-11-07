@@ -15,6 +15,7 @@ interface BlockTotals {
   spend: number
   subscriptionValue: number
   priced: boolean
+  failures: number
   workMs?: number
 }
 
@@ -25,6 +26,7 @@ function groupTotals(group: SessionUsageGroup): BlockTotals {
     spend: group.spend,
     subscriptionValue: group.subscriptionValue,
     priced: hasPricedRow(group.rows),
+    failures: group.rows.filter((row) => row.kind === 'failure' || row.failureCode !== undefined).length,
     ...timedTotal(group.rows),
   }
 }
@@ -33,12 +35,22 @@ function rowsTotals(rows: readonly SessionStepRow[]): BlockTotals {
   let tokens = 0
   let spend = 0
   let subscriptionValue = 0
+  let failures = 0
   for (const row of rows) {
     tokens += num(row.tokens)
     if (row.bucket === 'subscription') subscriptionValue += num(row.cost)
     else if (row.bucket !== 'unpriced') spend += num(row.cost)
+    if (row.kind === 'failure' || row.failureCode !== undefined) failures += 1
   }
-  return { steps: rows.length, tokens, spend, subscriptionValue, priced: hasPricedRow(rows), ...timedTotal(rows) }
+  return {
+    steps: rows.length,
+    tokens,
+    spend,
+    subscriptionValue,
+    priced: hasPricedRow(rows),
+    failures,
+    ...timedTotal(rows),
+  }
 }
 
 function timedTotal(rows: readonly SessionStepRow[]): { workMs?: number } {
@@ -69,9 +81,9 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews, provid
     })
   }
   return (
-    <section aria-label="轮次明细">
-      <h2 className="dtpl-sec-title">
-        轮次明细
+    <section className="dtpl-tok-sec" aria-label="轮次明细">
+      <div className="dtpl-tok-sec-h">
+        <h2 className="dtpl-tok-sec-k">轮次明细</h2>
         <span className="dtpl-tok-order" role="group" aria-label="轮次排序">
           {TURN_ORDERS.map((entry) => (
             <button
@@ -85,29 +97,25 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews, provid
             </button>
           ))}
         </span>
-      </h2>
-      <div className="dtpl-tok-note dtpl-tok-legend">
-        <span className="dtpl-tok-legend-figure">
-          <TimeBar
-            tone="step"
-            segments={LEGEND_SHAPE.map((phase) => ({ key: phase.kind, value: phase.share, kind: phase.kind }))}
-          />
-          <span className="dtpl-tok-legend-keys">
-            {LEGEND_SHAPE.map((phase) => (
-              <span key={phase.kind} style={{ flexGrow: phase.share }}>{phase.label}</span>
-            ))}
+      </div>
+      <div className="dtpl-tok-legend">
+        {LEGEND_SHAPE.map((phase) => (
+          <span className="dtpl-tok-legend-read" key={phase.kind}>
+            <i className="dtpl-tok-legend-mark" data-kind={phase.kind} aria-hidden="true" />
+            {phase.label}
           </span>
-        </span>
+        ))}
         <span className="dtpl-tok-legend-model">
-          <span className="dtpl-tok-legend-key" data-kind="model" aria-hidden="true" />
+          <i className="dtpl-tok-legend-mark" data-kind="model" aria-hidden="true" />
           模型（拆不开）：通道没上报流，等与生成分不清
         </span>
-        <span className="dtpl-tok-legend-say">步骤尺铺满整行；只有轮块头那条的长度说量级</span>      </div>
+        <span className="dtpl-tok-legend-say">块头那条有长度、按最重一轮归一；步骤尺铺满整行</span>
+      </div>
       <div className="dtpl-tok-turns">
         {ordered.map((group) => (
-          <TurnBlock
-            key={turnKey(group)}
-            blockKey={turnKey(group)}
+          <TurnEntry
+            key={turnKey(group.turn)}
+            blockKey={turnKey(group.turn)}
             label={`第 ${String(group.turn)} 轮`}
             totals={groupTotals(group)}
             rows={group.rows}
@@ -118,39 +126,33 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews, provid
             providerLabels={labels}
           />
         ))}
+        {betweenTurns !== null && (
+          <TurnEntry
+            blockKey={LOOSE_KEYS.between}
+            label="轮间"
+            note="确定不属于任何轮次的计费调用（目前只有压缩 summarize）"
+            totals={groupTotals(betweenTurns)}
+            rows={betweenTurns.rows}
+            expanded={expanded}
+            onToggle={toggle}
+            turnScale={turnScale}
+            providerLabels={labels}
+          />
+        )}
+        {unattributed.length > 0 && (
+          <TurnEntry
+            blockKey={LOOSE_KEYS.unattributed}
+            label="轮次未知"
+            note="没能拿到轮次/步骤的账本行：会话日志读不到，或这一行没有对应的事件"
+            totals={rowsTotals(unattributed)}
+            rows={unattributed}
+            expanded={expanded}
+            onToggle={toggle}
+            turnScale={turnScale}
+            providerLabels={labels}
+          />
+        )}
       </div>
-      {(betweenTurns !== null || unattributed.length > 0) && (
-        <div className="dtpl-tok-tail">
-          {betweenTurns !== null && (
-            <TurnBlock
-              blockKey="betweenTurns"
-              label="轮间"
-              loose
-              totals={groupTotals(betweenTurns)}
-              rows={betweenTurns.rows}
-              note="确定不属于任何轮次的计费调用（目前只有压缩 summarize）"
-              expanded={expanded}
-              onToggle={toggle}
-              turnScale={turnScale}
-              providerLabels={labels}
-            />
-          )}
-          {unattributed.length > 0 && (
-            <TurnBlock
-              blockKey="unattributed"
-              label="轮次未知"
-              loose
-              totals={rowsTotals(unattributed)}
-              rows={unattributed}
-              note="没能拿到轮次/步骤的账本行：会话日志读不到，或这一行没有对应的事件"
-              expanded={expanded}
-              onToggle={toggle}
-              turnScale={turnScale}
-              providerLabels={labels}
-            />
-          )}
-        </div>
-      )}
     </section>
   )
 }
@@ -162,8 +164,10 @@ const TURN_ORDERS: ReadonlyArray<{ id: TurnOrder; label: string }> = [
   { id: 'newest', label: '最新在前' },
 ]
 
-function turnKey(group: SessionUsageGroup): string {
-  return `turn:${String(group.turn)}`
+const LOOSE_KEYS = { between: 'loose:between', unattributed: 'loose:unattributed' } as const
+
+function turnKey(turn: number | null): string {
+  return turn === null ? LOOSE_KEYS.between : `turn:${String(turn)}`
 }
 
 interface ModelLabel {
@@ -177,7 +181,7 @@ function routeWord(provider: string, labels: Readonly<Record<string, string>>): 
 }
 
 function modelPairOf(row: SessionStepRow, labels: Readonly<Record<string, string>>): string {
-  return `${routeWord(row.provider, labels)}/${row.model === '' ? '模型未知' : row.model}`
+  return `${routeWord(row.provider, labels)} / ${row.model === '' ? '模型未知' : row.model}`
 }
 
 function turnModelOf(rows: readonly SessionStepRow[], labels: Readonly<Record<string, string>>): ModelLabel {
@@ -189,14 +193,19 @@ function turnModelOf(rows: readonly SessionStepRow[], labels: Readonly<Record<st
   return { text: `${first!} 等 ${String(pairs.size)} 个`, title: [...pairs].join(' · ') }
 }
 
-function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expanded, onToggle, turnScale, providerLabels }: {
+function moneyOf(totals: BlockTotals): { text: string; kind: 'spend' | 'subscription' | 'unpriced' } {
+  if (!totals.priced) return { text: '价格未知', kind: 'unpriced' }
+  if (totals.spend > 0 || totals.subscriptionValue === 0) return { text: formatMoney(totals.spend), kind: 'spend' }
+  return { text: `${formatMoney(totals.subscriptionValue)} 订阅`, kind: 'subscription' }
+}
+
+function TurnEntry({ blockKey, label, totals, rows, preview, note, expanded, onToggle, turnScale, providerLabels }: {
   blockKey: string
   label: string
   totals: BlockTotals
   rows: readonly SessionStepRow[]
   preview?: TurnPreview
   note?: string
-  loose?: boolean
   expanded: ReadonlySet<string>
   onToggle: (key: string) => void
   turnScale: number
@@ -205,6 +214,7 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
   const open = expanded.has(blockKey)
   const columns = timingColumnsOf(rows)
   const phases = sumSegments(rows)
+  const money = moneyOf(totals)
   const model = turnModelOf(rows, providerLabels)
   const waitMs = phases.find((phase) => phase.kind === 'wait')?.value ?? 0
   const generateMs = phases.find((phase) => phase.kind === 'generate')?.value ?? 0
@@ -214,54 +224,28 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
     kind: phase.kind,
     label: PHASE_LABEL[phase.kind],
     value: formatDuration(phase.value),
-    ...(waitOverGenerates && phase.kind === 'wait'
-      ? { isOver: true }
-      : {}),
+    ...(waitOverGenerates && phase.kind === 'wait' ? { isOver: true } : {}),
   }))
   return (
-    <div className={`dtpl-tok-turn${loose === true ? ' is-loose' : ''}`}>
+    <div className="dtpl-tok-turn" data-open={open ? '' : undefined}>
       <button
         type="button"
-        className="dtpl-tok-turn-head"
+        className="dtpl-tok-turn-h"
         aria-expanded={open}
         title={waitOverGenerates ? `${note === undefined ? '' : `${note}\n`}这一轮等首 token 比生成还久` : note}
         onClick={() => onToggle(blockKey)}
       >
         <span className="dtpl-tok-turn-k">{label}</span>
-        <span className="dtpl-hero-facts">
-          <span className="dtpl-hero-fact"><b>{totals.steps}</b> 步</span>
-          <i aria-hidden="true">·</i>
-          <span className="dtpl-hero-fact"><b>{formatTokens(totals.tokens)}</b> 词元</span>
-          {totals.workMs !== undefined && (
-            <>
-              <i aria-hidden="true">·</i>
-              <span className="dtpl-hero-fact">用时 <b>{formatDuration(totals.workMs)}</b></span>
-            </>
+        <span className="dtpl-tok-turn-reads">
+          <span><b>{totals.steps}</b> 步</span>
+          <span><b>{formatTokens(totals.tokens)}</b> 词元</span>
+          {totals.workMs !== undefined && <span>用时 <b>{formatDuration(totals.workMs)}</b></span>}
+          {totals.failures > 0 && (
+            <span className="dtpl-tok-turn-bad">失败 <b>{totals.failures}</b> 次</span>
           )}
-          {totals.priced
-            ? (totals.spend > 0 || totals.subscriptionValue === 0) && (
-              <>
-                <i aria-hidden="true">·</i>
-                <span className="dtpl-hero-fact"><b>{formatMoney(totals.spend)}</b> 实际支出</span>
-              </>
-            )
-            : (
-              <>
-                <i aria-hidden="true">·</i>
-                <span className="dtpl-hero-fact">价格未知</span>
-              </>
-            )}
-          {totals.subscriptionValue > 0 && (
-            <>
-              <i aria-hidden="true">·</i>
-              <span className="dtpl-hero-fact"><b>{formatMoney(totals.subscriptionValue)}</b> 订阅价值</span>
-            </>
-          )}
+          <span className="dtpl-tok-turn-model" title={model.title !== '' ? model.title : undefined}>{model.text}</span>
         </span>
-        <span className="dtpl-tok-turn-model" title={model.title !== '' ? model.title : undefined}>
-          {model.text}
-        </span>
-        <span className="dtpl-tok-turn-cue" aria-hidden="true">▾</span>
+        <span className="dtpl-tok-turn-money" data-kind={money.kind}>{money.text}</span>
         {phases.length > 0 && (
           <>
             <span className="dtpl-tok-turn-bar">
@@ -280,6 +264,8 @@ function TurnBlock({ blockKey, label, totals, rows, preview, note, loose, expand
             )}
           </span>
         )}
+        {note !== undefined && <span className="dtpl-tok-turn-note">{note}</span>}
+        <span className="dtpl-tok-turn-cue" aria-hidden="true">▾</span>
       </button>
       {rows.length > 0 && (
         <div className="dtpl-tok-steps" data-open={open}>
@@ -320,7 +306,7 @@ function StepRow({ row, columns, providerLabels }: {
   const chip = chipOf(row)
   const segments = stepSegments(row.timing)
   return (
-    <div className="dtpl-row dtpl-tok-step" title={stepDetail(row)}>
+    <div className="dtpl-tok-step" title={stepDetail(row)}>
       <div className="dtpl-tok-step-id">
         <span className="dtpl-tok-step-no">
           {row.step === undefined ? '步骤未知' : `第 ${String(row.step)} 步`}
@@ -330,22 +316,28 @@ function StepRow({ row, columns, providerLabels }: {
         {chip !== null && <em className="dtpl-tok-chip" data-kind={chip.kind}>{chip.word}</em>}
       </div>
       <CostCell row={row} />
-      <span className="dtpl-tok-step-bar">
-        <TimeBar segments={segments} tone="step" />
-      </span>
       <div className="dtpl-tok-step-read">
-        <StepTimingTable row={row} columns={columns} />
-        <span className="dtpl-tok-tokens">
+        <span className="dtpl-tok-step-buckets">
           {usage === undefined
-            ? <span className="dtpl-tok-untimed">用量未知</span>
+            ? <span className="dtpl-tok-untimed">用量未知：通道没上报 usage</span>
             : BUCKETS.map((bucketOf) => (
-              <span className="dtpl-tok-metric" key={bucketOf.key}>
-                <span className="dtpl-tok-metric-k">{bucketOf.label}</span>
-                <span className="dtpl-tok-metric-v">{formatTokens(num(usage[bucketOf.key]))}</span>
+              <span className="dtpl-tok-step-bk" key={bucketOf.key}>
+                <span className="dtpl-tok-step-bk-k">{bucketOf.label}</span>
+                <span className="dtpl-tok-step-bk-v">{formatTokens(num(usage[bucketOf.key]))}</span>
               </span>
             ))}
         </span>
+        {segments.length > 0
+          ? <span className="dtpl-tok-step-bar"><TimeBar segments={segments} tone="step" /></span>
+          : (
+            <span className="dtpl-tok-step-flat">
+              {row.timing?.wallMs === undefined ? '未计时' : `无产出 · ${formatDuration(row.timing.wallMs)}`}
+            </span>
+          )}
       </div>
+      <span className="dtpl-tok-step-timing">
+        <StepTimingTable row={row} columns={columns} />
+      </span>
     </div>
   )
 }
@@ -401,7 +393,7 @@ function StepTimingTable({ row, columns }: {
 
 function CostCell({ row }: { row: SessionStepRow }) {
   const bucket = row.bucket === 'subscription' || row.bucket === 'unpriced' ? row.bucket : 'spend'
-  const valueClass = bucket === 'unpriced' ? 'dtpl-cost-na' : bucket === 'subscription' ? 'dtpl-sub-amt' : 'dtpl-cash-amt'
+  const valueClass = bucket === 'unpriced' ? 'dtpl-tok-amt-na' : bucket === 'subscription' ? 'dtpl-tok-amt-sub' : 'dtpl-tok-amt'
   return (
     <span className="dtpl-tok-step-cost">
       <span className="dtpl-tok-step-cost-k">

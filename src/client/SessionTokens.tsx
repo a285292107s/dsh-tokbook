@@ -10,7 +10,8 @@ import { SessionShell } from './SessionShell.tsx'
 import { SubagentSection } from './session-subagents.tsx'
 import { MixBand, TurnBlocks, TurnChart, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
 import { PHASE_LABEL, TimeBar, sumSegments } from './session-timing.tsx'
-import { readSessionView } from './session-wire.ts'
+import { BUCKETS } from './session-shared.ts'
+import { num, readSessionView } from './session-wire.ts'
 
 const POLL_MS = 15_000
 
@@ -106,13 +107,13 @@ export function SessionTokens({ sessionId, useProjection }: SessionTokensProps) 
   return (
     <SessionShell>
       {error !== null && (
-        <div className="dtpl-error" role="alert">
-          <p className="dtpl-error-text">本会话词元加载失败：{error}</p>
-          <button type="button" className="dtpl-retry" onClick={() => setReload((round) => round + 1)}>重试</button>
+        <div className="dtpl-tok-error" role="alert">
+          <p className="dtpl-tok-error-text">本会话词元加载失败：{error}</p>
+          <button type="button" className="dtpl-tok-retry" onClick={() => setReload((round) => round + 1)}>重试</button>
         </div>
       )}
       {view === null
-        ? (error === null ? <div className="dtpl-sk dtpl-tok-sk" aria-hidden="true" /> : null)
+        ? (error === null ? <div className="dtpl-tok-sk" aria-hidden="true" /> : null)
         : isEmptyView(view)
           ? (
             <EmptyCard
@@ -127,10 +128,10 @@ export function SessionTokens({ sessionId, useProjection }: SessionTokensProps) 
 
 function EmptyCard({ title, sub }: { title: string; sub: string }) {
   return (
-    <div className="dtpl-empty">
-      <UsageGlyph className="dtpl-empty-ico" />
-      <p className="dtpl-empty-title">{title}</p>
-      <p className="dtpl-empty-sub">{sub}</p>
+    <div className="dtpl-tok-empty">
+      <UsageGlyph className="dtpl-tok-empty-ico" />
+      <p className="dtpl-tok-empty-title">{title}</p>
+      <p className="dtpl-tok-empty-sub">{sub}</p>
     </div>
   )
 }
@@ -156,7 +157,6 @@ type TimingExtreme = { key: string; label: string; where: string; figure: string
 function timingExtremes(groups: readonly { label: string; rows: readonly SessionStepRow[] }[]): {
   extremes: readonly TimingExtreme[]
   untimed: number
-  toolCalls: number
 } {
   let untimed = 0
   let toolCalls = 0
@@ -182,6 +182,7 @@ function timingExtremes(groups: readonly { label: string; rows: readonly Session
       if (slow !== undefined && (slowTool === null || slow.ms > slowTool.ms)) {
         slowTool = { where: toolWord(slow.name), ms: slow.ms }
       }
+      if (timing.llmMs === undefined) untimed += 1
     }
   }
   const extremes: TimingExtreme[] = []
@@ -195,7 +196,7 @@ function timingExtremes(groups: readonly { label: string; rows: readonly Session
     extremes.push({ key: 'busiest', label: '最忙一轮', where: busiest.where, figure: `${String(busiest.steps)} 步` })
   }
   if (toolCalls > 0) extremes.push({ key: 'calls', label: '工具调用', where: '', figure: `${String(toolCalls)} 次` })
-  return { extremes, untimed, toolCalls }
+  return { extremes, untimed }
 }
 
 function SessionTiming({ view }: { view: SessionUsageView }) {
@@ -214,60 +215,50 @@ function SessionTiming({ view }: { view: SessionUsageView }) {
     ? `会话跨度 ${formatDuration(spanMs)} = 引擎工作 ${formatDuration(workMs)} + 没在算 ${formatDuration(idleMs)}`
     : `会话跨度 ${formatDuration(spanMs)}｜引擎工作 ${untimed > 0 ? `${String(untimed)} 步未计时，无法合计` : '没有量到用时'}`
   return (
-    <section aria-label="会话时间">
-      <h2 className="dtpl-sec-title">
-        会话时间
-        {aside !== null && <span className="dtpl-sec-aside">{aside}</span>}
-      </h2>
-      <div className="dtpl-tok-timing">
-        <div className="dtpl-tok-timing-lead">
-          <span className="dtpl-total-k">引擎工作</span>
-          <span className="dtpl-hero-figure">
-            <span className="dtpl-total-num">{formatDuration(workMs)}</span>
-            <span className="dtpl-tok-timing-lead-k">占会话跨度 {formatShare(workMs, spanMs)}</span>
-          </span>
-        </div>
-        {segments.length > 0
-          ? (
-            <div className="dtpl-tok-timing-comp">
-              <span className="dtpl-tok-timing-comp-k">引擎工作在算什么</span>
-              <TimeBar
-                tone="hero"
-                scale={workMs}
-                segments={segments}
-                reads={segments.map((segment) => ({
-                  key: segment.key,
-                  kind: segment.kind,
-                  label: PHASE_LABEL[segment.kind],
-                  value: formatDuration(segment.value),
-                }))}
-              />
-            </div>
-          )
-          : (
-            <div className="dtpl-tok-timing-comp">
-              <span className="dtpl-tok-timing-comp-k">引擎工作在算什么</span>
-              <p className="dtpl-tok-timing-gap">拆不开：这个会话没有量到模型与工具的起止事件。</p>
-            </div>
-          )}
-        <p className="dtpl-tok-timing-ledger">{ledger}</p>
-        {extremes.length > 0 && (
-          <span className="dtpl-tok-timing-marks">
-            {extremes.map((extreme) => (
-              <span className="dtpl-tok-timing-mark" key={extreme.key}>
-                {extreme.label}
-                {extreme.where !== '' && <span className="dtpl-tok-timing-where">{extreme.where}</span>}
-                <b>{extreme.figure}</b>
-              </span>
-            ))}
-          </span>
-        )}
-        {untimed > 0 && (
-          <p className="dtpl-tok-timing-gap">
-            这个会话还有 <b>{String(untimed)}</b> 步量不到起止事件{segments.length > 0 ? '，上面那条构成尺不含它们' : ''}。
-          </p>
-        )}
+    <section className="dtpl-tok-sec" aria-label="会话时间">
+      <div className="dtpl-tok-sec-h">
+        <h2 className="dtpl-tok-sec-k">会话时间</h2>
+        {aside !== null && <span className="dtpl-tok-sec-aside">{aside}</span>}
       </div>
+      <p className="dtpl-tok-time-k">引擎工作</p>
+      <div className="dtpl-tok-time-lead">
+        <span className="dtpl-tok-time-num">{formatDuration(workMs)}</span>
+        <span className="dtpl-tok-time-pct">占会话跨度 {formatShare(workMs, spanMs)}</span>
+      </div>
+      {segments.length > 0
+        ? (
+          <div className="dtpl-tok-time-track">
+            <TimeBar
+              tone="hero"
+              scale={workMs}
+              segments={segments}
+              reads={segments.map((segment) => ({
+                key: segment.key,
+                kind: segment.kind,
+                label: PHASE_LABEL[segment.kind],
+                value: formatDuration(segment.value),
+              }))}
+            />
+          </div>
+        )
+        : <p className="dtpl-tok-time-gap">拆不开：这个会话没有量到模型与工具的起止事件。</p>}
+      <p className="dtpl-tok-time-eq">{ledger}</p>
+      {extremes.length > 0 && (
+        <div className="dtpl-tok-time-marks">
+          {extremes.map((extreme) => (
+            <span className="dtpl-tok-time-mark" key={extreme.key}>
+              {extreme.label}
+              {extreme.where !== '' && <span className="dtpl-tok-time-where">{extreme.where}</span>}
+              <b>{extreme.figure}</b>
+            </span>
+          ))}
+        </div>
+      )}
+      {untimed > 0 && (
+        <p className="dtpl-tok-time-gap">
+          还有 <b>{String(untimed)}</b> 步量不到起止事件{segments.length > 0 ? '，上面那条构成尺不含它们' : ''}。
+        </p>
+      )}
     </section>
   )
 }
@@ -294,49 +285,52 @@ function CountUp({ value, format }: { value: number; format: (n: number) => stri
   return <span>{format(current)}</span>
 }
 
-function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap }) {
-  const tokens = view.totalTokens
+function Hero({ view }: { view: SessionUsageView }) {
   const todayShare = view.todaySpend > 0 ? formatShare(view.spend, view.todaySpend) : null
+  const parts = BUCKETS.map((bucket) => `${bucket.label} ${formatTokens(num(view.total[bucket.key]))}`)
+  return (
+    <div className="dtpl-tok-hero">
+      <p className="dtpl-tok-hero-k">本会话四桶合计</p>
+      <div className="dtpl-tok-hero-row">
+        <div className="dtpl-tok-hero-lead">
+          <span className="dtpl-tok-hero-num"><CountUp value={view.totalTokens} format={formatTokens} /></span>
+          <span className="dtpl-tok-hero-sub">{parts.join(' · ')}</span>
+        </div>
+        <div className="dtpl-tok-hero-facts">
+          <div className="dtpl-tok-hero-fact">
+            <span className="dtpl-tok-hero-fact-k">实际支出</span>
+            <span className="dtpl-tok-hero-fact-v">{formatMoney(view.spend)}</span>
+          </div>
+          <div className="dtpl-tok-hero-fact">
+            <span className="dtpl-tok-hero-fact-k">订阅价值</span>
+            <span className="dtpl-tok-hero-fact-v">{formatMoney(view.subscriptionValue)}</span>
+          </div>
+          {todayShare !== null && (
+            <div className="dtpl-tok-hero-fact">
+              <span className="dtpl-tok-hero-fact-k">占今日消费</span>
+              <span className="dtpl-tok-hero-fact-v">{todayShare}</span>
+            </div>
+          )}
+          <div className="dtpl-tok-hero-fact">
+            <span className="dtpl-tok-hero-fact-k">共</span>
+            <span className="dtpl-tok-hero-fact-v">{view.turns.length} 轮 / {countSteps(view)} 步</span>
+          </div>
+        </div>
+      </div>
+      <MixBand totals={view.total} totalTokens={view.totalTokens} />
+    </div>
+  )
+}
+
+function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap }) {
   return (
     <>
-      <Block i={0}>
-        <div className="dtpl-tok-head">
-          <span className="dtpl-total-k">本会话四桶合计</span>
-          <span className="dtpl-hero-figure">
-            <span className="dtpl-total-num"><CountUp value={tokens} format={formatTokens} /></span>
-          </span>
-          <span className="dtpl-hero-facts">
-            {todayShare !== null && (
-              <>
-                <span className="dtpl-hero-fact">本会话占今日消费 <b>{todayShare}</b></span>
-                <i aria-hidden="true">·</i>
-              </>
-            )}
-            <span className="dtpl-hero-fact">实际支出 <b>{formatMoney(view.spend)}</b></span>
-            {view.subscriptionValue > 0 && (
-              <>
-                <i aria-hidden="true">·</i>
-                <span className="dtpl-hero-fact">订阅价值 <b>{formatMoney(view.subscriptionValue)}</b></span>
-              </>
-            )}
-            <i aria-hidden="true">·</i>
-            <span className="dtpl-hero-fact">共 <b>{view.turns.length}</b> 轮 / <b>{countSteps(view)}</b> 步</span>
-          </span>
-          <MixBand totals={view.total} totalTokens={tokens} />
-        </div>
-      </Block>
-      {view.subagents !== undefined && (
-        <Block i={1}>
-          <SubagentSection view={view.subagents} sessionTokens={tokens} />
-        </Block>
-      )}
+      <Block i={0}><Hero view={view} /></Block>
       {view.workMs !== undefined && view.spanMs !== undefined && (
-        <Block i={2}>
-          <SessionTiming view={view} />
-        </Block>
+        <Block i={1}><SessionTiming view={view} /></Block>
       )}
-      <Block i={3}><TurnChart turns={view.turns} previews={previews} /></Block>
-      <Block i={4}>
+      <Block i={2}><TurnChart turns={view.turns} previews={previews} /></Block>
+      <Block i={3}>
         <TurnBlocks
           turns={view.turns}
           betweenTurns={view.betweenTurns}
@@ -345,21 +339,24 @@ function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap
           providerLabels={view.providerLabels}
         />
       </Block>
-      <Block i={5}><Footer total={view.total} unpriced={view.unpriced} timing={hasTiming(view)} /></Block>
+      {view.subagents !== undefined && (
+        <Block i={4}>
+          <SubagentSection view={view.subagents} sessionTokens={view.totalTokens} />
+        </Block>
+      )}
+      <Block i={5}><Foot total={view.total} unpriced={view.unpriced} timing={hasTiming(view)} /></Block>
     </>
   )
 }
 
-function Footer({ total, unpriced, timing }: { total: UsageTotals; unpriced: readonly string[]; timing: boolean }) {
+function Foot({ total, unpriced, timing }: { total: UsageTotals; unpriced: readonly string[]; timing: boolean }) {
   return (
-    <div className="dtpl-tok-foot">
-      <span className="dtpl-hero-facts">
-        <span className="dtpl-hero-fact">用量未知 <b>{total.usageUnknown ?? 0}</b> 次</span>
-        <i aria-hidden="true">·</i>
-        <span className="dtpl-hero-fact">失败 <b>{total.failures ?? 0}</b> 次</span>
-        <i aria-hidden="true">·</i>
-        <span className="dtpl-hero-fact">价格未知 <b>{unpriced.length}</b> 个 (通道, 模型)</span>
-      </span>
+    <footer className="dtpl-tok-foot">
+      <p className="dtpl-tok-foot-facts">
+        <span>用量未知 <b>{total.usageUnknown ?? 0}</b> 次</span>
+        <span>失败 <b>{total.failures ?? 0}</b> 次</span>
+        <span>价格未知 <b>{unpriced.length}</b> 个 (通道, 模型)</span>
+      </p>
       {timing && (
         <p className="dtpl-tok-note">
           用时都来自会话日志的事件时刻（本机墙钟，不是计费时长）：一步的墙钟就是「模型 + 工具」
@@ -369,7 +366,7 @@ function Footer({ total, unpriced, timing }: { total: UsageTotals; unpriced: rea
       {unpriced.length > 0 && (
         <p className="dtpl-tok-note">价格未知：{unpriced.join(' · ')}——这些行按 ¥0 计</p>
       )}
-    </div>
+    </footer>
   )
 }
 

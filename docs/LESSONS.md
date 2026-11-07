@@ -634,7 +634,29 @@ sheet 尤其糟：它整块贴底，关闭钮是**唯一**的显式退出（Esca
 
 ---
 
-## 21. 一页速查（Checklist）
+## 21. 同前缀的两个「条」用了同名类：高度被静默压成 0
+
+### 现象
+
+- 词元页的用时构成尺（相位条）整条不见了，但那串读数（等首 token / 生成 / 工具）照常显示。
+- 不报错、不警告：元素在 DOM 里、`display:flex`、宽度 844px，只有 `height` 算出来是 `0px`。
+
+### 根因
+
+- 重写词元页时给柱图的一列用了 `.dtpl-tok-bar`，而相位分段条本来就叫 `.dtpl-tok-bar`。两条规则同在一个
+  选择器上打架：柱图那条后写、带 `height:100%`，父级没有确定高度 → 100% 解析成 0，把 `height:12px` 盖掉。
+- 这类冲突**只在计算样式里露头**：`getComputedStyle().height === '0px'`。看 DOM 结构、看 CSS 源码都正常。
+
+### 正确做法
+
+- 一个语义一个类名：柱图的一列是 `slot`（`.dtpl-tok-slot` / `-slot-fill` / `-slot-label`），相位条是
+  `bar`（`.dtpl-tok-bar` / `-bar-seg`）。同页共存的两套图形别共享基础类名。
+- 排查顺序：`getComputedStyle` 取高度 → 遍历 `document.styleSheets` 打印所有 `matches()` 的规则 →
+  看是谁的 `height` 赢。比逐条读 CSS 快。
+
+---
+
+## 22. 一页速查（Checklist）
 
 - [ ] 选择器：元素自身带 `data-plugin` → 用复合 `[data-plugin].class`；真子元素 → 用后代 `[data-plugin] .class`。
 - [ ] 改 UI（client）后：`pnpm build` 落盘 `lib/client.js` → 刷新浏览器取新 rev（client-hmr 活着时可能 ≤500ms 自动热更，加分项非保证）。

@@ -7,8 +7,6 @@ import { BUCKETS, hasPricedRow, type PreviewMap } from './session-shared.ts'
 
 type SlotStyle = CSSProperties & Record<'--dtpl-slots', string>
 
-const STAGGER_STEP = 6
-
 type Panel = 'fresh' | 'cache'
 
 interface HoverTarget {
@@ -83,8 +81,11 @@ export function TurnChart({ turns, previews }: {
   const hovered = hover === null ? undefined : turns[hover.index]
   const preview = hovered?.turn == null ? undefined : previews.get(hovered.turn)
   return (
-    <section aria-label="每轮新增与缓存读">
-      <h2 className="dtpl-sec-title">每轮新增与缓存读</h2>
+    <section className="dtpl-tok-sec" aria-label="每轮新增与缓存读">
+      <div className="dtpl-tok-sec-h">
+        <h2 className="dtpl-tok-sec-k">每轮新增与缓存读</h2>
+        <span className="dtpl-tok-sec-aside">{turns.length} 轮 · 柱高不可跨格比较</span>
+      </div>
       {notes.length > 0 && <p className="dtpl-tok-note">{notes.join(' ')}</p>}
       <div className="dtpl-tok-chart" ref={figure}>
         <div
@@ -110,16 +111,15 @@ export function TurnChart({ turns, previews }: {
               series={cached}
               turns={turns}
               peak={cachePeak}
-              offset={STAGGER_STEP}
               onHover={(panel, index, bar) => { setHover({ panel, index, bar }) }}
               onLeave={() => { setHover(null) }}
             />
           )}
-          <div className="dtpl-trend-axis" aria-hidden="true">
+          <div className="dtpl-tok-axis" aria-hidden="true">
             {turns.map((group, index) => (
               <span
                 key={group.turn ?? index}
-                className={index === freshPeak || index === cachePeak ? 'is-peak' : undefined}
+                data-peak={index === freshPeak || index === cachePeak ? '' : undefined}
               >
                 {group.turn}
               </span>
@@ -211,13 +211,12 @@ function peakIndexOf(series: readonly number[]): number {
   return index
 }
 
-function BarPanel({ panel, name, series, turns, peak, offset = 0, onHover, onLeave }: {
+function BarPanel({ panel, name, series, turns, peak, onHover, onLeave }: {
   panel: Panel
   name: string
   series: readonly number[]
   turns: readonly SessionUsageGroup[]
   peak: number
-  offset?: number
   onHover: (panel: Panel, index: number, bar: HTMLElement) => void
   onLeave: () => void
 }) {
@@ -237,10 +236,9 @@ function BarPanel({ panel, name, series, turns, peak, offset = 0, onHover, onLea
         </span>
       </p>
       <div
-        className="dtpl-bars is-anim"
+        className="dtpl-tok-bars"
         role="img"
         aria-label={panelLabel(name, turns, series, peak, sum)}
-        style={{ '--dtpl-offset': offset } as CSSProperties}
       >
         {turns.map((group, index) => {
           const value = series[index]!
@@ -248,21 +246,21 @@ function BarPanel({ panel, name, series, turns, peak, offset = 0, onHover, onLea
           const height = columnHeight(value, max)
           return (
             <div
-              className={`dtpl-bar${value === 0 ? ' is-zero' : ''}`}
+              className="dtpl-tok-slot"
               key={group.turn ?? index}
-              style={{ '--dtpl-i': index } as CSSProperties}
               onMouseEnter={(event) => { onHover(panel, index, event.currentTarget) }}
               onMouseLeave={onLeave}
             >
               {value > 0 && (
                 <>
                   <span
-                    className={`dtpl-bar-label${isPeak ? ' is-peak' : ''}`}
+                    className="dtpl-tok-slot-label"
+                    data-peak={isPeak ? '' : undefined}
                     style={{ bottom: `calc(${height} + 2px)` }}
                   >
                     {formatTokens(value)}
                   </span>
-                  <div className={`dtpl-bar-fill${isPeak ? ' is-peak' : ''}`} style={{ height }} />
+                  <div className="dtpl-tok-slot-fill" data-peak={isPeak ? '' : undefined} style={{ height }} />
                 </>
               )}
             </div>
