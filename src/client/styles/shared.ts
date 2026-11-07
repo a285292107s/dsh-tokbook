@@ -22,16 +22,21 @@ export const CSS_SHARED = `
   [data-plugin="dsh-tokbook"] .dtpl-tab{flex:0 0 auto;}
   [data-plugin="dsh-tokbook"] .dtpl-body{padding:12px 16px 14px;}
   [data-plugin="dsh-tokbook"] .dtpl-foot{padding:10px 16px 12px;}
-  [data-plugin="dsh-tokbook"] .dtpl-hero-top{flex-direction:column;align-items:flex-start;gap:8px;}
+  [data-plugin="dsh-tokbook"] .dtpl-kpis,
+  [data-plugin="dsh-tokbook"] .dtpl-kpis-2{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-kpi + .dtpl-kpi{
+    border-left:0;border-top:1px solid var(--dtpl-hairline);
+  }
+  [data-plugin="dsh-tokbook"] .dtpl-chart{overflow-x:auto;scrollbar-width:thin;}
+  [data-plugin="dsh-tokbook"] .dtpl-chart-svg{min-width:640px;}
   [data-plugin="dsh-tokbook"] .dtpl-hero-facts{flex:1 1 auto;gap:4px 10px;}
   [data-plugin="dsh-tokbook"] .dtpl-hero-facts i{display:none;}
-  [data-plugin="dsh-tokbook"] .dtpl-grid,
-  [data-plugin="dsh-tokbook"] .dtpl-grid-3{grid-template-columns:repeat(2,minmax(0,1fr));}
-  [data-plugin="dsh-tokbook"] .dtpl-stat:nth-child(odd){border-left:0;}
-  [data-plugin="dsh-tokbook"] .dtpl-stat:nth-child(n+3){border-top:1px solid var(--dtpl-border);}
-  [data-plugin="dsh-tokbook"] .dtpl-bar-label:not(.is-peak){display:none;}
-  [data-plugin="dsh-tokbook"] .dtpl-trend-axis span:not(:nth-child(4n+1)):not(.is-peak){visibility:hidden;}
-  [data-plugin="dsh-tokbook"] .dtpl-trend-axis span:has(+ .is-peak){visibility:hidden;}
+  [data-plugin="dsh-tokbook"] .dtpl-buckets,
+  [data-plugin="dsh-tokbook"] .dtpl-buckets-3{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-bucket:nth-child(2n){border-left:0;}
+  [data-plugin="dsh-tokbook"] .dtpl-bucket:nth-child(n+2){border-top:1px solid var(--dtpl-hairline);}
+  [data-plugin="dsh-tokbook"] .dtpl-buckets-3 > .dtpl-bucket:nth-child(2n){border-left:0;}
+  [data-plugin="dsh-tokbook"] .dtpl-buckets-3 > .dtpl-bucket:nth-child(n+2){border-top:1px solid var(--dtpl-hairline);}
   [data-plugin="dsh-tokbook"] .dtpl-bd-cols{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-bd-cols,
   [data-plugin="dsh-tokbook"] .dtpl-row{grid-template-columns:minmax(0,1fr);}
@@ -88,13 +93,8 @@ export const CSS_SHARED = `
 @media (prefers-reduced-motion:no-preference){
   [data-plugin="dsh-tokbook"].dtpl-overlay{animation:dtpl-fade var(--dtpl-dur-enter) var(--dtpl-ease-move);}
   [data-plugin="dsh-tokbook"] .dtpl-card{animation:dtpl-pop var(--dtpl-dur-move) var(--dtpl-ease-move);}
-  [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transform-origin:bottom;}
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill{animation:dtpl-bar-grow var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:calc((var(--dtpl-offset,0) + var(--dtpl-i,0)) * 12ms);}
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar.is-zero::after{animation:dtpl-fade var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:calc((var(--dtpl-offset,0) + var(--dtpl-i,0)) * 12ms);}
-  [data-plugin="dsh-tokbook"] .dtpl-bar-fill{transition:height var(--dtpl-dur-move) var(--dtpl-ease-move),background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);}
-  [data-plugin="dsh-tokbook"] .dtpl-bar-label{transition:bottom var(--dtpl-dur-move) var(--dtpl-ease-move),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);}
   [data-plugin="dsh-tokbook"] .dtpl-body > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;}
-  [data-plugin="dsh-tokbook"] .dtpl-hero > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:.06s;}
+  [data-plugin="dsh-tokbook"] .dtpl-inst > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:.06s;}
   [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{animation:dtpl-draw var(--dtpl-dur-draw) var(--dtpl-ease-move) both;}
 }
 @media (prefers-reduced-motion:no-preference) and (max-width:640px){
@@ -102,7 +102,6 @@ export const CSS_SHARED = `
 }
 @keyframes dtpl-fade{from{opacity:0}}
 @keyframes dtpl-rise{from{opacity:0;transform:translateY(6px)}}
-@keyframes dtpl-bar-grow{from{transform:scaleY(0)}}
 @keyframes dtpl-draw{from{stroke-dashoffset:var(--dtpl-arc,0)}}
 @keyframes dtpl-width-in{from{width:0}}
 @keyframes dtpl-pop{from{opacity:0;transform:translateY(8px) scale(.96)}}
@@ -117,11 +116,8 @@ export const CSS_SHARED = `
   100%{transform:scale(1)}
 }
 @media (prefers-reduced-motion:reduce){
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar-fill,
-  [data-plugin="dsh-tokbook"] .dtpl-bars.is-anim .dtpl-bar.is-zero::after,
-  [data-plugin="dsh-tokbook"] .dtpl-bar-fill,
-  [data-plugin="dsh-tokbook"] .dtpl-bar-label,
   [data-plugin="dsh-tokbook"] .dtpl-body > *,
+  [data-plugin="dsh-tokbook"] .dtpl-inst > *,
   [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc,
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,
