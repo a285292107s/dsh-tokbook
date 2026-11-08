@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-10-19 · supersedes: —
+> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-08 · supersedes: —
 
 A **cross-session token-usage ledger for DeepSeek Harness (DSH)**. The host half folds every billed model
 call into one row of a local, per-day JSONL ledger and aggregates it with costs; the browser half shows it
@@ -64,10 +64,12 @@ view reports tokens only. Tokens are facts, prices are not.
 
 ## The four tabs
 
-1. **用量总览 / Overview** — today's totals, the token composition and a 14-day trend. Scrolling past it
-   continues into **用量明细 / Usage detail**: the chosen window (today / yesterday / last 7 days / last
-   30 days / all) crossed with three breakdowns — by model, by workspace, by provider route. Money appears
-   only in the windows of 30 days or less.
+1. **用量总览 / Overview** — three stacked modules: **today** (tokens against the 7-day average, actual
+   spend with the 7-day total, subscription value when there is any), a **14-day trend** line, and
+   today's **token composition** as share bars (cache writes appear only when the ledger has any).
+   Scrolling past it continues into **用量明细 / Usage detail**: the chosen window (today / yesterday /
+   last 7 days / last 30 days / all) crossed with three breakdowns — by model, by workspace, by provider
+   route. Money appears only in the windows of 30 days or less.
 2. **订阅额度 / Subscription quota** — account-level official usage, fetched from the provider's own API
    with your key, so it includes every tool and device on that subscription. Covers Command Code and
    OpenCode Go.
@@ -94,19 +96,24 @@ price is never overwritten.
 The conversation view ring gains a **词元 / Tokens** view (`conversation.view`) that opens one **single
 session** up by turn and by step over its whole lifetime.
 
-- Header: the session's four-bucket total, its share of today's spend, actual spend and subscription
-  value, turn and step counts, token composition and cache hit rate.
-- **Subagents**: one row per direct subagent (creation label, tokens, share of all subagents, money), with
-  nested delegations folded into their direct parent so no subtree is counted twice. The header stays
-  session-only, and a manual fork — `parentSession` but not a subagent, per the host header's `origin` —
-  never counts. No direct child, no block.
-- **Session time**: engine work against session span, a bar for the time nothing was running, and the
-  first and last record. Unmeasurable means omitted, not zero.
+- **Header**: the session's four-bucket total as one number, the four bucket figures in a line beneath
+  it, and four facts to the right — actual spend, subscription value, share of today's spend, turns /
+  steps. Under it, one proportional composition bar plus four read-out columns with their shares, the
+  billing-input formula (uncached input + cache read + cache write) and the cache hit rate.
+- **Session time**: engine work against session span — wait / generation / tools as one bar, the
+  equation `span = work + not computing`, the first and last record times, and the slowest step,
+  slowest tool, busiest turn and tool-call count. Unmeasurable means omitted, not zero.
 - Two per-turn charts (new tokens, cache reads) share one turn axis; hovering a bar shows that turn's
   read-out plus question and answer previews.
-- **Per-turn detail**, collapsed by default: a turn header carries a three-phase bar (wait / generation /
-  tools) and the same numbers, and expanding it lists one row per billed call with identity, money, its
-  own bar and a `model / wait / generation / tools / tok per s` table.
+- **Per-turn detail**, collapsed by default and laid out as numbered entries on one vertical line: a
+  turn header carries a three-phase bar normalised to the heaviest turn plus the same numbers, and
+  expanding it lists one row per billed call with identity, money, its own bar filling the row and a
+  `model / wait / generation / tools / tok per s` table.
+- **Subagents**, last because nothing else on the page includes them: one row per direct subagent
+  (creation label, tokens, share of all subagents, money), with nested delegations folded into their
+  direct parent so no subtree is counted twice. The header stays session-only, and a manual fork —
+  `parentSession` but not a subagent, per the host header's `origin` — never counts. No direct child,
+  no block.
 - A footer sums unknown usage, failures and unpriced `(route, model)` pairs.
 
 It is **read-only** against the ledger and config — its only write is a content width in the browser — and
