@@ -17,8 +17,6 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
 
   --dtpl-focus:var(--dsw-alias-brand-primary,#1f2328);
 
-  --dtpl-footer-focus:var(--dsw-alias-label-primary,#1f2328);
-
   --dtpl-brand:#c99a2e;
   --dtpl-on-brand:#24211e;
 
@@ -66,58 +64,5 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
 
   --dtpl-tok-cell-w:62px;
 
-}
-
-[data-dtpl-device="light"][data-plugin="dsh-tokbook"]{
-  --dtpl-fg:#24211e;
-  --dtpl-fg-2:#6b6560;
-  --dtpl-fg-3:#8e8882;
-  --dtpl-fg-dim:#a8a29c;
-  --dtpl-card:#f5f6f8;
-  --dtpl-surface:#fcfcfd;
-  --dtpl-border:rgba(0,0,0,.12);
-  --dtpl-hairline:rgba(0,0,0,.08);
-  --dtpl-ok:#1a7f37;
-  --dtpl-warn:#b45309;
-  --dtpl-err:#c0242c;
-  --dtpl-focus:#1f2328;
-  --dtpl-footer-focus:#1f2328;
-  --dtpl-casing:#c9c5bf;
-  --dtpl-casing-ink:#24211e;
-  --dtpl-casing-ink-2:#5a5550;
-  --dtpl-casing-hover:rgba(0,0,0,.08);
-  --dtpl-casing-line:rgba(0,0,0,.28);
-  --dtpl-seam:rgba(0,0,0,.45);
-  --dtpl-case-edge:#7e838c;
-  --dtpl-case-shadow:rgba(15,17,21,.32);
-  --dtpl-device-mask:rgba(20,22,26,.55);
-  --dtpl-scrollbar:rgba(0,0,0,.24);
-  --dtpl-scrollbar-hover:rgba(0,0,0,.34);
-}
-[data-dtpl-device="dark"][data-plugin="dsh-tokbook"]{
-  --dtpl-fg:#f9fafb;
-  --dtpl-fg-2:#d4d0cb;
-  --dtpl-fg-3:#b0aba5;
-  --dtpl-fg-dim:#7a7570;
-  --dtpl-card:#26272b;
-  --dtpl-surface:#1c1d20;
-  --dtpl-border:rgba(255,255,255,.14);
-  --dtpl-hairline:rgba(255,255,255,.10);
-  --dtpl-ok:#3fb950;
-  --dtpl-warn:#f97316;
-  --dtpl-err:#ff6b61;
-  --dtpl-focus:#f9fafb;
-  --dtpl-footer-focus:#f9fafb;
-  --dtpl-casing:#2a2d33;
-  --dtpl-casing-ink:#f9fafb;
-  --dtpl-casing-ink-2:#b0aba5;
-  --dtpl-casing-hover:rgba(255,255,255,.10);
-  --dtpl-casing-line:rgba(255,255,255,.22);
-  --dtpl-seam:rgba(0,0,0,.70);
-  --dtpl-case-edge:#101114;
-  --dtpl-case-shadow:rgba(0,0,0,.62);
-  --dtpl-device-mask:rgba(8,9,11,.72);
-  --dtpl-scrollbar:rgba(255,255,255,.26);
-  --dtpl-scrollbar-hover:rgba(255,255,255,.38);
 }
 `

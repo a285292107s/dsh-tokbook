@@ -11,6 +11,10 @@
 
 ## 1. CSS 作用域选择器：`data-plugin` 与插件类放在同一元素上的坑（最重要）
 
+> 下面的示例取当时的侧栏 footer 按钮（`.dtpl-footer`）与浮窗（`.dtpl-overlay`）——第五期把这两者
+> 换成了面板行与主栏账本页，所以那些类名已不在代码里；**规则本身没变**，如今命中同一条规则的是
+> 页面根节点 `[data-plugin="dsh-tokbook"].dtpl-page`（以及它下面的 `.dtpl-head` / `.dtpl-body` 等后代）。
+
 ### 现象
 
 - 词元账本按钮呈现**浏览器默认 button 样式**：`background-color: rgb(107,107,107)`（灰底）、
@@ -401,7 +405,7 @@ CSS 解析器遇到多余的 `}` 不会停：它进入错误恢复，把紧随�
 
 ### 正确做法
 
-- 每个载荷入口一个 `readXxx(raw): T | null`（`LedgerOverlay` 的 `readOverview`、`PricingPanel` 的
+- 每个载荷入口一个 `readXxx(raw): T | null`（`TokBookPanel` 的 `readOverview`、`PricingPanel` 的
   `readPricingView`、`ProviderPanel` 的 `readUsageView`、`QuotaPanel` 的两个判定）。**只盖渲染会无条件
   解引用的字段**：可选字段与细节一律不收紧，否则一次正常演进也会被判死。
 - 判定放在**任何 setState 之前**：不合法就当一次读失败，走错误态（错误条 + 重试）——那是唯一的恢复入口。

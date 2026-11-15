@@ -1021,20 +1021,12 @@ const server = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html' })
   const quotaMode = url.searchParams.get('quota')
   if (quotaMode !== null) serverState.quota = quotaMode
-  const backdrop = LEDGER
-    ? `<h1>dsh-tokbook — 独立查看器</h1>
-    <p>直接读本机账本目录（不摄取会话日志）。数据目录见浮窗的「统计口径」tab。</p>
-    <p>浮窗穿着设备皮（无宿主色板，自带明暗双色）：默认浅面，?dark=1 换深面。</p>
-    <p>ESC 或点击遮罩关闭浮窗；关闭后点左下角的按钮可重新打开。</p>`
-    : `<h1>DSH 宿主应用（预览背景）</h1>
-    <p>这是模拟的宿主界面，用于预览 dsh-tokbook 悬浮窗口。弹窗打开时这些内容应被遮罩压暗。</p>
-    <p>TAB 键在弹窗打开时不应离开弹窗；ESC 或点击遮罩可关闭。</p>`
   res.end(`<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${LEDGER ? 'tokbook 账本查看器' : 'tokbook overlay preview'}</title>
+<title>${LEDGER ? 'tokbook 账本查看器' : 'tokbook panel preview'}</title>
 <style>
   html,body{margin:0;height:100%;}
   body{
@@ -1042,11 +1034,13 @@ const server = createServer((req, res) => {
     background:linear-gradient(180deg,#f7f8fa,#eef0f3);
   }
   body.dark{background:linear-gradient(180deg,#151517,#1c1d20);}
-  .fake-app{max-width:720px;margin:0 auto;padding:32px 24px;color:#0f1115;}
-  body.dark .fake-app{color:#f9fafb;}
-  .fake-app h1{font-size:18px;margin:0 0 12px;}
-  .fake-app p{font-size:14px;line-height:24px;color:#61666b;margin:0 0 8px;}
-  body.dark .fake-app p{color:#cfd3d6;}
+  #root{
+    position:fixed;inset:0;display:flex;flex-direction:column;min-height:0;
+    background:var(--dsw-alias-bg-base,#fff);
+  }
+  #root[hidden]{display:none;}
+  #root > [data-slot="main"]{flex:1 1 0;min-height:0;display:flex;flex-direction:column;}
+  #root > [data-slot="main"] > *{flex:1 1 0;min-height:0;}
 
   .dsh-view-host{position:fixed;inset:0;display:flex;flex-direction:column;z-index:2;}
   .dsh-view-host[hidden]{display:none;}
@@ -1159,9 +1153,7 @@ const server = createServer((req, res) => {
 <script src="/client.js"></script>
 </head>
 <body class="${url.searchParams.has('dark') ? 'dark' : ''}">
-  <div class="fake-app">
-    ${backdrop}
-  </div>
+  <div id="root"></div>
 
   <div class="dsh-view-host" id="view-host" hidden>
     <div class="dsh-view-ring">
@@ -1174,7 +1166,6 @@ const server = createServer((req, res) => {
       <div class="dsh-composer">按 Enter 发送 · Shift+Enter 换行</div>
     </div>
   </div>
-  <div id="root"></div>
   <script type="module">
     const params = new URLSearchParams(location.search);
     const mounted = window.__MOUNTED__;
@@ -1184,7 +1175,7 @@ const server = createServer((req, res) => {
         register(options, component) { mounted.push({ options, component }); return () => {}; },
       },
 
-      effect() { return () => {}; },
+      effect(execute) { const dispose = execute(); return typeof dispose === 'function' ? dispose : () => {}; },
     };
     window.__PLUGIN_EXPORTS__.apply(ctx);
 
@@ -1193,11 +1184,10 @@ const server = createServer((req, res) => {
 
     const viewArea = viewHost === null ? null : viewHost.querySelector('.dsh-view-area');
     for (const { options, component } of mounted) {
+      if (options.name === 'sidebar.panellist') continue;
       const isView = options.name === 'conversation.view';
 
-      const ownerShare = options.name === 'sidebar.footer.action'
-        ? { wide: true }
-        : isView ? 'preview-session-1' : {};
+      const ownerShare = isView ? 'preview-session-1' : {};
       const share = { ...(typeof ownerShare === 'string' ? {} : ownerShare), ...(options.inject ? options.inject(ownerShare) : {}) };
       const host = document.createElement('div');
       host.dataset.slot = options.name;
@@ -1206,38 +1196,18 @@ const server = createServer((req, res) => {
         .render(window.__DSH_REQUIRE_CACHE__['react'].createElement(component, share));
     }
 
-    if (${LEDGER}) {
-      const deviceTheme = params.has('dark') ? 'dark' : 'light';
-      const tagDevice = () => {
-        const el = document.querySelector('.dtpl-overlay');
-        if (el !== null && el.getAttribute('data-dtpl-device') !== deviceTheme) {
-          el.setAttribute('data-dtpl-device', deviceTheme);
-        }
-      };
-      new MutationObserver(tagDevice).observe(document.body, { childList: true, subtree: true });
-      tagDevice();
-    }
-
     const tabFlag = params.has('tab') ? params.get('tab') : (params.has('quota') ? 'quota' : null);
 
     if (params.get('view') === 'tokens') {
       viewHost.hidden = false;
-      for (const el of [document.querySelector('.fake-app'), root]) {
-        if (el !== null) el.style.display = 'none';
-      }
-    }
-    if (window.__PREVIEW_NO_AUTO !== true && params.get('view') !== 'tokens') {
+      root.style.display = 'none';
+    } else if (window.__PREVIEW_NO_AUTO !== true && tabFlag !== null) {
       let tries = 0;
-      setTimeout(function open() {
-        if (document.querySelector('.dtpl-overlay') === null) {
-          const trigger = document.querySelector('[data-plugin="dsh-tokbook"]');
-          if (trigger) trigger.click();
-        } else if (tabFlag !== null) {
-          const tabEl = document.getElementById('dtpl-tab-' + tabFlag);
-          if (tabEl) { tabEl.click(); return; }
-        }
-        if (++tries < 25) setTimeout(open, 100);
-      }, 200);
+      setTimeout(function pick() {
+        const tabEl = document.getElementById('dtpl-tab-' + tabFlag);
+        if (tabEl) { tabEl.click(); return; }
+        if (++tries < 25) setTimeout(pick, 100);
+      }, 100);
     }
   </script>
 </body>
@@ -1247,7 +1217,7 @@ const server = createServer((req, res) => {
 const port = Number(process.env.PORT ?? 8931)
 server.listen(port, '127.0.0.1', () => {
   if (LEDGER) {
-    console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}（浮窗带设备皮，?dark=1 换深面）`)
+    console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}（?dark=1 换深面）`)
     return
   }
   console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|quota|pricing|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)

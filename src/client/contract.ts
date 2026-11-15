@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 export interface SlotRegisterOptions {
   name: string
   id?: string
+  key?: string
   order?: number
   locale?: string
   label?: string | (() => string)

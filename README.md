@@ -4,12 +4,12 @@
 
 A **cross-session token-usage ledger for DeepSeek Harness (DSH)**. The host half folds every billed model
 call into one row of a local, per-day JSONL ledger and aggregates it with costs; the browser half shows it
-from a four-tab overlay behind a sidebar-footer button, plus a **词元 / Tokens** page that the conversation
-view ring gains for a single session.
+as a four-tab page in the main column, opened from a row (`sidebar.panellist`) in the sidebar's panel list,
+plus a **词元 / Tokens** page that the conversation view ring gains for a single session.
 
 | Light | Dark |
 | --- | --- |
-| ![The overview tab in the light skin](docs/assets/overlay-ledger.png) | ![The overview tab in the dark skin](docs/assets/overlay-ledger-dark.png) |
+| ![The overview tab in the light skin](docs/assets/panel-ledger.png) | ![The overview tab in the dark skin](docs/assets/panel-ledger-dark.png) |
 
 *All screenshots come from the preview bench, so the numbers are fixture data, not a real ledger.*
 
@@ -31,8 +31,8 @@ into the profile after a successful install. Its patch inserts the `tokbook` row
 configuration; add a `config:` block only to change something (see Configuration), with an override
 example in [`cordis.patch.example.yml`](cordis.patch.example.yml).
 
-Restart `dsh web` and refresh — the entry button appears at the bottom of the sidebar
-(`sidebar.footer.action`).
+Restart `dsh web` and refresh — the **词元账本** row appears in the sidebar's panel list, just above
+**更多 / More**; selecting it opens the ledger page in the main column (`main` + `sidebar.panellist`).
 
 The repo carries the built `lib/`, so installing runs no build script and needs no `allowBuilds` edit in
 the profile's `pnpm-workspace.yaml`. Rebuild (`pnpm build`) and commit `lib/` after changing `src/` (see
@@ -80,11 +80,11 @@ view reports tokens only. Tokens are facts, prices are not.
 
 | Usage detail, the overview's second section | Subscription quota |
 | --- | --- |
-| ![Usage detail](docs/assets/overlay-detail.png) | ![The subscription quota tab](docs/assets/overlay-quota.png) |
+| ![Usage detail](docs/assets/panel-detail.png) | ![The subscription quota tab](docs/assets/panel-quota.png) |
 
 | Pricing | Method |
 | --- | --- |
-| ![The pricing tab](docs/assets/overlay-pricing.png) | ![The method tab](docs/assets/overlay-method.png) |
+| ![The pricing tab](docs/assets/panel-pricing.png) | ![The method tab](docs/assets/panel-method.png) |
 
 Prices can also come from [models.dev](https://models.dev/api.json), a public USD catalogue: **查价 /
 lookup** fuzzy-searches the selected model name for a candidate to fill, and **从 models.dev 补价 / sync**
@@ -153,7 +153,7 @@ one that reports window percentages without a plan (OpenCode Go answering `403` 
 `none` card. Only an endpoint that actually answered derives a gate — a timeout or `5xx` is *unknown*,
 never "no subscription".
 
-The dot on the sidebar button comes from the last successful snapshot and calls no provider API itself.
+The dot on the sidebar row's icon comes from the last successful snapshot and calls no provider API itself.
 
 The data directory has **one writer**: startup writes an `owner.json` marker (pid and start time) and warns
 instead of taking over when a live foreign process owns it, while a stale marker is taken over silently.

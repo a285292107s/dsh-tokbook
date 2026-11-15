@@ -1,7 +1,7 @@
 # AGENTS.md
 
 dsh-tokbook 是面向 DeepSeek Harness(DSH)的**跨会话 Token 用量账本**插件:host 半区把每次通道计费
-模型调用记成一行、写入按日 JSONL 账本并给出带成本的聚合,browser 半区在侧边栏 footer 的浮窗里展示。
+模型调用记成一行、写入按日 JSONL 账本并给出带成本的聚合,browser 半区把它做成主栏里的四 tab 账本页,入口是侧边栏面板列表的一行。
 目录布局见 `README.zh.md`,**动手前该读哪份见 docs/INDEX.md**。
 
 ## 与维护者的协作方式(常设偏好)

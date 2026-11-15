@@ -96,7 +96,7 @@ for (const f of fragments) {
 }
 check('圆角只走 0 / 50% / var()', badRadius.length === 0, { badRadius })
 
-const DSW_ALLOWED = new Set(['tokens.ts', 'overlay.ts', 'footer.ts', 'shared.ts'])
+const DSW_ALLOWED = new Set(['tokens.ts', 'page.ts', 'shared.ts'])
 const dswFiles = fragments.filter((f) => f.code.includes('--dsw-')).map((f) => f.name)
 const dswSpread = dswFiles.filter((n) => !DSW_ALLOWED.has(n))
 check('--dsw-* 只在白名单片段里直连', dswSpread.length === 0, { dswSpread })

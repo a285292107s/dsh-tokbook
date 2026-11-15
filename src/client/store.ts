@@ -1,7 +1,6 @@
 import type { TokBookOverview } from '../types.ts'
 
 export interface TokBookViewSnapshot {
-  readonly open: boolean
   readonly overview: TokBookOverview | null
   readonly error: string | null
   readonly pricingDirty: boolean
@@ -11,7 +10,6 @@ export interface TokBookViewSnapshot {
 export interface TokBookViewStore {
   subscribe(listener: () => void): () => void
   getSnapshot(): TokBookViewSnapshot
-  setOpen(open: boolean): void
   setOverview(overview: TokBookOverview | null): void
   setError(error: string | null): void
   setPricingDirty(dirty: boolean): void
@@ -21,7 +19,7 @@ export interface TokBookViewStore {
 export function createTokBookViewStore(): TokBookViewStore {
   const listeners = new Set<() => void>()
   let snapshot: TokBookViewSnapshot = {
-    open: false, overview: null, error: null, pricingDirty: false, quotaAlert: false,
+    overview: null, error: null, pricingDirty: false, quotaAlert: false,
   }
   const emit = (): void => {
     for (const listener of [...listeners]) listener()
@@ -33,10 +31,6 @@ export function createTokBookViewStore(): TokBookViewStore {
     },
     getSnapshot() {
       return snapshot
-    },
-    setOpen(open) {
-      snapshot = { ...snapshot, open }
-      emit()
     },
     setOverview(overview) {
       snapshot = { ...snapshot, overview, error: null }

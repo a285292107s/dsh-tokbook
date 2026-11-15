@@ -3,11 +3,15 @@ import type { TokBookContext } from './contract.ts'
 import { ROUTE_QUOTA } from '../route-paths.ts'
 import { createTokBookViewStore, type TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
-import { FooterButton } from './FooterButton.tsx'
-import { LedgerOverlay } from './LedgerOverlay.tsx'
+import { TokBookPanel } from './TokBookPanel.tsx'
+import { TokBookPanelIcon } from './TokBookPanelIcon.tsx'
 import { SessionTokens } from './SessionTokens.tsx'
 
 export const inject = ['slots']
+
+const PANEL_ID = 'tokbook'
+
+const PANEL_ENTRY_ORDER = 30
 
 const QUOTA_ALERT_POLL_MS = 5 * 60_000
 
@@ -23,21 +27,21 @@ export function apply(ctx: TokBookContext): void {
 
   ctx.effect(() => injectStyles())
 
-  ctx.slots.inject('sidebar.footer.action', () =>
+  ctx.slots.inject('main', () =>
     ctx.slots.register({
-      name: 'sidebar.footer.action',
-      id: 'dsh-tokbook',
-      order: 100,
+      name: 'main',
+      key: PANEL_ID,
       inject: () => ({ view }),
-    }, FooterButton))
+    }, TokBookPanel))
 
-  ctx.slots.inject('shell.overlay', () =>
+  ctx.slots.inject('sidebar.panellist', () =>
     ctx.slots.register({
-      name: 'shell.overlay',
-      id: 'dsh-tokbook',
-      order: 200,
+      name: 'sidebar.panellist',
+      id: PANEL_ID,
+      order: PANEL_ENTRY_ORDER,
+      label: '词元账本',
       inject: () => ({ view }),
-    }, LedgerOverlay))
+    }, TokBookPanelIcon))
 
   ctx.slots.inject('conversation.view', () =>
     ctx.slots.register({
@@ -51,11 +55,4 @@ export function apply(ctx: TokBookContext): void {
   void refreshQuotaAlert(view)
   const poll = setInterval(() => { void refreshQuotaAlert(view) }, QUOTA_ALERT_POLL_MS)
   ctx.effect(() => () => { clearInterval(poll) })
-  let wasOpen = false
-  const unsubscribe = view.subscribe(() => {
-    const open = view.getSnapshot().open
-    if (wasOpen && !open) void refreshQuotaAlert(view)
-    wasOpen = open
-  })
-  ctx.effect(() => unsubscribe)
 }

@@ -22,9 +22,12 @@
 > - **第三期 = 价格表破坏性重构**：删掉云端镜像 / 通道覆盖层 / 双维计价，改成本机唯一一份
 >   手工价表（路由 → 模型串 → 价段）。二期关于云端 feed / 覆盖层的长文已删（避免再被当成现状），
 >   旧文字按 git 历史追溯。
-> - **第四期（当前）= 价表去掉生效时间轴**：每个 (route, model) 只剩一份**当前价** + 峰谷时段，
+> - **第四期 = 价表去掉生效时间轴**：每个 (route, model) 只剩一份**当前价** + 峰谷时段，
 >   金额收口成「现价刻度」并且只在 30 天及更短的窗口里给（推理见 §5 末「为什么价表只有一份现价」）。
 >   「价段」这个词在第三期文字里仍会出现，读到它按第四期理解：那份价就是当前价。
+> - **第五期（2026-11-15）= 入口与形态**：侧栏 footer 按钮 + `shell.overlay` 浮窗退役，换成侧栏
+>   面板列表的一行（`sidebar.panellist`）+ 主栏账本页（`main`）。理由见 §6.2；本文其余地方写
+>   「浮窗 / footer 按钮 / 弹窗」的按第五期理解成「账本页 / 面板行」，旧文字按 git 历史追溯。
 >
 > **精确接口** → [`CONTRACTS.md`](CONTRACTS.md)；实现与操作现状 → [`../README.zh.md`](../README.zh.md)；
 > HMR → [`HMR.md`](HMR.md)。
@@ -34,13 +37,13 @@
 ## 0. 一句话结论
 
 DSH **已经内置**逐会话、逐 turn 的 token 计量与展示（`token-meter` / `session-stats` 投影 + 内置 Web UI）。
-所以 `dsh-tokbook` 的增量在**跨会话、可持久化、可回溯**的聚合账本与一个**常驻浮窗**，不重复造逐 turn 的轮子。
+所以 `dsh-tokbook` 的增量在**跨会话、可持久化、可回溯**的聚合账本与一个**常驻账本页**，不重复造逐 turn 的轮子。
 
 ## 1. 目标与范围
 
 **目标。** 一个独立外置插件（host 半区 + client 半区）：host 监听持久化 `session/event`，把每次通道
 计费模型调用落成可持久化的账本，数据跨重启累计、能按会话 / 模型 / 通道 / 时间维度汇总；client 在
-Web UI 左下角（设置按钮上方）加一个入口按钮，点击弹出独立浮窗展示账本。
+Web UI 的侧边栏面板列表里加一行入口，选中后在主栏打开账本页。
 
 **范围边界。** 保持纯外置，不改造 DSH 仓库——唯一例外是「左栏常驻入口」：要它才需要 in-repo 改
 `ui-sidebar` 声明新子槽（见 §6）。成本折算曾列为「本期不做」并判给 `dsh-costbook`，二期已推翻落地
@@ -55,8 +58,8 @@ Web UI 左下角（设置按钮上方）加一个入口按钮，点击弹出独�
 - **持久化**：自己按日追加 JSONL 到数据目录（`node:fs`）——账本是流水账，不是「几条小状态」，
   所以不吃 base 层那套 schema 校验的 JSON 后端（`storage-domain`）。（§5 有同一条的完整理由。）
 - **host→浏览器**：`ctx.webServer` 的精确 Fetch 路由——外置插件难以贡献生成式 Typert Remote。
-- **UI**：只填**已声明**的槽——入口按钮 + 浮窗（`sidebar.footer.action` + `shell.overlay`），
-  以及后来加的会话词元页（`conversation.view`）。外置插件不能声明新 slot（§6）。
+- **UI**：只填**已声明**的槽——侧栏面板行 + 主栏账本页（`sidebar.panellist` + `main`），
+  以及会话词元页（`conversation.view`）。外置插件不能声明新 slot（§6）。
 
 ## 3. DSH 插件机制（必要背景）
 
@@ -108,12 +111,12 @@ Web UI 左下角（设置按钮上方）加一个入口按钮，点击弹出独�
 ## 4. 总体架构
 
 两个半区，一条单向数据流：**host 拥有全部数据**（持久事件流 → 折叠 → 账本落盘 → 精确 Fetch 路由），
-**browser 只注册三个已声明的 slot 并读那条路由**（入口按钮 / 浮窗 / 会话词元页）；浮窗开关是入口组件的私有 React state。**为什么：**
+**browser 只注册三个已声明的 slot 并读那条路由**（侧栏面板行 / 主栏账本页 / 会话词元页）；面板行的选中态归宿主，账本页只关心自己那一列挂载了没有。**为什么：**
 
 - **数据只过 host**：账本要跨重启、要被别的消费者读，而 browser 半区只活在一个页面里；持久
   `session/event` 流也只有 host 看得到。
 - **host→browser 用精确 Fetch 路由**而不是生成式 Remote：外置插件贡献不了 remote namespace（§2）。
-- **控制面与数据面分开**：按钮只负责开窗、浮窗只负责读，两者都进**已声明**的槽，所以不动 DSH（§6）。
+- **控制面与数据面分开**：面板行只负责选中、账本页只负责读，两者都进**已声明**的槽，所以不动 DSH（§6）。
 
 **路由注册挂在 `ctx.inject(['webServer'])` 的作用域上，不是外层 ctx。** `register` 撞到同一个
 `(kind, path)` 会抛错，而 webServer 单独重载时只有注入作用域上的 effect 会跟着撤销——把注册留在外层，
@@ -207,28 +210,35 @@ models.dev 的「一次都没试过」不能报 `ok`——那会让界面说「�
 ## 6. UI 设计（外置插件即可落地，无需改 DSH 仓库）
 
 **关键外部事实：外置插件不能声明新 slot**，只能注册进宿主**已声明**的槽（`docs/subsystems/slots.md`
-+ `packages/client/AGENTS.md`）。要的「左下角入口 + 点击弹浮窗」刚好落到两个已声明的槽，**纯外置可行**：
++ `packages/client/AGENTS.md`）。要的「侧栏一行入口 + 主栏一整页」刚好落到两个已声明的槽，**纯外置可行**：
 
-- `sidebar.footer.action`（侧栏底部的短操作；官方明确「优先于替换整列 sidebar」）——入口按钮。
-- `shell.overlay`（壳层浮层，list / additive，位于所有列之上；官方点名「要浮在整个应用之上的框架级
-  浮层先查这个槽」）——浮窗本体，注册项自绘并自己接管 pointer events（接管前是 click-through）。
+- `sidebar.panellist`（list / root）——面板列表里的一行。按钮由宿主画、点击由宿主调
+  `ctx.layout.selectPanel(id)`，插件只给 label 与图标；每个 list id 必须对应一个已注册的 `main` key。
+- `main`（keyed / root）——主栏那一列的内容，`key` 就是面板 id；选中别的面板或会话时它自己卸载。
+
+**为什么不再用 `sidebar.footer.action` + `shell.overlay`**（第五期改掉的形态）：浮窗是盖在宿主之上的一层，
+打开时挡住正在读的对话；而这个插件是**读者反复回来瞄一眼**的账本，不是打断型操作。落成主栏的一页后，
+它和「看板」「技能与 MCP」同构——同一列、同样高度、同样随面板切换；浮窗需要的遮罩、Esc、焦点陷阱、
+点外部关闭这整套「临时表面」的机器随之消失，代码与测试面一起变小（§6.2）。
 
 ### 6.0 侧边栏植入：社区的两条路线，本项目选 A
 
-- **路线 A（采用）——DSH 官方 slot。** 权威参考
-  [build-deepseek-harness-plugin · client-slots-and-theme.md](https://github.com/oil-oil/build-deepseek-harness-plugin/blob/main/references/client-slots-and-theme.md?plain=1)。
-  社区 starter [kun2-5code/dsh-plugin-template](https://github.com/kun2-5code/dsh-plugin-template) 把
-  浏览器侧 UI 拆成 14 个 surface，其中就有 `sidebar.footer.action` 与 `shell.overlay`——正是「左下角
-  入口 + 独立浮窗」的标准做法。**该模板同时证明：纯 slot 注册在任何 harness 上直接生效**（不同于设置
-  卡片受 allowlist 限制，见 §11）。优点：不动 DSH、无第三方依赖、不绑版本。
+- **路线 A（采用）——DSH 官方 slot。** 第五期改用面板行之后，权威参考是 DSH 自己的
+  **`dsh-task-board`（看板）**：它就是 `sidebar.panellist`（id `task-board`、order 20、自带 label）
+  \+ `main`（key `task-board`）两个槽的组合，行序里紧挨「插件」「自动化任务」。社区 starter
+  [kun2-5code/dsh-plugin-template](https://github.com/kun2-5code/dsh-plugin-template) 的 14 个 surface
+  里也有 `sidebar.panellist`，同样证明**纯 slot 注册在任何 harness 上直接生效**（不同于设置卡片受
+  allowlist 限制，见 §11）。优点：不动 DSH、无第三方依赖、不绑版本。
 - **路线 B（否）——生态注册表服务。** [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)
   开放一个 Cordis 服务，供消费插件注册 tab / file viewer，但它自建的是**右侧面板工作台**——位置与
-  形态都不是一回事（右侧面板 ≠ 左下角入口 + 浮窗），且带版本墙与 `pnpm approve-builds` 门槛。
+  形态都不是一回事（右侧面板 ≠ 侧栏面板行 + 主栏页），且带版本墙与 `pnpm approve-builds` 门槛。
 
 > 何时转 B：只有当词元账本想成为「那个侧边栏工作台」里的一等 tab 时，再以 optional peerDependency 引入。
 
-**复核结论：** 两个槽都是 list + root、additive，外置插件可直接填入；**都是「纯 slot 注册」，在任何 harness
-上生效**。只有想要「左栏常驻入口」而非 footer 按钮，才需要 in-repo 改 `ui-sidebar`；逐槽 props 与注册写法见 `src/client/index.ts`。
+**复核结论：** 两个槽都是 list / keyed + root、additive，外置插件可直接填入；**都是「纯 slot 注册」，在任何
+harness 上生效**。第五期顺手修正了一条旧判断：此前以为「左栏常驻入口」必须 in-repo 改 `ui-sidebar`——
+实际 `sidebar.panellist` + `main` 就够了，按钮、选中态、哪个面板活着全归宿主。逐槽 props 与注册写法见
+`src/client/index.ts`。
 
 ### 6.1 可点元素分两档，判据是位置
 
@@ -243,6 +253,37 @@ models.dev 的「一次都没试过」不能报 `ok`——那会让界面说「�
 「它贴在数据行旁边」——一个不适用于独立按钮的前提。照着它给底部工具条的两个按钮选样式，
 结果它们是 0 边框、透明底、fg-2 灰字（实测），在屏幕上就是两段普通文字。判据搬进本文后，
 新增可点元素时按「位置」选档，而不是按「看起来像不像链接」。
+
+### 6.2 第五期：浮窗退役，搬进主栏页
+
+**改的是什么。** 入口从侧栏 footer 的一枚按钮改成面板列表里的一行「词元账本」
+（`sidebar.panellist`，`order: 30`），内容从 `shell.overlay` 上的一层浮窗改成主栏的一页（`main`，
+key `tokbook`）。四个 tab、数据与取数逻辑原样搬过去；`FooterButton.tsx`、`styles/footer.ts`、
+`styles/device.ts`、对话框/遮罩/Esc/焦点陷阱/全局快捷键整套删掉。
+
+**为什么换（一层一层往下）。** 这个插件是「一眼」型工具：读者想知道今天花了多少，看一眼就回去写代码。
+浮窗适合**打断型**操作（做一半的事、确认一个动作），不适合反复瞄的账本——它一打开就盖住正文，
+关掉又要找入口。宿主里已经有一个给「一眼」型工具准备好的位置：主栏的面板页（看板、技能与 MCP 就在
+那一列），同一个侧栏列表里选中、主栏整页显示、切走即离开。搬过去之后：
+
+- **不打断阅读**：账本在它自己那一列，正文还在旁边；不需要遮罩、Esc、点外部关闭。
+- **宽度够**：浮窗最宽也就 720 上下，四 tab 里的图表与价表长期挤；主栏整页按窗口给宽度。
+- **状态归宿主**：谁被选中、哪个面板活着都由宿主的布局服务管，插件不再自己维护「开/关」两态，
+  也就不会与宿主的选中态打架。
+
+**为什么不同时留浮窗。** 两个表面入口、一套内容，读者得先猜「哪个界面是全的」；而浮窗那套外壳
+（遮罩、焦点陷阱、快捷键、设备皮）是纯维护成本。删掉比留着更省。
+
+**顺序 `order: 30` 的理由。** 看板是 20、技能与 MCP 是 25，都已被占；取 30 落在它们之后、面板组
+末尾（仍在「更多」之前）。取 21–24 也能插进去，但以后再有面板想排在它们之间就得回头重排，30 不用。
+
+**内容列收一条 `max-width: 1060px` 的居中列。** 行布局是「名字贴左、数字贴右」，浮窗时代最宽 720，
+两端天生很近；主栏在 1400+ 的窗口下会把两端拉到 1300 多，读一行要来回扫。一条居中的 1060 列既保住
+贴近感，也仍比浮窗宽一半（价表的四档价输入、图表都受益）。很宽的窗口由页面材质填满留白，不算空。
+
+**版面骨架跟着换。** 页面撑满主栏（`flex:1` + `min-height:0`）+ 头部 / tab 条 / 滚动主体 / 页脚四段纵向 flex；页脚是
+主体的**兄弟**而不是 sticky 在内容上，所以内容永远滚不到页脚底下。滚动只发生在主体里，页头与 tab 条
+不动——这也是它在浮窗里就该有的行为，只是浮窗的 720 高经常连三个模块都放不下。
 
 ## 7. 外置包构建（这是最关键的一道坎）
 
@@ -301,7 +342,7 @@ bundle 层，以及 client 改动怎么生效（`rev` 不可变缓存、刷新 /
    不要重算」只看账本代数（`/tokbook/sync` 的 `ledger`），不接 SSE、也不盲轮询（口径见
    [`CONTRACTS.md`](CONTRACTS.md) §2）。
 3. **记账权威源**：`assistant/message` 的 `usage`；不用 `session-telemetry`（可能丢 / 重）。
-4. **UI 槽位**：只填已声明的 `sidebar.footer.action` + `shell.overlay`（+ 后来的 `conversation.view`），**无需改 DSH 仓库**（路线 A，见 §6.0）。
+4. **UI 槽位**：只填已声明的 `sidebar.panellist` + `main`（+ 后来的 `conversation.view`），**无需改 DSH 仓库**（路线 A，见 §6.0）。
 5. **不要看 `dsh-costbook`**（已废弃 / 有问题的实现），不要照抄它。
 
 ## 11. 风险与后续
@@ -310,7 +351,7 @@ bundle 层，以及 client 改动怎么生效（`rev` 不可变缓存、刷新 /
 |---|---|
 | 外置 bundle 格式 | 需自己维护基线 external 列表与纯净化纪律（它同时是判死表外 import 的门禁）；DSH 升级若新增本插件用到的基线模块需同步。风险可控 |
 | client 插件默认导出 | 不可给 client 入口加 `export default`（cordis loader `exports.default ?? exports` 会掩盖 `.inject`，报 “without inject”）。见 §7.4 |
-| 设置卡片（若后续做） | `settings.plugin.item` 卡片在 stock harness 上被 `WEB_SETTINGS_NAMESPACES` allowlist 卡住、显示“not exposed”；需在 DSH 的 api-proxy 加一行，或等官方把声明迁进 `settings.register()`。本项目 UI 走 footer+overlay（**纯 slot 注册，不受影响**），仅当后续加配置卡片时才需注意 |
+| 设置卡片（若后续做） | `settings.plugin.item` 卡片在 stock harness 上被 `WEB_SETTINGS_NAMESPACES` allowlist 卡住、显示“not exposed”；需在 DSH 的 api-proxy 加一行，或等官方把声明迁进 `settings.register()`。本项目 UI 走面板行 + 主栏页（**纯 slot 注册，不受影响**），仅当后续加配置卡片时才需注意 |
 
 ## 附：参考资料索引（权威）
 
@@ -391,7 +432,7 @@ TTL 30 秒的内存卡 → 数据目录里最近一张 `ok` 快照（跨重启�
 「刷新」走 `force`，直接轮询并重写快照；client 收到一张数据已过一分钟的卡会自己跟进一次 `force`，
 并带冷却——快速切 tab 不该把 provider API 打爆。
 
-清单路由**一个 provider 请求都不打**，连 footer 的告急点也只从 durable 快照推出来：那枚徽章是「上次
+清单路由**一个 provider 请求都不打**，连面板行图标的告急点也只从 durable 快照推出来：那枚徽章是「上次
 看时某个窗口快满了」的廉价信号，不是实时告警。卡本身也逐张拉（`?provider=`），一个慢或失败的
 provider 不该让其余卡一起等。缓存只为内置 provider 建：`provider` 是调用方给的任意字符串，非内置的
 集合没有上界，而那个 Map 从不清理。
@@ -399,6 +440,6 @@ provider 不该让其余卡一起等。缓存只为内置 provider 建：`provid
 ## 附二：社区/生态参考（GitHub，检索实测）
 
 - **侧边栏原生 slot 权威指南**（路线 A）：[oil-oil/build-deepseek-harness-plugin · client-slots-and-theme.md](https://github.com/oil-oil/build-deepseek-harness-plugin/blob/main/references/client-slots-and-theme.md?plain=1)
-- **插件模板**（14 个 UI surface，含 `sidebar.footer.action` + `shell.overlay`）：[kun2-5code/dsh-plugin-template](https://github.com/kun2-5code/dsh-plugin-template)
+- **插件模板**（14 个 UI surface，含 `sidebar.panellist`）：[kun2-5code/dsh-plugin-template](https://github.com/kun2-5code/dsh-plugin-template)
 - **侧边栏生态注册表服务**（路线 B）：[omdsh-dev/DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) · [external-plugin-guide.md](https://raw.githubusercontent.com/omdsh-dev/DSH-better-sidebar/main/docs/external-plugin-guide.md)
 - **官方 client 模块**：`docs/subsystems/client-modules.zh.md`

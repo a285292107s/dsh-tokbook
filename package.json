@@ -1,6 +1,6 @@
 {
   "name": "dsh-tokbook",
-  "description": "Cross-session token-usage ledger for DeepSeek Harness (DSH). Host half folds provider usage into a durable book; browser half shows it via a sidebar footer button + shell overlay.",
+  "description": "Cross-session token-usage ledger for DeepSeek Harness (DSH). Host half folds provider usage into a durable book; browser half shows it as a four-tab page in the main column, opened from a sidebar panel row.",
   "version": "0.1.2",
   "keywords": [
     "dsh",

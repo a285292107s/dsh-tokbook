@@ -235,7 +235,7 @@ export const CSS_LEDGER = `
 
 [data-plugin="dsh-tokbook"] .dtpl-foot{
   flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;
-  padding:11px 20px 14px;
+  padding:11px var(--dtpl-page-pad) 14px;
   border-top:1px solid var(--dtpl-border);
 }
 [data-plugin="dsh-tokbook"] .dtpl-foot-state{

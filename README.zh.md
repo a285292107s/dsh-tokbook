@@ -5,23 +5,23 @@
 > 英文门面见 [`README.md`](README.md);本文件是**维护者的那一份**,多带 `src/` 布局树与开发细节。
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
-一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区从**侧边栏
-footer 按钮**(`sidebar.footer.action`)弹出**浮窗**(`shell.overlay`),内含四个 tab(按界面
-从左到右):**用量总览**(今日读数 / 近 14 天趋势 / 今日词元构成三个模块;往下滚接**用量明细**——
-窗口 × 按模型 / 按工作区 / 按通道,金额只在近 30 天及更短的窗口里给)、**订阅额度**(用你的 key 向通道查
-账户级官方用量)、**价格表**(选一个通道 + 模型,填它的**当前价**;峰谷时段、汇率与节假日年历也在这里)、
-**统计口径**(不估算的口径、漏项与对账)。
+一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区在**侧边栏面板列表**
+里放一行入口(`sidebar.panellist`,和「插件」「看板」同一个列表),点开在**主栏**打开账本页(`main`)——
+页内四个 tab(按界面上方从左到右):**用量总览**(今日读数 / 近 14 天趋势 / 今日词元构成三个模块;
+往下滚接**用量明细**——窗口 × 按模型 / 按工作区 / 按通道,金额只在近 30 天及更短的窗口里给)、
+**订阅额度**(用你的 key 向通道查账户级官方用量)、**价格表**(选一个通道 + 模型,填它的**当前价**;
+峰谷时段、汇率与节假日年历也在这里)、**统计口径**(不估算的口径、漏项与对账)。
 
-另有一格不在浮窗里:插件还在**对话视图环**里加了**词元**页(`conversation.view`)——单会话全生命周期,
+另有一格不在账本页里:插件还在**对话视图环**里加了**词元**页(`conversation.view`)——单会话全生命周期,
 按轮次与步骤摊开,见下文「[会话词元页](#会话词元页conversationview)」。
 
 > **用量明细不是第五个 tab。** 它是**用量总览**页往下滚的第二段(`ProviderPanel`,
 > `section[aria-label="用量明细"]`)。此前这一句写「五个 tab」,是 `用量明细并入总览` 那次改动
-> (f7c7e27)漏掉的:**界面 tab 条上只有四个**,`src/client/LedgerOverlay.tsx` 的 tablist 是唯一真源。
+> (f7c7e27)漏掉的:**界面 tab 条上只有四个**,`src/client/TokBookPanel.tsx` 的 tablist 是唯一真源。
 
 | 浅色 | 深色 |
 | --- | --- |
-| ![浅色皮下的浮窗总览](docs/assets/overlay-ledger.png) | ![深色皮下的浮窗总览](docs/assets/overlay-ledger-dark.png) |
+| ![浅色下的账本页总览](docs/assets/panel-ledger.png) | ![深色下的账本页总览](docs/assets/panel-ledger-dark.png) |
 
 *两张都抓自预览台,所以数字是 fixture 数据,不是真账本。*
 
@@ -66,7 +66,8 @@ dsh plugin --profile web add github:a285292107s/dsh-tokbook
 记账**;只有要改什么才加 `config:` 块(见[配置](#配置)),覆盖示例见
 [`cordis.patch.example.yml`](cordis.patch.example.yml)。
 
-重启 `dsh web` 并刷新浏览器。入口按钮在侧边栏底部,浮窗是一个 shell overlay。
+重启 `dsh web` 并刷新浏览器。入口是侧边栏面板列表里的「**词元账本**」行(在「更多」上面一格),
+点开在右侧主栏打开账本页;它不是弹窗,切走面板即离开这一页。
 
 仓库里带着构建好的 `lib/`(随 git 发布),所以安装时**不需要 pnpm 跑构建脚本**,也不需要先改 profile
 的 `pnpm-workspace.yaml`。改完 `src/` 要 `pnpm build`,再把 `lib/` 一起提交(见「构建」)。
@@ -89,9 +90,9 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 
 - **用量未知 ≠ 0。** 通道没上报 `usage` 的计费调用(中途取消的请求、没回报用量的 summarize)
   **仍写一行、仍计入请求次数**,但四个 token 桶一个都不加,也不按 0 词元冒充。
-- **新鲜度不靠读路径等。** 打开浮窗那次读只做**廉价探测**(列会话 + 比对变更签名);要折叠时才把
+- **新鲜度不靠读路径等。** 打开账本页那次读只做**廉价探测**(列会话 + 比对变更签名);要折叠时才把
   **权威 walk 排到后台**并按 15 s 节流——账本最多晚一个节流窗口,要立刻全量走一遍用**重新扫描**。
-  walk 在跑时浮窗靠只读探针 `/tokbook/sync` 把状态追到落定(页脚那句「正在重新扫描…」/「上次重新
+  walk 在跑时账本页靠只读探针 `/tokbook/sync` 把状态追到落定(页脚那句「正在重新扫描…」/「上次重新
   扫描失败:…」),落定后再拉一次概览。
 - **界面跟着账本走,不靠盲轮询。** `/tokbook/sync` 除了调度器状态,还端出**账本代数**(每落一行 /
   每挪动一行 +1,只读内存)。浏览器侧一个共享探针每 3 s 读它一次;代数变了才让当前那一页重拉自己
@@ -107,8 +108,8 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 
 ## 会话词元页(`conversation.view`)
 
-除了侧栏按钮与浮窗,插件还在**对话视图环**里加了一格:**词元**(`conversation.view`,id
-`dsh-tokbook-tokens`)。它答的是浮窗答不了的那个问题——**这一个会话**的词元与钱,按轮次、按步骤摊开:
+除了面板行与账本页,插件还在**对话视图环**里加了一格:**词元**(`conversation.view`,id
+`dsh-tokbook-tokens`)。它答的是账本页答不了的那个问题——**这一个会话**的词元与钱,按轮次、按步骤摊开:
 
 - **抬头**:本会话四桶合计一个大数,四桶读数在其下一行;右侧四行事实——实际支出、订阅价值、占今日消费、
   共 N 轮 / N 步。下面一条比例构成条 + 四列读数(每列带占比),再一行「计费输入 = 未缓存输入 +
@@ -157,7 +158,7 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 区间,按年收录)判定:年历里查不到那一年就是**未知**,「工作日」此时退化成「周一至周五」——
 **安全方向**,宁可多按高峰算;调休上班日不用收(周末上不上班都是闲时价),所以这份年历只收放假日。
 
-金额拆成两个桶,浮窗分开显示、绝不混为单一「支出」:**实际支出**(`spend`)= `metered` 路由按现价
+金额拆成两个桶,账本页分开显示、绝不混为单一「支出」:**实际支出**(`spend`)= `metered` 路由按现价
 折算的钱;**订阅价值**(`subscriptionValue`)= `subscription` 路由按你写的价折算的「省了多少」,
 **不是现金**。计费性质是**通道路由**属性(价表 `$billing` 的一条),省略按 `metered`。
 
@@ -239,8 +240,8 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 - **有 key 但没有生效订阅不是错误**:按 provider 自己报的东西分成 `balance`(只有余额约束用量)与
   `none`(只报窗口百分比,如 OpenCode Go 的 403「有效 key,无 Go 订阅」)两档状态卡;门只从**真的
   答复了**的端点推导,网络故障绝不写成「没订阅」。
-- 侧栏按钮上那一点 = **最近一次成功快照**里有窗口接近或超过上限;它由 `GET /tokbook/quota` 推出
-  （内存里有 `ok` 卡就用它,否则读磁盘快照）,打开浮窗与后台轮询都**不打** provider API。
+- 侧栏面板行图标上那一点 = **最近一次成功快照**里有窗口接近或超过上限;它由 `GET /tokbook/quota` 推出
+  （内存里有 `ok` 卡就用它,否则读磁盘快照）,打开账本页与后台轮询都**不打** provider API。
 
 ## 状态
 
@@ -284,27 +285,25 @@ src/
   route-paths.ts      host 与 browser 共用的 HTTP 路径 / query 键词表(两半区唯一的真源)
   routes.ts           host 精确 Fetch 路由(handler / method 的真源)
   client/
-    index.ts          client: apply(ctx),注册三个 slot(footer 按钮 / 浮窗 / 会话词元页)
+    index.ts          client: apply(ctx),注册三个 slot(主栏账本页 / 侧栏面板行 / 会话词元页)
     contract.ts       最小 client 契约:插件被授予的 ctx/slots 面
-    store.ts          按钮 ↔ 浮窗共享视图 store
+    store.ts          面板行图标 ↔ 账本页共享视图 store
     ledger-clock.ts   全插件共享的「账本又落行了」探针(3 s 一次、只读内存),驱动各页跟着会话更新
     format.ts         纯展示 helper(日键、token/金额/时间格式化)
     icons.tsx         内联 SVG 图标(承 currentColor,跟随当前墨色)
     styles.ts         注入样式表入口(按 styles/*.ts 的顺序拼接——级联是契约)
     styles/           CSS 分片,按拼接顺序列出(重排即改级联):
       tokens.ts       全插件唯一的取值登记处(宿主变量 + 兜底 + 自有常量)
-      footer.ts       侧边栏入口按钮
-      overlay.ts      浮窗外壳(遮罩 / 卡片 / tab 条)
+      page.ts         账本页外壳(页头 / tab 条 / 滚动主体 / 页脚)与侧栏面板行图标
       ledger.ts       用量总览
       method.ts       统计口径
       provider.ts     用量明细
       session.ts      会话词元页(自有滚动区 / 阅读列宽与手柄 / 抬头 / 两格图 / 步骤三段带 / 三段尺与纹路)
       quota.ts        订阅额度
       pricing.ts      价格表(选择带 / 四档价 / 峰谷时段 / 年历 / 汇率)
-      shared.ts       跨面共用原语(面板材质 / 只读文本 / 选中态)
-      device.ts       设备皮(独立查看器的仪器外壳;只在 data-dtpl-device 下生效)
-    FooterButton.tsx  sidebar.footer.action 触发器(额度告急时多一个点)
-    LedgerOverlay.tsx shell.overlay 浮窗外壳(四 tab + 焦点/快捷键)
+      shared.ts       跨面共用原语(面板材质 / 只读文本 / 选中态 / 窄屏与动效分支)
+    TokBookPanelIcon.tsx sidebar.panellist 面板行图标(额度告急时多一个点)
+    TokBookPanel.tsx  main 账本页(四 tab + 取数 / 跟账本刷新)
     LedgerView.tsx    用量总览 tab
     ProviderPanel.tsx 用量明细 tab 外壳(窗口 + 三种切法)
     Breakdowns.tsx    用量明细的两种行清单:按模型 / 按工作区
@@ -330,7 +329,7 @@ src/
       QuotaPanel.tsx  订阅额度 tab 外壳:取数 + 刷新策略 + 卡片排序
 scripts/
   build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS),并校验 bundle 接线契约
-  preview-overlay.ts       浮窗预览台(fixture 数据)与独立查看器(--ledger,读真账本)
+  preview-overlay.ts       账本页预览台(fixture 数据)与独立查看器(--ledger,读真账本)
   smoke.ts                 纯逻辑冒烟:投影 / 聚合 / 取价(时段 / 年历 / 币种)/ 草稿与写路径 / 路由·工作区 / 额度(一条不变量一个断言)
   selfcheck-rebuild.ts     账本不变量:折叠无损重建 / refile / 跨实例去重 / 价格签名 / 重启基线 / 派生态自证 / seeded 会话同步
   selfcheck-ui.ts          界面禁令静态检查:死类双向 / 色值 / 虚线 / 圆角 / 宿主变量白名单 / 动效·焦点·窄屏分支 / ARIA 引用
@@ -367,9 +366,8 @@ pnpm ledger                                                 # 默认账本目录
 node --experimental-strip-types scripts/preview-overlay.ts --ledger D:/data/tokbook     # 或指定别的目录
 ```
 
-页面壳自己供一套 DSH 的 `--dsw-alias-*` 色板(按宿主真实取值,浅 / 深两套),浮窗还额外穿一层
-**设备皮**(`styles/device.ts` + `tokens.ts` 里那两段 `[data-dtpl-device]`,只在根元素带 `data-dtpl-device="light|dark"`
-时生效)——所以不装宿主也能按真实皮肤看。
+页面壳自己供一套 DSH 的 `--dsw-alias-*` 色板(按宿主真实取值,浅 / 深两套),账本页铺满整个视口
+——所以不装宿主也能按真实皮肤看。
 
 不带 `--ledger` 时同一个脚本退化成 **fixture 预览台**,用来看 UI 的各个状态与空态:
 `?dark=1` / `?tab=` / `?quota=<模式>` 换皮肤、tab 与额度场景,`?view=tokens` 显形**词元页**

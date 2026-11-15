@@ -1,6 +1,5 @@
 import type { TokBookOverview } from '../types.ts';
 export interface TokBookViewSnapshot {
-    readonly open: boolean;
     readonly overview: TokBookOverview | null;
     readonly error: string | null;
     readonly pricingDirty: boolean;
@@ -9,7 +8,6 @@ export interface TokBookViewSnapshot {
 export interface TokBookViewStore {
     subscribe(listener: () => void): () => void;
     getSnapshot(): TokBookViewSnapshot;
-    setOpen(open: boolean): void;
     setOverview(overview: TokBookOverview | null): void;
     setError(error: string | null): void;
     setPricingDirty(dirty: boolean): void;
