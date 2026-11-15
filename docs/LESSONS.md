@@ -525,7 +525,7 @@ CSS 动画由**元素的挂载**触发；React 重渲染不重挂 DOM，动画�
 
 ### 正确做法
 
-- **视图偏好**（看哪个窗口、自动刷新多久、价格表选中哪一行、词元页列宽）进 `localStorage`：它们是每台
+- **视图偏好**（看哪个窗口、自动刷新多久、价格表选中哪一行）进 `localStorage`：它们是每台
   浏览器自己的选择，不是账本数据，也活不过卸载。读回时只认合法值，坏值一律回落默认——别让一个记不住的
   旧值决定控件显示什么。
 - **上一份干净视图**进模块级缓存（`lastView` / `lastViews`），只为"先画出来"，挂载后那次读照常覆盖它。
@@ -633,8 +633,8 @@ sheet 尤其糟：它整块贴底，关闭钮是**唯一**的显式退出（Esca
 - **装行的容器要常驻**：`.dtpl-tok-steps` 这个 0fr 网格元素即使空着也留在 DOM 里，展开时新挂的行才有
   上一帧的 `0fr` 可过渡；把容器也一起卸载掉，高度过渡就没了（新插进 DOM 的元素不参与过渡）。
 - 量法：真载荷喂 `scripts/preview-overlay.ts`（临时把 `SESSIONS` 指到抓下来的那份 JSON），无头
-  `playwright-cli` 里挂 `PerformanceObserver('longtask')`，再数 `[data-slot="conversation.view"] *`
-  的节点数——比盯着屏猜「卡不卡」准。
+  `playwright-cli` 里挂 `PerformanceObserver('longtask')`，再数 `[data-slot="sidebar.right.pane.tab"] *`
+  （第六期之前是 `[data-slot="conversation.view"] *`）的节点数——比盯着屏猜「卡不卡」准。
 
 ---
 

@@ -1042,32 +1042,41 @@ const server = createServer((req, res) => {
   #root > [data-slot="main"]{flex:1 1 0;min-height:0;display:flex;flex-direction:column;}
   #root > [data-slot="main"] > *{flex:1 1 0;min-height:0;}
 
-  .dsh-view-host{position:fixed;inset:0;display:flex;flex-direction:column;z-index:2;}
-  .dsh-view-host[hidden]{display:none;}
-  .dsh-view-ring{
-    display:flex;gap:2px;align-items:center;
+  .dsh-session-host{position:fixed;inset:0;display:flex;flex-direction:column;z-index:2;background:var(--dsw-alias-bg-base,#fff);}
+  .dsh-session-host[hidden]{display:none;}
+  .dsh-session-head{
+    display:flex;align-items:center;gap:12px;flex:none;
     padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));
-    background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-secondary,#61666b);
-    font-size:13px;
+    color:var(--dsw-alias-label-secondary,#61666b);font-size:13px;
   }
-  body.dark .dsh-view-ring{background:var(--dsw-alias-bg-base,#151517);}
-  .dsh-view-tab{
-    appearance:none;border:0;background:transparent;cursor:pointer;
-    padding:6px 12px;font:inherit;color:inherit;
+  .dsh-session-head b{color:var(--dsw-alias-label-primary,#0f1115);font-weight:600;}
+  .dsh-session-utils{margin-left:auto;display:flex;align-items:center;gap:6px;height:24px;}
+  .dsh-session-body{flex:1 1 0;min-height:0;display:flex;}
+  .dsh-session-main{
+    flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;
+    color:var(--dsw-alias-label-dimmed,#b4b8bc);font-size:13px;
   }
-  .dsh-view-tab[data-active="true"]{color:var(--dsw-alias-label-primary,#0f1115);font-weight:600;box-shadow:inset 0 -2px 0 currentColor;}
-  .dsh-view-body{position:relative;flex:1 1 0;min-height:0;--dsh-chat-content-width:920px;--dsh-composer-height:152px;}
-
-  .dsh-view-area{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;}
-  .dsh-view-area > [data-slot="conversation.view"]{flex:1 1 0;min-height:0;display:flex;flex-direction:column;}
-  .dsh-composer{
-    position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
-    width:min(var(--dsh-chat-content-width),calc(100% - 48px));
-    padding:14px 16px;box-sizing:border-box;
-    background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-tertiary,#81858c);
-    border:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));font-size:13px;
+  .dsh-rightbar{
+    flex:none;width:var(--pane-w,640px);max-width:70%;
+    display:flex;flex-direction:column;min-height:0;
+    border-left:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));
   }
-  body.dark .dsh-composer{background:var(--dsw-alias-bg-layer-1,#1c1d20);}
+  .dsh-rightbar[hidden]{display:none;}
+  .dsh-rightbar-strip{
+    display:flex;align-items:center;gap:6px;flex:none;
+    padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));
+    font-size:12px;color:var(--dsw-alias-label-secondary,#61666b);
+  }
+  .dsh-rightbar-chip{
+    padding:2px 8px;color:var(--dsw-alias-label-primary,#0f1115);
+    box-shadow:inset 0 -2px 0 currentColor;
+  }
+  .dsh-rightbar-close{
+    margin-left:auto;appearance:none;border:0;background:transparent;cursor:pointer;
+    padding:2px 6px;font:inherit;color:inherit;
+  }
+  .dsh-rightbar-body{flex:1 1 0;min-height:0;display:flex;flex-direction:column;overflow:hidden;}
+  .dsh-rightbar-body > [data-slot="sidebar.right.pane.tab"]{flex:1 1 0;min-height:0;display:flex;flex-direction:column;}
 
   :root{
     --dsw-alias-bg-base:#ffffff;
@@ -1155,52 +1164,73 @@ const server = createServer((req, res) => {
 <body class="${url.searchParams.has('dark') ? 'dark' : ''}">
   <div id="root"></div>
 
-  <div class="dsh-view-host" id="view-host" hidden>
-    <div class="dsh-view-ring">
-      <button type="button" class="dsh-view-tab">对话</button>
-      <button type="button" class="dsh-view-tab">轨迹</button>
-      <button type="button" class="dsh-view-tab" data-active="true">词元</button>
+  <div class="dsh-session-host" id="session-host" hidden>
+    <div class="dsh-session-head">
+      <b>预览会话</b>
+      <span>会话头部右侧的 utilities 槽位 · ?pane=宽（默认 640）</span>
+      <div class="dsh-session-utils" id="header-utils"></div>
     </div>
-    <div class="dsh-view-body">
-      <div class="dsh-view-area" data-conversation-composer-overlay=""></div>
-      <div class="dsh-composer">按 Enter 发送 · Shift+Enter 换行</div>
+    <div class="dsh-session-body">
+      <div class="dsh-session-main">对话正文（预览里不画）</div>
+      <div class="dsh-rightbar" id="rightbar" hidden>
+        <div class="dsh-rightbar-strip">
+          <span class="dsh-rightbar-chip">词元</span>
+          <button type="button" class="dsh-rightbar-close" id="rightbar-close">关闭侧栏</button>
+        </div>
+        <div class="dsh-rightbar-body" id="rightbar-body"></div>
+      </div>
     </div>
   </div>
   <script type="module">
     const params = new URLSearchParams(location.search);
     const mounted = window.__MOUNTED__;
+    const root = document.getElementById('root');
+    const sessionHost = document.getElementById('session-host');
+    const rightbar = document.getElementById('rightbar');
+    const rightbarBody = document.getElementById('rightbar-body');
+    const headerUtils = document.getElementById('header-utils');
+    const SESSION = 'preview-session-1';
+    const requestedPane = Number(params.get('pane') ?? 640);
+    const paneWidth = Number.isFinite(requestedPane) && requestedPane > 0 ? requestedPane : 640;
+    rightbar.style.setProperty('--pane-w', paneWidth + 'px');
+
     const ctx = {
       slots: {
         inject(name, callback) { callback(); return () => {}; },
         register(options, component) { mounted.push({ options, component }); return () => {}; },
       },
-
+      sidebarRightTabs: { register() { return () => {}; } },
+      sidebarRight: { openTab() { rightbar.hidden = false; } },
       effect(execute) { const dispose = execute(); return typeof dispose === 'function' ? dispose : () => {}; },
     };
     window.__PLUGIN_EXPORTS__.apply(ctx);
 
-    const root = document.getElementById('root');
-    const viewHost = document.getElementById('view-host');
+    const createRoot = window.__DSH_REQUIRE_CACHE__['react-dom/client'].createRoot;
+    const createElement = window.__DSH_REQUIRE_CACHE__['react'].createElement;
 
-    const viewArea = viewHost === null ? null : viewHost.querySelector('.dsh-view-area');
     for (const { options, component } of mounted) {
       if (options.name === 'sidebar.panellist') continue;
-      const isView = options.name === 'conversation.view';
-
-      const ownerShare = isView ? 'preview-session-1' : {};
-      const share = { ...(typeof ownerShare === 'string' ? {} : ownerShare), ...(options.inject ? options.inject(ownerShare) : {}) };
-      const host = document.createElement('div');
-      host.dataset.slot = options.name;
-      (isView && viewArea !== null ? viewArea : root).appendChild(host);
-      window.__DSH_REQUIRE_CACHE__['react-dom/client'].createRoot(host)
-        .render(window.__DSH_REQUIRE_CACHE__['react'].createElement(component, share));
+      let host = root;
+      let share = options.inject ? options.inject() : {};
+      if (options.name === 'conversation.session.header.utilities') {
+        host = headerUtils;
+        share = options.inject ? options.inject(SESSION) : {};
+      } else if (options.name === 'sidebar.right.pane.tab') {
+        host = rightbarBody;
+        share = { sessionId: SESSION, useProjection: () => undefined };
+      }
+      const slot = document.createElement('div');
+      slot.dataset.slot = options.name;
+      host.appendChild(slot);
+      createRoot(slot).render(createElement(component, share));
     }
 
     const tabFlag = params.has('tab') ? params.get('tab') : (params.has('quota') ? 'quota' : null);
 
     if (params.get('view') === 'tokens') {
-      viewHost.hidden = false;
+      sessionHost.hidden = false;
       root.style.display = 'none';
+      rightbar.hidden = false;
     } else if (window.__PREVIEW_NO_AUTO !== true && tabFlag !== null) {
       let tries = 0;
       setTimeout(function pick() {
@@ -1209,6 +1239,7 @@ const server = createServer((req, res) => {
         if (++tries < 25) setTimeout(pick, 100);
       }, 100);
     }
+    document.getElementById('rightbar-close').addEventListener('click', () => { rightbar.hidden = true; });
   </script>
 </body>
 </html>`)
@@ -1221,7 +1252,7 @@ server.listen(port, '127.0.0.1', () => {
     return
   }
   console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|quota|pricing|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
-  console.log(`  词元页：http://127.0.0.1:${port}/?view=tokens（宿主式对话正文容器；形状 TOKBOOK_SESSION_SCENARIO=${SESSION_SCENARIO}）`)
+  console.log(`  词元页：http://127.0.0.1:${port}/?view=tokens（模拟会话头部 + 右侧侧栏；?pane=360|640|900 换侧栏宽；形状 TOKBOOK_SESSION_SCENARIO=${SESSION_SCENARIO}）`)
   console.log(`  整台的形状由 **环境变量** 选（一个进程 = 一种形状）：TOKBOOK_MODE=empty|err|sync|syncerr（当前：${MODE === '' ? '有数据' : MODE}）。`)
   console.log(`  lib/client.js 按请求读盘：pnpm build 之后刷新页面即可，不用重启本进程。`)
 })

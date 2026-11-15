@@ -6,12 +6,19 @@ import { injectStyles } from './styles.ts'
 import { TokBookPanel } from './TokBookPanel.tsx'
 import { TokBookPanelIcon } from './TokBookPanelIcon.tsx'
 import { SessionTokens } from './SessionTokens.tsx'
+import { SessionTokensEntry } from './SessionTokensEntry.tsx'
 
-export const inject = ['slots']
+export const inject = ['slots', 'sidebarRightTabs', 'sidebarRight']
 
 const PANEL_ID = 'tokbook'
 
 const PANEL_ENTRY_ORDER = 30
+
+const TOKENS_TAB_ID = 'dsh-tokbook/tokens'
+
+const TOKENS_TAB_KIND = 'tokbook-tokens'
+
+const TOKENS_ENTRY_ORDER = -4
 
 const QUOTA_ALERT_POLL_MS = 5 * 60_000
 
@@ -43,14 +50,25 @@ export function apply(ctx: TokBookContext): void {
       inject: () => ({ view }),
     }, TokBookPanelIcon))
 
-  ctx.slots.inject('conversation.view', () =>
+  ctx.effect(() => ctx.sidebarRightTabs.register({
+    id: TOKENS_TAB_ID,
+    kind: TOKENS_TAB_KIND,
+    title: () => '词元',
+  }))
+
+  ctx.slots.inject('sidebar.right.pane.tab', () =>
     ctx.slots.register({
-      name: 'conversation.view',
-      id: 'dsh-tokbook-tokens',
-      order: 20,
-      label: '词元',
-      inject: (sessionId) => ({ sessionId }),
+      name: 'sidebar.right.pane.tab',
+      key: TOKENS_TAB_ID,
     }, SessionTokens))
+
+  ctx.slots.inject('conversation.session.header.utilities', () =>
+    ctx.slots.register({
+      name: 'conversation.session.header.utilities',
+      id: 'tokbook-tokens',
+      order: TOKENS_ENTRY_ORDER,
+      inject: () => ({ openTokens: () => { ctx.sidebarRight.openTab(TOKENS_TAB_KIND) } }),
+    }, SessionTokensEntry))
 
   void refreshQuotaAlert(view)
   const poll = setInterval(() => { void refreshQuotaAlert(view) }, QUOTA_ALERT_POLL_MS)

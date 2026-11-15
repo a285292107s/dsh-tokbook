@@ -28,6 +28,10 @@
 > - **第五期（2026-11-15）= 入口与形态**：侧栏 footer 按钮 + `shell.overlay` 浮窗退役，换成侧栏
 >   面板列表的一行（`sidebar.panellist`）+ 主栏账本页（`main`）。理由见 §6.2；本文其余地方写
 >   「浮窗 / footer 按钮 / 弹窗」的按第五期理解成「账本页 / 面板行」，旧文字按 git 历史追溯。
+> - **第六期（2026-11-15）= 词元页搬进右侧侧栏**：`conversation.view` 里的「词元」页退役，换成
+>   会话头部的一个「词元」按钮（`conversation.session.header.utilities`）+ 右侧侧栏里的一个页签
+>   （`sidebarRightTabs` 注册类型，页体挂 `sidebar.right.pane.tab`）。理由：单会话读数要能**和对话
+>   并排看**，而对话视图环一次只显示一页；侧栏页签还能随手关、随手再开。
 >
 > **精确接口** → [`CONTRACTS.md`](CONTRACTS.md)；实现与操作现状 → [`../README.zh.md`](../README.zh.md)；
 > HMR → [`HMR.md`](HMR.md)。
@@ -59,7 +63,8 @@ Web UI 的侧边栏面板列表里加一行入口，选中后在主栏打开账�
   所以不吃 base 层那套 schema 校验的 JSON 后端（`storage-domain`）。（§5 有同一条的完整理由。）
 - **host→浏览器**：`ctx.webServer` 的精确 Fetch 路由——外置插件难以贡献生成式 Typert Remote。
 - **UI**：只填**已声明**的槽——侧栏面板行 + 主栏账本页（`sidebar.panellist` + `main`），
-  以及会话词元页（`conversation.view`）。外置插件不能声明新 slot（§6）。
+  会话头部按钮（`conversation.session.header.utilities`），以及右侧侧栏的词元页签
+  （`ctx.sidebarRightTabs.register` 的类型 + `sidebar.right.pane.tab` 的页体）。外置插件不能声明新 slot（§6）。
 
 ## 3. DSH 插件机制（必要背景）
 
@@ -342,7 +347,8 @@ bundle 层，以及 client 改动怎么生效（`rev` 不可变缓存、刷新 /
    不要重算」只看账本代数（`/tokbook/sync` 的 `ledger`），不接 SSE、也不盲轮询（口径见
    [`CONTRACTS.md`](CONTRACTS.md) §2）。
 3. **记账权威源**：`assistant/message` 的 `usage`；不用 `session-telemetry`（可能丢 / 重）。
-4. **UI 槽位**：只填已声明的 `sidebar.panellist` + `main`（+ 后来的 `conversation.view`），**无需改 DSH 仓库**（路线 A，见 §6.0）。
+4. **UI 槽位**：只填已声明的 `sidebar.panellist` + `main` ＋ 会话头部 utilities ＋ 右侧侧栏页签
+   （`sidebarRightTabs` + `sidebar.right.pane.tab`），**无需改 DSH 仓库**（路线 A，见 §6.0）。
 5. **不要看 `dsh-costbook`**（已废弃 / 有问题的实现），不要照抄它。
 
 ## 11. 风险与后续

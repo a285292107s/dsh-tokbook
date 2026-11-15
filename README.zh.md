@@ -12,8 +12,9 @@ DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把�
 **订阅额度**(用你的 key 向通道查账户级官方用量)、**价格表**(选一个通道 + 模型,填它的**当前价**;
 峰谷时段、汇率与节假日年历也在这里)、**统计口径**(不估算的口径、漏项与对账)。
 
-另有一格不在账本页里:插件还在**对话视图环**里加了**词元**页(`conversation.view`)——单会话全生命周期,
-按轮次与步骤摊开,见下文「[会话词元页](#会话词元页conversationview)」。
+另有一格不在账本页里:插件在**会话头部**放了一个**词元**按钮,点它在**右侧侧栏**里打开这一会话的
+**词元**页签(`sidebar.right.pane.tab`)——单会话全生命周期,按轮次与步骤摊开,
+见下文「[会话词元页](#会话词元页右侧侧栏)」。
 
 > **用量明细不是第五个 tab。** 它是**用量总览**页往下滚的第二段(`ProviderPanel`,
 > `section[aria-label="用量明细"]`)。此前这一句写「五个 tab」,是 `用量明细并入总览` 那次改动
@@ -106,10 +107,12 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
 (pid + 启动时间),**检测到存活的异进程已占用时告警**(陈旧标记静默接管)。第二个 host 请指向
 自己的 `path`(见 [配置](#配置));去重与热重载边界见 [`docs/HMR.md`](docs/HMR.md)。
 
-## 会话词元页(`conversation.view`)
+## 会话词元页(右侧侧栏)
 
-除了面板行与账本页,插件还在**对话视图环**里加了一格:**词元**(`conversation.view`,id
-`dsh-tokbook-tokens`)。它答的是账本页答不了的那个问题——**这一个会话**的词元与钱,按轮次、按步骤摊开:
+除了面板行与账本页,插件还在**会话头部**的 utilities 槽位(`conversation.session.header.utilities`)放了
+一个**词元**按钮:点它在**右侧侧栏**里打开一个「词元」页签(页签类型 id `dsh-tokbook/tokens`,
+kind `tokbook-tokens`,页面体挂在 `sidebar.right.pane.tab`)。它答的是账本页答不了的那个问题——
+**这一个会话**的词元与钱,按轮次、按步骤摊开:
 
 - **抬头**:本会话四桶合计一个大数,四桶读数在其下一行;右侧四行事实——实际支出、订阅价值、占今日消费、
   共 N 轮 / N 步。下面一条比例构成条 + 四列读数(每列带占比),再一行「计费输入 = 未缓存输入 +
@@ -133,9 +136,10 @@ host 监听持久化 `session/event` 流,把每次通道计费模型调用折成
   有 `parentSession` 却不是子代理(只认宿主 header 的 `origin`),不会被算进来。
 - **脚注**:整会话的 `用量未知 N 次 · 失败 N 次 · 价格未知 N 个 (通道, 模型)`。
 
-它**对账本与配置完全只读**(唯一的写入是浏览器本地记的阅读列宽),也**不需要活的会话**:读的是
-已经入账的行 + 该会话已落盘的日志,页面在后台时整个不发请求。**跟着会话走**:宿主的账本代数
-(每落一行 +1)由共享探针每 3 s 读一次,变了才重拉;宿主不提供它时退回 15 s 盲轮询。
+它**对账本与配置完全只读**,也**不需要活的会话**:读的是已经入账的行 + 该会话已落盘的日志,
+页面在后台时整个不发请求。**跟着会话走**:宿主的账本代数(每落一行 +1)由共享探针每 3 s 读一次,
+变了才重拉;宿主不提供它时退回 15 s 盲轮询。**版面跟着侧栏宽度走**:页根自己做容器查询,
+侧栏拖到 640px 以下换成单列紧凑版面(与原来窄屏那一套同形),拖宽回到双列。
 
 > **已知降级**:把行归属到轮次 / 步骤要靠宿主的 `sessionPersistence`。它缺席时(独立查看器就不提供)
 > 数字照旧,但非压缩行全部落进「轮次未知」那一块,而且**两格图与会话时间整块不出**。
@@ -285,8 +289,9 @@ src/
   route-paths.ts      host 与 browser 共用的 HTTP 路径 / query 键词表(两半区唯一的真源)
   routes.ts           host 精确 Fetch 路由(handler / method 的真源)
   client/
-    index.ts          client: apply(ctx),注册三个 slot(主栏账本页 / 侧栏面板行 / 会话词元页)
-    contract.ts       最小 client 契约:插件被授予的 ctx/slots 面
+    index.ts          client: apply(ctx),注册四个 slot(主栏账本页 / 侧栏面板行 / 词元页签页体 /
+                      会话头部「词元」按钮)+ 侧栏页签类型
+    contract.ts       最小 client 契约:插件被授予的 ctx/slots 面 + 右侧侧栏两个服务(页签注册 / 打开)
     store.ts          面板行图标 ↔ 账本页共享视图 store
     ledger-clock.ts   全插件共享的「账本又落行了」探针(3 s 一次、只读内存),驱动各页跟着会话更新
     format.ts         纯展示 helper(日键、token/金额/时间格式化)
@@ -298,7 +303,7 @@ src/
       ledger.ts       用量总览
       method.ts       统计口径
       provider.ts     用量明细
-      session.ts      会话词元页(自有滚动区 / 阅读列宽与手柄 / 抬头 / 两格图 / 步骤三段带 / 三段尺与纹路)
+      session.ts      会话词元页(自有滚动区 / 容器查询窄版 / 头部入口按钮 / 抬头 / 两格图 / 步骤三段带 / 三段尺与纹路)
       quota.ts        订阅额度
       pricing.ts      价格表(选择带 / 四档价 / 峰谷时段 / 年历 / 汇率)
       shared.ts       跨面共用原语(面板材质 / 只读文本 / 选中态 / 窄屏与动效分支)
@@ -308,8 +313,8 @@ src/
     ProviderPanel.tsx 用量明细 tab 外壳(窗口 + 三种切法)
     Breakdowns.tsx    用量明细的两种行清单:按模型 / 按工作区
     MethodDoc.tsx     统计口径 tab
-    SessionTokens.tsx 词元页(conversation.view)本体:单会话全生命周期;取数 + 五态 + 版面装配
-    SessionShell.tsx  词元页外壳:根 / 自有滚动区 / 阅读列宽三层盒子 + 一对列宽手柄(宽度只存这一页)
+    SessionTokens.tsx 词元页(sidebar.right.pane.tab)本体:单会话全生命周期;取数 + 四态 + 版面装配
+    SessionTokensEntry.tsx 会话头部的「词元」按钮:点一下在右侧侧栏打开这一页
     SessionTurns.tsx  词元页的公共导入面(barrel),自己只放本页独有的「词元构成」带 MixBand
     session-chart.tsx 每轮两格小图(新增词元 / 缓存读取)+ 指着一根柱子时那张轮次读数卡
     session-detail.tsx 按轮次的步骤行(默认全收起)、轮块头、用时表、轮间与轮次未知两块、三段尺图例
@@ -371,7 +376,8 @@ node --experimental-strip-types scripts/preview-overlay.ts --ledger D:/data/tokb
 
 不带 `--ledger` 时同一个脚本退化成 **fixture 预览台**,用来看 UI 的各个状态与空态:
 `?dark=1` / `?tab=` / `?quota=<模式>` 换皮肤、tab 与额度场景,`?view=tokens` 显形**词元页**
-(那一页的形状由 `TOKBOOK_SESSION_SCENARIO=rich|one|empty` 按进程选,默认 `rich`);整台的形状
+(它现在画在模拟的右侧侧栏里,`?pane=<像素>` 换侧栏宽,默认 640;那一页的形状由
+`TOKBOOK_SESSION_SCENARIO=rich|one|empty` 按进程选,默认 `rich`);整台的形状
 (四路皆空 / 四路皆 500 / 诊断带的两态)由 `TOKBOOK_MODE=empty|err|sync|syncerr` 按进程选;
 `lib/client.js` 按请求读盘,所以 `pnpm build` 之后刷新页面即可。
 

@@ -93,8 +93,10 @@ price is never overwritten.
 
 ## The session token page
 
-The conversation view ring gains a **词元 / Tokens** view (`conversation.view`) that opens one **single
-session** up by turn and by step over its whole lifetime.
+A **词元 / Tokens** button in the session header opens the page as a **right-sidebar tab** that reads one
+**single session** by turn and by step over its whole lifetime — next to the conversation, closeable
+when you are done. The layout follows the sidebar width: a two-column body while the pane is wide, a
+single-column compact body once it drops below 640px.
 
 - **Header**: the session's four-bucket total as one number, the four bucket figures in a line beneath
   it, and four facts to the right — actual spend, subscription value, share of today's spend, turns /
@@ -116,10 +118,10 @@ session** up by turn and by step over its whole lifetime.
   no block.
 - A footer sums unknown usage, failures and unpriced `(route, model)` pairs.
 
-It is **read-only** against the ledger and config — its only write is a content width in the browser — and
-needs no live session: it reads ledger rows plus the session's log on disk. A shared probe reads the
-host's ledger generation every 3 seconds and refetches only when it changed, falling back to a 15-second
-poll elsewhere; nothing is sent while the page is in the background.
+It is **read-only** against the ledger and config and needs no live session: it reads ledger rows plus
+the session's log on disk. A shared probe reads the host's ledger generation every 3 seconds and
+refetches only when it changed, falling back to a 15-second poll elsewhere; nothing is sent while the
+page is in the background.
 
 ![The session token page](docs/assets/tokens-page.png)
 
@@ -184,7 +186,7 @@ pnpm test         # smoke (pure logic) + selfcheck (ledger) + selfcheck:ui (UI s
 
 `pnpm build` is a product, not a check: run it when you want a `src/` change to show up in a host or the
 preview bench. `pnpm ledger` serves the same page against a real ledger directory, and without `--ledger`
-it becomes the fixture bench these screenshots came from (`?dark=1`, `?tab=`, `?view=tokens`, `?quota=`).
+it becomes the fixture bench these screenshots came from (`?dark=1`, `?tab=`, `?view=tokens&pane=<px>`, `?quota=`).
 
 The Chinese README ([`README.zh.md`](README.zh.md)) carries the `src/` layout tree and the development
 loop. The contracts that keep the numbers honest are in [`docs/CONTRACTS.md`](docs/CONTRACTS.md); the

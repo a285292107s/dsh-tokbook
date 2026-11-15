@@ -6,7 +6,6 @@ import { QUERY_SESSION, ROUTE_SESSION } from '../route-paths.ts'
 import { formatDateTime, formatDuration, formatMoney, formatShare, formatTokens } from './format.ts'
 import { UsageGlyph } from './icons.tsx'
 import { ledgerClockSupported, subscribeLedgerChanges } from './ledger-clock.ts'
-import { SessionShell } from './SessionShell.tsx'
 import { SubagentSection } from './session-subagents.tsx'
 import { MixBand, TurnBlocks, TurnChart, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
 import { PHASE_LABEL, TimeBar, sumSegments } from './session-timing.tsx'
@@ -32,7 +31,7 @@ function rememberView(sessionId: string, view: SessionUsageView): void {
 }
 
 export interface SessionTokensProps {
-  sessionId?: string
+  sessionId: string
   useProjection?: <T>(key: string) => T | undefined
 }
 
@@ -40,11 +39,9 @@ export function SessionTokens({ sessionId, useProjection }: SessionTokensProps) 
   const [loaded, setLoaded] = useState<{ sessionId: string; view: SessionUsageView } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
-  const usable = typeof sessionId === 'string' && sessionId !== ''
   const view = loaded !== null && loaded.sessionId === sessionId ? loaded.view : lastViewOf(sessionId)
 
   useEffect(() => {
-    if (!usable) return
     const target = sessionId
     const url = `${ROUTE_SESSION}?${QUERY_SESSION}=${encodeURIComponent(target)}`
     const controller = new AbortController()
@@ -90,39 +87,33 @@ export function SessionTokens({ sessionId, useProjection }: SessionTokensProps) 
       unsubscribe()
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [usable, sessionId, reload])
+  }, [sessionId, reload])
 
   const previews = indexPreviews(useProjection?.<readonly TurnPreview[]>('turnOutline'))
 
-  if (!usable) {
-    return (
-      <SessionShell>
-        <EmptyCard
-          title="没有拿到会话标识"
-          sub="这一页按会话读账本；宿主没有给出会话标识时，读不到任何东西。"
-        />
-      </SessionShell>
-    )
-  }
   return (
-    <SessionShell>
-      {error !== null && (
-        <div className="dtpl-tok-error" role="alert">
-          <p className="dtpl-tok-error-text">本会话词元加载失败：{error}</p>
-          <button type="button" className="dtpl-tok-retry" onClick={() => setReload((round) => round + 1)}>重试</button>
+    <div className="dtpl-tok" data-plugin="dsh-tokbook">
+      <div className="dtpl-tok-scroll">
+        <div className="dtpl-tok-col">
+          {error !== null && (
+            <div className="dtpl-tok-error" role="alert">
+              <p className="dtpl-tok-error-text">本会话词元加载失败：{error}</p>
+              <button type="button" className="dtpl-tok-retry" onClick={() => setReload((round) => round + 1)}>重试</button>
+            </div>
+          )}
+          {view === null
+            ? (error === null ? <div className="dtpl-tok-sk" aria-hidden="true" /> : null)
+            : isEmptyView(view)
+              ? (
+                <EmptyCard
+                  title="这个会话还没有入账的计费调用"
+                  sub="账本一行就是一次模型调用。先聊几句就会有记录；安装前的历史记录到侧栏的「词元账本」页里点「重新扫描」补上。"
+                />
+              )
+              : <Body view={view} previews={previews} />}
         </div>
-      )}
-      {view === null
-        ? (error === null ? <div className="dtpl-tok-sk" aria-hidden="true" /> : null)
-        : isEmptyView(view)
-          ? (
-            <EmptyCard
-              title="这个会话还没有入账的计费调用"
-              sub="账本一行就是一次模型调用。先聊几句就会有记录；安装前的历史记录到侧栏的「词元账本」页里点「重新扫描」补上。"
-            />
-          )
-          : <Body view={view} previews={previews} />}
-    </SessionShell>
+      </div>
+    </div>
   )
 }
 
