@@ -118,7 +118,7 @@ export function SessionTokens({ sessionId, useProjection }: SessionTokensProps) 
           ? (
             <EmptyCard
               title="这个会话还没有入账的计费调用"
-              sub="账本一行就是一次模型调用。先聊几句就会有记录；安装前的历史记录可以在侧栏的账本浮窗里点「重新扫描」补上。"
+              sub="账本一行就是一次模型调用。先聊几句就会有记录；安装前的历史记录到侧栏的「词元账本」页里点「重新扫描」补上。"
             />
           )
           : <Body view={view} previews={previews} />}
