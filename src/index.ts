@@ -1,6 +1,6 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  BillingMap, HolidayCalendar, HolidayRefreshResult, HolidaySyncView, PlanConfig, PricingLookupResult, PricingSyncResult, PricingSyncView, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SessionUsageView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
+  BillingMap, HolidayCalendar, HolidayRefreshResult, HolidaySyncView, PlanConfig, PricingLookupResult, PricingSyncResult, PricingSyncView, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SessionUsageView, SyncResultView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
 } from './types.ts'
 import { totalsTokens } from './types.ts'
 import { coercePlansConfig, validateConfig } from './config.ts'
@@ -12,7 +12,7 @@ import { readSyncProgress, writeSyncProgress } from './sync-state.ts'
 import {
   attachCosts, buildSummary, listDayFiles, rangeDayWindow, readCachedRecords,
   readRecordsByDayRange, snapshotBaseline, staleSessionIds, summarizeRecords, warmRecordCache,
-  type PersistenceSnapshotLike, type RateResolver,
+  type AttemptedRevision, type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import { aggregateWindow, type WorkspaceRef } from './window-usage.ts'
 import {
@@ -80,14 +80,15 @@ export class TokenUsageBook extends Service {
   private credentials: CredentialResolver | undefined
   private persistence: SyncPersistence | undefined
   private lastSyncAt = 0
+  private lastSyncResult: SyncResultView | null = null
   private lastWalkAt = 0
   private walkInFlight: Promise<void> | null = null
   private probeCache: { at: number; snapshots: readonly PersistenceSnapshotLike[] } | null = null
   private probeInFlight: Promise<readonly PersistenceSnapshotLike[]> | null = null
   private syncStatus: 'idle' | 'running' | 'done' | 'error' = 'idle'
   private syncError: string | null = null
-  private syncedBySession = new Map<string, string>()
-  private syncedOnce = false
+  private attemptedBySession = new Map<string, AttemptedRevision>()
+  private baselineKnown = false
   private readonly baselineReady: Promise<void>
   private disposed = false
   private pricingSyncInFlight: Promise<PricingSyncResult> | null = null
@@ -119,9 +120,9 @@ export class TokenUsageBook extends Service {
     this.baselineReady = readSyncProgress(this.dir)
       .then((progress) => {
         if (progress === null) return
-        this.syncedBySession = new Map(Object.entries(progress.sessions))
-        this.syncedOnce = true
-        this.logger.info?.(`[tokbook] loaded sync baseline: ${String(this.syncedBySession.size)} sessions (synced ${new Date(progress.syncedAt).toISOString()})`)
+        this.attemptedBySession = new Map(Object.entries(progress.sessions))
+        this.baselineKnown = true
+        this.logger.info?.(`[tokbook] loaded sync baseline: ${String(this.attemptedBySession.size)} sessions (synced ${new Date(progress.syncedAt).toISOString()})`)
       })
       .catch((error: unknown) => {
         this.logger.warn?.('[tokbook] cannot read sync baseline; will re-sync from scratch:', error)
@@ -153,14 +154,13 @@ export class TokenUsageBook extends Service {
     ctx.inject(['sessionPersistence'], (persistenceCtx: Context) => {
       const persistence = persistenceCtx.get('sessionPersistence') as SyncPersistence
       this.persistence = persistence
-      const failed = new Set<string>()
       this.startWalk(async () => {
         try {
-          const result = await autoSyncIfNeeded(this.syncDeps(persistence, failed), this.dir)
+          const result = await autoSyncIfNeeded(this.syncDeps(persistence), this.dir)
           if (this.disposed || result === null) return
           this.logger.info?.(`[tokbook] first-run sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions`)
           try {
-            this.setBaseline(await listPersistenceSnapshots(persistence, this.logger), failed)
+            this.setBaseline(await listPersistenceSnapshots(persistence, this.logger))
           } catch (error) {
             this.logger.warn?.('[tokbook] cannot record baseline after first-run sync:', error)
           }
@@ -241,7 +241,7 @@ export class TokenUsageBook extends Service {
         this.logger.error('[tokbook] background probe refresh failed:', error)
       })
     }
-    this.scheduleSync(cached.snapshots, staleSessionIds(this.syncedOnce, this.syncedBySession, cached.snapshots))
+    this.scheduleSync(cached.snapshots, staleSessionIds(this.baselineKnown, this.attemptedBySession, cached.snapshots))
     return Promise.resolve(cached.snapshots)
   }
 
@@ -254,7 +254,7 @@ export class TokenUsageBook extends Service {
       })
       .then((snapshots) => {
         this.probeCache = { at: Date.now(), snapshots }
-        this.scheduleSync(snapshots, staleSessionIds(this.syncedOnce, this.syncedBySession, snapshots))
+        this.scheduleSync(snapshots, staleSessionIds(this.baselineKnown, this.attemptedBySession, snapshots))
         return snapshots
       })
       .finally(() => {
@@ -270,19 +270,18 @@ export class TokenUsageBook extends Service {
       return
     }
     if (this.walkInFlight !== null) return
-    const neverSynced = stale.some((id) => !this.syncedBySession.has(id))
+    const neverSynced = stale.some((id) => !this.attemptedBySession.has(id))
     if (!neverSynced && Date.now() - this.lastWalkAt < SYNC_MIN_INTERVAL_MS) return
     this.doSync(snapshots, stale)
   }
 
-  private syncDeps(persistence: SyncPersistence, failed: Set<string>): SyncDeps {
+  private syncDeps(persistence: SyncPersistence): SyncDeps {
     return {
       persistence,
       log: this.log,
       recordCompaction: this.recordCompaction,
       logger: this.logger,
       onSessionFailure: (id, error) => {
-        failed.add(id)
         this.logger.error(`[tokbook] cannot fold session ${id}:`, error)
       },
     }
@@ -305,15 +304,21 @@ export class TokenUsageBook extends Service {
       this.syncStatus = 'running'
       this.syncError = null
       this.lastWalkAt = startedAt
-      const failed = new Set<string>()
       try {
         const result = await syncHistory(
-          this.syncDeps(persistence, failed),
+          this.syncDeps(persistence),
           { snapshots, sessionIds },
         )
         this.lastSyncAt = Date.now()
+        this.lastSyncResult = {
+          added: result.added,
+          skipped: result.skipped,
+          failedSessions: result.failedSessions,
+          sessions: sessionIds.length,
+          at: this.lastSyncAt,
+        }
         this.syncStatus = 'done'
-        this.setBaseline(snapshots, failed)
+        this.setBaseline(snapshots)
         this.logger.info?.(`[tokbook] sync: ${String(result.added)} added, ${String(result.skipped)} skipped, ${String(result.failedSessions)} failed sessions (${String(sessionIds.length)} of ${String(snapshots.length)} sessions) in ${String(Date.now() - startedAt)} ms`)
       } catch (error) {
         this.syncStatus = 'error'
@@ -323,15 +328,13 @@ export class TokenUsageBook extends Service {
     })
   }
 
-  private setBaseline(snapshots: readonly PersistenceSnapshotLike[], failed: ReadonlySet<string>): void {
-    const baseline = snapshotBaseline(snapshots)
-    for (const id of failed) baseline.delete(id)
-    this.syncedBySession = baseline
-    this.syncedOnce = true
+  private setBaseline(snapshots: readonly PersistenceSnapshotLike[]): void {
+    this.attemptedBySession = snapshotBaseline(snapshots)
+    this.baselineKnown = true
     if (this.disposed) return
     writeSyncProgress(this.dir, {
       syncedAt: Date.now(),
-      sessions: Object.fromEntries(baseline),
+      sessions: Object.fromEntries(this.attemptedBySession),
     }).catch((error: unknown) => {
       this.logger.warn?.('[tokbook] cannot persist sync baseline:', error)
     })
@@ -545,6 +548,7 @@ export class TokenUsageBook extends Service {
       status: this.syncStatus,
       error: this.syncError,
       lastSyncAt: this.lastSyncAt > 0 ? this.lastSyncAt : null,
+      lastResult: this.lastSyncResult,
       ledger: ledgerGeneration(this.dir),
     }
   }

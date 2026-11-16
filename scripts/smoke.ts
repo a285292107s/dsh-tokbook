@@ -1260,8 +1260,10 @@ if (section('持久化列表与历史回填')) {
   })
   check('list() 优先;只有旧名 listSnapshots() 时也能归一化,垃圾条目丢掉',
     bare.length === 1 && bare[0]!.header.id === 's1' && preferred.length === 2 && preferred[1]!.revision === 'r2')
-  check('没有 revision 的快照永远读不成新鲜(它没法与同步签名比对)',
+  check('没有 revision 的快照没有签名可比:没试过就算脏,试过一次(记成 null)就不再重试,后来有了 revision 立刻算脏',
     staleSessionIds(true, new Map([['s1', 'r1']]), [{ header: { id: 's1' } }]).length === 1
+    && staleSessionIds(true, new Map<string, string | null>([['s1', null]]), [{ header: { id: 's1' } }]).length === 0
+    && staleSessionIds(true, new Map<string, string | null>([['s1', null]]), [{ header: { id: 's1' }, revision: 'r1' }]).length === 1
     && staleSessionIds(true, new Map([['s1', 'r1']]), [{ header: { id: 's1' }, revision: 'r1' }, { header: { id: 's2' } }]).join(',') === 's2')
 }
 

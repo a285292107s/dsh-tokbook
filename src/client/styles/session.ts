@@ -95,10 +95,6 @@ export const CSS_SESSION = `
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero{display:flex;flex-direction:column;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-hero-k{
-  margin:0 0 8px;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
-  color:var(--dtpl-fg-2);letter-spacing:.12em;
-}
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero-row{display:flex;align-items:flex-start;gap:48px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero-lead{display:flex;flex-direction:column;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero-num{
@@ -221,77 +217,6 @@ export const CSS_SESSION = `
   overflow-wrap:anywhere;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-time-gap b{font-family:var(--dtpl-mono);font-weight:600;color:var(--dtpl-fg-2);}
-
-[data-plugin="dsh-tokbook"] .dtpl-tok-chart{position:relative;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-plot{
-  --dtpl-slot-w:48px;
-  display:flex;flex-direction:column;gap:24px;
-  min-width:min(280px,100%);
-  max-width:calc(var(--dtpl-slots,4) * 92px + 28px);
-  overflow-x:auto;
-  scrollbar-width:thin;
-  scrollbar-color:color-mix(in srgb,var(--dtpl-fg) 30%,transparent) transparent;
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-plot > *{
-  box-sizing:border-box;
-  min-width:calc(var(--dtpl-slots,4) * var(--dtpl-slot-w));
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-panel{display:flex;flex-direction:column;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-panel-k{
-  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;margin:0;
-  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-panel-v,
-[data-plugin="dsh-tokbook"] .dtpl-tok-panel-k i{
-  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);font-weight:400;
-  font-style:normal;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-swatch{
-  flex:none;width:8px;height:8px;align-self:center;
-  background-color:color-mix(in srgb,var(--dtpl-fg) 52%,transparent);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-bars{
-  display:flex;align-items:flex-end;position:relative;
-  height:76px;margin-top:22px;
-  border-bottom:1px solid var(--dtpl-border);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-slot{
-  position:relative;flex:1 1 0;min-width:0;height:100%;
-  display:flex;align-items:flex-end;
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-slot-fill{
-  display:block;width:min(52%,34px);margin:0 auto;
-  background:color-mix(in srgb,var(--dtpl-fg) 52%,transparent);
-  transform-origin:bottom;
-  transition:height var(--dtpl-dur-move) var(--dtpl-ease-move);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-slot-fill[data-peak]{background:var(--dtpl-fg);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-slot-label{
-  position:absolute;left:50%;transform:translateX(-50%);
-  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);
-  color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;white-space:nowrap;
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-slot-label[data-peak]{color:var(--dtpl-fg);font-weight:600;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-axis{display:flex;margin-top:8px;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-axis span{
-  flex:1 1 0;min-width:0;text-align:center;white-space:nowrap;
-  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-3);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-axis span[data-peak]{color:var(--dtpl-fg);font-weight:600;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-hover{
-  position:absolute;z-index:1;pointer-events:none;
-  display:flex;flex-direction:column;gap:5px;
-  box-sizing:border-box;
-  max-width:min(300px,100%);
-  padding:8px 10px;
-  border:1px solid var(--dtpl-border);
-  background:var(--dtpl-card);
-  box-shadow:var(--dtpl-metal);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-hover-basis{
-  margin:0;font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-2);
-}
-[data-plugin="dsh-tokbook"] .dtpl-tok-hover-buckets{font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);}
 
 [data-plugin="dsh-tokbook"] .dtpl-tok-legend{
   display:flex;flex-wrap:wrap;align-items:center;gap:6px 22px;
@@ -696,6 +621,5 @@ export const CSS_SESSION = `
   [data-plugin="dsh-tokbook"] .dtpl-tok-steps{transition:none;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-col > .dtpl-tok-block{animation:none;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-sk{animation:none;}
-  [data-plugin="dsh-tokbook"] .dtpl-tok-slot-fill{transition:none;}
 }
 `

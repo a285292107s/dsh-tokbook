@@ -7,7 +7,7 @@ import { formatDateTime, formatDuration, formatMoney, formatShare, formatTokens 
 import { UsageGlyph } from './icons.tsx'
 import { ledgerClockSupported, subscribeLedgerChanges } from './ledger-clock.ts'
 import { SubagentSection } from './session-subagents.tsx'
-import { MixBand, TurnBlocks, TurnChart, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
+import { MixBand, TurnBlocks, type PreviewMap, type TurnPreview } from './SessionTurns.tsx'
 import { PHASE_LABEL, TimeBar, sumSegments } from './session-timing.tsx'
 import { BUCKETS } from './session-shared.ts'
 import { num, readSessionView } from './session-wire.ts'
@@ -280,36 +280,40 @@ function Hero({ view }: { view: SessionUsageView }) {
   const todayShare = view.todaySpend > 0 ? formatShare(view.spend, view.todaySpend) : null
   const parts = BUCKETS.map((bucket) => `${bucket.label} ${formatTokens(num(view.total[bucket.key]))}`)
   return (
-    <div className="dtpl-tok-hero">
-      <p className="dtpl-tok-hero-k">本会话四桶合计</p>
-      <div className="dtpl-tok-hero-row">
-        <div className="dtpl-tok-hero-lead">
-          <span className="dtpl-tok-hero-num"><CountUp value={view.totalTokens} format={formatTokens} /></span>
-          <span className="dtpl-tok-hero-sub">{parts.join(' · ')}</span>
-        </div>
-        <div className="dtpl-tok-hero-facts">
-          <div className="dtpl-tok-hero-fact">
-            <span className="dtpl-tok-hero-fact-k">实际支出</span>
-            <span className="dtpl-tok-hero-fact-v">{formatMoney(view.spend)}</span>
-          </div>
-          <div className="dtpl-tok-hero-fact">
-            <span className="dtpl-tok-hero-fact-k">订阅价值</span>
-            <span className="dtpl-tok-hero-fact-v">{formatMoney(view.subscriptionValue)}</span>
-          </div>
-          {todayShare !== null && (
-            <div className="dtpl-tok-hero-fact">
-              <span className="dtpl-tok-hero-fact-k">占今日消费</span>
-              <span className="dtpl-tok-hero-fact-v">{todayShare}</span>
-            </div>
-          )}
-          <div className="dtpl-tok-hero-fact">
-            <span className="dtpl-tok-hero-fact-k">共</span>
-            <span className="dtpl-tok-hero-fact-v">{view.turns.length} 轮 / {countSteps(view)} 步</span>
-          </div>
-        </div>
+    <section className="dtpl-tok-sec" aria-label="本会话四桶合计">
+      <div className="dtpl-tok-sec-h">
+        <h2 className="dtpl-tok-sec-k">本会话四桶合计</h2>
       </div>
-      <MixBand totals={view.total} totalTokens={view.totalTokens} />
-    </div>
+      <div className="dtpl-tok-hero">
+        <div className="dtpl-tok-hero-row">
+          <div className="dtpl-tok-hero-lead">
+            <span className="dtpl-tok-hero-num"><CountUp value={view.totalTokens} format={formatTokens} /></span>
+            <span className="dtpl-tok-hero-sub">{parts.join(' · ')}</span>
+          </div>
+          <div className="dtpl-tok-hero-facts">
+            <div className="dtpl-tok-hero-fact">
+              <span className="dtpl-tok-hero-fact-k">实际支出</span>
+              <span className="dtpl-tok-hero-fact-v">{formatMoney(view.spend)}</span>
+            </div>
+            <div className="dtpl-tok-hero-fact">
+              <span className="dtpl-tok-hero-fact-k">订阅价值</span>
+              <span className="dtpl-tok-hero-fact-v">{formatMoney(view.subscriptionValue)}</span>
+            </div>
+            {todayShare !== null && (
+              <div className="dtpl-tok-hero-fact">
+                <span className="dtpl-tok-hero-fact-k">占今日消费</span>
+                <span className="dtpl-tok-hero-fact-v">{todayShare}</span>
+              </div>
+            )}
+            <div className="dtpl-tok-hero-fact">
+              <span className="dtpl-tok-hero-fact-k">共</span>
+              <span className="dtpl-tok-hero-fact-v">{view.turns.length} 轮 / {countSteps(view)} 步</span>
+            </div>
+          </div>
+        </div>
+        <MixBand totals={view.total} totalTokens={view.totalTokens} />
+      </div>
+    </section>
   )
 }
 
@@ -320,8 +324,7 @@ function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap
       {view.workMs !== undefined && view.spanMs !== undefined && (
         <Block i={1}><SessionTiming view={view} /></Block>
       )}
-      <Block i={2}><TurnChart turns={view.turns} previews={previews} /></Block>
-      <Block i={3}>
+      <Block i={2}>
         <TurnBlocks
           turns={view.turns}
           betweenTurns={view.betweenTurns}
@@ -331,11 +334,11 @@ function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap
         />
       </Block>
       {view.subagents !== undefined && (
-        <Block i={4}>
+        <Block i={3}>
           <SubagentSection view={view.subagents} sessionTokens={view.totalTokens} />
         </Block>
       )}
-      <Block i={5}><Foot total={view.total} unpriced={view.unpriced} timing={hasTiming(view)} /></Block>
+      <Block i={4}><Foot total={view.total} unpriced={view.unpriced} timing={hasTiming(view)} /></Block>
     </>
   )
 }

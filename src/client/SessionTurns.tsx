@@ -1,6 +1,5 @@
 export { type PreviewMap, type TurnPreview } from './session-shared.ts'
 export { TimeBar } from './session-timing.tsx'
-export { TurnChart } from './session-chart.tsx'
 export { TurnBlocks } from './session-detail.tsx'
 
 import { formatRatio, formatShare, formatTokens } from './format.ts'

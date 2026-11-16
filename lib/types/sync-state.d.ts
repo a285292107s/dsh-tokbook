@@ -2,7 +2,7 @@ export declare function isInitialized(dir: string): Promise<boolean>;
 export declare function markInitialized(dir: string): Promise<void>;
 export interface SyncProgressFile {
     syncedAt: number;
-    sessions: Record<string, string>;
+    sessions: Record<string, string | null>;
 }
 export declare function readSyncProgress(dir: string): Promise<SyncProgressFile | null>;
 export declare function writeSyncProgress(dir: string, progress: SyncProgressFile): Promise<void>;

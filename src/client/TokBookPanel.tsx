@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { SyncStatusView, TokBookOverview, UsageDayRow } from '../types.ts'
+import type { SyncResultView, SyncStatusView, TokBookOverview, UsageDayRow } from '../types.ts'
 import { ROUTE_OVERVIEW, ROUTE_RESCAN, ROUTE_SYNC } from '../route-paths.ts'
 import type { TokBookViewStore } from './store.ts'
 import { PricingPanel } from './pricing/PricingPanel.tsx'
@@ -8,8 +8,9 @@ import { QuotaPanel } from './quota/QuotaPanel.tsx'
 import { LedgerSkeleton, LedgerView } from './LedgerView.tsx'
 import { ProviderPanel } from './ProviderPanel.tsx'
 import { MethodDoc } from './MethodDoc.tsx'
-import { RefreshGlyph, UsageGlyph } from './icons.tsx'
-import { formatDateTime } from './format.ts'
+import { UsageGlyph } from './icons.tsx'
+import { RescanButton } from './RescanButton.tsx'
+import { formatDateTime, formatRelative } from './format.ts'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
 
 export interface TokBookPanelProps {
@@ -17,7 +18,6 @@ export interface TokBookPanelProps {
 }
 
 const SYNC_FOLLOW_INTERVAL_MS = 500
-const SYNC_FOLLOW_ATTEMPTS = 60
 
 const OVERVIEW_REFRESH_MIN_GAP_MS = 2_000
 
@@ -51,19 +51,23 @@ type TokBookTab = 'ledger' | 'quota' | 'pricing' | 'method'
 
 const TAB_IDS: ReadonlyArray<TokBookTab> = ['ledger', 'quota', 'pricing', 'method']
 
+function describeScanResult(result: SyncResultView): string {
+  const added = result.added === 0 ? '扫描没有新记录' : `扫描补上 ${result.added} 条记录`
+  return result.failedSessions === 0 ? added : `${added}，${result.failedSessions} 个会话读取失败`
+}
+
 export function TokBookPanel({ view }: TokBookPanelProps) {
   const { overview, error, pricingDirty } = useSyncExternalStore(view.subscribe, view.getSnapshot)
-  const [scanning, setScanning] = useState(false)
-  const followRef = useRef<AbortController | null>(null)
-
+  const [sync, setSync] = useState<SyncStatusView | null>(null)
+  const [scanResult, setScanResult] = useState<SyncResultView | null>(null)
+  const [scanNotice, setScanNotice] = useState<string | null>(null)
   const lastOverviewAt = useRef(0)
+  const visibleTab = useRef<TokBookTab>('ledger')
+  const followRun = useRef(0)
+  const busy = sync?.status === 'running'
+  const busyRef = useRef(busy)
 
-  const beginFollow = useCallback((): AbortController => {
-    followRef.current?.abort()
-    const controller = new AbortController()
-    followRef.current = controller
-    return controller
-  }, [])
+  useEffect(() => { busyRef.current = busy }, [busy])
 
   const fetchOverview = useCallback((signal?: AbortSignal): Promise<void> => {
     return fetch(ROUTE_OVERVIEW, { signal })
@@ -78,88 +82,117 @@ export function TokBookPanel({ view }: TokBookPanelProps) {
       .catch((err: unknown) => { if (signal?.aborted !== true) view.setError(err instanceof Error ? err.message : String(err)) })
   }, [view])
 
-  const fetchSyncState = useCallback((signal?: AbortSignal): Promise<SyncStatusView | null> => {
+  const probeSync = useCallback((signal?: AbortSignal): Promise<SyncStatusView | null> => {
     return fetch(ROUTE_SYNC, { signal })
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<SyncStatusView> })
-      .then((state) => (signal?.aborted === true ? null : state))
       .catch(() => null)
+      .then((state) => {
+        if (state === null || signal?.aborted === true) return null
+        setSync(state)
+        return state
+      })
   }, [])
 
-  const followSync = useCallback(async (signal?: AbortSignal): Promise<void> => {
-    for (let attempt = 0; attempt < SYNC_FOLLOW_ATTEMPTS; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, SYNC_FOLLOW_INTERVAL_MS))
-      if (signal?.aborted === true) return
-      const state = await fetchSyncState(signal)
-      if (state !== null && state.status === 'running') continue
-      await fetchOverview(signal)
-      if (view.getSnapshot().overview?.syncStatus !== 'running') return
-    }
+  const refresh = useCallback(async (signal?: AbortSignal): Promise<SyncStatusView | null> => {
     await fetchOverview(signal)
-  }, [fetchOverview, fetchSyncState, view])
+    if (signal?.aborted === true) return null
+    return probeSync(signal)
+  }, [fetchOverview, probeSync])
 
   useEffect(() => {
-    const controller = beginFollow()
-    void fetchOverview(controller.signal).then(() => {
-      if (view.getSnapshot().overview?.syncStatus === 'running') return followSync(controller.signal)
-    })
+    const controller = new AbortController()
+    void refresh(controller.signal)
     return () => { controller.abort() }
-  }, [beginFollow, fetchOverview, followSync, view])
+  }, [refresh])
 
-  const visibleTab = useRef<TokBookTab>('ledger')
+  useEffect(() => {
+    if (!busy) return
+    const run = followRun.current + 1
+    followRun.current = run
+    const stopped = (): boolean => followRun.current !== run
+    setScanResult(null)
+    setScanNotice(null)
+    void (async () => {
+      while (!stopped()) {
+        await new Promise((resolve) => setTimeout(resolve, SYNC_FOLLOW_INTERVAL_MS))
+        if (stopped()) return
+        const state = await probeSync()
+        if (state === null) continue
+        if (state.status === 'running') continue
+        setScanResult(state.lastResult ?? null)
+        const next = await refresh()
+        if (next?.status === 'running') continue
+        return
+      }
+    })()
+    return () => { if (followRun.current === run) followRun.current += 1 }
+  }, [busy, probeSync, refresh])
+
   useEffect(() => {
     const unsubscribe = subscribeLedgerChanges(() => {
       if (visibleTab.current !== 'ledger') return
-      if (view.getSnapshot().overview?.syncStatus === 'running') return
+      if (busyRef.current) return
       if (Date.now() - lastOverviewAt.current < OVERVIEW_REFRESH_MIN_GAP_MS) return
-      void fetchOverview()
+      void refresh()
     })
     return unsubscribe
-  }, [fetchOverview, view])
+  }, [refresh])
 
   const onVisibleTab = useCallback((next: TokBookTab) => {
     const previous = visibleTab.current
     visibleTab.current = next
     if (next !== 'ledger' || previous === 'ledger') return
-    if (view.getSnapshot().overview?.syncStatus === 'running') return
+    if (busyRef.current) return
     if (Date.now() - lastOverviewAt.current < OVERVIEW_REFRESH_MIN_GAP_MS) return
-    void fetchOverview()
-  }, [fetchOverview, view])
+    void refresh()
+  }, [refresh])
 
   const onRescan = useCallback(async () => {
-    const controller = beginFollow()
-    setScanning(true)
+    setScanNotice(null)
+    setScanResult(null)
     try {
-      await fetch(ROUTE_RESCAN, { method: 'POST', signal: controller.signal })
-        .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
-      await followSync(controller.signal)
+      const started = await fetch(ROUTE_RESCAN, { method: 'POST' })
+        .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() as Promise<{ status?: string }> })
+        .then((body) => body.status !== 'skipped')
+      const state = await probeSync()
+      if (state?.status === 'running') return
+      if (!started) setScanNotice('扫描没有启动，请稍后再试')
+      setScanResult(state?.lastResult ?? null)
+      await refresh()
     } catch (err) {
-      if (!controller.signal.aborted) view.setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (followRef.current === controller) setScanning(false)
+      view.setError(err instanceof Error ? err.message : String(err))
     }
-  }, [beginFollow, followSync, view])
+  }, [probeSync, refresh, view])
+
+  const syncFailure = sync?.status === 'error' ? sync.error ?? '原因不明' : null
 
   return (
     <div className="dtpl-page" data-plugin="dsh-tokbook">
       <TokBookPage
         overview={overview}
         error={error}
-        scanning={scanning}
+        busy={busy}
+        syncFailure={syncFailure}
+        scanResult={scanResult}
+        scanNotice={scanNotice}
         pricingDirty={pricingDirty}
         onDirtyChange={view.setPricingDirty}
         onRescan={onRescan}
-        onRetry={() => { view.setError(null); void fetchOverview() }}
-        onRefresh={fetchOverview}
+        onRetry={() => { view.setError(null); void refresh() }}
+        onRefresh={() => { void refresh() }}
         onVisibleTab={onVisibleTab}
       />
     </div>
   )
 }
 
-function TokBookPage({ overview, error, scanning, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onVisibleTab }: {
+function TokBookPage({ overview, error, busy, syncFailure, scanResult, scanNotice, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onVisibleTab }: {
   overview: TokBookOverview | null
   error: string | null
-  scanning: boolean
+  busy: boolean
+  syncFailure: string | null
+  scanResult: SyncResultView | null
+  scanNotice: string | null
   pricingDirty: boolean
   onDirtyChange: (dirty: boolean) => void
   onRescan: () => void
@@ -187,6 +220,24 @@ function TokBookPage({ overview, error, scanning, pricingDirty, onDirtyChange, o
     selectTab(next)
     document.getElementById(`dtpl-tab-${next}`)?.focus()
   }, [tab, selectTab])
+
+  const failedText = busy
+    ? null
+    : syncFailure !== null
+      ? `扫描失败：${syncFailure}`
+      : scanNotice
+  const footText = busy
+    ? '正在扫描记录…'
+    : failedText ?? [
+      overview !== null && overview.lastEventAt !== null ? `数据截至 ${formatRelative(overview.lastEventAt)}` : '',
+      scanResult !== null ? describeScanResult(scanResult) : '',
+    ].filter((part) => part !== '').join(' · ')
+  const footTitle = busy || failedText !== null ? '' : [
+    overview !== null && overview.lastEventAt !== null ? `最新记录 ${formatDateTime(overview.lastEventAt)}` : '',
+    scanResult !== null ? `扫描完成于 ${formatDateTime(scanResult.at)}` : '',
+  ].filter((part) => part !== '').join('；')
+  const footTone = busy ? ' dtpl-sync-running' : failedText !== null ? ' dtpl-sync-error' : ''
+  const emptyLedger = overview !== null && overview.records === 0
 
   return (
     <>
@@ -277,35 +328,19 @@ function TokBookPage({ overview, error, scanning, pricingDirty, onDirtyChange, o
                 )}
                 {overview === null
                   ? <LedgerSkeleton />
-                  : <LedgerView overview={overview} />}
+                  : <LedgerView overview={overview} busy={busy} retry={failedText !== null} onRescan={onRescan} />}
                 <ProviderPanel />
               </>
               )}
       </div>
 
-      {overview !== null && tab === 'ledger' && (
+      {overview !== null && tab === 'ledger' && (!emptyLedger || footText !== '') && (
         <footer className="dtpl-foot">
-          <span className="dtpl-foot-state">
-            {overview.syncStatus === 'running' && (
-              <span className="dtpl-sync dtpl-sync-running">
-                <i className="dtpl-sync-dot" aria-hidden="true" />
-                正在重新扫描…
-              </span>
-            )}
-            {overview.syncStatus === 'error' && (
-              <span className="dtpl-sync dtpl-sync-error">
-                <i className="dtpl-sync-dot" aria-hidden="true" />
-                上次重新扫描失败{overview.syncError !== null ? `：${overview.syncError}` : ''}
-              </span>
-            )}
-            {overview.lastEventAt !== null && (
-              <span className="dtpl-foot-latest">最新记录 {formatDateTime(overview.lastEventAt)}</span>
-            )}
+          <span className={`dtpl-sync${footTone}`} role="status" aria-live="polite">
+            {footTone === '' ? null : <i className="dtpl-sync-dot" aria-hidden="true" />}
+            <span className="dtpl-sync-text" title={footTitle === '' ? undefined : footTitle}>{footText}</span>
           </span>
-          <button type="button" className="dtpl-rescan" onClick={onRescan} disabled={scanning}>
-            <RefreshGlyph className={`dtpl-rescan-ico${scanning ? ' dtpl-spin' : ''}`} />
-            {scanning ? '扫描中…' : '重新扫描'}
-          </button>
+          {!emptyLedger && <RescanButton busy={busy} retry={failedText !== null} onRescan={onRescan} />}
         </footer>
       )}
     </>

@@ -8,9 +8,10 @@ export interface PersistenceSnapshotLike {
     };
     revision?: unknown;
 }
-export declare function snapshotBaseline(snapshots: readonly PersistenceSnapshotLike[]): Map<string, string>;
-export declare function staleSessionIds(syncedOnce: boolean, syncedBySession: ReadonlyMap<string, string>, snapshots: readonly PersistenceSnapshotLike[]): string[];
-export declare function isLedgerStale(syncedOnce: boolean, syncedBySession: ReadonlyMap<string, string>, snapshots: readonly PersistenceSnapshotLike[]): boolean;
+export type AttemptedRevision = string | null;
+export declare function snapshotBaseline(snapshots: readonly PersistenceSnapshotLike[]): Map<string, AttemptedRevision>;
+export declare function staleSessionIds(baselineKnown: boolean, attemptedBySession: ReadonlyMap<string, AttemptedRevision>, snapshots: readonly PersistenceSnapshotLike[]): string[];
+export declare function isLedgerStale(baselineKnown: boolean, attemptedBySession: ReadonlyMap<string, AttemptedRevision>, snapshots: readonly PersistenceSnapshotLike[]): boolean;
 export type RateResolver = (record: UsageRecord) => RateKey;
 export type StatsLogger = {
     error(...args: unknown[]): void;

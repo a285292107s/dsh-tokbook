@@ -225,10 +225,18 @@ export interface TokBookOverview extends Omit<CostedSummary, 'pricing' | 'rateRo
     syncError: string | null;
 }
 export type SyncStatus = 'idle' | 'running' | 'done' | 'error';
+export interface SyncResultView {
+    added: number;
+    skipped: number;
+    failedSessions: number;
+    sessions: number;
+    at: number;
+}
 export interface SyncStatusView {
     status: SyncStatus;
     error: string | null;
     lastSyncAt: number | null;
+    lastResult: SyncResultView | null;
     ledger: number;
 }
 export interface PricingSyncView {

@@ -25,7 +25,7 @@ export async function markInitialized(dir: string): Promise<void> {
 
 export interface SyncProgressFile {
   syncedAt: number
-  sessions: Record<string, string>
+  sessions: Record<string, string | null>
 }
 
 function isProgressFile(value: unknown): value is SyncProgressFile {
@@ -35,7 +35,7 @@ function isProgressFile(value: unknown): value is SyncProgressFile {
   const sessions = raw.sessions
   if (typeof sessions !== 'object' || sessions === null || Array.isArray(sessions)) return false
   return Object.entries(sessions as Record<string, unknown>).every(([id, rev]) =>
-    id !== '' && typeof rev === 'string' && rev !== '')
+    id !== '' && (rev === null || typeof rev === 'string'))
 }
 
 export async function readSyncProgress(dir: string): Promise<SyncProgressFile | null> {

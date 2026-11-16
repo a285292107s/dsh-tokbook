@@ -238,26 +238,19 @@ export const CSS_LEDGER = `
   padding:11px var(--dtpl-page-pad) 14px;
   border-top:1px solid var(--dtpl-border);
 }
-[data-plugin="dsh-tokbook"] .dtpl-foot-state{
-  display:inline-flex;align-items:baseline;gap:8px;min-width:0;
-}
 [data-plugin="dsh-tokbook"] .dtpl-sync{
-  display:inline-flex;align-items:center;gap:6px;min-width:0;
+  display:flex;align-items:flex-start;gap:6px;flex:1 1 auto;min-width:0;
   font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
+[data-plugin="dsh-tokbook"] .dtpl-sync-text{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;}
 [data-plugin="dsh-tokbook"] .dtpl-sync-dot{
   flex:none;width:6px;height:6px;border-radius:50%;corner-shape:round;
+  margin-top:calc((var(--dtpl-lh-body) - 6px) / 2);
   background:currentColor;
 }
 [data-plugin="dsh-tokbook"] .dtpl-sync-error{color:var(--dtpl-err);}
 [data-plugin="dsh-tokbook"] .dtpl-sync-running{color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot{animation:dtpl-pulse 1.2s ease-in-out infinite;}
-[data-plugin="dsh-tokbook"] .dtpl-foot-latest{
-  font-family:var(--dtpl-mono);
-  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);letter-spacing:.04em;color:var(--dtpl-fg-2);
-  font-variant-numeric:tabular-nums;white-space:nowrap;
-}
 [data-plugin="dsh-tokbook"] .dtpl-rescan{
   display:inline-flex;align-items:center;gap:6px;flex:none;
   height:30px;padding:0 12px;
@@ -268,6 +261,14 @@ export const CSS_LEDGER = `
 [data-plugin="dsh-tokbook"] .dtpl-rescan:hover:not(:disabled){
   background:color-mix(in srgb,var(--dtpl-fg) 7%,transparent);
   border-color:color-mix(in srgb,var(--dtpl-fg) 28%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-rescan-retry{
+  color:var(--dtpl-err);
+  border-color:color-mix(in srgb,var(--dtpl-err) 45%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-rescan-retry:hover:not(:disabled){
+  background:color-mix(in srgb,var(--dtpl-err) 12%,transparent);
+  border-color:color-mix(in srgb,var(--dtpl-err) 60%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-rescan:disabled{opacity:.4;cursor:not-allowed;}
 [data-plugin="dsh-tokbook"] .dtpl-rescan-ico{width:14px;height:14px;flex:none;}
@@ -315,6 +316,7 @@ export const CSS_LEDGER = `
   font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);margin:0 0 6px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-empty-sub{font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);margin:0;max-width:44ch;}
+[data-plugin="dsh-tokbook"] .dtpl-empty-act{margin-top:16px;}
 [data-plugin="dsh-tokbook"] .dtpl-empty-sub code{
   font-family:var(--dtpl-mono);font-size:.9em;
   padding:.1em .35em;

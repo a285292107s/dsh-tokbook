@@ -287,16 +287,17 @@ console.log('baseline: 重启后只走漂移 / 新增的会话')
   const snap = (id: string, revision: unknown): PersistenceSnapshotLike => ({ header: { id }, ...(revision !== undefined ? { revision } : {}) })
   const dir = await mkdtemp(join(tmpdir(), 'tokbook-baseline-'))
   try {
-    const listing = [snap('a', 'rev-1'), snap('b', 'rev-2'), snap('c', 'rev-3')]
+    const listing = [snap('a', 'rev-1'), snap('b'), snap('c', 'rev-3')]
     await writeSyncProgress(dir, { syncedAt: Date.now(), sessions: Object.fromEntries(snapshotBaseline(listing)) })
     const progress = await readSyncProgress(dir)
     const map = new Map(Object.entries(progress?.sessions ?? {}))
-    const syncedOnce = true
-    const nothing = staleSessionIds(syncedOnce, map, listing)
-    const drift = staleSessionIds(syncedOnce, map, [snap('a', 'rev-1-changed'), snap('b', 'rev-2'), snap('c', 'rev-3'), snap('d', 'rev-4')])
-    check('写下的基线读得回来;未变的会话一个都不走,漂移 / 新增的才走,只有会话被删也算干净',
-      progress !== null && nothing.length === 0 && drift.length === 2 && drift.includes('a') && drift.includes('d')
-      && staleSessionIds(syncedOnce, map, [snap('b', 'rev-2')]).length === 0)
+    const baselineKnown = true
+    const nothing = staleSessionIds(baselineKnown, map, listing)
+    const drift = staleSessionIds(baselineKnown, map, [snap('a', 'rev-1-changed'), snap('b'), snap('c', 'rev-3'), snap('d', 'rev-4')])
+    check('写下的基线读得回来(读不动的会话也按已试过的签名留档,没有签名记成 null);未变的会话一个都不走,漂移 / 新增的才走,只有会话被删也算干净',
+      progress !== null && map.get('b') === null && nothing.length === 0 && drift.length === 2 && drift.includes('a') && drift.includes('d')
+      && staleSessionIds(baselineKnown, map, [snap('b', 'rev-2')]).join(',') === 'b'
+      && staleSessionIds(baselineKnown, map, [snap('c', 'rev-3')]).length === 0)
 
     await writeFile(join(dir, 'sync-progress.json'), '{ "syncedAt": "not-a-number", "sessions": {} }', 'utf8')
     const torn = await readSyncProgress(dir)

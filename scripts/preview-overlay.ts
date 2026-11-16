@@ -142,6 +142,12 @@ const runningOverview = { ...overview, syncStatus: 'running' }
 const syncErrorText = 'EACCES: permission denied, scandir C:\\Users\\28529\\.dsh\\sessions'
 const syncErrOverview = { ...overview, syncStatus: 'error', syncError: syncErrorText }
 
+const LAST_SYNC_AT = Date.now() - 90_000
+const LAST_SYNC_RESULT = { added: 3, skipped: 214, failedSessions: 0, sessions: 12, at: LAST_SYNC_AT }
+const RESCAN_RUNNING_MS = 2_500
+let rescanUntil = 0
+const scanRunning = (): boolean => MODE === 'sync' || Date.now() < rescanUntil
+
 const PRICING_FIXTURE = {
   routes: [
     {
@@ -836,24 +842,29 @@ const server = createServer((req, res) => {
     const body = MODE === 'empty' ? emptyOverview
       : MODE === 'sync' ? runningOverview
         : MODE === 'syncerr' ? syncErrOverview
-          : overview
+          : scanRunning() ? runningOverview
+            : overview
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify(body))
     return
   }
   if (url.pathname === ROUTE_SYNC) {
+    const failed = MODE === 'syncerr'
+    const running = !failed && scanRunning()
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({
-      status: MODE === 'sync' ? 'running' : MODE === 'syncerr' ? 'error' : 'done',
-      error: MODE === 'syncerr' ? syncErrorText : null,
-      lastSyncAt: null,
-      ledger: 0,
+      status: failed ? 'error' : running ? 'running' : 'done',
+      error: failed ? syncErrorText : null,
+      lastSyncAt: failed ? null : LAST_SYNC_AT,
+      lastResult: failed || running ? null : LAST_SYNC_RESULT,
+      ledger: 7,
     }))
     return
   }
   if (url.pathname === ROUTE_RESCAN) {
+    rescanUntil = Date.now() + RESCAN_RUNNING_MS
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end('{}')
+    res.end(JSON.stringify({ status: 'running', lastSyncAt: LAST_SYNC_AT }))
     return
   }
   if (url.pathname === ROUTE_USAGE) {

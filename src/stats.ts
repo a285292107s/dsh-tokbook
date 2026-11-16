@@ -15,39 +15,35 @@ export interface PersistenceSnapshotLike {
   revision?: unknown
 }
 
-export function snapshotBaseline(snapshots: readonly PersistenceSnapshotLike[]): Map<string, string> {
-  const baseline = new Map<string, string>()
-  for (const snap of snapshots) {
-    if (snap.revision === undefined) continue
-    baseline.set(snap.header.id, String(snap.revision))
-  }
+export type AttemptedRevision = string | null
+
+function revisionOf(snap: PersistenceSnapshotLike): AttemptedRevision {
+  return snap.revision === undefined ? null : String(snap.revision)
+}
+
+export function snapshotBaseline(snapshots: readonly PersistenceSnapshotLike[]): Map<string, AttemptedRevision> {
+  const baseline = new Map<string, AttemptedRevision>()
+  for (const snap of snapshots) baseline.set(snap.header.id, revisionOf(snap))
   return baseline
 }
 
 export function staleSessionIds(
-  syncedOnce: boolean,
-  syncedBySession: ReadonlyMap<string, string>,
+  baselineKnown: boolean,
+  attemptedBySession: ReadonlyMap<string, AttemptedRevision>,
   snapshots: readonly PersistenceSnapshotLike[],
 ): string[] {
-  if (!syncedOnce) return snapshots.map(snap => snap.header.id)
-  const out: string[] = []
-  for (const snap of snapshots) {
-    const id = snap.header.id
-    if (syncedBySession.get(id) === undefined) {
-      out.push(id)
-      continue
-    }
-    if (snap.revision === undefined || syncedBySession.get(id) !== String(snap.revision)) out.push(id)
-  }
-  return out
+  if (!baselineKnown) return snapshots.map(snap => snap.header.id)
+  return snapshots
+    .filter(snap => attemptedBySession.get(snap.header.id) !== revisionOf(snap))
+    .map(snap => snap.header.id)
 }
 
 export function isLedgerStale(
-  syncedOnce: boolean,
-  syncedBySession: ReadonlyMap<string, string>,
+  baselineKnown: boolean,
+  attemptedBySession: ReadonlyMap<string, AttemptedRevision>,
   snapshots: readonly PersistenceSnapshotLike[],
 ): boolean {
-  return staleSessionIds(syncedOnce, syncedBySession, snapshots).length > 0
+  return staleSessionIds(baselineKnown, attemptedBySession, snapshots).length > 0
 }
 
 export type RateResolver = (record: UsageRecord) => RateKey

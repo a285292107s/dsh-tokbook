@@ -1,6 +1,7 @@
 import type { TokBookOverview, UsageDayRow, UsageTotals } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import { UsageGlyph } from './icons.tsx'
+import { RescanButton } from './RescanButton.tsx'
 import {
   formatMoney, formatShare, formatTokens,
   localDayKey, share, shiftDayKey, shortDay,
@@ -274,7 +275,12 @@ function BucketModule({ totals, tokens, showCacheWrite }: {
   )
 }
 
-export function LedgerView({ overview }: { overview: TokBookOverview }) {
+export function LedgerView({ overview, busy, retry, onRescan }: {
+  overview: TokBookOverview
+  busy: boolean
+  retry: boolean
+  onRescan: () => void
+}) {
   const hero = todayHero(overview)
   const today = localDayKey()
   const showCacheWrite = overview.byDay.some(row => row.totals.cacheWriteTokens > 0)
@@ -283,7 +289,10 @@ export function LedgerView({ overview }: { overview: TokBookOverview }) {
       <div className="dtpl-empty">
         <UsageGlyph className="dtpl-empty-ico" />
         <p className="dtpl-empty-title">还没有记录到词元用量</p>
-        <p className="dtpl-empty-sub">本插件记录本机每次模型调用的用量。先聊几句就会有数据；安装前的历史记录，点右下角「重新扫描」可以补上。</p>
+        <p className="dtpl-empty-sub">本插件记录本机每次模型调用的用量。先聊几句就会有数据；安装前的历史记录可以扫回来。</p>
+        <div className="dtpl-empty-act">
+          <RescanButton busy={busy} retry={retry} onRescan={onRescan} />
+        </div>
       </div>
     )
   }

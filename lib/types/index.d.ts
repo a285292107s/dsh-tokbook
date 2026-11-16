@@ -15,14 +15,15 @@ export declare class TokenUsageBook extends Service {
     private credentials;
     private persistence;
     private lastSyncAt;
+    private lastSyncResult;
     private lastWalkAt;
     private walkInFlight;
     private probeCache;
     private probeInFlight;
     private syncStatus;
     private syncError;
-    private syncedBySession;
-    private syncedOnce;
+    private attemptedBySession;
+    private baselineKnown;
     private readonly baselineReady;
     private disposed;
     private pricingSyncInFlight;

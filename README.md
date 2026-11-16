@@ -105,8 +105,6 @@ single-column compact body once it drops below 640px.
 - **Session time**: engine work against session span — wait / generation / tools as one bar, the
   equation `span = work + not computing`, the first and last record times, and the slowest step,
   slowest tool, busiest turn and tool-call count. Unmeasurable means omitted, not zero.
-- Two per-turn charts (new tokens, cache reads) share one turn axis; hovering a bar shows that turn's
-  read-out plus question and answer previews.
 - **Per-turn detail**, collapsed by default and laid out as numbered entries on one vertical line: a
   turn header carries a three-phase bar normalised to the heaviest turn plus the same numbers, and
   expanding it lists one row per billed call with identity, money, its own bar filling the row and a
@@ -126,8 +124,8 @@ page is in the background.
 ![The session token page](docs/assets/tokens-page.png)
 
 > **Known degradation:** attributing rows to turns and steps needs the host's `sessionPersistence`. Without
-> it the numbers still arrive, but every non-compaction row lands in an "unknown turn" block and the charts
-> and session-time block do not render at all. The subagent block needs it for lineage and is omitted
+> it the numbers still arrive, but every non-compaction row lands in an "unknown turn" block and the
+> session-time block does not render at all. The subagent block needs it for lineage and is omitted
 > entirely — "cannot tell whether there are children" is not "there are none". Timings are local
 > wall-clock, not billed duration.
 
