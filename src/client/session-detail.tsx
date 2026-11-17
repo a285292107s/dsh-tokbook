@@ -69,9 +69,16 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews, provid
   const labels = providerLabels ?? {}
   const [order, setOrder] = useState<TurnOrder>('oldest')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>())
-  const ordered = order === 'newest' ? [...turns].reverse() : turns
-  const turnScale = Math.max(1, ...[...turns, ...(betweenTurns === null ? [] : [betweenTurns])]
-    .map((group) => groupTotals(group).workMs ?? 0))
+  const measured = turns.map((group) => ({ group, totals: groupTotals(group) }))
+  const ordered = order === 'newest'
+    ? [...measured].reverse()
+    : order === 'slowest'
+      ? [...measured].sort((left, right) => (right.totals.workMs ?? -1) - (left.totals.workMs ?? -1)
+        || (left.group.turn ?? 0) - (right.group.turn ?? 0))
+      : measured
+  const turnScale = Math.max(1,
+    ...measured.map((entry) => entry.totals.workMs ?? 0),
+    ...(betweenTurns === null ? [] : [groupTotals(betweenTurns).workMs ?? 0]))
   const toggle = (key: string): void => {
     setExpanded((current) => {
       const next = new Set(current)
@@ -81,9 +88,9 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews, provid
     })
   }
   return (
-    <section className="dtpl-tok-sec" aria-label="轮次明细">
+    <section className="dtpl-tok-sec" aria-label="每轮用时">
       <div className="dtpl-tok-sec-h">
-        <h2 className="dtpl-tok-sec-k">轮次明细</h2>
+        <h2 className="dtpl-tok-sec-k">每轮用时</h2>
         <span className="dtpl-tok-order" role="group" aria-label="轮次排序">
           {TURN_ORDERS.map((entry) => (
             <button
@@ -112,12 +119,12 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews, provid
         <span className="dtpl-tok-legend-say">块头那条有长度、按最重一轮归一；步骤尺铺满整行</span>
       </div>
       <div className="dtpl-tok-turns">
-        {ordered.map((group) => (
+        {ordered.map(({ group, totals }) => (
           <TurnEntry
             key={turnKey(group.turn)}
             blockKey={turnKey(group.turn)}
             label={`第 ${String(group.turn)} 轮`}
-            totals={groupTotals(group)}
+            totals={totals}
             rows={group.rows}
             preview={group.turn === null ? undefined : previews.get(group.turn)}
             expanded={expanded}
@@ -157,11 +164,12 @@ export function TurnBlocks({ turns, betweenTurns, unattributed, previews, provid
   )
 }
 
-type TurnOrder = 'oldest' | 'newest'
+type TurnOrder = 'oldest' | 'newest' | 'slowest'
 
 const TURN_ORDERS: ReadonlyArray<{ id: TurnOrder; label: string }> = [
   { id: 'oldest', label: '最早在前' },
   { id: 'newest', label: '最新在前' },
+  { id: 'slowest', label: '最费时在前' },
 ]
 
 const LOOSE_KEYS = { between: 'loose:between', unattributed: 'loose:unattributed' } as const
@@ -236,10 +244,17 @@ function TurnEntry({ blockKey, label, totals, rows, preview, note, expanded, onT
         onClick={() => onToggle(blockKey)}
       >
         <span className="dtpl-tok-turn-k">{label}</span>
+        {totals.workMs === undefined
+          ? <span className="dtpl-tok-turn-time is-flat">未计时</span>
+          : (
+            <span
+              className="dtpl-tok-turn-time"
+              title={`引擎工作（模型用时 + 工具用时）：${formatDuration(totals.workMs)}`}
+            >{formatDuration(totals.workMs)}</span>
+          )}
         <span className="dtpl-tok-turn-reads">
           <span><b>{totals.steps}</b> 步</span>
           <span><b>{formatTokens(totals.tokens)}</b> 词元</span>
-          {totals.workMs !== undefined && <span>用时 <b>{formatDuration(totals.workMs)}</b></span>}
           {totals.failures > 0 && (
             <span className="dtpl-tok-turn-bad">失败 <b>{totals.failures}</b> 次</span>
           )}
@@ -311,11 +326,17 @@ function StepRow({ row, columns, providerLabels }: {
         <span className="dtpl-tok-step-no">
           {row.step === undefined ? '步骤未知' : `第 ${String(row.step)} 步`}
         </span>
+        {row.timing?.wallMs !== undefined && (
+          <span className="dtpl-tok-step-wall" title="这一步的墙钟：从 step/start 到 step/end">{formatDuration(row.timing.wallMs)}</span>
+        )}
         <span className="dtpl-tok-step-time">{formatDateTime(num(row.time))}</span>
         <span className="dtpl-tok-step-model">{modelPairOf(row, providerLabels)}</span>
         {chip !== null && <em className="dtpl-tok-chip" data-kind={chip.kind}>{chip.word}</em>}
       </div>
       <CostCell row={row} />
+      <span className="dtpl-tok-step-timing">
+        <StepTimingTable row={row} columns={columns} />
+      </span>
       <div className="dtpl-tok-step-read">
         <span className="dtpl-tok-step-buckets">
           {usage === undefined
@@ -335,9 +356,6 @@ function StepRow({ row, columns, providerLabels }: {
             </span>
           )}
       </div>
-      <span className="dtpl-tok-step-timing">
-        <StepTimingTable row={row} columns={columns} />
-      </span>
     </div>
   )
 }

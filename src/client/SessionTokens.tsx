@@ -206,15 +206,15 @@ function SessionTiming({ view }: { view: SessionUsageView }) {
     ? `会话跨度 ${formatDuration(spanMs)} = 引擎工作 ${formatDuration(workMs)} + 没在算 ${formatDuration(idleMs)}`
     : `会话跨度 ${formatDuration(spanMs)}｜引擎工作 ${untimed > 0 ? `${String(untimed)} 步未计时，无法合计` : '没有量到用时'}`
   return (
-    <section className="dtpl-tok-sec" aria-label="会话时间">
+    <section className="dtpl-tok-sec" aria-label="会话用时">
       <div className="dtpl-tok-sec-h">
-        <h2 className="dtpl-tok-sec-k">会话时间</h2>
+        <h2 className="dtpl-tok-sec-k">会话用时</h2>
         {aside !== null && <span className="dtpl-tok-sec-aside">{aside}</span>}
       </div>
       <p className="dtpl-tok-time-k">引擎工作</p>
       <div className="dtpl-tok-time-lead">
         <span className="dtpl-tok-time-num">{formatDuration(workMs)}</span>
-        <span className="dtpl-tok-time-pct">占会话跨度 {formatShare(workMs, spanMs)}</span>
+        <span className="dtpl-tok-time-pct">占会话跨度 {formatShare(workMs, spanMs)} · 共 {view.turns.length} 轮 / {countSteps(view)} 步</span>
       </div>
       {segments.length > 0
         ? (
@@ -280,9 +280,9 @@ function Hero({ view }: { view: SessionUsageView }) {
   const todayShare = view.todaySpend > 0 ? formatShare(view.spend, view.todaySpend) : null
   const parts = BUCKETS.map((bucket) => `${bucket.label} ${formatTokens(num(view.total[bucket.key]))}`)
   return (
-    <section className="dtpl-tok-sec" aria-label="本会话四桶合计">
+    <section className="dtpl-tok-sec" aria-label="本会话词元与花费">
       <div className="dtpl-tok-sec-h">
-        <h2 className="dtpl-tok-sec-k">本会话四桶合计</h2>
+        <h2 className="dtpl-tok-sec-k">词元与花费</h2>
       </div>
       <div className="dtpl-tok-hero">
         <div className="dtpl-tok-hero-row">
@@ -305,10 +305,6 @@ function Hero({ view }: { view: SessionUsageView }) {
                 <span className="dtpl-tok-hero-fact-v">{todayShare}</span>
               </div>
             )}
-            <div className="dtpl-tok-hero-fact">
-              <span className="dtpl-tok-hero-fact-k">共</span>
-              <span className="dtpl-tok-hero-fact-v">{view.turns.length} 轮 / {countSteps(view)} 步</span>
-            </div>
           </div>
         </div>
         <MixBand totals={view.total} totalTokens={view.totalTokens} />
@@ -320,10 +316,10 @@ function Hero({ view }: { view: SessionUsageView }) {
 function Body({ view, previews }: { view: SessionUsageView; previews: PreviewMap }) {
   return (
     <>
-      <Block i={0}><Hero view={view} /></Block>
       {view.workMs !== undefined && view.spanMs !== undefined && (
-        <Block i={1}><SessionTiming view={view} /></Block>
+        <Block i={0}><SessionTiming view={view} /></Block>
       )}
+      <Block i={1}><Hero view={view} /></Block>
       <Block i={2}>
         <TurnBlocks
           turns={view.turns}

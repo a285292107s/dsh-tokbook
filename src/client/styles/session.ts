@@ -98,7 +98,7 @@ export const CSS_SESSION = `
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero-row{display:flex;align-items:flex-start;gap:48px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero-lead{display:flex;flex-direction:column;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero-num{
-  font-family:var(--dtpl-mono);font-size:72px;line-height:76px;font-weight:700;letter-spacing:-.04em;
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-hero);line-height:var(--dtpl-lh-hero);font-weight:700;letter-spacing:-.03em;
   font-variant-numeric:tabular-nums;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-hero-sub{
@@ -184,12 +184,14 @@ export const CSS_SESSION = `
 
 [data-plugin="dsh-tokbook"] .dtpl-tok-time-k{
   margin:0 0 4px;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
-  color:var(--dtpl-fg-2);letter-spacing:.1em;
+  color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-tok-time-lead{display:flex;align-items:baseline;gap:18px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-time-lead{
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 18px;min-width:0;
+}
 [data-plugin="dsh-tokbook"] .dtpl-tok-time-num{
-  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-hero);line-height:var(--dtpl-lh-hero);
-  font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums;
+  font-family:var(--dtpl-mono);font-size:72px;line-height:76px;
+  font-weight:700;letter-spacing:-.04em;font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-time-pct{font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-tok-time-track{margin-top:20px;min-width:0;}
@@ -274,12 +276,12 @@ export const CSS_SESSION = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-h{
   display:grid;
-  grid-template-columns:104px minmax(0,1fr) auto 14px;
+  grid-template-columns:104px auto minmax(0,1fr) auto 14px;
   grid-template-areas:
-    "k reads money cue"
-    "bar bar bar bar"
-    "reads2 reads2 reads2 reads2"
-    "preview preview preview preview";
+    "k time reads money cue"
+    "bar bar bar bar bar"
+    "reads2 reads2 reads2 reads2 reads2"
+    "preview preview preview preview preview";
   gap:0 18px;
   width:100%;margin:0;padding:15px 0;
   appearance:none;border:0;background:transparent;
@@ -289,6 +291,15 @@ export const CSS_SESSION = `
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-h:hover{background:var(--dtpl-wash-hover);}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-k{
   grid-area:k;font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:700;white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn-time{
+  grid-area:time;align-self:center;white-space:nowrap;
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);
+  font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn-time.is-flat{
+  font-family:inherit;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
+  font-weight:400;letter-spacing:normal;color:var(--dtpl-fg-3);
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-reads{
   grid-area:reads;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 18px;
@@ -310,8 +321,12 @@ export const CSS_SESSION = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-money[data-kind="subscription"]{color:var(--dtpl-fg-2);font-weight:500;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-money[data-kind="unpriced"]{color:var(--dtpl-fg-3);font-weight:400;font-size:var(--dtpl-fs-label);}
-[data-plugin="dsh-tokbook"] .dtpl-tok-turn-bar{grid-area:bar;display:block;min-width:0;margin-top:11px;}
-[data-plugin="dsh-tokbook"] .dtpl-tok-turn-bar .dtpl-tok-bar[data-tone="turn"]{height:14px;}
+[data-plugin="dsh-tokbook"] .dtpl-tok-turn-bar{
+  grid-area:bar;display:block;min-width:0;margin-top:11px;
+  background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dtpl-fg) 16%,transparent);
+}
+  [data-plugin="dsh-tokbook"] .dtpl-tok-turn-bar .dtpl-tok-bar[data-tone="turn"]{height:14px;background:transparent;box-shadow:none;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-h > .dtpl-tok-reads{grid-area:reads2;margin-top:9px;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-turn-preview{
   grid-area:preview;display:flex;flex-direction:column;min-width:0;margin-top:10px;
@@ -350,7 +365,7 @@ export const CSS_SESSION = `
 [data-plugin="dsh-tokbook"] .dtpl-tok-step{
   display:grid;
   grid-template-columns:minmax(0,1fr) auto;
-  grid-template-areas:"id cost" "read read" "timing timing";
+  grid-template-areas:"id cost" "timing timing" "read read";
   gap:0 18px;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step > .dtpl-tok-step-id{grid-area:id;}
@@ -360,6 +375,10 @@ export const CSS_SESSION = `
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-id{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-no{
   font-size:13px;line-height:18px;font-weight:600;color:var(--dtpl-fg);white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-tok-step-wall{
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);
+  font-weight:700;font-variant-numeric:tabular-nums;color:var(--dtpl-fg);white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-tok-step-time{
   font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
@@ -574,7 +593,7 @@ export const CSS_SESSION = `
   [data-plugin="dsh-tokbook"] .dtpl-tok-sec-h{flex-wrap:wrap;gap:8px 12px;padding-bottom:9px;margin-bottom:18px;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-sec-aside{margin-left:0;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-hero-row{flex-direction:column;gap:22px;}
-  [data-plugin="dsh-tokbook"] .dtpl-tok-hero-num{font-size:var(--dtpl-fs-hero);line-height:var(--dtpl-lh-hero);letter-spacing:-.03em;}
+  [data-plugin="dsh-tokbook"] .dtpl-tok-hero-num{font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);letter-spacing:-.02em;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-hero-facts{
     margin:0;padding:16px 0 0;border-left:0;border-top:1px solid var(--dtpl-hairline);
     min-width:0;width:100%;
@@ -584,16 +603,16 @@ export const CSS_SESSION = `
   [data-plugin="dsh-tokbook"] .dtpl-tok-mix-cell:nth-child(even){padding-left:16px;border-left:1px solid var(--dtpl-hairline);}
   [data-plugin="dsh-tokbook"] .dtpl-tok-mix-cell:nth-child(n+3){margin-top:16px;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-mix-note{flex-direction:column;gap:6px;}
-  [data-plugin="dsh-tokbook"] .dtpl-tok-time-num{font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);}
+  [data-plugin="dsh-tokbook"] .dtpl-tok-time-num{font-size:var(--dtpl-fs-hero);line-height:var(--dtpl-lh-hero);letter-spacing:-.03em;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-time-marks{gap:8px 20px;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-turn-h{
-    grid-template-columns:minmax(0,1fr) auto 14px;
+    grid-template-columns:auto auto minmax(0,1fr) 14px;
     grid-template-areas:
-      "k money cue" "reads reads reads" "bar bar bar" "reads2 reads2 reads2" "preview preview preview";
+      "k time money cue" "reads reads reads reads" "bar bar bar bar" "reads2 reads2 reads2 reads2" "preview preview preview preview";
   }
   [data-plugin="dsh-tokbook"] .dtpl-tok-turn[data-open]{margin:0 -10px;padding:0 10px;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-steps-inner{padding-left:12px;margin-left:10px;}
-  [data-plugin="dsh-tokbook"] .dtpl-tok-step{grid-template-columns:minmax(0,1fr);grid-template-areas:"id" "cost" "read" "timing";}
+  [data-plugin="dsh-tokbook"] .dtpl-tok-step{grid-template-columns:minmax(0,1fr);grid-template-areas:"id" "timing" "read" "cost";}
   [data-plugin="dsh-tokbook"] .dtpl-tok-step-cost{margin-top:6px;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-step-read{grid-template-columns:minmax(0,1fr);gap:10px 0;}
   [data-plugin="dsh-tokbook"] .dtpl-tok-step-buckets{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;}

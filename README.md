@@ -95,20 +95,27 @@ price is never overwritten.
 
 A **词元 / Tokens** button in the session header opens the page as a **right-sidebar tab** that reads one
 **single session** by turn and by step over its whole lifetime — next to the conversation, closeable
-when you are done. The layout follows the sidebar width: a two-column body while the pane is wide, a
-single-column compact body once it drops below 640px.
+when you are done. It answers what the cross-session ledger cannot: **where this session's time went**,
+and then what it used in tokens and money. The layout follows the sidebar width: a wider body
+while the pane is wide, a single-column compact body once it drops below 640px.
 
-- **Header**: the session's four-bucket total as one number, the four bucket figures in a line beneath
-  it, and four facts to the right — actual spend, subscription value, share of today's spend, turns /
-  steps. Under it, one proportional composition bar plus four read-out columns with their shares, the
-  billing-input formula (uncached input + cache read + cache write) and the cache hit rate.
-- **Session time**: engine work against session span — wait / generation / tools as one bar, the
-  equation `span = work + not computing`, the first and last record times, and the slowest step,
-  slowest tool, busiest turn and tool-call count. Unmeasurable means omitted, not zero.
-- **Per-turn detail**, collapsed by default and laid out as numbered entries on one vertical line: a
-  turn header carries a three-phase bar normalised to the heaviest turn plus the same numbers, and
-  expanding it lists one row per billed call with identity, money, its own bar filling the row and a
-  `model / wait / generation / tools / tok per s` table.
+- **Session time**, the page's lead reading: engine work (model + tool time summed over its steps)
+  against session span — wait / generation / tools as one bar, the equation
+  `span = work + not computing`, the first and last record times, the share of the span and the
+  turn / step counts, and the slowest step, slowest tool, busiest turn and tool-call count.
+  Unmeasurable means omitted, not zero.
+- **Tokens and money**, second because time leads the page: the session's four-bucket total as one
+  number, the four bucket figures in a line beneath it, and three facts to the right — actual spend,
+  subscription value, share of today's spend. Under it, one proportional composition bar plus four
+  read-out columns with their shares, the billing-input formula (uncached input + cache read + cache
+  write) and the cache hit rate.
+- **Per-turn time**, collapsed by default and laid out as numbered entries on one vertical line:
+  a turn header leads with the turn's engine work, then its steps, tokens and model, then a
+  three-phase bar normalised to the heaviest turn (drawn on a full-width track) plus the same
+  numbers. Sort by oldest / newest / **most time first**. Expanding it lists one row per billed
+  call: the step's wall time first, beside its number, then the
+  `model / wait / generation / tools / tok per s` table, then buckets and money. Between-turns and
+  unknown-turn blocks stay separate.
 - **Subagents**, last because nothing else on the page includes them: one row per direct subagent
   (creation label, tokens, share of all subagents, money), with nested delegations folded into their
   direct parent so no subtree is counted twice. The header stays session-only, and a manual fork —
