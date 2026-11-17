@@ -1,6 +1,6 @@
 # 领域词汇 — dsh-tokbook
 
-> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-10-19 · supersedes: —
+> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-11-17 · supersedes: —
 
 本文件只收**新引入、且会被反复用错**的词。既有词汇**不在这里重复**，它们各有单一真源：
 
