@@ -14,24 +14,15 @@ export const CSS_SHARED = `
   [data-plugin="dsh-tokbook"] .dtpl-tab{padding:0 12px;}
   [data-plugin="dsh-tokbook"] .dtpl-body{padding:14px 16px 20px;}
   [data-plugin="dsh-tokbook"] .dtpl-foot{padding:10px 16px 12px;}
-  [data-plugin="dsh-tokbook"] .dtpl-kpis,
-  [data-plugin="dsh-tokbook"] .dtpl-kpis-2{grid-template-columns:minmax(0,1fr);}
-  [data-plugin="dsh-tokbook"] .dtpl-kpi + .dtpl-kpi{
-    border-left:0;border-top:1px solid var(--dtpl-hairline);
-  }
   [data-plugin="dsh-tokbook"] .dtpl-chart{overflow-x:auto;scrollbar-width:thin;}
   [data-plugin="dsh-tokbook"] .dtpl-chart-svg{min-width:640px;}
   [data-plugin="dsh-tokbook"] .dtpl-hero-facts{flex:1 1 auto;gap:4px 10px;}
   [data-plugin="dsh-tokbook"] .dtpl-hero-facts i{display:none;}
-  [data-plugin="dsh-tokbook"] .dtpl-buckets,
-  [data-plugin="dsh-tokbook"] .dtpl-buckets-3{grid-template-columns:minmax(0,1fr);}
-  [data-plugin="dsh-tokbook"] .dtpl-bucket:nth-child(2n){border-left:0;}
-  [data-plugin="dsh-tokbook"] .dtpl-bucket:nth-child(n+2){border-top:1px solid var(--dtpl-hairline);}
-  [data-plugin="dsh-tokbook"] .dtpl-buckets-3 > .dtpl-bucket:nth-child(2n){border-left:0;}
-  [data-plugin="dsh-tokbook"] .dtpl-buckets-3 > .dtpl-bucket:nth-child(n+2){border-top:1px solid var(--dtpl-hairline);}
   [data-plugin="dsh-tokbook"] .dtpl-bd-cols{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-bd-cols,
   [data-plugin="dsh-tokbook"] .dtpl-row{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-models > .dtpl-row{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-row-share{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-model-nums{
     flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:12px;
     margin-top:5px;
@@ -81,7 +72,8 @@ export const CSS_SHARED = `
 
 @media (prefers-reduced-motion:no-preference){
   [data-plugin="dsh-tokbook"] .dtpl-body > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;}
-  [data-plugin="dsh-tokbook"] .dtpl-inst > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:.06s;}
+  [data-plugin="dsh-tokbook"] .dtpl-grid > *,
+  [data-plugin="dsh-tokbook"] .dtpl-price-board > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:.06s;}
   [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{animation:dtpl-draw var(--dtpl-dur-draw) var(--dtpl-ease-move) both;}
 }
 @keyframes dtpl-rise{from{opacity:0;transform:translateY(6px)}}
@@ -98,7 +90,8 @@ export const CSS_SHARED = `
 }
 @media (prefers-reduced-motion:reduce){
   [data-plugin="dsh-tokbook"] .dtpl-body > *,
-  [data-plugin="dsh-tokbook"] .dtpl-inst > *,
+  [data-plugin="dsh-tokbook"] .dtpl-grid > *,
+  [data-plugin="dsh-tokbook"] .dtpl-price-board > *,
   [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc,
   [data-plugin="dsh-tokbook"] .dtpl-sk,
   [data-plugin="dsh-tokbook"] .dtpl-sync-running .dtpl-sync-dot,

@@ -511,8 +511,9 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   }, [card, row, updateModel, closeLookup])
 
   return (
+    <div className="dtpl-price-board">
     <section
-      className="dtpl-price-sec"
+      className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-price-controls"
       onBlur={(event) => {
         if (event.target instanceof HTMLSelectElement) return
         if (stagedChanges(stateRef.current, baselineRef.current) === 0) return
@@ -635,6 +636,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         </div>
       )}
 
+    </section>
+    <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-price-stage">
       {view === null
         ? (loadError === null
           ? (
@@ -728,10 +731,12 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           onClose={closeLookup}
         />
       )}
-      {view !== null && (
-        <CalendarEditor
-          entries={state.calendar}
-          missingYears={view.calendarMissing}
+    </section>
+    {view !== null && (
+      <CalendarEditor
+        className="dtpl-span-12"
+        entries={state.calendar}
+        missingYears={view.calendarMissing}
           autoYears={[...state.autoYears].sort((left, right) => left.localeCompare(right))}
           sync={view.holidaySync}
           dirty={calendarDirty(state, baseline)}
@@ -741,8 +746,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           onAutoRefresh={() => void runHolidaySync(true, view.calendarMissing)}
           syncing={holiday.running}
         />
-      )}
-    </section>
+    )}
+    </div>
   )
 }
 

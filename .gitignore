@@ -6,3 +6,6 @@ lib/tsconfig.tsbuildinfo
 .playwright-cli/
 shots/
 output/
+.taste-skill/
+docs/design/
+docs/assets/design-today-hero-dark-*.png

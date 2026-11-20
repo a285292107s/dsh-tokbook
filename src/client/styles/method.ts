@@ -1,5 +1,5 @@
 export const CSS_METHOD = `
-[data-plugin="dsh-tokbook"] .dtpl-doc{max-width:none;}
+[data-plugin="dsh-tokbook"] .dtpl-doc{max-width:none;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-doc code{
   font-family:var(--dtpl-mono);
   padding:.1em .35em;
@@ -9,11 +9,13 @@ export const CSS_METHOD = `
   white-space:nowrap;
 }
 
+[data-plugin="dsh-tokbook"] .dtpl-doc-head,
+[data-plugin="dsh-tokbook"] .dtpl-doc-tail{display:flex;flex-direction:column;gap:10px;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede{
   display:flex;flex-direction:column;gap:3px;
   margin:0 0 12px;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-doc-lede p{margin:0;}
+[data-plugin="dsh-tokbook"] .dtpl-doc-head .dtpl-doc-lede p{margin:0;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-lede b{color:var(--dtpl-fg);font-weight:600;}
 
 [data-plugin="dsh-tokbook"] .dtpl-doc-facts{
@@ -43,7 +45,7 @@ export const CSS_METHOD = `
   font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg);
 }
 
-[data-plugin="dsh-tokbook"] .dtpl-doc-sec{margin-bottom:16px;}
+[data-plugin="dsh-tokbook"] .dtpl-doc-sec{gap:0;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-title{
   display:flex;align-items:center;gap:8px;
   font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);
@@ -89,6 +91,12 @@ export const CSS_METHOD = `
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 
+[data-plugin="dsh-tokbook"] .dtpl-doc-table-wrap{
+  overflow:auto;max-inline-size:100%;
+  container:judge/inline-size;
+  scrollbar-width:thin;
+}
+[data-plugin="dsh-tokbook"] .dtpl-doc-table-wrap:focus-visible{outline:2px solid var(--dtpl-focus);outline-offset:2px;}
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge{
   width:100%;table-layout:fixed;border-collapse:collapse;
   margin:0 0 8px;
@@ -117,7 +125,8 @@ export const CSS_METHOD = `
   margin:0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-doc-judge-note b{color:var(--dtpl-fg);font-weight:600;}
-@media (max-width:640px){
+@container judge (max-width:560px){
+  [data-plugin="dsh-tokbook"] .dtpl-doc-judge{min-width:460px;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:first-child{width:46%;}
   [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(2),
   [data-plugin="dsh-tokbook"] .dtpl-doc-judge thead th:nth-child(3){width:27%;}

@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { DAY_SET_HINTS, DAY_SET_LABELS, DAY_SETS, clockLabel, isHourRange } from '../../price-format.ts'
+import { DAY_SET_HINTS, DAY_SET_LABELS, DAY_SETS, clockLabel, holidayDates, isHourRange } from '../../price-format.ts'
 import type { BillingNature, DaySet, HolidaySyncView, PriceCurrency } from '../../types.ts'
 import { counterpartOf, unitOf, type MoneyView } from './currency.ts'
 import {
@@ -24,7 +24,65 @@ const END_HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hou
 const HOURS: readonly number[] = Array.from({ length: 24 }, (_, hour) => hour)
 const HOUR_TICKS: readonly number[] = [0, 6, 12, 18, 24]
 
-export function CalendarEditor({ entries, missingYears, autoYears, dirty, expanded, sync, onAutoRefresh, syncing, onExpandedChange, onChange }: {
+const WEEK_LABELS: readonly string[] = ['一', '二', '三', '四', '五', '六', '日']
+
+interface CalendarDay {
+  key: string
+  day: number
+  weekend: boolean
+  holiday: boolean
+  blank: boolean
+}
+
+function monthDays(year: number, month: number, holidays: ReadonlySet<string>): CalendarDay[] {
+  const offset = (new Date(year, month - 1, 1).getDay() + 6) % 7
+  const total = new Date(year, month, 0).getDate()
+  const cells: CalendarDay[] = []
+  for (let index = 0; index < offset; index += 1) {
+    cells.push({ key: `b-${month}-${index}`, day: 0, weekend: false, holiday: false, blank: true })
+  }
+  for (let day = 1; day <= total; day += 1) {
+    const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    const weekday = (new Date(year, month - 1, day).getDay() + 6) % 7
+    cells.push({ key, day, weekend: weekday >= 5, holiday: holidays.has(key), blank: false })
+  }
+  return cells
+}
+
+function HolidayCalendar({ year, holidays }: { year: string; holidays: ReadonlySet<string> }) {
+  const yearNum = Number(year)
+  const months = Array.from({ length: 12 }, (_, index) => index + 1)
+  return (
+    <div className="dtpl-cal-grid" role="group" aria-label={`${year} 年节假日日历：标假的是法定节假日，标休的是周末`}>
+      {months.map(month => (
+        <div className="dtpl-cal-month" key={month}>
+          <div className="dtpl-cal-month-name">{month} 月</div>
+          <div className="dtpl-cal-weekheads" aria-hidden="true">
+            {WEEK_LABELS.map((label, index) => <span key={label} data-weekend={index >= 5 || undefined}>{label}</span>)}
+          </div>
+          <div className="dtpl-cal-days">
+            {monthDays(yearNum, month, holidays).map(cell => cell.blank
+              ? <span className="dtpl-cal-day is-blank" key={cell.key} aria-hidden="true" />
+              : (
+                <span
+                  className="dtpl-cal-day"
+                  key={cell.key}
+                  data-holiday={cell.holiday || undefined}
+                  data-weekend={!cell.holiday && cell.weekend || undefined}
+                  title={`${year}-${String(month).padStart(2, '0')}-${String(cell.day).padStart(2, '0')} ${cell.holiday ? '法定节假日' : cell.weekend ? '周末' : '工作日'}`}
+                >
+                  <span className="dtpl-cal-day-num">{cell.day}</span>
+                  <span className="dtpl-cal-day-mark" aria-hidden="true">{cell.holiday ? '假' : cell.weekend ? '休' : ''}</span>
+                </span>
+              )
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+export function CalendarEditor({ entries, missingYears, autoYears, dirty, expanded, sync, onAutoRefresh, syncing, onExpandedChange, onChange, className }: {
   entries: CalendarEntries
   missingYears: readonly string[]
   autoYears?: readonly string[]
@@ -35,10 +93,18 @@ export function CalendarEditor({ entries, missingYears, autoYears, dirty, expand
   sync?: HolidaySyncView
   onAutoRefresh?: () => void
   syncing?: boolean
+  className?: string
 }) {
   const [addingTouched, setAddingTouched] = useState(false)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [typed, setTyped] = useState<string | null>(null)
+  const [viewYear, setViewYear] = useState<string | null>(null)
+  const holidayDateSet = new Set<string>()
+  for (const entry of entries.values()) {
+    for (const row of entry.holidays) {
+      for (const date of holidayDates({ start: row.start, end: row.end })) holidayDateSet.add(date)
+    }
+  }
   const years = [...entries.keys()].sort((left, right) => left.localeCompare(right))
   const reads = new Map(years.map(year => [year, readHolidays(year, entries.get(year)!.holidays)]))
   const defaultYear = defaultCalendarYear(entries)
@@ -85,11 +151,16 @@ export function CalendarEditor({ entries, missingYears, autoYears, dirty, expand
     setFocusId(first === undefined ? null : dateFieldId(first, 'start'))
   }
 
+  const calendarYear = viewYear !== null && /^\d{4}$/u.test(viewYear)
+    ? viewYear
+    : years.includes(defaultYear) ? defaultYear : years[0] ?? defaultYear
+  const calendarOptions = [...new Set([...years, ...(viewYear !== null && /^\d{4}$/u.test(viewYear) ? [viewYear] : [])])].sort((a, b) => a.localeCompare(b))
+
   const autoLine = describeAutoSync(sync, syncing === true)
   const needsManual = sync !== undefined && (sync.state === 'failed' || sync.state === 'missing')
 
   return (
-    <section className="dtpl-price-cal" id="price-calendar" data-dirty={dirty} data-open={expanded} aria-label="法定节假日年历">
+    <section className={`dtpl-price-cal ${className ?? ''}`} id="price-calendar" data-dirty={dirty} data-open={expanded} aria-label="法定节假日年历">
       <div className="dtpl-price-cal-head">
         <button
           type="button"
@@ -154,6 +225,24 @@ export function CalendarEditor({ entries, missingYears, autoYears, dirty, expand
             标着<b>「自动」</b>的年份没写在这里，是启动时从 holiday-cn 拉来并缓存的；你手写过哪一年，
             哪一年就以你的为准。
           </p>
+          <div className="dtpl-cal-panel">
+            <div className="dtpl-cal-toolbar">
+              <label className="dtpl-cal-year-label" htmlFor="cal-view-year">查看年份</label>
+              <select
+                id="cal-view-year"
+                className="dtpl-price-select dtpl-cal-year-select"
+                value={calendarYear}
+                onChange={(event) => setViewYear(event.target.value)}
+              >
+                {calendarOptions.map(option => <option key={option} value={option}>{option} 年</option>)}
+              </select>
+              <span className="dtpl-cal-legend">
+                <span className="dtpl-cal-legend-item" data-kind="holiday"><i aria-hidden="true">假</i>法定节假日</span>
+                <span className="dtpl-cal-legend-item" data-kind="weekend"><i aria-hidden="true">休</i>周末</span>
+              </span>
+            </div>
+            <HolidayCalendar year={calendarYear} holidays={holidayDateSet} />
+          </div>
           {years.map(year => (
             <CalendarYearGroup
               key={year}
@@ -442,7 +531,7 @@ function LiveRates({ live, records, view }: { live: InForceRates | null; records
     return ''
   }
   return (
-    <div className="dtpl-price-live" role="group" aria-label="此刻计费的价">
+    <div className="dtpl-price-live" role="group" aria-label="此刻计费的价" data-ui>
       <div className="dtpl-price-live-head">
         <span className="dtpl-price-live-k">此刻计费</span>
         <span className="dtpl-price-live-unit">{unitOf(view)}</span>
@@ -486,6 +575,7 @@ function DayBand({ price }: { price: ModelDraft }) {
       className="dtpl-price-day"
       role="img"
       aria-label={`24 小时生效范围：基准价铺满全天${drawn.length === 0 ? '' : `；${drawn.map(row => `${row.label} 覆盖 ${String(row.start)}–${String(row.end)} 点`).join('；')}`}`}
+      data-ui
     >
       <div className="dtpl-price-day-row" aria-hidden="true">
         <span className="dtpl-price-day-k">基准价</span>
@@ -701,7 +791,6 @@ function PriceTable({ price, view, onChange }: {
           <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>峰谷时段
         </button>
       </div>
-      {effectiveSlots(price).length > 0 && <DayBand price={price} />}
     </>
   )
 }
@@ -788,8 +877,15 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
           </span>
         </span>
       </div>
-      <LiveRates live={live} records={row.records} view={view} />
-      <PriceTable price={row} view={view} onChange={(next) => onRowChange(route, row.model, next)} />
+      <div className="dtpl-price-console">
+        <div className="dtpl-price-console-live">
+          <LiveRates live={live} records={row.records} view={view} />
+          {effectiveSlots(row).length > 0 && <DayBand price={row} />}
+        </div>
+        <div className="dtpl-price-console-edit">
+          <PriceTable price={row} view={view} onChange={(next) => onRowChange(route, row.model, next)} />
+        </div>
+      </div>
       {live === null && (
         <p className="dtpl-price-note">
           {row.records > 0

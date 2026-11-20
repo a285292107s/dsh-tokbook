@@ -1236,7 +1236,7 @@ const server = createServer((req, res) => {
       createRoot(slot).render(createElement(component, share));
     }
 
-    const tabFlag = params.has('tab') ? params.get('tab') : (params.has('quota') ? 'quota' : null);
+    const tabFlag = params.get('tab') ?? (params.has('quota') ? 'ledger' : null);
 
     if (params.get('view') === 'tokens') {
       sessionHost.hidden = false;
@@ -1262,7 +1262,7 @@ server.listen(port, '127.0.0.1', () => {
     console.log(`tokbook 独立查看器 on http://127.0.0.1:${port}/ —— 账本目录：${ledgerDir ?? '默认（$DSH_HOME/tokbook，否则 ~/.dsh/tokbook）'}（?dark=1 换深面）`)
     return
   }
-  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|quota|pricing|method, ?dark=1, ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none)`)
+  console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|pricing|method, ?dark=1, 额度场景用 ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none，落在总览里)`)
   console.log(`  词元页：http://127.0.0.1:${port}/?view=tokens（模拟会话头部 + 右侧侧栏；?pane=360|640|900 换侧栏宽；形状 TOKBOOK_SESSION_SCENARIO=${SESSION_SCENARIO}）`)
   console.log(`  整台的形状由 **环境变量** 选（一个进程 = 一种形状）：TOKBOOK_MODE=empty|err|sync|syncerr（当前：${MODE === '' ? '有数据' : MODE}）。`)
   console.log(`  lib/client.js 按请求读盘：pnpm build 之后刷新页面即可，不用重启本进程。`)

@@ -1,10 +1,13 @@
 export const CSS_PRICING = `
-[data-plugin="dsh-tokbook"] .dtpl-price-sec{display:flex;flex-direction:column;gap:14px;}
 
 [data-plugin="dsh-tokbook"] .dtpl-price-cal{
   display:flex;flex-direction:column;gap:8px;
-  margin-top:2px;
+  min-width:0;padding:13px 15px;
+  border:1px solid var(--dtpl-border);
+  background:var(--dtpl-panel-bg);
+  box-shadow:var(--dtpl-metal);
 }
+[data-plugin="dsh-tokbook"] .dtpl-price-cal:hover{box-shadow:var(--dtpl-sheen-hover),var(--dtpl-metal),var(--dtpl-lift);}
 [data-plugin="dsh-tokbook"] .dtpl-price-cal[data-dirty="true"]{
   box-shadow:inset 2px 0 0 var(--dtpl-fg);
 }
@@ -125,10 +128,70 @@ export const CSS_PRICING = `
   flex:1 1 auto;min-width:0;
   font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-err);overflow-wrap:anywhere;
 }
+[data-plugin="dsh-tokbook"] .dtpl-cal-panel{
+  display:flex;flex-direction:column;gap:10px;
+  padding:12px 14px;
+  background:color-mix(in srgb,var(--dtpl-fg) 3%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-toolbar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-year-label{
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-year-select{width:96px;}
+[data-plugin="dsh-tokbook"] .dtpl-cal-legend{
+  margin-left:auto;display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-legend-item{display:inline-flex;align-items:center;gap:4px;}
+[data-plugin="dsh-tokbook"] .dtpl-cal-legend-item i{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;font-style:normal;font-size:10px;line-height:1;
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-legend-item[data-kind="holiday"] i{background:color-mix(in srgb,var(--dtpl-err) 18%,transparent);color:var(--dtpl-err);font-weight:600;}
+[data-plugin="dsh-tokbook"] .dtpl-cal-legend-item[data-kind="weekend"] i{background:color-mix(in srgb,var(--dtpl-fg) 22%,transparent);color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-cal-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-month{
+  display:flex;flex-direction:column;gap:3px;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-month-name{
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:600;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-weekheads,
+[data-plugin="dsh-tokbook"] .dtpl-cal-days{
+  display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-weekheads span{
+  text-align:center;font-size:10px;line-height:14px;color:var(--dtpl-fg-3);
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-weekheads span[data-weekend]{color:var(--dtpl-err);}
+[data-plugin="dsh-tokbook"] .dtpl-cal-day{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;
+  min-width:0;height:26px;
+  font-size:11px;line-height:12px;font-variant-numeric:tabular-nums;
+  color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-cal-day-num{line-height:12px;}
+[data-plugin="dsh-tokbook"] .dtpl-cal-day.is-blank{visibility:hidden;}
+[data-plugin="dsh-tokbook"] .dtpl-cal-day[data-weekend]{background:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-cal-day[data-holiday]{background:color-mix(in srgb,var(--dtpl-err) 18%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-cal-day-mark{font-size:9px;line-height:10px;height:10px;color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-cal-day[data-holiday] .dtpl-cal-day-mark{color:var(--dtpl-err);font-weight:600;}
+[data-plugin="dsh-tokbook"] .dtpl-cal-day[data-weekend] .dtpl-cal-day-mark{color:var(--dtpl-fg-2);}
 
+[data-plugin="dsh-tokbook"] .dtpl-price-controls{
+  padding-block:10px 12px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-controls .dtpl-price-pick{
+  border-bottom:0;padding-bottom:0;
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-pick{
-  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
-  column-gap:16px;row-gap:8px;align-items:start;
+  max-width:none;
+  display:grid;grid-template-columns:1.3fr 1.3fr 1.2fr 1fr;
+  column-gap:16px;row-gap:8px;align-items:end;
   border-bottom:1px solid var(--dtpl-border);padding-bottom:10px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-row{
@@ -138,8 +201,11 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-pick .dtpl-price-pick-sel{
   width:100%;height:36px;font-size:var(--dtpl-fs-lead);font-weight:500;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-pick > .dtpl-price-pick-fxrow{grid-column:1;}
-[data-plugin="dsh-tokbook"] .dtpl-price-pick-state{grid-column:2;}
+[data-plugin="dsh-tokbook"] .dtpl-price-board > *{align-self:start;}
+[data-plugin="dsh-tokbook"] .dtpl-price-board{row-gap:12px;}
+@container (max-width:1050px){
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;}
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-state-row{
   display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0;min-height:24px;
 }
@@ -168,29 +234,38 @@ export const CSS_PRICING = `
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-price-detail{
-  display:flex;flex-direction:column;gap:12px;
-  padding:12px 14px 14px;
-  border:1px solid var(--dtpl-border);
-  background:var(--dtpl-panel-bg);
-  box-shadow:var(--dtpl-metal);
+  display:flex;flex-direction:column;gap:18px;
+  min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-detail[data-dirty="true"]{
-  box-shadow:
-    inset 2px 0 0 var(--dtpl-fg),
-    var(--dtpl-metal);
+  box-shadow:inset 2px 0 0 var(--dtpl-fg),var(--dtpl-metal);
 }
+[data-plugin="dsh-tokbook"] .dtpl-price-console{
+  display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);
+  gap:20px;align-items:start;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-console-live{
+  display:flex;flex-direction:column;gap:14px;min-width:0;
+  padding:18px 16px;
+  background:color-mix(in srgb,var(--dtpl-brand) 8%,var(--dtpl-card));
+  box-shadow:inset 0 4px 0 var(--dtpl-brand);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-console-edit{min-width:0;overflow-x:auto;padding-top:2px;}
+@container (max-width:1180px){
+  [data-plugin="dsh-tokbook"] .dtpl-price-console{grid-template-columns:minmax(0,1fr);gap:16px;}
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-stage{padding-block:18px 20px;}
 
 [data-plugin="dsh-tokbook"] .dtpl-price-live{
-  display:flex;flex-direction:column;gap:6px;min-width:0;
-  padding:10px 12px;
-  background:color-mix(in srgb,var(--dtpl-fg) 4%,transparent);
+  display:flex;flex-direction:column;gap:10px;min-width:0;
+  padding:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-head{
   display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-k{
   display:inline-flex;align-items:center;gap:8px;
-  font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:500;color:var(--dtpl-fg);
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-k::before{
   content:"";flex:none;width:7px;height:13px;
@@ -202,10 +277,10 @@ export const CSS_PRICING = `
   display:flex;align-items:baseline;gap:24px;flex-wrap:wrap;row-gap:8px;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-cell{display:flex;flex-direction:column;gap:1px;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-price-live-label{font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-label{font-size:13px;line-height:18px;color:var(--dtpl-fg-2);}
 [data-plugin="dsh-tokbook"] .dtpl-price-live-v{
-  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);font-weight:600;color:var(--dtpl-fg);
-  font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+  font-family:var(--dtpl-mono);font-size:clamp(30px,3vw,44px);line-height:1.08;font-weight:600;color:var(--dtpl-fg);
+  font-variant-numeric:tabular-nums;letter-spacing:-.03em;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-cell[data-bad="true"] .dtpl-price-live-v{color:var(--dtpl-err);}
 [data-plugin="dsh-tokbook"] .dtpl-price-live-none{
@@ -249,7 +324,8 @@ export const CSS_PRICING = `
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 
-[data-plugin="dsh-tokbook"] .dtpl-price-sec{
+[data-plugin="dsh-tokbook"] .dtpl-price-board{
+  display:contents;
   --dtpl-cell-pad-x:7px;
   --dtpl-rate-w:88px;
   --dtpl-rate-gap:8px;
@@ -623,4 +699,17 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-lookup-note{
   margin:6px 0 0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-warn-ink);
 }
+
+@media (prefers-reduced-motion:no-preference){
+  [data-plugin="dsh-tokbook"] .dtpl-price-console-live{animation:dtpl-price-wipe 720ms var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-v{animation:dtpl-price-settle 640ms var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-v:nth-child(1){animation-delay:80ms;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-v:nth-child(2){animation-delay:130ms;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-v:nth-child(3){animation-delay:180ms;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-v:nth-child(4){animation-delay:230ms;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-day-cell[data-on="slot"]{animation:dtpl-price-light 520ms var(--dtpl-ease-move) both;}
+}
+@keyframes dtpl-price-wipe{from{clip-path:inset(0 100% 0 0);}}
+@keyframes dtpl-price-settle{from{opacity:0;transform:translateY(10px);}}
+@keyframes dtpl-price-light{from{opacity:.2;}}
 `

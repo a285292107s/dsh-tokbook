@@ -1,24 +1,26 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-11-08 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-11-19 · supersedes: —
 
 > 英文门面见 [`README.md`](README.md);本文件是**维护者的那一份**,多带 `src/` 布局树与开发细节。
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区在**侧边栏面板列表**
 里放一行入口(`sidebar.panellist`,和「插件」「看板」同一个列表),点开在**主栏**打开账本页(`main`)——
-页内四个 tab(按界面上方从左到右):**用量总览**(今日读数 / 近 14 天趋势 / 今日词元构成三个模块;
-往下滚接**用量明细**——窗口 × 按模型 / 按工作区 / 按通道,金额只在近 30 天及更短的窗口里给)、
-**订阅额度**(用你的 key 向通道查账户级官方用量)、**价格表**(选一个通道 + 模型,填它的**当前价**;
-峰谷时段、汇率与节假日年历也在这里)、**统计口径**(不估算的口径、漏项与对账)。
-
+页内三个 tab(按界面上方从左到右):**用量总览**(响应式网格卡片:今日读数 / 近 14 天「词元柱 + 支出线」/
+今日词元构成叠 14 天累计 / **用量明细**——窗口 × 按模型 / 按工作区 / 按通道;宽主栏一屏四块,
+窄了竖排;金额只在近 30 天及更短的窗口里给;下方一排**订阅额度**卡,用你的 key 向通道查账户级
+官方用量)、**价格表**(卡片网格:选择带 / 价格详情 / 节假日年历;选一个通道 + 模型填**当前价**,
+峰谷时段、汇率也在这里)、**统计口径**(卡片网格:导言 / 四桶 / 调用判定表 / 差额 / 核对;
+不估算的口径、漏项与对账)。
 另有一格不在账本页里:插件在**会话头部**放了一个**词元**按钮,点它在**右侧侧栏**里打开这一会话的
 **词元**页签(`sidebar.right.pane.tab`)——单会话全生命周期,按轮次与步骤摊开,
 见下文「[会话词元页](#会话词元页右侧侧栏)」。
 
-> **用量明细不是第五个 tab。** 它是**用量总览**页往下滚的第二段(`ProviderPanel`,
-> `section[aria-label="用量明细"]`)。此前这一句写「五个 tab」,是 `用量明细并入总览` 那次改动
-> (f7c7e27)漏掉的:**界面 tab 条上只有四个**,`src/client/TokBookPanel.tsx` 的 tablist 是唯一真源。
+> **用量明细不是第四个 tab,订阅额度也不再单列 tab。** 两者都在**用量总览**这一页里:明细是
+> `ProviderPanel`(`section[aria-label="用量明细"]`),额度是总览下方那排卡。tab 条上只有三个,
+> 三个 tab 的内容都挂在**同一张 12 栏响应式网格**上,各块是独立卡片。tablist 的唯一真源是
+> `src/client/TokBookPanel.tsx`。
 
 | 浅色 | 深色 |
 | --- | --- |
@@ -226,9 +228,9 @@ kind `tokbook-tokens`,页面体挂在 `sidebar.right.pane.tab`)。它答的是�
 给已挂载的那一行改配置,也可以另写一条按 `id: tokbook` 定位的 patch——它**整体替换**该行的
 `config`,不与旧值合并,所以覆盖时要把想留的键写全。
 
-### 官方账户用量(订阅额度 tab)
+### 官方账户用量(总览里的订阅额度卡)
 
-这个 tab **用你的 key 从通道自己的账户 API 拉账户级订阅用量**——所以它反映共享该订阅的*所有*工具 /
+这些卡 **用你的 key 从通道自己的账户 API 拉账户级订阅用量**——所以它反映共享该订阅的*所有*工具 /
 设备,本地 token 账本做不到。目前覆盖 Command Code 与 OpenCode Go 两个内置计划。
 
 - **无 key → `unconfigured` 卡;拉取失败 → `error` 卡**,两者都**绝不回退到本地估算**;**browser 从不持有
@@ -241,7 +243,7 @@ kind `tokbook-tokens`,页面体挂在 `sidebar.right.pane.tab`)。它答的是�
 
 ## 状态
 
-四个 tab 都已落地(界面规格的真源是 `src/client/`)。剩余缺口:
+三个 tab 都已落地(界面规格的真源是 `src/client/`)。剩余缺口:
 
 - 额度计划每个通道路由只收一个 API key(尚无多账户轮换)。
 - `assistant/attempt`(流结束时没产出可见消息的那次尝试)当前不投影,补它得按 retry 生命周期配对
@@ -292,6 +294,7 @@ src/
     styles/           CSS 分片,按拼接顺序列出(重排即改级联):
       tokens.ts       全插件唯一的取值登记处(宿主变量 + 兜底 + 自有常量)
       page.ts         账本页外壳(页头 / tab 条 / 滚动主体 / 页脚)与侧栏面板行图标
+      grid.ts         响应式网格系统(12 栏 + 卡片基元 + 容器查询断点)
       ledger.ts       用量总览
       method.ts       统计口径
       provider.ts     用量明细
@@ -300,9 +303,9 @@ src/
       pricing.ts      价格表(选择带 / 四档价 / 峰谷时段 / 年历 / 汇率)
       shared.ts       跨面共用原语(面板材质 / 只读文本 / 选中态 / 窄屏与动效分支)
     TokBookPanelIcon.tsx sidebar.panellist 面板行图标(额度告急时多一个点)
-    TokBookPanel.tsx  main 账本页(四 tab + 取数 / 跟账本刷新)
-    LedgerView.tsx    用量总览 tab
-    ProviderPanel.tsx 用量明细 tab 外壳(窗口 + 三种切法)
+    TokBookPanel.tsx  main 账本页(三 tab + 取数 / 跟账本刷新)
+    LedgerView.tsx    用量总览的四块卡片(今日 / 趋势 / 构成 / 空态与骨架)
+    ProviderPanel.tsx 用量明细卡外壳(窗口 + 三种切法)
     Breakdowns.tsx    用量明细的两种行清单:按模型 / 按工作区
     MethodDoc.tsx     统计口径 tab
     SessionTokens.tsx 词元页(sidebar.right.pane.tab)本体:单会话全生命周期;取数 + 四态 + 版面装配
@@ -322,7 +325,7 @@ src/
     quota/
       metrics.ts      订阅额度纯规则:占比/语气/口径/文案(无 React)
       QuotaCard.tsx   订阅额度卡:卡壳 + ok 主体 + 余额/无订阅面板 + gauge/骨架
-      QuotaPanel.tsx  订阅额度 tab 外壳:取数 + 刷新策略 + 卡片排序
+      QuotaSection.tsx 订阅额度区:取数 + 刷新策略 + 卡片排序(嵌在总览下方)
 scripts/
   build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS),并校验 bundle 接线契约
   preview-overlay.ts       账本页预览台(fixture 数据)与独立查看器(--ledger,读真账本)

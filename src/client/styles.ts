@@ -1,5 +1,6 @@
 import { CSS_TOKENS } from './styles/tokens.ts'
 import { CSS_PAGE } from './styles/page.ts'
+import { CSS_GRID } from './styles/grid.ts'
 import { CSS_LEDGER } from './styles/ledger.ts'
 import { CSS_METHOD } from './styles/method.ts'
 import { CSS_PROVIDER } from './styles/provider.ts'
@@ -11,6 +12,7 @@ import { CSS_SHARED } from './styles/shared.ts'
 const CSS = [
   CSS_TOKENS,
   CSS_PAGE,
+  CSS_GRID,
   CSS_LEDGER,
   CSS_METHOD,
   CSS_PROVIDER,

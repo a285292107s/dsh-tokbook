@@ -42,29 +42,29 @@ const JUDGE_ROWS: readonly JudgeRow[] = [
 
 export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
   return (
-    <section className="dtpl-doc" aria-label="统计口径">
-      <div className="dtpl-doc-lede">
-        <p>本插件<b>不估算</b>：每个数字都来自<b>本机保存的对话记录</b>——只存在本机，不上传。</p>
-        <p><b>通道</b>（代码与文档里写作 provider）是你从哪接入、按什么方式付费的那条路，如 <code>deepseek-official</code>、<code>commandcode</code>；<b>模型厂商</b>是做出模型、定官方价的那一方。同一家公司可以兼任两者（DeepSeek 官方 API），也可以只是通道（Command Code 卖 DeepSeek 模型，但不是 DeepSeek）。</p>
-        <p>向模型提问时，通道会回报这次消耗了多少词元。本页记的就是这些回报、逐条累加——<b>不是</b>模型厂商官网上的账户数据。</p>
-      </div>
-
-      <div className="dtpl-doc-facts" role="group" aria-label="口径速览">
-        <div className="dtpl-doc-fact">
-          <span className="dtpl-doc-fact-k">来源</span>
-          <span className="dtpl-doc-fact-v">本机对话记录，逐条统计</span>
+    <>
+      <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-head" aria-label="统计口径导言">
+        <div className="dtpl-doc-lede">
+          <p>本插件<b>不估算</b>：每个数字都来自<b>本机保存的对话记录</b>——只存在本机，不上传。</p>
+          <p><b>通道</b>（代码与文档里写作 provider）是你从哪接入、按什么方式付费的那条路，如 <code>deepseek-official</code>、<code>commandcode</code>；<b>模型厂商</b>是做出模型、定官方价的那一方。同一家公司可以兼任两者（DeepSeek 官方 API），也可以只是通道（Command Code 卖 DeepSeek 模型，但不是 DeepSeek）。</p>
+          <p>向模型提问时，通道会回报这次消耗了多少词元。本页记的就是这些回报、逐条累加——<b>不是</b>模型厂商官网上的账户数据。</p>
         </div>
-        <div className="dtpl-doc-fact">
-          <span className="dtpl-doc-fact-k">精度</span>
-          <span className="dtpl-doc-fact-v">单条照实记录，无舍入</span>
+        <div className="dtpl-doc-facts" role="group" aria-label="口径速览">
+          <div className="dtpl-doc-fact">
+            <span className="dtpl-doc-fact-k">来源</span>
+            <span className="dtpl-doc-fact-v">本机对话记录，逐条统计</span>
+          </div>
+          <div className="dtpl-doc-fact">
+            <span className="dtpl-doc-fact-k">精度</span>
+            <span className="dtpl-doc-fact-v">单条照实记录，无舍入</span>
+          </div>
+          <div className="dtpl-doc-fact">
+            <span className="dtpl-doc-fact-k">范围</span>
+            <span className="dtpl-doc-fact-v">只记 DeepSeek Harness 的会话记录</span>
+          </div>
         </div>
-        <div className="dtpl-doc-fact">
-          <span className="dtpl-doc-fact-k">范围</span>
-          <span className="dtpl-doc-fact-v">只记 DeepSeek Harness 的会话记录</span>
-        </div>
-      </div>
-
-      <section className="dtpl-doc-sec">
+      </section>
+      <section className="dtpl-card dtpl-span-5 dtpl-card-pad dtpl-doc dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">1</span>词元分四桶</h2>
         <p className="dtpl-doc-sub">
           厂商按 <b>词元（token）</b>计费——可以理解为模型读写的最小文字单位。一次请求的用量被拆成
@@ -78,38 +78,40 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </div>
       </section>
 
-      <section className="dtpl-doc-sec">
+      <section className="dtpl-card dtpl-span-7 dtpl-card-pad dtpl-doc dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">2</span>记了哪些调用</h2>
         <p className="dtpl-doc-sub">
           按<b>你会遇到的情况</b>对照，每一行只回答两件事：算不算一次请求、有没有词元可加。
         </p>
-        <table className="dtpl-doc-judge">
-          <thead>
-            <tr>
-              <th scope="col">你会遇到的情况</th>
-              <th scope="col">请求次数</th>
-              <th scope="col">词元用量</th>
-            </tr>
-          </thead>
-          <tbody>
-            {JUDGE_ROWS.map((row) => (
-              <tr key={row.what}>
-                <th scope="row">
-                  <span className="dtpl-doc-judge-what">{row.what}</span>
-                  <span className="dtpl-doc-judge-detail">{row.detail}</span>
-                </th>
-                <td><Judge value={row.requests} on={row.requestsOn} /></td>
-                <td><Judge value={row.tokens} on={row.tokensOn} /></td>
+        <div className="dtpl-doc-table-wrap" role="region" aria-label="记了哪些调用" tabIndex={0}>
+          <table className="dtpl-doc-judge">
+            <thead>
+              <tr>
+                <th scope="col">你会遇到的情况</th>
+                <th scope="col">请求次数</th>
+                <th scope="col">词元用量</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {JUDGE_ROWS.map((row) => (
+                <tr key={row.what}>
+                  <th scope="row">
+                    <span className="dtpl-doc-judge-what">{row.what}</span>
+                    <span className="dtpl-doc-judge-detail">{row.detail}</span>
+                  </th>
+                  <td><Judge value={row.requests} on={row.requestsOn} /></td>
+                  <td><Judge value={row.tokens} on={row.tokensOn} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <p className="dtpl-doc-judge-note">
           安装前的旧对话、以及当时漏记的调用，会按原始记录<b>自动补录</b>，判定口径与上表完全一致。
         </p>
       </section>
 
-      <section className="dtpl-doc-sec">
+      <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">3</span>差额从哪来</h2>
         <div className="dtpl-doc-gap">
           <article className="dtpl-doc-gap-card dtpl-doc-gap-warn">
@@ -150,7 +152,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </div>
       </section>
 
-      <section className="dtpl-doc-sec">
+      <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">4</span>怎么核对</h2>
         <p className="dtpl-doc-sub">
           登录模型厂商的官网（如 DeepSeek 开放平台），<b>按天导出用量</b>，
@@ -180,22 +182,24 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <p className="dtpl-doc-map-note">除第 3 节列的那几类漏项外，应逐日吻合。</p>
       </section>
 
-      <div className="dtpl-doc-quota">
-        <p><b>另一个 tab：「订阅额度」</b>用的是<b>另一套数据</b>。</p>
-        <p>它用你的账号凭据直接向厂商查询<b>账户级官方用量</b>（含你在其它设备上的消费），与本页的本机账本刻意不混用。</p>
-      </div>
-
-      {overview !== null && overview.dataDir !== '' && (
-        <div className="dtpl-doc-data">
-          <p className="dtpl-doc-data-line">
-            账本里已有 <b>{overview.records}</b> 条记录，最近一次在 <b>{overview.lastEventAt === null ? '—' : formatDateTime(overview.lastEventAt)}</b>。
-          </p>
-          <p className="dtpl-doc-data-dir">数据目录：<code>{overview.dataDir}</code></p>
+      <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-tail">
+        <div className="dtpl-doc-quota">
+          <p><b>总览下方那排「订阅额度」卡</b>用的是<b>另一套数据</b>。</p>
+          <p>它们用你的账号凭据直接向厂商查询<b>账户级官方用量</b>（含你在其它设备上的消费），与本页的本机账本刻意不混用。</p>
         </div>
-      )}
 
-      <p className="dtpl-doc-foot">以上口径基于当前 DSH 版本源码核对。</p>
-    </section>
+        {overview !== null && overview.dataDir !== '' && (
+          <div className="dtpl-doc-data">
+            <p className="dtpl-doc-data-line">
+              账本里已有 <b>{overview.records}</b> 条记录，最近一次在 <b>{overview.lastEventAt === null ? '—' : formatDateTime(overview.lastEventAt)}</b>。
+            </p>
+            <p className="dtpl-doc-data-dir">数据目录：<code>{overview.dataDir}</code></p>
+          </div>
+        )}
+
+        <p className="dtpl-doc-foot">以上口径基于当前 DSH 版本源码核对。</p>
+      </section>
+    </>
   )
 }
 

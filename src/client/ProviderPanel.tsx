@@ -6,9 +6,9 @@ import type {
 import { PROVIDER_RANGES, rangeCarriesMoney } from '../types.ts'
 import { QUERY_RANGE, ROUTE_USAGE } from '../route-paths.ts'
 import { UsageGlyph } from './icons.tsx'
-import { formatMoney, formatTokens } from './format.ts'
-import { isNoPrice, ModelRows, WorkspaceRows } from './Breakdowns.tsx'
 import { ShareRing } from './ShareRing.tsx'
+import { isNoPrice, ModelRows, WorkspaceRows } from './Breakdowns.tsx'
+import { formatMoney, formatShare, formatTokens, share } from './format.ts'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
 
 const RANGE_IDS: ReadonlyArray<ProviderRange> = ['today', 'yesterday', 'last7', 'last30', 'all']
@@ -54,6 +54,12 @@ const SLICE_LABELS: Record<Slice, string> = {
   provider: '按通道',
 }
 
+const SLICE_UNITS: Record<Slice, string> = {
+  model: '个模型',
+  workspace: '个工作区',
+  provider: '个通道',
+}
+
 const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
   model: {
     text: '词元从多到少 · 环为占本窗口',
@@ -69,9 +75,9 @@ const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
   },
 }
 
-const COLUMNS: Partial<Record<Slice, { id: string; nums: string }>> = {
-  model: { id: '模型 · 通道', nums: '词元 · 金额' },
-  workspace: { id: '工作区 · 目录', nums: '词元 · 金额' },
+const COLUMNS: Partial<Record<Slice, { id: string; share: string; nums: string }>> = {
+  model: { id: '模型 · 通道', share: '占本窗口', nums: '词元 · 金额' },
+  workspace: { id: '工作区 · 目录', share: '占本窗口', nums: '词元 · 金额' },
 }
 
 function cutsOf(view: ProviderUsageView): Slice[] {
@@ -200,6 +206,16 @@ export function ProviderPanel() {
   const available = view === undefined ? cuts : cutsOf(view)
 
   const active: Slice = available.includes(slice) ? slice : available[0] ?? 'model'
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { panelRef.current?.scrollTo({ top: 0 }) }, [range, active])
+  const total = view === undefined
+    ? 0
+    : active === 'model'
+      ? view.byModel.length
+      : active === 'workspace'
+        ? view.byWorkspace.length
+        : view.providers.length
+  const scrollable = active === 'provider' ? total > 3 : total > 7
   const note = SLICE_NOTES[active]
   const cols = COLUMNS[active]
   const showCuts = view !== undefined ? available.length > 0 : busy
@@ -215,10 +231,15 @@ export function ProviderPanel() {
   }
 
   return (
-    <section aria-label="用量明细" className="dtpl-usage-section">
+    <section aria-label="用量明细" className="dtpl-card dtpl-span-12 dtpl-usage-section">
       <div className="dtpl-usage-head">
         <div className="dtpl-usage-head-top">
-          <h2 className="dtpl-sec-title dtpl-usage-title">{RANGE_WORDS[range]}用量</h2>
+          <h2 className="dtpl-mod-t">
+            {RANGE_WORDS[range]}用量
+            {view !== undefined && total > 0 && (
+              <span className="dtpl-usage-count">· {total} {SLICE_UNITS[active]}</span>
+            )}
+          </h2>
           <div className="dtpl-usage-scope">
             <div className="dtpl-range-tabs" role="group" aria-label="时间跨度">
               {RANGE_IDS.map((id) => (
@@ -298,7 +319,9 @@ export function ProviderPanel() {
           ) : (
             <span className="dtpl-sk dtpl-usage-cuts-sk" aria-hidden="true" />
           )}
-          <span className="dtpl-sec-aside" title={note.title}>{note.text}</span>
+          <span className="dtpl-sec-aside" title={note.title}>
+            {note.text}{scrollable ? ' · 列表可滚动' : ''}
+          </span>
         </div>
       )}
 
@@ -311,11 +334,13 @@ export function ProviderPanel() {
       ) : cols !== undefined && view !== undefined ? (
         <div className="dtpl-bd-cols" aria-hidden="true">
           <span className="dtpl-bd-col-id">{cols.id}</span>
+          <span className="dtpl-bd-col-share">{cols.share}</span>
           <span className="dtpl-bd-col-nums">{showMoney ? cols.nums : '词元'}</span>
         </div>
       ) : null}
 
       <div
+        ref={panelRef}
         role="tabpanel"
         id="dtpl-usage-panel"
         aria-busy={busy}
@@ -329,6 +354,9 @@ export function ProviderPanel() {
               ? <WorkspaceRows rows={view.byWorkspace} totalTokens={view.totalTokens} money={moneyOf} showMoney={showMoney} />
               : <ProviderCards cards={view.providers} labels={view.providerLabels ?? {}} money={moneyOf} showMoney={showMoney} />}
       </div>
+      {view !== undefined && active === 'model' && view.byWorkspace.length > 0 && (
+        <WorkspaceStrip rows={view.byWorkspace} totalTokens={view.totalTokens} />
+      )}
     </section>
   )
 }
@@ -428,6 +456,30 @@ function ProviderCard({ card, money, labels, showMoney }: {
         })}
       </div>
     </article>
+  )
+}
+
+function WorkspaceStrip({ rows, totalTokens }: {
+  rows: readonly WorkspaceUsageRow[]
+  totalTokens: number
+}) {
+  return (
+    <div className="dtpl-ws-strip">
+      <div className="dtpl-ws-strip-h"><span>工作区摘要</span><span>词元 · 占本窗口</span></div>
+      <div className="dtpl-ws-strip-grid">
+        {rows.slice(0, 4).map((row) => (
+          <div className="dtpl-ws-cell" key={row.id === '' ? 'unattributed' : row.id}>
+            <div className="dtpl-ws-cell-k" title={row.path === '' ? '未归属' : row.path}>{row.title}</div>
+            <div className="dtpl-ws-cell-v">
+              {formatTokens(row.tokens)}<span>{formatShare(row.tokens, totalTokens)}</span>
+            </div>
+            <div className="dtpl-ws-cell-bar" aria-hidden="true">
+              <i style={{ width: `${share(row.tokens, totalTokens)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 

@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-08 · supersedes: —
+> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-19 · supersedes: —
 
 A **cross-session token-usage ledger for DeepSeek Harness (DSH)**. The host half folds every billed model
 call into one row of a local, per-day JSONL ledger and aggregates it with costs; the browser half shows it
@@ -62,25 +62,25 @@ A price is a single current value, so an amount answers *what the tokens I used 
 not what an invoice said. That is why money is reported only for windows of 30 days or less; the all-time
 view reports tokens only. Tokens are facts, prices are not.
 
-## The four tabs
+## The three tabs
 
-1. **用量总览 / Overview** — three stacked modules: **today** (tokens against the 7-day average, actual
-   spend with the 7-day total, subscription value when there is any), a **14-day trend** line, and
-   today's **token composition** as share bars (cache writes appear only when the ledger has any).
-   Scrolling past it continues into **用量明细 / Usage detail**: the chosen window (today / yesterday /
-   last 7 days / last 30 days / all) crossed with three breakdowns — by model, by workspace, by provider
-   route. Money appears only in the windows of 30 days or less.
-2. **订阅额度 / Subscription quota** — account-level official usage, fetched from the provider's own API
-   with your key, so it includes every tool and device on that subscription. Covers Command Code and
-   OpenCode Go.
-3. **价格表 / Pricing** — one model per screen: pick a route and a model, then write its current price
-   (four tiers plus optional peak/off-peak slots). The FX rate and the statutory-holiday calendar live
-   here too.
-4. **统计口径 / Method** — what is not estimated, what is missing, and how the numbers reconcile.
+1. **用量总览 / Overview** — a responsive card grid on 12 columns, in asymmetric 5/7, 7/5, 12 rows.
+   **Today** (tokens, actual spend as the headline figure, cache hit rate) pairs with **订阅额度 /
+   subscription quota** — account-level official usage fetched from the provider's own API with your key
+   (so it includes every tool and device on that subscription; covers Command Code and OpenCode Go).
+   Beneath, the **14-day trend** (tokens as bars, spend as a line) pairs with **today's token composition**;
+   **用量明细 / Usage detail** takes the full row. Money appears only in windows of 30 days or less.
+   Narrow containers collapse the grid to one column and the quota cards to two, then one.
+2. **价格表 / Pricing** — a card grid: a full-width selector strip, then **price detail** (7 columns)
+   beside the **statutory-holiday calendar** (5 columns). Pick a route and a model, then write its
+   current price (four tiers plus optional peak/off-peak slots); the FX rate lives in the selector strip.
+3. **统计口径 / Method** — a card grid: intro and quick facts, four token buckets (5 columns) beside the
+   call-classification table (7 columns), then reconciliation gaps, field mapping, and data footer.
+   What is not estimated, what is missing, and how the numbers reconcile.
 
-| Usage detail, the overview's second section | Subscription quota |
+| Usage detail, the overview's last full-width block | Subscription quota, a card row below the overview |
 | --- | --- |
-| ![Usage detail](docs/assets/panel-detail.png) | ![The subscription quota tab](docs/assets/panel-quota.png) |
+| ![Usage detail](docs/assets/panel-detail.png) | ![The subscription quota card](docs/assets/panel-quota.png) |
 
 | Pricing | Method |
 | --- | --- |
@@ -154,7 +154,7 @@ config:
 A second patch targeting `id: tokbook` **replaces** that row's `config` wholesale, so restate every key
 you want to keep.
 
-The quota tab fetches with your key but never estimates locally, and the browser half never holds the key.
+The subscription quota cards fetch with your key but never estimate locally, and the browser half never holds the key.
 A key without an active subscription is not an error: a balance-only provider gets a `balance` card, and
 one that reports window percentages without a plan (OpenCode Go answering `403` for a valid key) gets a
 `none` card. Only an endpoint that actually answered derives a gate — a timeout or `5xx` is *unknown*,

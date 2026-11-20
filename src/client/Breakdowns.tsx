@@ -1,6 +1,6 @@
 import type { CostedModelRow, WorkspaceUsageRow } from '../types.ts'
 import { totalsTokens } from '../types.ts'
-import { formatDateTime, formatRelative, formatShare, formatTokens } from './format.ts'
+import { formatDateTime, formatRelative, formatShare, formatTokens, share } from './format.ts'
 import { ShareRing } from './ShareRing.tsx'
 
 export function isNoPrice(cost: number, unpriced: boolean): boolean {
@@ -38,6 +38,10 @@ export function ModelRows({ byModel, totalTokens, money, unpriced, showMoney }: 
                   <span className="dtpl-model-provider"><span className="dtpl-sr">通道 </span>{m.provider}</span>
                 )}
               </div>
+            </div>
+            <div className="dtpl-row-share" aria-hidden="true">
+              <span className="dtpl-row-share-track"><i style={{ width: `${share(tokens, totalTokens)}%` }} /></span>
+              <span className="dtpl-row-share-p">{formatShare(tokens, totalTokens)}</span>
             </div>
             <div className="dtpl-model-nums">
               <span className="dtpl-val">
@@ -106,6 +110,10 @@ export function WorkspaceRows({ rows, totalTokens, money, showMoney }: {
                   </span>
                 </span>
               </div>
+            </div>
+            <div className="dtpl-row-share" aria-hidden="true">
+              <span className="dtpl-row-share-track"><i style={{ width: `${share(row.tokens, totalTokens)}%` }} /></span>
+              <span className="dtpl-row-share-p">{formatShare(row.tokens, totalTokens)}</span>
             </div>
             <div className="dtpl-model-nums">
               <span className="dtpl-val">

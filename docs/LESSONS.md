@@ -406,7 +406,7 @@ CSS 解析器遇到多余的 `}` 不会停：它进入错误恢复，把紧随�
 ### 正确做法
 
 - 每个载荷入口一个 `readXxx(raw): T | null`（`TokBookPanel` 的 `readOverview`、`PricingPanel` 的
-  `readPricingView`、`ProviderPanel` 的 `readUsageView`、`QuotaPanel` 的两个判定）。**只盖渲染会无条件
+  `readPricingView`、`ProviderPanel` 的 `readUsageView`、`QuotaSection` 的两个判定）。**只盖渲染会无条件
   解引用的字段**：可选字段与细节一律不收紧，否则一次正常演进也会被判死。
 - 判定放在**任何 setState 之前**：不合法就当一次读失败，走错误态（错误条 + 重试）——那是唯一的恢复入口。
 - 反过来的一面是词元页：它没有"重试就有一份完整数据"的假设，于是 `session-wire` 走另一条路——

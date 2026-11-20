@@ -4,13 +4,13 @@ import type { SyncResultView, SyncStatusView, TokBookOverview, UsageDayRow } fro
 import { ROUTE_OVERVIEW, ROUTE_RESCAN, ROUTE_SYNC } from '../route-paths.ts'
 import type { TokBookViewStore } from './store.ts'
 import { PricingPanel } from './pricing/PricingPanel.tsx'
-import { QuotaPanel } from './quota/QuotaPanel.tsx'
+import { QuotaSection } from './quota/QuotaSection.tsx'
 import { LedgerSkeleton, LedgerView } from './LedgerView.tsx'
 import { ProviderPanel } from './ProviderPanel.tsx'
 import { MethodDoc } from './MethodDoc.tsx'
 import { UsageGlyph } from './icons.tsx'
 import { RescanButton } from './RescanButton.tsx'
-import { formatDateTime, formatRelative } from './format.ts'
+import { formatDateTime, formatRelative, formatShare, localDayKey, shiftDayKey } from './format.ts'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
 
 export interface TokBookPanelProps {
@@ -47,9 +47,9 @@ function readOverview(raw: unknown): TokBookOverview | null {
   return source as TokBookOverview
 }
 
-type TokBookTab = 'ledger' | 'quota' | 'pricing' | 'method'
+type TokBookTab = 'ledger' | 'pricing' | 'method'
 
-const TAB_IDS: ReadonlyArray<TokBookTab> = ['ledger', 'quota', 'pricing', 'method']
+const TAB_IDS: ReadonlyArray<TokBookTab> = ['ledger', 'pricing', 'method']
 
 function describeScanResult(result: SyncResultView): string {
   const added = result.added === 0 ? '扫描没有新记录' : `扫描补上 ${result.added} 条记录`
@@ -58,6 +58,7 @@ function describeScanResult(result: SyncResultView): string {
 
 export function TokBookPanel({ view }: TokBookPanelProps) {
   const { overview, error, pricingDirty } = useSyncExternalStore(view.subscribe, view.getSnapshot)
+  const [tab, setTab] = useState<TokBookTab>('ledger')
   const [sync, setSync] = useState<SyncStatusView | null>(null)
   const [scanResult, setScanResult] = useState<SyncResultView | null>(null)
   const [scanNotice, setScanNotice] = useState<string | null>(null)
@@ -139,6 +140,7 @@ export function TokBookPanel({ view }: TokBookPanelProps) {
   }, [refresh])
 
   const onVisibleTab = useCallback((next: TokBookTab) => {
+    setTab(next)
     const previous = visibleTab.current
     visibleTab.current = next
     if (next !== 'ledger' || previous === 'ledger') return
@@ -167,8 +169,9 @@ export function TokBookPanel({ view }: TokBookPanelProps) {
   const syncFailure = sync?.status === 'error' ? sync.error ?? '原因不明' : null
 
   return (
-    <div className="dtpl-page" data-plugin="dsh-tokbook">
+    <div className="dtpl-page" data-plugin="dsh-tokbook" data-tab={tab}>
       <TokBookPage
+        tab={tab}
         overview={overview}
         error={error}
         busy={busy}
@@ -185,8 +188,26 @@ export function TokBookPanel({ view }: TokBookPanelProps) {
     </div>
   )
 }
+function LedgerHeadMeta({ overview }: { overview: TokBookOverview }) {
+  const earliest = shiftDayKey(localDayKey(), -13)
+  const recent = overview.byDay.filter(row => row.day >= earliest)
+  const cacheRead = recent.reduce((sum, row) => sum + row.totals.cacheReadTokens, 0)
+  const input = recent.reduce((sum, row) => sum + row.totals.inputTokens, 0)
+  return (
+    <div className="dtpl-head-meta">
+      <span>账本 <b>{overview.records}</b> 条</span>
+      {recent.length > 0 && (
+        <>
+          <i aria-hidden="true">·</i>
+          <span>近 {recent.length} 天缓存命中 <b>{cacheRead + input > 0 ? formatShare(cacheRead, cacheRead + input) : '—'}</b></span>
+        </>
+      )}
+    </div>
+  )
+}
 
-function TokBookPage({ overview, error, busy, syncFailure, scanResult, scanNotice, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onVisibleTab }: {
+function TokBookPage({ tab, overview, error, busy, syncFailure, scanResult, scanNotice, pricingDirty, onDirtyChange, onRescan, onRetry, onRefresh, onVisibleTab }: {
+  tab: TokBookTab
   overview: TokBookOverview | null
   error: string | null
   busy: boolean
@@ -200,11 +221,9 @@ function TokBookPage({ overview, error, busy, syncFailure, scanResult, scanNotic
   onRefresh: () => void
   onVisibleTab: (tab: TokBookTab) => void
 }) {
-  const [tab, setTab] = useState<TokBookTab>('ledger')
   const bodyRef = useRef<HTMLDivElement>(null)
 
   const selectTab = useCallback((next: TokBookTab) => {
-    setTab(next)
     onVisibleTab(next)
   }, [onVisibleTab])
 
@@ -246,6 +265,7 @@ function TokBookPage({ overview, error, busy, syncFailure, scanResult, scanNotic
           <span className="dtpl-title-ico-chip"><UsageGlyph className="dtpl-title-ico" /></span>
           <span>词元账本</span>
         </h1>
+        {tab === 'ledger' && overview !== null && <LedgerHeadMeta overview={overview} />}
       </header>
 
       <div className="dtpl-tabs" role="tablist" aria-label="账本视图" onKeyDown={onTablistKeyDown}>
@@ -260,18 +280,6 @@ function TokBookPage({ overview, error, busy, syncFailure, scanResult, scanNotic
           onClick={() => selectTab('ledger')}
         >
           用量总览
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="dtpl-tab-quota"
-          aria-selected={tab === 'quota'}
-          aria-controls="dtpl-panel"
-          tabIndex={tab === 'quota' ? 0 : -1}
-          className="dtpl-tab"
-          onClick={() => selectTab('quota')}
-        >
-          订阅额度
         </button>
         <button
           type="button"
@@ -308,30 +316,40 @@ function TokBookPage({ overview, error, busy, syncFailure, scanResult, scanNotic
         aria-labelledby={`dtpl-tab-${tab}`}
       >
         {tab === 'method'
-          ? <MethodDoc overview={overview} />
-          : tab === 'quota'
-            ? <QuotaPanel />
-            : tab === 'pricing'
-              ? (
+          ? (
+            <div className="dtpl-grid">
+              <MethodDoc overview={overview} />
+            </div>
+          )
+          : tab === 'pricing'
+            ? (
+              <div className="dtpl-grid">
                 <PricingPanel
                   onChanged={onRefresh}
                   onDirtyChange={onDirtyChange}
                 />
-              )
-              : (
-              <>
+              </div>
+            )
+            : (
+              <div className="dtpl-grid">
                 {error !== null && (
-                  <div className="dtpl-error" role="alert">
+                  <div className="dtpl-error dtpl-span-12" role="alert">
                     <p className="dtpl-error-text">加载失败：{error}</p>
                     <button type="button" className="dtpl-retry" onClick={onRetry}>重试</button>
                   </div>
                 )}
                 {overview === null
                   ? <LedgerSkeleton />
-                  : <LedgerView overview={overview} busy={busy} retry={failedText !== null} onRescan={onRescan} />}
-                <ProviderPanel />
-              </>
-              )}
+                  : <LedgerView
+                      overview={overview}
+                      busy={busy}
+                      retry={failedText !== null}
+                      onRescan={onRescan}
+                      quota={<QuotaSection />}
+                    />}
+                {!(overview !== null && overview.records === 0) && <ProviderPanel />}
+              </div>
+            )}
       </div>
 
       {overview !== null && tab === 'ledger' && (!emptyLedger || footText !== '') && (

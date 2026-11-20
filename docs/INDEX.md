@@ -11,7 +11,7 @@
 | 文件 | 角色 | 状态 | 何时读 |
 |---|---|---|---|
 | [`AGENTS.md`](../AGENTS.md) | identity(身份) | current | 每个任务——自动载入上下文 |
-| [`README.md`](../README.md) | entry(入口) | current | 公开门面(**英文**):这是什么、装它、配置、四个 tab、已知缺口。给第一次来的访客看,不放开发细节 |
+| [`README.md`](../README.md) | entry(入口) | current | 公开门面(**英文**):这是什么、装它、配置、三个 tab、已知缺口。给第一次来的访客看,不放开发细节 |
 | [`README.zh.md`](../README.zh.md) | entry(入口)+ operations(操作) | current | 维护者的那一份(中文,`README.md` 的镜像):范围、安装、配置,外加 `src/` 布局树、构建与开发回路 |
 | `docs/INDEX.md` | index(地图,本文件) | current | 在文档间导航 |
 | [`docs/CONTRACTS.md`](CONTRACTS.md) | contracts(契约) | current | **改 host 行为前读这一份**:术语与口径、**让数字保持诚实的不变量**、单写者与数据目录、不显然的默认值——只写**代码里读不出来、违反后不会报错但会把钱算错**的规则。路由 / wire 形状 / 配置键 / 数据文件清单都是代码(见它的指针表);路由路径**不得**在这份文档里复述 |

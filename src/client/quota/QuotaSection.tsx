@@ -52,7 +52,7 @@ const QUOTA_FRESH_MS = 60_000
 
 const QUOTA_REFRESH_COOLDOWN_MS = 30_000
 
-export function QuotaPanel() {
+export function QuotaSection() {
   const [providers, setProviders] = useState<readonly string[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [autoMinutes, setAutoMinutes] = useState(readAutoMinutes)
@@ -116,51 +116,43 @@ export function QuotaPanel() {
     [providers, gates],
   )
   return (
-    <section className="dtpl-quota-sec" aria-label="订阅额度">
-      <p className="dtpl-quota-intro">
-        各订阅的<b>官方账户用量</b>（由插件用你配置的 key 直接向该通道方查询）。
+    <section className="dtpl-card dtpl-span-7 dtpl-quota-panel" aria-label="订阅额度">
+      <div className="dtpl-quota-strip">
+        <h2 className="dtpl-quota-strip-t">订阅额度</h2>
+        {hasProviders && <AutoRefreshControl value={autoMinutes} onChange={chooseAutoMinutes} />}
+      </div>
+      <p className="dtpl-quota-strip-note">
+        各订阅的官方账户用量，由插件用你配置的 key 直接向该通道方查询；与上面这份本机账本不是一套数。
       </p>
 
-      {hasProviders && (
-        <AutoRefreshControl value={autoMinutes} onChange={chooseAutoMinutes} />
-      )}
-
-      {listError !== null && (
+      {listError !== null ? (
         <div className="dtpl-error" role="alert">
           <p className="dtpl-error-text">额度加载失败：{listError}</p>
           <button type="button" className="dtpl-retry" onClick={() => setReload((count) => count + 1)}>重试</button>
         </div>
+      ) : providers === null ? (
+        <div className="dtpl-quota-sk-body" aria-hidden="true">
+          <div className="dtpl-quota-sk-card dtpl-sk" />
+          <div className="dtpl-quota-sk-card dtpl-sk" />
+        </div>
+      ) : !hasProviders ? (
+        <div className="dtpl-empty">
+          <UsageGlyph className="dtpl-empty-ico" />
+          <p className="dtpl-empty-title">尚未配置任何订阅额度查询</p>
+          <p className="dtpl-empty-sub">在插件配置的 <code>plans</code> 里为 opencode-go / commandcode 提供 API key，或在本机 Models 页填好该通道的 key，这里就会展示官方账户用量。</p>
+        </div>
+      ) : (
+        <div className="dtpl-quota-grid">
+          {ordered.map((provider) => (
+            <QuotaCardController
+              key={provider}
+              provider={provider}
+              autoTicker={autoTicker}
+              onGate={reportGate}
+            />
+          ))}
+        </div>
       )}
-
-      {listError !== null
-        ? null
-        : providers === null
-          ? (
-            <div className="dtpl-skeleton" aria-hidden="true">
-              <div className="dtpl-quota-sk-card dtpl-sk" />
-              <div className="dtpl-quota-sk-card dtpl-sk" />
-            </div>
-          )
-          : !hasProviders
-            ? (
-              <div className="dtpl-empty">
-                <UsageGlyph className="dtpl-empty-ico" />
-                <p className="dtpl-empty-title">尚未配置任何订阅额度查询</p>
-                <p className="dtpl-empty-sub">在插件配置的 <code>plans</code> 里为 opencode-go / commandcode 提供 API key，或在本机 Models 页填好该通道的 key，这里就会展示官方账户用量。</p>
-              </div>
-            )
-            : (
-              <div className="dtpl-quota-cards">
-                {ordered.map((provider) => (
-                  <QuotaCardController
-                    key={provider}
-                    provider={provider}
-                    autoTicker={autoTicker}
-                    onGate={reportGate}
-                  />
-                ))}
-              </div>
-            )}
     </section>
   )
 }

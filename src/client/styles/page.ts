@@ -9,7 +9,7 @@ export const CSS_PAGE = `
   color:var(--dtpl-fg);
   overflow:hidden;
   --dtpl-page-pad:clamp(20px,3.6vw,40px);
-  --dtpl-page-col:1060px;
+  --dtpl-page-col:1760px;
 }
 
 [data-plugin="dsh-tokbook"].dtpl-page > .dtpl-head,
@@ -24,6 +24,16 @@ export const CSS_PAGE = `
   display:flex;align-items:center;justify-content:space-between;gap:16px;
   flex:none;
   padding:26px var(--dtpl-page-pad) 14px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-head-meta{
+  display:flex;align-items:center;gap:12px;flex:none;
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
+  color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-head-meta b{font-weight:600;color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-head-meta i{font-style:normal;color:var(--dtpl-fg-dim);}
+@media (max-width:760px){
+  [data-plugin="dsh-tokbook"] .dtpl-head-meta{display:none;}
 }
 html[data-platform="darwin"] [data-plugin="dsh-tokbook"] .dtpl-head{
   padding-top:calc(26px + var(--dsh-frame-top-clearance,0px));
@@ -75,6 +85,7 @@ html[data-platform="darwin"] [data-plugin="dsh-tokbook"] .dtpl-head{
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-body{
+  container-type:inline-size;
   flex:1;min-height:0;
   padding:20px var(--dtpl-page-pad) 28px;overflow:auto;overscroll-behavior:contain;
   scrollbar-gutter:stable;
