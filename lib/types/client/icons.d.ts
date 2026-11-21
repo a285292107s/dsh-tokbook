@@ -4,3 +4,6 @@ export declare function UsageGlyph({ className }: {
 export declare function RefreshGlyph({ className }: {
     className?: string;
 }): import("react").JSX.Element;
+export declare function ClockGlyph({ className }: {
+    className?: string;
+}): import("react").JSX.Element;

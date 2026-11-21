@@ -5,6 +5,7 @@ import { createTokBookViewStore, type TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
 import { TokBookPanel } from './TokBookPanel.tsx'
 import { TokBookPanelIcon } from './TokBookPanelIcon.tsx'
+import { SessionTimingEntry } from './SessionTimingEntry.tsx'
 import { SessionTokens } from './SessionTokens.tsx'
 import { SessionTokensEntry } from './SessionTokensEntry.tsx'
 
@@ -19,6 +20,8 @@ const TOKENS_TAB_ID = 'dsh-tokbook/tokens'
 const TOKENS_TAB_KIND = 'tokbook-tokens'
 
 const TOKENS_ENTRY_ORDER = -4
+
+const TIMING_ENTRY_ORDER = -3
 
 const QUOTA_ALERT_POLL_MS = 5 * 60_000
 
@@ -69,6 +72,14 @@ export function apply(ctx: TokBookContext): void {
       order: TOKENS_ENTRY_ORDER,
       inject: () => ({ openTokens: () => { ctx.sidebarRight.openTab(TOKENS_TAB_KIND) } }),
     }, SessionTokensEntry))
+
+  ctx.slots.inject('conversation.session.header.utilities', () =>
+    ctx.slots.register({
+      name: 'conversation.session.header.utilities',
+      id: 'tokbook-timing',
+      order: TIMING_ENTRY_ORDER,
+      inject: () => ({ openTokens: () => { ctx.sidebarRight.openTab(TOKENS_TAB_KIND) } }),
+    }, SessionTimingEntry))
 
   void refreshQuotaAlert(view)
   const poll = setInterval(() => { void refreshQuotaAlert(view) }, QUOTA_ALERT_POLL_MS)

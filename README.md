@@ -99,6 +99,11 @@ when you are done. It answers what the cross-session ledger cannot: **where this
 and then what it used in tokens and money. The layout follows the sidebar width: a wider body
 while the pane is wide, a single-column compact body once it drops below 640px.
 
+Beside it, a **耗时 / Time** button opens a compact popover anchored to the header: one card per turn,
+newest first, each leading with the turn's engine work and step count, then the wait / generation /
+tools split and a bar normalised to the slowest turn. A footer link opens the full token page when
+the step detail matters. The popover fetches only when opened and then follows the same ledger probe.
+
 - **Session time**, the page's lead reading: engine work (model + tool time summed over its steps)
   against session span — wait / generation / tools as one bar, the equation
   `span = work + not computing`, the first and last record times, the share of the span and the
