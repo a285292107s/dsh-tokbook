@@ -1,42 +1,44 @@
 import type { TokBookOverview } from '../types.ts'
 import { formatDateTime } from './format.ts'
 
+type ChipTone = 'on' | 'zero' | 'unknown'
+
+interface Chip {
+  text: string
+  tone: ChipTone
+}
+
 interface JudgeRow {
   what: string
   detail: string
-  requests: string
-  tokens: string
-  requestsOn?: boolean
-  tokensOn?: boolean
+  requests: Chip
+  tokens: Chip
 }
 
 const JUDGE_ROWS: readonly JudgeRow[] = [
   {
     what: '你发问、模型回复',
     detail: '每次模型调用记一次——一轮里模型连着调工具，就会记好几次。',
-    requests: '计 1 次',
-    tokens: '四桶累加',
+    requests: { text: '计 1 次', tone: 'on' },
+    tokens: { text: '四桶累加', tone: 'on' },
   },
   {
     what: '对话太长，系统自动压缩上文',
     detail: '这次总结本身也是一次计费调用，所以另记一次「压缩」（可在配置里关掉）。',
-    requests: '计 1 次',
-    tokens: '四桶累加',
+    requests: { text: '计 1 次', tone: 'on' },
+    tokens: { text: '四桶累加', tone: 'on' },
   },
   {
     what: '你中途停止，或这次调用没回报用量',
     detail: '厂商可能照常计费，账本却拿不到数字：计入次数，词元记为未知——不按 0 计，金额也因此按 ¥0 计（不是免费）。',
-    requests: '计 1 次',
-    tokens: '未知',
-    tokensOn: false,
+    requests: { text: '计 1 次', tone: 'on' },
+    tokens: { text: '未知', tone: 'unknown' },
   },
   {
     what: '请求失败了（报错、自动重试）',
     detail: '仍留一条失败记录、单独计数，在用量明细里报出「N 失败」；不抬高总量，也不被悄悄丢掉。',
-    requests: '不计入',
-    tokens: '不计入',
-    requestsOn: false,
-    tokensOn: false,
+    requests: { text: '不计入', tone: 'zero' },
+    tokens: { text: '不计入', tone: 'zero' },
   },
 ]
 
@@ -46,7 +48,6 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
       <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-head" aria-label="统计口径导言">
         <div className="dtpl-doc-lede">
           <p>本插件<b>不估算</b>：每个数字都来自<b>本机保存的对话记录</b>——只存在本机，不上传。</p>
-          <p><b>通道</b>（代码与文档里写作 provider）是你从哪接入、按什么方式付费的那条路，如 <code>deepseek-official</code>、<code>commandcode</code>；<b>模型厂商</b>是做出模型、定官方价的那一方。同一家公司可以兼任两者（DeepSeek 官方 API），也可以只是通道（Command Code 卖 DeepSeek 模型，但不是 DeepSeek）。</p>
           <p>向模型提问时，通道会回报这次消耗了多少词元。本页记的就是这些回报、逐条累加——<b>不是</b>模型厂商官网上的账户数据。</p>
         </div>
         <div className="dtpl-doc-facts" role="group" aria-label="口径速览">
@@ -63,8 +64,22 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
             <span className="dtpl-doc-fact-v">只记 DeepSeek Harness 的会话记录</span>
           </div>
         </div>
+        <div className="dtpl-doc-glossary">
+          <dl>
+            <div>
+              <dt>通道</dt>
+              <dd>你从哪接入、按什么方式付费的那条路；代码与文档里写作 provider，如 <code>deepseek-official</code>、<code>commandcode</code>。</dd>
+            </div>
+            <div>
+              <dt>模型厂商</dt>
+              <dd>做出模型、定官方价的那一方。</dd>
+            </div>
+          </dl>
+          <p>同一家公司可以兼任两者（DeepSeek 官方 API），也可以只是通道（Command Code 卖 DeepSeek 模型，但不是 DeepSeek）。</p>
+        </div>
       </section>
-      <section className="dtpl-card dtpl-span-5 dtpl-card-pad dtpl-doc dtpl-doc-sec">
+
+      <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">1</span>词元分四桶</h2>
         <p className="dtpl-doc-sub">
           厂商按 <b>词元（token）</b>计费——可以理解为模型读写的最小文字单位。一次请求的用量被拆成
@@ -78,7 +93,7 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         </div>
       </section>
 
-      <section className="dtpl-card dtpl-span-7 dtpl-card-pad dtpl-doc dtpl-doc-sec">
+      <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">2</span>记了哪些调用</h2>
         <p className="dtpl-doc-sub">
           按<b>你会遇到的情况</b>对照，每一行只回答两件事：算不算一次请求、有没有词元可加。
@@ -99,8 +114,8 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
                     <span className="dtpl-doc-judge-what">{row.what}</span>
                     <span className="dtpl-doc-judge-detail">{row.detail}</span>
                   </th>
-                  <td><Judge value={row.requests} on={row.requestsOn} /></td>
-                  <td><Judge value={row.tokens} on={row.tokensOn} /></td>
+                  <td><JudgeChip chip={row.requests} /></td>
+                  <td><JudgeChip chip={row.tokens} /></td>
                 </tr>
               ))}
             </tbody>
@@ -113,6 +128,9 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
 
       <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-sec">
         <h2 className="dtpl-doc-title"><span className="dtpl-doc-idx">3</span>差额从哪来</h2>
+        <p className="dtpl-doc-sub">
+          账本与账单对不上，通常不是记错：要么是本账本<b>没记到</b>的部分，要么是两边的<b>统计方式</b>本来就不同。
+        </p>
         <div className="dtpl-doc-gap">
           <article className="dtpl-doc-gap-card dtpl-doc-gap-warn">
             <h3 className="dtpl-doc-gap-title">账本会比账单少：没记到的</h3>
@@ -122,8 +140,16 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
                 <span className="dtpl-doc-gap-item-desc">给对话起标题的小请求没有走常规记录通道，本账本拿不到那次用量。会话每有新发言都可能再生成一次，是最大的固定漏项。</span>
               </li>
               <li>
-                <span className="dtpl-doc-gap-item-name">中途取消 / 出错的请求</span>
-                <span className="dtpl-doc-gap-item-desc"><b>中途取消</b>：文字已经发出去了，厂商可能照常计费，本账本拿不到用量——按上表记为「未知」，并在用量明细的通道卡上单独报出「<b>N 次没上报用量</b>」。<b>最终失败的尝试</b>：只计失败次数、不计词元；厂商若照样收费，这里也会对不上。</span>
+                <span className="dtpl-doc-gap-item-name">中途取消</span>
+                <span className="dtpl-doc-gap-item-desc">文字已经发出去了，厂商可能照常计费，本账本拿不到用量——按上表记为「未知」，并在用量明细的通道卡上单独报出「<b>N 次没上报用量</b>」。</span>
+              </li>
+              <li>
+                <span className="dtpl-doc-gap-item-name">最终失败的尝试</span>
+                <span className="dtpl-doc-gap-item-desc">只计失败次数、不计词元；厂商若照样收费，这里也会对不上。</span>
+              </li>
+              <li>
+                <span className="dtpl-doc-gap-item-name">没有收尾的失败尝试</span>
+                <span className="dtpl-doc-gap-item-desc">流结束时没有产出可见消息、也没有以报错收尾或安排重试。这种尝试可能只在上报流里带了用量，账本拿不到——失败次数与词元都不会记。</span>
               </li>
               <li>
                 <span className="dtpl-doc-gap-item-name">不走会话记录的调用</span>
@@ -161,25 +187,27 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
         <p className="dtpl-doc-sub">
           左侧是本账本，右侧是平台导出的字段：
         </p>
-        <div className="dtpl-doc-map">
+        <div className="dtpl-doc-map" role="region" aria-label="本账本与平台导出的字段对应" tabIndex={0}>
           <div className="dtpl-doc-map-row">
             <span><b>未缓存输入</b></span>
             <span className="dtpl-doc-map-arrow">↔</span>
-            <span><code>prompt_cache_miss_tokens</code></span>
+            <code>prompt_cache_miss_tokens</code>
           </div>
           <div className="dtpl-doc-map-row">
             <span><b>缓存读取</b></span>
             <span className="dtpl-doc-map-arrow">↔</span>
-            <span><code>prompt_cache_hit_tokens</code></span>
+            <code>prompt_cache_hit_tokens</code>
           </div>
           <div className="dtpl-doc-map-row">
             <span><b>输出</b></span>
             <span className="dtpl-doc-map-arrow">↔</span>
-            <span><code>completion_tokens</code></span>
+            <code>completion_tokens</code>
           </div>
         </div>
-        <p className="dtpl-doc-map-note">未缓存输入、缓存读取、输出正好对应平台导出的三个字段。</p>
-        <p className="dtpl-doc-map-note">除第 3 节列的那几类漏项外，应逐日吻合。</p>
+        <div className="dtpl-doc-notes">
+          <p>未缓存输入、缓存读取、输出正好对应平台导出的三个字段。</p>
+          <p>除第 3 节列的那几类漏项外，应逐日吻合。</p>
+        </div>
       </section>
 
       <section className="dtpl-card dtpl-span-12 dtpl-card-pad dtpl-doc dtpl-doc-tail">
@@ -203,8 +231,9 @@ export function MethodDoc({ overview }: { overview: TokBookOverview | null }) {
   )
 }
 
-function Judge({ value, on = true }: { value: string; on?: boolean }) {
-  return <span className={on ? 'dtpl-doc-chip' : 'dtpl-doc-chip dtpl-doc-chip-off'}>{value}</span>
+function JudgeChip({ chip }: { chip: Chip }) {
+  const tone = chip.tone === 'on' ? '' : ` dtpl-doc-chip-${chip.tone}`
+  return <span className={`dtpl-doc-chip${tone}`}>{chip.text}</span>
 }
 
 function Bucket({ name, desc }: { name: string; desc: string }) {
