@@ -1,46 +1,18 @@
 import type { SessionStepRow, StepTiming } from '../types.ts';
-type TimeSegment = {
+type TimeKind = 'model' | 'wait' | 'generate' | 'tool';
+export interface TimeSegment {
     key: string;
     value: number;
-    kind: 'model' | 'wait' | 'generate' | 'tool';
-};
-export interface TimeBarRead {
-    key: string;
-    kind: TimeSegment['kind'];
-    label: string;
-    value: string;
-    isOver?: boolean;
+    kind: TimeKind;
 }
-export declare const PHASE_LABEL: Record<'wait' | 'generate' | 'model' | 'tool', string>;
-export declare const LEGEND_SHAPE: ReadonlyArray<{
-    kind: 'wait' | 'generate' | 'tool';
-    share: number;
-    label: string;
-}>;
-export declare function TimeReads({ reads }: {
-    reads: readonly TimeBarRead[];
-}): import("react").JSX.Element;
-type TimeBarProps = {
+export declare const PHASE_LABEL: Record<TimeKind, string>;
+export declare function TimeDial({ workMs, segments }: {
+    workMs?: number;
     segments: readonly TimeSegment[];
-} & ({
-    tone: 'step';
-} | {
-    tone: 'turn';
-    scale: number;
-} | {
-    tone: 'hero';
-    scale: number;
-    reads: readonly TimeBarRead[];
-});
-export declare function TimeBar(props: TimeBarProps): import("react").JSX.Element | null;
-export declare function sumSegments(rows: readonly SessionStepRow[]): {
-    key: string;
-    value: number;
-    kind: 'model' | 'wait' | 'generate' | 'tool';
-}[];
-export declare function stepSegments(timing: StepTiming | undefined): {
-    key: string;
-    value: number;
-    kind: 'model' | 'wait' | 'generate' | 'tool';
-}[];
+}): import("react").JSX.Element;
+export declare function PhaseLedger({ segments }: {
+    segments: readonly TimeSegment[];
+}): import("react").JSX.Element;
+export declare function sumSegments(rows: readonly SessionStepRow[]): TimeSegment[];
+export declare function stepSegments(timing: StepTiming | undefined): TimeSegment[];
 export {};

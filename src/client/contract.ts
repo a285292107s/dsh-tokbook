@@ -16,22 +16,6 @@ export interface SlotsService {
   register(options: SlotRegisterOptions, component: unknown): () => void
 }
 
-export interface SidebarRightTabDefinition {
-  id: string
-  kind: string
-  title: (address: string) => string
-}
-
-export interface SidebarRightTabsService {
-  register(definition: SidebarRightTabDefinition): () => void
-}
-
-export interface SidebarRightService {
-  openTab(kind: string): void
-}
-
 export type TokBookContext = Context & {
   slots: SlotsService
-  sidebarRightTabs: SidebarRightTabsService
-  sidebarRight: SidebarRightService
 }

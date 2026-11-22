@@ -1,11 +1,11 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-19 · supersedes: —
+> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-22 · supersedes: —
 
 A **cross-session token-usage ledger for DeepSeek Harness (DSH)**. The host half folds every billed model
 call into one row of a local, per-day JSONL ledger and aggregates it with costs; the browser half shows it
-as a four-tab page in the main column, opened from a row (`sidebar.panellist`) in the sidebar's panel list,
-plus a **词元 / Tokens** page that the conversation view ring gains for a single session.
+as a three-tab page in the main column, opened from a row (`sidebar.panellist`) in the sidebar's panel list.
+The conversation header adds two compact popovers, **词元 / Tokens** and **耗时 / Time**, one card per turn.
 
 | Light | Dark |
 | --- | --- |
@@ -91,55 +91,40 @@ lookup** fuzzy-searches the selected model name for a candidate to fill, and **�
 fills gaps on USD routes the ledger has billed. Only first-party entries are trusted, and a hand-written
 price is never overwritten.
 
-## The session token page
+## The session tokens popover
 
-A **词元 / Tokens** button in the session header opens the page as a **right-sidebar tab** that reads one
-**single session** by turn and by step over its whole lifetime — next to the conversation, closeable
-when you are done. It answers what the cross-session ledger cannot: **where this session's time went**,
-and then what it used in tokens and money. The layout follows the sidebar width: a wider body
-while the pane is wide, a single-column compact body once it drops below 640px.
+A **词元 / Tokens** button in the session header opens a compact popover anchored to the header: one card
+per turn, newest first. Each card's split ring is cut into the four token buckets — uncached input, cache
+read, cache write, output — with the turn's token total in the centre; the table beside it gives each
+bucket's mark, label, tokens and share. Output is solid; the other three use brightness plus vertical,
+horizontal and diagonal hatching, so the composition reads without colour. The ring is a full circle, not
+normalised to the heaviest turn; compare turns by the centre figures. Zero buckets stay listed as 0 / 0%.
+A turn whose calls reported no usage says so instead of showing 0; a partly reported turn sums only what
+was reported and names the gap beside the step count. Failed attempts are counted in the step total but
+contribute no tokens, so the card names them as (含 N 次失败). Between-turn and unknown-turn rows are left out.
 
-Beside it, a **耗时 / Time** button opens a compact popover anchored to the header: one card per turn,
-newest first, each leading with the turn's engine work and step count, then the wait / generation /
-tools split and a bar normalised to the slowest turn. A footer link opens the full token page when
-the step detail matters. The popover fetches only when opened and then follows the same ledger probe.
+It shares one session view (`GET /tokbook/session`) and one popover shell with the timing popover: read-only,
+fetched only when opened, then following the same ledger probe. It reports **no money** — money is the ledger
+page's current-price view, and mixing it into a token reading would conflate measured tokens with a
+recomputed price.
 
-- **Session time**, the page's lead reading: engine work (model + tool time summed over its steps)
-  against session span — wait / generation / tools as one bar, the equation
-  `span = work + not computing`, the first and last record times, the share of the span and the
-  turn / step counts, and the slowest step, slowest tool, busiest turn and tool-call count.
-  Unmeasurable means omitted, not zero.
-- **Tokens and money**, second because time leads the page: the session's four-bucket total as one
-  number, the four bucket figures in a line beneath it, and three facts to the right — actual spend,
-  subscription value, share of today's spend. Under it, one proportional composition bar plus four
-  read-out columns with their shares, the billing-input formula (uncached input + cache read + cache
-  write) and the cache hit rate.
-- **Per-turn time**, collapsed by default and laid out as numbered entries on one vertical line:
-  a turn header leads with the turn's engine work, then its steps, tokens and model, then a
-  three-phase bar normalised to the heaviest turn (drawn on a full-width track) plus the same
-  numbers. Sort by oldest / newest / **most time first**. Expanding it lists one row per billed
-  call: the step's wall time first, beside its number, then the
-  `model / wait / generation / tools / tok per s` table, then buckets and money. Between-turns and
-  unknown-turn blocks stay separate.
-- **Subagents**, last because nothing else on the page includes them: one row per direct subagent
-  (creation label, tokens, share of all subagents, money), with nested delegations folded into their
-  direct parent so no subtree is counted twice. The header stays session-only, and a manual fork —
-  `parentSession` but not a subagent, per the host header's `origin` — never counts. No direct child,
-  no block.
-- A footer sums unknown usage, failures and unpriced `(route, model)` pairs.
+## The session timing popover
 
-It is **read-only** against the ledger and config and needs no live session: it reads ledger rows plus
-the session's log on disk. A shared probe reads the host's ledger generation every 3 seconds and
-refetches only when it changed, falling back to a 15-second poll elsewhere; nothing is sent while the
-page is in the background.
+A **耗时 / Time** button in the session header opens a compact popover anchored to the header: one card
+per turn, newest first. Each card's left edge carries a split ring: the centre is that turn's engine work,
+the arc is cut into wait / generation / tools (or one crosshatched model segment when the channel cannot
+split them), and the table beside it gives each segment's mark, label, duration and share. Each card also
+names the provider / model used by the turn (when more than one model was used, it reports the first and the
+count; the full list is in the hover title). The ring is
+always a full circle — it shows composition, not a length normalised to the slowest turn; compare turns by
+the centre figures. Turns whose steps carry no timing say so instead of
+showing 0. The popover fetches only when opened and then follows the same ledger probe; between-turn and
+unknown-turn rows are left out.
 
-![The session token page](docs/assets/tokens-page.png)
-
-> **Known degradation:** attributing rows to turns and steps needs the host's `sessionPersistence`. Without
-> it the numbers still arrive, but every non-compaction row lands in an "unknown turn" block and the
-> session-time block does not render at all. The subagent block needs it for lineage and is omitted
-> entirely — "cannot tell whether there are children" is not "there are none". Timings are local
-> wall-clock, not billed duration.
+It is **read-only** against the ledger and config and needs no live session: it reads the session's log on
+disk for event times. Timings are local wall-clock, not billed duration. Attributing billed rows to turns
+and steps needs the host's `sessionPersistence`; without it the view has no turns, so the popover shows no
+card at all.
 
 ## Configuration
 
@@ -196,7 +181,7 @@ pnpm test         # smoke (pure logic) + selfcheck (ledger) + selfcheck:ui (UI s
 
 `pnpm build` is a product, not a check: run it when you want a `src/` change to show up in a host or the
 preview bench. `pnpm ledger` serves the same page against a real ledger directory, and without `--ledger`
-it becomes the fixture bench these screenshots came from (`?dark=1`, `?tab=`, `?view=tokens&pane=<px>`, `?quota=`).
+it becomes the fixture bench these screenshots came from (`?dark=1`, `?tab=`, `?view=timing` for both header popovers, `?quota=`).
 
 The Chinese README ([`README.zh.md`](README.zh.md)) carries the `src/` layout tree and the development
 loop. The contracts that keep the numbers honest are in [`docs/CONTRACTS.md`](docs/CONTRACTS.md); the

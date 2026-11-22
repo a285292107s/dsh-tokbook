@@ -18,7 +18,7 @@
 | [`docs/DESIGN.md`](DESIGN.md) | reason(推理 / 背景) | current | 改架构、价格/计价、额度或界面结构前先读这一份。**只留从代码推不出来的抽象**:DSH 插件机制与 `dsh web` 的组合方式、**外置包契约与坑**(CJS factory / 禁 `default` 导出 / external 基线)、插槽语义与社区两条路线、**为什么是这个形状**(逐请求行 / 派生折叠可丢 / 本地日历日 / 单写者 / 精确 Fetch 路由)与每条的代价、额度门的外部证据(§3.1)、参考坐标。逐文件、逐字段、路由路径、尺寸数字都不在这里。顶部「阅读指南」区分历史与现状——**§9 已删,§8 只剩指针** |
 | [`docs/HMR.md`](HMR.md) | lessons(教训)/ reference(参考) | current | HMR 机制与模块级重载的去重边界——改账本 / 去重路径前先读 |
 | [`docs/LESSONS.md`](LESSONS.md) | lessons(教训) | current | 改 client 样式、client bundle、构建或浏览器验证时对照的踩坑记录;也收 ARIA、账本探针、预览台 fixture 契约这类「不报错只是悄悄错」的判断 |
-| [`docs/CONTEXT.md`](CONTEXT.md) | reference(参考,词汇表+呈现口径) | current | 用到本插件的词汇、或要新增术语/改界面取值时。**只收新词与呈现口径**——既有词(通道 / 用量未知 / 价格未知 …)一律指向 CONTRACTS,不在这里重复;tokens 分档、对比度达标线、构造尺明度与纹路、片段拼接顺序在它的「取值与样式口径」一节 |
+| [`docs/CONTEXT.md`](CONTEXT.md) | reference(参考,词汇表+呈现口径) | current | 用到本插件的词汇、或要新增术语/改界面取值时。**只收新词与呈现口径**——既有词(通道 / 用量未知 / 价格未知 …)一律指向 CONTRACTS,不在这里重复;tokens 分档、对比度达标线、构成环明度与纹路、片段拼接顺序在它的「取值与样式口径」一节 |
 | [`docs/adr/`](adr/) | reason(推理,决策记录) | current | 改**难逆转**的决定前(读路径 / 数据归属 / 归属口径)。ADR 只收「难逆转 + 没有上下文会令人惊讶 + 真权衡」三项同时成立的决策,其余理由进 DESIGN.md。**逐份看 `status`**:`0002` 是 `draft`(已定案但代码里还没有),别把它读成现状 |
 
 ## Doc meta 约定

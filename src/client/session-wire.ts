@@ -2,7 +2,7 @@ import type {
   SessionStepRow, SessionSubagentRow, SessionSubagentsView, SessionUsageGroup, SessionUsageView, StepTiming, UsageTotals,
 } from '../types.ts'
 
-export function num(value: unknown): number {
+function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 

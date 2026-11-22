@@ -1,4 +1,4 @@
 export interface SessionTokensEntryProps {
-    openTokens: () => void;
+    sessionId?: string;
 }
-export declare function SessionTokensEntry({ openTokens }: SessionTokensEntryProps): import("react").JSX.Element;
+export declare function SessionTokensEntry({ sessionId }: SessionTokensEntryProps): import("react").JSX.Element;

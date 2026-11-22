@@ -744,7 +744,7 @@ const SESSIONS = {
     const betweenRows = [step(0, 0, M_FAST, 'deepseek', 6, { inputTokens: 34_000, outputTokens: 1_800, cacheReadTokens: 120_000 }, { kind: 'compaction', cost: 0.08, bucket: 'spend', timing: { llmMs: 20_600 } })]
     const betweenTurns = groupOf(null, betweenRows)
     const unattributed = [step(0, 0, M_SPEEULESS, 'opencode-go', 20, { inputTokens: 1_200, outputTokens: 300, cacheReadTokens: 0 }, { bucket: 'unpriced', cost: 0, timing: null })]
-    const total = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 1, failures: 1, usageUnknown: 1 }
+    const total = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 1, failures: 1, usageUnknown: 0 }
     for (const g of [...turns, betweenTurns]) {
       total.requests += g.totals.requests
       total.inputTokens += g.totals.inputTokens
@@ -754,6 +754,7 @@ const SESSIONS = {
     }
     total.inputTokens += 1_200
     total.outputTokens += 300
+    total.requests += 1
     const times = [...turns.flatMap((g) => g.rows), ...betweenRows, ...unattributed].map((row) => row.time)
     const workMs = workOf([...turns.flatMap((g) => g.rows), ...betweenRows])
     return {
@@ -783,16 +784,19 @@ function groupOf(turn, rows) {
   let spend = 0
   let subscriptionValue = 0
   for (const row of rows) {
-    totals.requests += 1
-    if (row.usage === undefined) totals.usageUnknown += 1
-    else {
-      totals.inputTokens += row.usage.inputTokens
-      totals.outputTokens += row.usage.outputTokens
-      totals.cacheReadTokens += row.usage.cacheReadTokens ?? 0
-      totals.cacheWriteTokens += row.usage.cacheWriteTokens ?? 0
+    if (row.kind === 'failure') {
+      totals.failures += 1
+    } else {
+      totals.requests += 1
+      if (row.kind === 'compaction') totals.compactions += 1
+      if (row.usage === undefined) totals.usageUnknown += 1
+      else {
+        totals.inputTokens += row.usage.inputTokens
+        totals.outputTokens += row.usage.outputTokens
+        totals.cacheReadTokens += row.usage.cacheReadTokens ?? 0
+        totals.cacheWriteTokens += row.usage.cacheWriteTokens ?? 0
+      }
     }
-    if (row.kind === 'compaction') totals.compactions += 1
-    if (row.kind === 'failure') totals.failures += 1
     tokens += row.tokens
     if (row.bucket === 'subscription') subscriptionValue += row.cost
     else if (row.bucket !== 'unpriced') spend += row.cost
@@ -1067,27 +1071,6 @@ const server = createServer((req, res) => {
     flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;
     color:var(--dsw-alias-label-dimmed,#b4b8bc);font-size:13px;
   }
-  .dsh-rightbar{
-    flex:none;width:var(--pane-w,640px);max-width:70%;
-    display:flex;flex-direction:column;min-height:0;
-    border-left:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));
-  }
-  .dsh-rightbar[hidden]{display:none;}
-  .dsh-rightbar-strip{
-    display:flex;align-items:center;gap:6px;flex:none;
-    padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1,rgb(0 0 0 / 8%));
-    font-size:12px;color:var(--dsw-alias-label-secondary,#61666b);
-  }
-  .dsh-rightbar-chip{
-    padding:2px 8px;color:var(--dsw-alias-label-primary,#0f1115);
-    box-shadow:inset 0 -2px 0 currentColor;
-  }
-  .dsh-rightbar-close{
-    margin-left:auto;appearance:none;border:0;background:transparent;cursor:pointer;
-    padding:2px 6px;font:inherit;color:inherit;
-  }
-  .dsh-rightbar-body{flex:1 1 0;min-height:0;display:flex;flex-direction:column;overflow:hidden;}
-  .dsh-rightbar-body > [data-slot="sidebar.right.pane.tab"]{flex:1 1 0;min-height:0;display:flex;flex-direction:column;}
 
   :root{
     --dsw-alias-bg-base:#ffffff;
@@ -1178,18 +1161,11 @@ const server = createServer((req, res) => {
   <div class="dsh-session-host" id="session-host" hidden>
     <div class="dsh-session-head">
       <b>预览会话</b>
-      <span>会话头部右侧的 utilities 槽位 · ?pane=宽（默认 640）</span>
+      <span>会话头部右侧的 utilities 槽位</span>
       <div class="dsh-session-utils" id="header-utils"></div>
     </div>
     <div class="dsh-session-body">
       <div class="dsh-session-main">对话正文（预览里不画）</div>
-      <div class="dsh-rightbar" id="rightbar" hidden>
-        <div class="dsh-rightbar-strip">
-          <span class="dsh-rightbar-chip">词元</span>
-          <button type="button" class="dsh-rightbar-close" id="rightbar-close">关闭侧栏</button>
-        </div>
-        <div class="dsh-rightbar-body" id="rightbar-body"></div>
-      </div>
     </div>
   </div>
   <script type="module">
@@ -1197,21 +1173,13 @@ const server = createServer((req, res) => {
     const mounted = window.__MOUNTED__;
     const root = document.getElementById('root');
     const sessionHost = document.getElementById('session-host');
-    const rightbar = document.getElementById('rightbar');
-    const rightbarBody = document.getElementById('rightbar-body');
     const headerUtils = document.getElementById('header-utils');
-    const SESSION = 'preview-session-1';
-    const requestedPane = Number(params.get('pane') ?? 640);
-    const paneWidth = Number.isFinite(requestedPane) && requestedPane > 0 ? requestedPane : 640;
-    rightbar.style.setProperty('--pane-w', paneWidth + 'px');
-
+    const SESSION = ${JSON.stringify(SESSIONS[SESSION_SCENARIO].sessionId)};
     const ctx = {
       slots: {
         inject(name, callback) { callback(); return () => {}; },
         register(options, component) { mounted.push({ options, component }); return () => {}; },
       },
-      sidebarRightTabs: { register() { return () => {}; } },
-      sidebarRight: { openTab() { rightbar.hidden = false; } },
       effect(execute) { const dispose = execute(); return typeof dispose === 'function' ? dispose : () => {}; },
     };
     window.__PLUGIN_EXPORTS__.apply(ctx);
@@ -1225,10 +1193,7 @@ const server = createServer((req, res) => {
       let share = options.inject ? options.inject() : {};
       if (options.name === 'conversation.session.header.utilities') {
         host = headerUtils;
-        share = options.inject ? options.inject(SESSION) : {};
-      } else if (options.name === 'sidebar.right.pane.tab') {
-        host = rightbarBody;
-        share = { sessionId: SESSION, useProjection: () => undefined };
+        share = { sessionId: SESSION };
       }
       const slot = document.createElement('div');
       slot.dataset.slot = options.name;
@@ -1238,10 +1203,9 @@ const server = createServer((req, res) => {
 
     const tabFlag = params.get('tab') ?? (params.has('quota') ? 'ledger' : null);
 
-    if (params.get('view') === 'tokens') {
+    if (params.get('view') === 'timing') {
       sessionHost.hidden = false;
       root.style.display = 'none';
-      rightbar.hidden = false;
     } else if (window.__PREVIEW_NO_AUTO !== true && tabFlag !== null) {
       let tries = 0;
       setTimeout(function pick() {
@@ -1250,7 +1214,6 @@ const server = createServer((req, res) => {
         if (++tries < 25) setTimeout(pick, 100);
       }, 100);
     }
-    document.getElementById('rightbar-close').addEventListener('click', () => { rightbar.hidden = true; });
   </script>
 </body>
 </html>`)
@@ -1263,7 +1226,7 @@ server.listen(port, '127.0.0.1', () => {
     return
   }
   console.log(`preview on http://127.0.0.1:${port}/  (?tab=ledger|pricing|method, ?dark=1, 额度场景用 ?quota=rich|percent|mix|unconfigured|error|balance|payg|nosub|retiredfirst|none，落在总览里)`)
-  console.log(`  词元页：http://127.0.0.1:${port}/?view=tokens（模拟会话头部 + 右侧侧栏；?pane=360|640|900 换侧栏宽；形状 TOKBOOK_SESSION_SCENARIO=${SESSION_SCENARIO}）`)
+  console.log(`  会话头部浮层：http://127.0.0.1:${port}/?view=timing（模拟会话头部，词元 / 耗时两颗按钮都在；形状 TOKBOOK_SESSION_SCENARIO=${SESSION_SCENARIO}）`)
   console.log(`  整台的形状由 **环境变量** 选（一个进程 = 一种形状）：TOKBOOK_MODE=empty|err|sync|syncerr（当前：${MODE === '' ? '有数据' : MODE}）。`)
   console.log(`  lib/client.js 按请求读盘：pnpm build 之后刷新页面即可，不用重启本进程。`)
 })

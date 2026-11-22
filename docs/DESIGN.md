@@ -1,6 +1,6 @@
 # dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-11-19 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-11-22 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。本文只留**从代码推不出来**的东西：外部
 > 系统的机制与事实、为什么是现在这个形状、每条选择的代价。权威来源只有两个——官方文档站点
@@ -31,7 +31,13 @@
 > - **第六期（2026-11-15）= 词元页搬进右侧侧栏**：`conversation.view` 里的「词元」页退役，换成
 >   会话头部的一个「词元」按钮（`conversation.session.header.utilities`）+ 右侧侧栏里的一个页签
 >   （`sidebarRightTabs` 注册类型，页体挂 `sidebar.right.pane.tab`）。理由：单会话读数要能**和对话
->   并排看**，而对话视图环一次只显示一页；侧栏页签还能随手关、随手再开。
+>   并排看**，而对话视图环一次只显示一页；侧栏页签还能随手关、随手再开。**该页已于第七期退役。**
+> - **第七期（2026-11-22）= 词元页退役**：右侧侧栏页签与会话头部的「词元」按钮删除，整页组件
+>   （步骤明细 / 子代理 / 每轮用时）一并删掉；单会话的用时读数只剩会话头部「耗时」浮层。host 的
+>   会话视图路由（`GET /tokbook/session`）保留——浮层仍读它；账本页与账本口径不动。
+> - **第八期（2026-11-22）= 词元浮层回到会话头部**：退役的「词元」按钮以**浮层**回来，和「耗时」共用一套壳
+>   （开合 / 取数 / 卡片头 / 原生 popover 定位）。不恢复右侧侧栏页签，也不恢复步骤明细 / 子代理 / 每轮用时整页：
+>   单会话的每轮四桶在浮层里就能读完；跨会话 / 按窗口 / 钱仍在账本页。两个浮层读同一份会话视图。
 >
 > **精确接口** → [`CONTRACTS.md`](CONTRACTS.md)；实现与操作现状 → [`../README.zh.md`](../README.zh.md)；
 > HMR → [`HMR.md`](HMR.md)。
@@ -63,8 +69,7 @@ Web UI 的侧边栏面板列表里加一行入口，选中后在主栏打开账�
   所以不吃 base 层那套 schema 校验的 JSON 后端（`storage-domain`）。（§5 有同一条的完整理由。）
 - **host→浏览器**：`ctx.webServer` 的精确 Fetch 路由——外置插件难以贡献生成式 Typert Remote。
 - **UI**：只填**已声明**的槽——侧栏面板行 + 主栏账本页（`sidebar.panellist` + `main`），
-  会话头部按钮（`conversation.session.header.utilities`），以及右侧侧栏的词元页签
-  （`ctx.sidebarRightTabs.register` 的类型 + `sidebar.right.pane.tab` 的页体）。外置插件不能声明新 slot（§6）。
+  与会话头部按钮（`conversation.session.header.utilities`）。外置插件不能声明新 slot（§6）。
 
 ## 3. DSH 插件机制（必要背景）
 
@@ -116,12 +121,17 @@ Web UI 的侧边栏面板列表里加一行入口，选中后在主栏打开账�
 ## 4. 总体架构
 
 两个半区，一条单向数据流：**host 拥有全部数据**（持久事件流 → 折叠 → 账本落盘 → 精确 Fetch 路由），
-**browser 只注册三个已声明的 slot 并读那条路由**（侧栏面板行 / 主栏账本页 / 会话词元页）；面板行的选中态归宿主，账本页只关心自己那一列挂载了没有。**为什么：**
+**browser 只注册三个已声明的 slot 并读那条路由**（侧栏面板行 / 主栏账本页 / 会话头部「词元」与「耗时」两颗按钮，
+同一 slot 的两个条目）；面板行的选中态归宿主，账本页只关心自己那一列挂载了没有。**为什么：**
 
 - **数据只过 host**：账本要跨重启、要被别的消费者读，而 browser 半区只活在一个页面里；持久
   `session/event` 流也只有 host 看得到。
 - **host→browser 用精确 Fetch 路由**而不是生成式 Remote：外置插件贡献不了 remote namespace（§2）。
 - **控制面与数据面分开**：面板行只负责选中、账本页只负责读，两者都进**已声明**的槽，所以不动 DSH（§6）。
+
+两个会话浮层共用 `SessionOverlay`（取数 / 定位 / 卡片头 / 空错态）与 `dial.tsx`（切分环几何），只有卡片内容不同：
+一个画时间相位，一个画四桶。共用一层壳不是抽象冲动——开合与取数一旦各写一份，「打开才拉、跟着账本代数刷新、
+Escape 还焦点」就会在两处慢慢分叉。
 
 **路由注册挂在 `ctx.inject(['webServer'])` 的作用域上，不是外层 ctx。** `register` 撞到同一个
 `(kind, path)` 会抛错，而 webServer 单独重载时只有注入作用域上的 effect 会跟着撤销——把注册留在外层，
@@ -379,8 +389,7 @@ bundle 层，以及 client 改动怎么生效（`rev` 不可变缓存、刷新 /
    不要重算」只看账本代数（`/tokbook/sync` 的 `ledger`），不接 SSE、也不盲轮询（口径见
    [`CONTRACTS.md`](CONTRACTS.md) §2）。
 3. **记账权威源**：`assistant/message` 的 `usage`；不用 `session-telemetry`（可能丢 / 重）。
-4. **UI 槽位**：只填已声明的 `sidebar.panellist` + `main` ＋ 会话头部 utilities ＋ 右侧侧栏页签
-   （`sidebarRightTabs` + `sidebar.right.pane.tab`），**无需改 DSH 仓库**（路线 A，见 §6.0）。
+4. **UI 槽位**：只填已声明的 `sidebar.panellist` + `main` ＋ 会话头部 utilities，**无需改 DSH 仓库**（路线 A，见 §6.0）。
 5. **不要看 `dsh-costbook`**（已废弃 / 有问题的实现），不要照抄它。
 
 ## 11. 风险与后续

@@ -1,9 +1,9 @@
 # ADR 0002 — 侧栏项目行的用量入口走 DOM 注入，不给 DSH 本体加 slot
 
-> **Doc meta** · role: reason · language: zh-CN · status: draft · last-reviewed: 2026-10-17 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: draft · last-reviewed: 2026-11-22 · supersedes: —
 
 - **状态**：已接受（2026-09-30），但**尚未实现**——`src/` 里从没有过它的代码（全历史可查），
-  当前 client 半区只注册三个 slot、没有任何宿主 DOM 注入。所以本文记的是**打算怎么做**，
+  当前 client 半区只注册三个 slot（会话头部 utilities 里有「词元」「耗时」两个条目）、没有任何宿主 DOM 注入。所以本文记的是**打算怎么做**，
   不是现状；读了它别以为界面上已经有那枚图标。
 - **决策**：侧栏**项目行**里那枚「看这个项目的用量」图标，由插件 client 半区**往宿主 DOM 里注入**
   （项目行行尾的操作容器里、⋯ 之前），**不给 DSH 本体加 slot**。图标是纯图标（悬停出工具提示），
@@ -24,7 +24,7 @@
 - 项目行在 DOM 里带 `data-row-key="workspace:<workspaceId>"`；未归属分组是 `workspace:`（空 key，
   `buildGroup('' , undefined, …)`）。这个 `workspaceId` 与账本侧 `WorkspaceUsageRow.id`（`src/window-usage.ts`
   的 `byId` 键）**是同一个值**——因此「哪一行 = 哪个项目」不需要新增 host 路由。
-- 本插件的其余 UI（侧栏面板行、主栏账本页、会话词元页）全部注册进宿主**已声明**的槽（DESIGN §6.0 路线 A），
+- 本插件的其余 UI（侧栏面板行、主栏账本页、会话头部「词元」「耗时」按钮）全部注册进宿主**已声明**的槽（DESIGN §6.0 路线 A），
   **这枚图标将是唯一的例外**。
 - 改 DSH 本体加 slot 的代价：补丁只能落在**全局 npm 安装**的
   `@deepseek-ai/dsh-client-ui-workspace/lib/client.js`（打好的 bundle，不是源码）——`npm i -g` 一升级就没了，
