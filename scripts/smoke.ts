@@ -46,7 +46,7 @@ import {
   resolvePlanApiKey, fetchOfficialQuota, fetchOpenCodeGoQuota, fetchCommandCodeQuota, parseOpenCodeGoUsage,
 } from '../src/quota-official.ts'
 import type { BillingNature, HolidayCalendar, PricingEntryInput, PricingTable, PricingView, UsageRecord } from '../src/types.ts'
-import { settleTiming, totalsTokens, UNPRICED_KEY } from '../src/types.ts'
+import { totalsTokens, UNPRICED_KEY } from '../src/types.ts'
 import { buildSessionUsageView, joinOfEvents, type SessionJoin } from '../src/session-usage.ts'
 
 let failed = 0
@@ -1752,7 +1752,7 @@ if (section('models.dev 查价:模糊搜索 / 排序 / 采信边界')) {
 if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0')) {
   const joinOf = (events: readonly SessionEventLike[] | null, sessionId = 'sess-t'): SessionJoin =>
     (events === null
-      ? { turn: null, timing: null, span: null, labels: new Map() }
+      ? { turn: null, timing: null }
       : joinOfEvents(sessionId, events))
 
   const packed = (time0: number, texts: string[], dt: number[]) =>
@@ -1815,19 +1815,13 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
       return t.wallMs >= (t.llmMs ?? 0) + (t.toolMs ?? 0)
     }))
 
-  check('会话跨度含挂起时间(4 小时)',
-    view.spanMs === 4 * 3_600_000)
-  check('引擎工作不含重试退避那 10s(5 + 2 + 0.9 + 2.9 = 10.8s)', view.workMs === 10_800)
-  check('分组用时不另存一份,settleTiming 现加等于逐行相加',
-    settleTiming(rows).llmMs + settleTiming(rows).toolMs === view.workMs)
 
   const blind = buildSessionUsageView({
     sessionId: 'sess-t', records, join: joinOf(null),
     pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
   })
-  check('日志读不到:用时与跨度都缺席(不报 0——那是「量不到」),行仍进 unattributed',
-    blind.spanMs === undefined && blind.workMs === undefined
-    && blind.unattributed.every((row) => row.timing === undefined))
+  check('日志读不到:行仍进 unattributed,用时整段缺席(不报 0——那是「量不到」)',
+    blind.unattributed.every((row) => row.timing === undefined))
 
   const compBase = dayMillis('2026-03-02', 9)
   const compEvents: SessionEventLike[] = [
@@ -1863,58 +1857,8 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
   check('同一步的两行只报一次用时(报在有产出的那行),另行为「未计时」',
     retryRows.length === 2 && retryRows.filter((row) => row.timing !== undefined).length === 1
     && retryRows.find((row) => row.usage !== undefined)?.timing?.wallMs === 9_000)
-  check('同一步的用时不被加两遍:引擎工作 8s(模型)≤ 跨度 9s',
-    retryView.workMs === 8_000 && retryView.spanMs === 9_000)
 }
 
-if (section('会话子代理:整棵子树归一个直接子代理,fork 不算子代理')) {
-  const base = dayMillis('2026-03-03', 9)
-  const sessions = [
-    { header: { id: 'sess-p' } },
-    { header: { id: 'sub-a', parentSession: 'sess-p', origin: 'subagent' } },
-    { header: { id: 'sub-a-1', parentSession: 'sub-a', origin: 'subagent' } },
-    { header: { id: 'sub-b', parentSession: 'sess-p', origin: 'subagent' } },
-    { header: { id: 'fork-x', parentSession: 'sess-p' } },
-    { header: { id: 'other' } },
-  ]
-  const record = (sessionId: string, inputTokens: number) => ({
-    requestId: `${sessionId}:m1`, time: base, sessionId, model: 'm', provider: 'p',
-    usage: { inputTokens, outputTokens: 0 },
-  })
-  const records = [
-    record('sess-p', 100),
-    record('sub-a', 200),
-    record('sub-a-1', 300),
-    record('sub-b', 50),
-    record('fork-x', 999),
-    record('other', 999),
-  ]
-  const parentEvents: SessionEventLike[] = [
-    { type: 'assistant/message', time: base, seq: 0, data: { turn: 1, step: 1, message: { id: 'sess-p:m1', source: { provider: 'p', model: 'm' } } } },
-    { type: 'subagent/catalog', time: base, seq: 1, data: { childId: 'sub-a', label: '审查计价' } },
-  ]
-  const view = buildSessionUsageView({
-    sessionId: 'sess-p', records, sessions,
-    join: joinOfEvents('sess-p', parentEvents),
-    pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
-  })
-  const subagents = view.subagents
-  check('主合计仍是本会话自己的 100 词元,不并入子代理', view.totalTokens === 100)
-  check('两个直接子代理各自一行', subagents?.count === 2 && subagents.rows.length === 2)
-  check('整棵子树折进直接子代理:sub-a 500 = 200 + 300,子代理合计 550',
-    subagents?.rows[0]?.sessionId === 'sub-a' && subagents.rows[0].tokens === 500
-    && subagents?.totalTokens === 550)
-  check('「含 N 个下级」只数它自己的后代', subagents?.rows[0]?.descendants === 1 && subagents?.rows[1]?.descendants === 0)
-  check('两个直接子代理按词元降序排列', subagents?.rows[1]?.sessionId === 'sub-b' && subagents?.rows[1]?.tokens === 50)
-  check('fork 与无关会话都不算子代理', subagents?.rows.every((row) => row.sessionId !== 'fork-x' && row.sessionId !== 'other') === true)
-  check('父会话目录里的创建标签随行到达,缺席时留空', subagents?.rows[0]?.label === '审查计价' && subagents?.rows[1]?.label === '')
-  check('整段价格未知时行不报 ¥0 读数', subagents?.rows.every((row) => row.priced === false) === true)
-  const noLineage = buildSessionUsageView({
-    sessionId: 'sess-p', records, join: joinOfEvents('sess-p', parentEvents),
-    pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
-  })
-  check('没有会话清单时子代理一段缺席(不知道 ≠ 没有)', noLineage.subagents === undefined)
-}
 
 if (only !== null && ranSections === 0) {
   console.error(`\nno section matches --only ${JSON.stringify(only)}`)

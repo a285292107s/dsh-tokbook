@@ -396,28 +396,6 @@ export interface SessionUsageGroup {
     subscriptionValue: number;
     rows: SessionStepRow[];
 }
-export interface SessionSubagentRow {
-    sessionId: string;
-    label: string;
-    tokens: number;
-    requests: number;
-    failures: number;
-    usageUnknown: number;
-    spend: number;
-    subscriptionValue: number;
-    priced: boolean;
-    descendants: number;
-}
-export interface SessionSubagentsView {
-    count: number;
-    totalTokens: number;
-    spend: number;
-    subscriptionValue: number;
-    usageUnknown: number;
-    failures: number;
-    unpriced: string[];
-    rows: SessionSubagentRow[];
-}
 export interface SessionUsageView {
     sessionId: string;
     updatedAt: number;
@@ -432,9 +410,6 @@ export interface SessionUsageView {
     betweenTurns: SessionUsageGroup | null;
     unattributed: SessionStepRow[];
     todaySpend: number;
-    spanMs?: number;
-    workMs?: number;
     providerLabels?: Record<string, string>;
-    subagents?: SessionSubagentsView;
 }
 export declare function totalsTokens(totals: UsageTotals): number;

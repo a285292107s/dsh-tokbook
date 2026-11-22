@@ -7,20 +7,12 @@ export interface SessionUsageInput {
     sessionId: string;
     records: readonly UsageRecord[];
     join: SessionJoin;
-    sessions?: readonly SessionLineageLike[];
     pricing: PricingTable;
     billing: BillingMap;
     resolve: RateResolver;
     todaySpend: number;
     updatedAt: number;
     providerLabels?: Record<string, string>;
-}
-export interface SessionLineageLike {
-    header: {
-        id: string;
-        parentSession?: string;
-        origin?: string;
-    };
 }
 interface Attribution {
     turn: number;
@@ -29,11 +21,6 @@ interface Attribution {
 export interface SessionJoin {
     turn: ReadonlyMap<string, Attribution> | null;
     timing: SessionTimingIndex | null;
-    span: {
-        first: number;
-        last: number;
-    } | null;
-    labels: ReadonlyMap<string, string>;
 }
 export declare function joinOfEvents(sessionId: string, events: readonly SessionEventLike[]): SessionJoin;
 export declare function sessionJoin(persistence: SyncPersistence | undefined, sessionId: string, logger?: StatsLogger): Promise<SessionJoin>;

@@ -4,26 +4,20 @@ import { summarizeRecords, type RateResolver, type StatsLogger } from './stats.t
 import { recordFromRetry, type SessionEventLike } from './usage-record.ts'
 import type { SyncPersistence } from './sync.ts'
 import {
-  settleTiming, totalsTokens, type BillingMap, type PricingTable, type SessionStepRow, type SessionSubagentRow,
-  type SessionSubagentsView, type SessionUsageGroup, type SessionUsageView, type StepTiming, type UsageFields,
-  type UsageRecord, type UsageTotals,
+  totalsTokens, type BillingMap, type PricingTable, type SessionStepRow, type SessionUsageGroup,
+  type SessionUsageView, type StepTiming, type UsageFields, type UsageRecord, type UsageTotals,
 } from './types.ts'
 
 export interface SessionUsageInput {
   sessionId: string
   records: readonly UsageRecord[]
   join: SessionJoin
-  sessions?: readonly SessionLineageLike[]
   pricing: PricingTable
   billing: BillingMap
   resolve: RateResolver
   todaySpend: number
   updatedAt: number
   providerLabels?: Record<string, string>
-}
-
-export interface SessionLineageLike {
-  header: { id: string; parentSession?: string; origin?: string }
 }
 
 interface Attribution {
@@ -169,11 +163,9 @@ function groupOf(turn: number | null, entries: readonly Entry[], resolve: RateRe
 export interface SessionJoin {
   turn: ReadonlyMap<string, Attribution> | null
   timing: SessionTimingIndex | null
-  span: { first: number; last: number } | null
-  labels: ReadonlyMap<string, string>
 }
 
-const NO_JOIN: SessionJoin = { turn: null, timing: null, span: null, labels: new Map() }
+const NO_JOIN: SessionJoin = { turn: null, timing: null }
 
 const joinCache = new Map<string, SessionJoin>()
 const JOIN_CACHE_MAX = 8
@@ -190,27 +182,9 @@ async function revisionOf(persistence: SyncPersistence, sessionId: string): Prom
 }
 
 export function joinOfEvents(sessionId: string, events: readonly SessionEventLike[]): SessionJoin {
-  let first = Number.POSITIVE_INFINITY
-  let last = Number.NEGATIVE_INFINITY
-  const labels = new Map<string, string>()
-  for (const event of events) {
-    if (Number.isFinite(event.time)) {
-      if (event.time < first) first = event.time
-      if (event.time > last) last = event.time
-    }
-    if (event.type === 'subagent/catalog') {
-      const childId = event.data?.childId
-      const label = event.data?.label
-      if (typeof childId === 'string' && childId !== '' && typeof label === 'string' && label !== '') {
-        labels.set(childId, label)
-      }
-    }
-  }
   return {
     turn: turnIndexOf(sessionId, events),
     timing: timingIndexOf(sessionId, events),
-    span: Number.isFinite(first) && last >= first ? { first, last } : null,
-    labels,
   }
 }
 
@@ -267,118 +241,9 @@ export async function readSessionJoinEvents(
   }
 }
 
-interface SubagentBranch {
-  id: string
-  tree: readonly string[]
-}
-
-function subagentBranches(sessions: readonly SessionLineageLike[], rootId: string): SubagentBranch[] {
-  const children = new Map<string, string[]>()
-  for (const snapshot of sessions) {
-    const { id, parentSession, origin } = snapshot.header
-    if (origin !== 'subagent') continue
-    if (typeof parentSession !== 'string' || parentSession === '') continue
-    const siblings = children.get(parentSession)
-    if (siblings === undefined) children.set(parentSession, [id])
-    else siblings.push(id)
-  }
-  const branches: SubagentBranch[] = []
-  for (const child of children.get(rootId) ?? []) {
-    const tree: string[] = []
-    const seen = new Set<string>()
-    const stack = [child]
-    while (stack.length > 0) {
-      const id = stack.pop()!
-      if (seen.has(id)) continue
-      seen.add(id)
-      tree.push(id)
-      for (const grandchild of children.get(id) ?? []) stack.push(grandchild)
-    }
-    branches.push({ id: child, tree })
-  }
-  return branches
-}
-
-function subagentsOf(input: SessionUsageInput, labels: ReadonlyMap<string, string>): SessionSubagentsView | undefined {
-  const sessions = input.sessions
-  if (sessions === undefined || sessions.length === 0) return undefined
-  const branches = subagentBranches(sessions, input.sessionId)
-  if (branches.length === 0) return undefined
-
-  const owner = new Map<string, string>()
-  for (const branch of branches) {
-    for (const id of branch.tree) owner.set(id, branch.id)
-  }
-  const recordsByBranch = new Map<string, UsageRecord[]>()
-  for (const record of input.records) {
-    const branchId = owner.get(record.sessionId)
-    if (branchId === undefined) continue
-    const list = recordsByBranch.get(branchId)
-    if (list === undefined) recordsByBranch.set(branchId, [record])
-    else list.push(record)
-  }
-
-  const unpriced = new Set<string>()
-  const rows: SessionSubagentRow[] = []
-  let totalTokens = 0
-  let spend = 0
-  let subscriptionValue = 0
-  let usageUnknown = 0
-  let failures = 0
-  for (const branch of branches) {
-    const records = recordsByBranch.get(branch.id) ?? []
-    const totals = summarizeRecords(records, input.resolve).total
-    let branchSpend = 0
-    let branchSubscription = 0
-    let priced = false
-    for (const record of records) {
-      const price = priceOfRecord(record, input.pricing, input.billing, input.resolve, unpriced)
-      if (price.bucket === 'spend') {
-        branchSpend += price.cost
-        priced = true
-      } else if (price.bucket === 'subscription') {
-        branchSubscription += price.cost
-        priced = true
-      }
-    }
-    const tokens = totalsTokens(totals)
-    const unknown = totals.usageUnknown ?? 0
-    const failed = totals.failures ?? 0
-    rows.push({
-      sessionId: branch.id,
-      label: labels.get(branch.id) ?? '',
-      tokens,
-      requests: totals.requests,
-      failures: failed,
-      usageUnknown: unknown,
-      spend: branchSpend,
-      subscriptionValue: branchSubscription,
-      priced,
-      descendants: branch.tree.length - 1,
-    })
-    totalTokens += tokens
-    spend += branchSpend
-    subscriptionValue += branchSubscription
-    usageUnknown += unknown
-    failures += failed
-  }
-  rows.sort((left, right) => right.tokens - left.tokens
-    || (left.label !== right.label ? (left.label < right.label ? -1 : 1)
-      : (left.sessionId < right.sessionId ? -1 : left.sessionId > right.sessionId ? 1 : 0)))
-  return {
-    count: rows.length,
-    totalTokens,
-    spend,
-    subscriptionValue,
-    usageUnknown,
-    failures,
-    unpriced: [...unpriced].sort(),
-    rows,
-  }
-}
 
 export function buildSessionUsageView(input: SessionUsageInput): SessionUsageView {
-  const { turn: index, timing, span } = input.join
+  const { turn: index, timing } = input.join
   const owners = index === null ? new Map<string, string>() : timingOwners(input.records, index, input.sessionId)
   const all: Entry[] = []
   const turns = new Map<number, Entry[]>()
@@ -427,7 +292,6 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
     .sort((left, right) => left[0] - right[0])
     .map(([turn, entries]) => groupOf(turn, entries, input.resolve))
   const tail = between.length === 0 ? null : groupOf(null, between, input.resolve)
-  const subagents = subagentsOf(input, input.join.labels)
 
   return {
     sessionId: input.sessionId,
@@ -443,9 +307,7 @@ export function buildSessionUsageView(input: SessionUsageInput): SessionUsageVie
     betweenTurns: tail,
     unattributed: sortEntries(unattributed).map(entry => entry.row),
     todaySpend: input.todaySpend,
-    ...spanOf(span, all.map(entry => entry.row)),
     ...(input.providerLabels === undefined ? {} : { providerLabels: input.providerLabels }),
-    ...(subagents === undefined ? {} : { subagents }),
   }
 }
 
@@ -480,15 +342,4 @@ function timingOfRow(
   const key = `${String(at.turn)}:${String(at.step)}`
   if (owners.get(key) !== record.requestId) return undefined
   return timing.steps.get(key)
-}
-
-function spanOf(
-  span: { first: number; last: number } | null,
-  rows: readonly SessionStepRow[],
-): { spanMs?: number; workMs?: number } {
-  if (span === null) return {}
-  const { llmMs, toolMs } = settleTiming(rows)
-  const timed = rows.some((row) => row.timing !== undefined)
-  const elapsed = span.last >= span.first ? { spanMs: span.last - span.first } : {}
-  return timed ? { ...elapsed, workMs: llmMs + toolMs } : elapsed
 }

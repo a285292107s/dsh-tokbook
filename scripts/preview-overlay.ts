@@ -631,9 +631,6 @@ function step(turn, step, model, provider, ageMinutes, usage, extra = {}) {
   }
 }
 
-function workOf(rows) {
-  return rows.reduce((sum, row) => sum + (row.timing?.llmMs ?? 0) + (row.timing?.toolMs ?? 0), 0)
-}
 
 function fixtureTiming(outputTokens, seed) {
   const decodeMs = Math.round(outputTokens / 190 * 1000) + (seed % 7) * 130
@@ -696,8 +693,6 @@ const SESSIONS = {
       betweenTurns: null,
       unattributed: [],
       todaySpend: 4.99,
-      spanMs: 9 * minute,
-      workMs: workOf(rows),
     }
   })(),
   rich: (() => {
@@ -756,7 +751,6 @@ const SESSIONS = {
     total.outputTokens += 300
     total.requests += 1
     const times = [...turns.flatMap((g) => g.rows), ...betweenRows, ...unattributed].map((row) => row.time)
-    const workMs = workOf([...turns.flatMap((g) => g.rows), ...betweenRows])
     return {
       sessionId: 'sess-rich',
       updatedAt: t0,
@@ -771,8 +765,6 @@ const SESSIONS = {
       betweenTurns,
       unattributed,
       todaySpend: 4.99,
-      spanMs: 14 * 60 * minute,
-      workMs,
       providerLabels: USAGE_LABELS,
     }
   })(),

@@ -1,5 +1,5 @@
 import type {
-  SessionStepRow, SessionSubagentRow, SessionSubagentsView, SessionUsageGroup, SessionUsageView, StepTiming, UsageTotals,
+  SessionStepRow, SessionUsageGroup, SessionUsageView, StepTiming, UsageTotals,
 } from '../types.ts'
 
 function num(value: unknown): number {
@@ -29,10 +29,7 @@ export function readSessionView(raw: unknown): SessionUsageView | null {
     betweenTurns: readGroup(source.betweenTurns),
     unattributed: readRows(source.unattributed),
     todaySpend: num(source.todaySpend),
-    spanMs: optionalMs(source.spanMs),
-    workMs: optionalMs(source.workMs),
     providerLabels: readLabels(source.providerLabels),
-    subagents: readSubagents(source.subagents),
   }
 }
 
@@ -45,43 +42,6 @@ function readLabels(raw: unknown): Record<string, string> | undefined {
   return Object.keys(labels).length === 0 ? undefined : labels
 }
 
-function readSubagents(raw: unknown): SessionSubagentsView | undefined {
-  if (typeof raw !== 'object' || raw === null) return undefined
-  const source = raw as Partial<SessionSubagentsView>
-  const rows: SessionSubagentRow[] = []
-  if (Array.isArray(source.rows)) {
-    for (const item of source.rows) {
-      if (typeof item !== 'object' || item === null) continue
-      const row = item as Partial<SessionSubagentRow>
-      if (typeof row.sessionId !== 'string' || row.sessionId === '') continue
-      rows.push({
-        sessionId: row.sessionId,
-        label: typeof row.label === 'string' ? row.label : '',
-        tokens: num(row.tokens),
-        requests: num(row.requests),
-        failures: num(row.failures),
-        usageUnknown: num(row.usageUnknown),
-        spend: num(row.spend),
-        subscriptionValue: num(row.subscriptionValue),
-        priced: row.priced === true,
-        descendants: num(row.descendants),
-      })
-    }
-  }
-  if (rows.length === 0) return undefined
-  return {
-    count: num(source.count),
-    totalTokens: num(source.totalTokens),
-    spend: num(source.spend),
-    subscriptionValue: num(source.subscriptionValue),
-    usageUnknown: num(source.usageUnknown),
-    failures: num(source.failures),
-    unpriced: Array.isArray(source.unpriced)
-      ? source.unpriced.filter((key): key is string => typeof key === 'string')
-      : [],
-    rows,
-  }
-}
 
 function readTotals(raw: unknown): UsageTotals {
   const source = (typeof raw === 'object' && raw !== null ? raw : {}) as Partial<UsageTotals>

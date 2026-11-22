@@ -398,7 +398,7 @@ export class TokenUsageBook extends Service {
   }
 
   async sessionUsage(sessionId: string): Promise<SessionUsageView> {
-    const snapshots = await this.ensureFresh()
+    await this.ensureFresh()
     const { table, billing, resolve } = await this.rateContext()
     const records = await readCachedRecords(this.dir, this.logger)
     const join = await sessionJoin(this.persistence, sessionId, this.logger)
@@ -407,7 +407,6 @@ export class TokenUsageBook extends Service {
       sessionId,
       records,
       join,
-      sessions: snapshots,
       pricing: table,
       billing,
       resolve,
