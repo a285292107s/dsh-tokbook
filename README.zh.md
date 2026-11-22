@@ -286,7 +286,7 @@ src/
   route-paths.ts      host 与 browser 共用的 HTTP 路径 / query 键词表(两半区唯一的真源)
   routes.ts           host 精确 Fetch 路由(handler / method 的真源)
   client/
-    index.ts          client: apply(ctx),注册四个入口(主栏账本页 / 侧栏面板行 / 会话头部「词元」「耗时」按钮)
+    index.ts          client: apply(ctx),注册三个条目(主栏账本页 / 侧栏面板行 / 会话头部「词元」+「耗时」组)
     contract.ts       最小 client 契约:插件被授予的 ctx/slots 面
     store.ts          面板行图标 ↔ 账本页共享视图 store
     ledger-clock.ts   全插件共享的「账本又落行了」探针(3 s 一次、只读内存),驱动各页跟着会话更新
@@ -314,6 +314,7 @@ src/
     ProviderPanel.tsx 用量明细卡外壳(窗口 + 三种切法)
     Breakdowns.tsx    用量明细的两种行清单:按模型 / 按工作区
     MethodDoc.tsx     统计口径 tab
+    SessionHeaderEntries.tsx 会话头部的组入口:一个 slot 条目里按词元、耗时排两颗按钮
     SessionOverlay.tsx 两个会话浮层共用的壳:取数 / 原生 popover 定位 / 打开才拉 / 卡片头与错误骨架
     SessionTimingEntry.tsx 会话头部的「耗时」按钮:浮层里一轮一张卡片,打开时才拉会话视图
     SessionTokensEntry.tsx 会话头部的「词元」按钮:圆心报词元合计,环按四桶摊开

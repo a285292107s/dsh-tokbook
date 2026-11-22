@@ -1,4 +1,5 @@
 export const CSS_OVERLAY = `
+[data-plugin="dsh-tokbook"].dtpl-ov-group{display:inline-flex;align-items:center;gap:8px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-ov-root{display:inline-flex;align-items:center;min-width:0;}
 
 [data-plugin="dsh-tokbook"] .dtpl-ov-panel{

@@ -5,8 +5,7 @@ import { createTokBookViewStore, type TokBookViewStore } from './store.ts'
 import { injectStyles } from './styles.ts'
 import { TokBookPanel } from './TokBookPanel.tsx'
 import { TokBookPanelIcon } from './TokBookPanelIcon.tsx'
-import { SessionTimingEntry } from './SessionTimingEntry.tsx'
-import { SessionTokensEntry } from './SessionTokensEntry.tsx'
+import { SessionHeaderEntries } from './SessionHeaderEntries.tsx'
 
 export const inject = ['slots']
 
@@ -14,9 +13,7 @@ const PANEL_ID = 'tokbook'
 
 const PANEL_ENTRY_ORDER = 30
 
-const TIMING_ENTRY_ORDER = -3
-
-const TOKENS_ENTRY_ORDER = -4
+const SESSION_ENTRY_ORDER = -4
 
 const QUOTA_ALERT_POLL_MS = 5 * 60_000
 
@@ -51,16 +48,9 @@ export function apply(ctx: TokBookContext): void {
   ctx.slots.inject('conversation.session.header.utilities', () =>
     ctx.slots.register({
       name: 'conversation.session.header.utilities',
-      id: 'tokbook-tokens',
-      order: TOKENS_ENTRY_ORDER,
-    }, SessionTokensEntry))
-
-  ctx.slots.inject('conversation.session.header.utilities', () =>
-    ctx.slots.register({
-      name: 'conversation.session.header.utilities',
-      id: 'tokbook-timing',
-      order: TIMING_ENTRY_ORDER,
-    }, SessionTimingEntry))
+      id: 'tokbook-session',
+      order: SESSION_ENTRY_ORDER,
+    }, SessionHeaderEntries))
 
   void refreshQuotaAlert(view)
   const poll = setInterval(() => { void refreshQuotaAlert(view) }, QUOTA_ALERT_POLL_MS)
