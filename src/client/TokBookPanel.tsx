@@ -10,6 +10,7 @@ import { ProviderPanel } from './ProviderPanel.tsx'
 import { MethodDoc } from './MethodDoc.tsx'
 import { UsageGlyph } from './icons.tsx'
 import { RescanButton } from './RescanButton.tsx'
+import { ScrollRail } from './ScrollRail.tsx'
 import { formatDateTime, formatRelative } from './format.ts'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
 
@@ -298,6 +299,7 @@ function TokBookPage({ tab, overview, error, busy, syncFailure, scanResult, scan
         </button>
       </div>
 
+      <div className="dtpl-body-wrap">
       <div
         ref={bodyRef}
         className="dtpl-body"
@@ -340,6 +342,8 @@ function TokBookPage({ tab, overview, error, busy, syncFailure, scanResult, scan
                 {!(overview !== null && overview.records === 0) && <ProviderPanel />}
               </div>
             )}
+        </div>
+        <ScrollRail targetRef={bodyRef} resetKey={tab} />
       </div>
 
       {overview !== null && tab === 'ledger' && (!emptyLedger || footText !== '') && (

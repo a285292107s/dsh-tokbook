@@ -9,12 +9,12 @@ export const CSS_PAGE = `
   color:var(--dtpl-fg);
   overflow:hidden;
   --dtpl-page-pad:clamp(20px,3.6vw,40px);
-  --dtpl-page-col:1760px;
+  --dtpl-page-col:1280px;
 }
 
 [data-plugin="dsh-tokbook"].dtpl-page > .dtpl-head,
 [data-plugin="dsh-tokbook"].dtpl-page > .dtpl-tabs,
-[data-plugin="dsh-tokbook"].dtpl-page > .dtpl-body,
+[data-plugin="dsh-tokbook"].dtpl-page > .dtpl-body-wrap,
 [data-plugin="dsh-tokbook"].dtpl-page > .dtpl-foot{
   box-sizing:border-box;
   width:100%;max-width:var(--dtpl-page-col);margin-inline:auto;
@@ -84,22 +84,24 @@ html[data-platform="darwin"] [data-plugin="dsh-tokbook"] .dtpl-head{
   vertical-align:middle;
 }
 
+[data-plugin="dsh-tokbook"] .dtpl-body-wrap{position:relative;flex:1;min-height:0;}
 [data-plugin="dsh-tokbook"] .dtpl-body{
+  position:absolute;inset:0;box-sizing:border-box;
   container-type:inline-size;
-  flex:1;min-height:0;
   padding:20px var(--dtpl-page-pad) 28px;overflow:auto;overscroll-behavior:contain;
-  scrollbar-gutter:stable;
-  scrollbar-width:thin;
-  scrollbar-color:var(--dsw-alias-scrollbar-bg-l2,rgba(0,0,0,.2)) transparent;
+  scrollbar-width:none;
   scroll-padding:8px;
 }
-[data-plugin="dsh-tokbook"] .dtpl-body::-webkit-scrollbar{width:8px;}
-[data-plugin="dsh-tokbook"] .dtpl-body::-webkit-scrollbar-thumb{
-  border:2px solid transparent;border-radius:0;background-clip:padding-box;
-  background-color:var(--dsw-alias-scrollbar-bg-l2,rgba(0,0,0,.2));
+[data-plugin="dsh-tokbook"] .dtpl-body::-webkit-scrollbar{width:0;height:0;}
+[data-plugin="dsh-tokbook"] .dtpl-scroll-rail{
+  position:absolute;top:0;right:0;bottom:0;width:10px;z-index:1;
+  opacity:0;pointer-events:none;
+  transition:opacity var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
-[data-plugin="dsh-tokbook"] .dtpl-body::-webkit-scrollbar-thumb:hover{
-  background-color:var(--dsw-alias-scrollbar-hover-l2,rgba(0,0,0,.3));
+[data-plugin="dsh-tokbook"] .dtpl-scroll-rail[data-visible="true"]{opacity:1;}
+[data-plugin="dsh-tokbook"] .dtpl-scroll-thumb{
+  position:absolute;left:2px;width:5px;
+  background:color-mix(in srgb,var(--dtpl-fg) 30%,transparent);
 }
 
 [data-plugin="dsh-tokbook"] :focus-visible{
