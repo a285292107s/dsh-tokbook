@@ -8,7 +8,7 @@ import { QUERY_RANGE, ROUTE_USAGE } from '../route-paths.ts'
 import { UsageGlyph } from './icons.tsx'
 import { ShareRing } from './ShareRing.tsx'
 import { isNoPrice, ModelRows, WorkspaceRows } from './Breakdowns.tsx'
-import { formatMoney, formatShare, formatTokens, share } from './format.ts'
+import { formatMoney, formatTokens } from './format.ts'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
 
 const RANGE_IDS: ReadonlyArray<ProviderRange> = ['today', 'yesterday', 'last7', 'last30', 'all']
@@ -62,12 +62,12 @@ const SLICE_UNITS: Record<Slice, string> = {
 
 const SLICE_NOTES: Record<Slice, { text: string; title: string }> = {
   model: {
-    text: '词元从多到少 · 环为占本窗口',
-    title: '每个（通道，模型）在该窗口内的词元与费用，按词元从多到少排列；占比环的分母是这个窗口的总词元。',
+    text: '词元从多到少 · 占比按本窗口',
+    title: '每个（通道，模型）在该窗口内的词元与费用，按词元从多到少排列；占比的分母是这个窗口的总词元。',
   },
   workspace: {
-    text: '最近有操作在前 · 环为占本窗口',
-    title: '每个工作区在该窗口内的词元。记录按会话的创建目录归属到工作区；没有工作区目录、或目录未注册为工作区的记录归入「未归属」。占比环的分母是这个窗口的总词元。',
+    text: '最近有操作在前 · 占比按本窗口',
+    title: '每个工作区在该窗口内的词元。记录按会话的创建目录归属到工作区；没有工作区目录、或目录未注册为工作区的记录归入「未归属」。占比的分母是这个窗口的总词元。',
   },
   provider: {
     text: '词元从多到少 · 环为占本通道',
@@ -354,9 +354,6 @@ export function ProviderPanel() {
               ? <WorkspaceRows rows={view.byWorkspace} totalTokens={view.totalTokens} money={moneyOf} showMoney={showMoney} />
               : <ProviderCards cards={view.providers} labels={view.providerLabels ?? {}} money={moneyOf} showMoney={showMoney} />}
       </div>
-      {view !== undefined && active === 'model' && view.byWorkspace.length > 0 && (
-        <WorkspaceStrip rows={view.byWorkspace} totalTokens={view.totalTokens} />
-      )}
     </section>
   )
 }
@@ -456,30 +453,6 @@ function ProviderCard({ card, money, labels, showMoney }: {
         })}
       </div>
     </article>
-  )
-}
-
-function WorkspaceStrip({ rows, totalTokens }: {
-  rows: readonly WorkspaceUsageRow[]
-  totalTokens: number
-}) {
-  return (
-    <div className="dtpl-ws-strip">
-      <div className="dtpl-ws-strip-h"><span>工作区摘要</span><span>词元 · 占本窗口</span></div>
-      <div className="dtpl-ws-strip-grid">
-        {rows.slice(0, 4).map((row) => (
-          <div className="dtpl-ws-cell" key={row.id === '' ? 'unattributed' : row.id}>
-            <div className="dtpl-ws-cell-k" title={row.path === '' ? '未归属' : row.path}>{row.title}</div>
-            <div className="dtpl-ws-cell-v">
-              {formatTokens(row.tokens)}<span>{formatShare(row.tokens, totalTokens)}</span>
-            </div>
-            <div className="dtpl-ws-cell-bar" aria-hidden="true">
-              <i style={{ width: `${share(row.tokens, totalTokens)}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
   )
 }
 

@@ -116,14 +116,14 @@ export function QuotaSection() {
     [providers, gates],
   )
   return (
-    <section className="dtpl-card dtpl-span-7 dtpl-quota-panel" aria-label="订阅额度">
+    <section className="dtpl-card dtpl-span-12 dtpl-quota-panel" aria-label="订阅额度">
       <div className="dtpl-quota-strip">
-        <h2 className="dtpl-quota-strip-t">订阅额度</h2>
+        <div className="dtpl-quota-strip-id">
+          <h2 className="dtpl-quota-strip-t">订阅额度</h2>
+          <span className="dtpl-quota-strip-note">官方账户数据（用你的 key 查询），与本机账本分开</span>
+        </div>
         {hasProviders && <AutoRefreshControl value={autoMinutes} onChange={chooseAutoMinutes} />}
       </div>
-      <p className="dtpl-quota-strip-note">
-        各订阅的官方账户用量，由插件用你配置的 key 直接向该通道方查询；与上面这份本机账本不是一套数。
-      </p>
 
       {listError !== null ? (
         <div className="dtpl-error" role="alert">
@@ -174,9 +174,6 @@ function AutoRefreshControl({ value, onChange }: { value: number; onChange: (v: 
           </button>
         ))}
       </div>
-      <span className="dtpl-quota-autorefresh-state">
-        {value > 0 ? `每 ${value} 分钟自动刷新` : '不自动刷新'}
-      </span>
     </div>
   )
 }

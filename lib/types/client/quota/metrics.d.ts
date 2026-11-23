@@ -9,10 +9,6 @@ export declare function ringPressure(card: QuotaCard): {
     tone: QuotaTone;
     cap: string;
 } | undefined;
-export declare function headStateWord(card: QuotaCard | null): {
-    word: string;
-    alert: boolean;
-};
 export declare function resetLabel(window: QuotaWindowView): string;
 export declare function planContext(card: QuotaCard): string;
 export declare function money(value: number): string;

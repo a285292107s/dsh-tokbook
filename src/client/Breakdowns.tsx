@@ -1,8 +1,6 @@
 import type { CostedModelRow, WorkspaceUsageRow } from '../types.ts'
 import { totalsTokens } from '../types.ts'
 import { formatDateTime, formatRelative, formatShare, formatTokens, share } from './format.ts'
-import { ShareRing } from './ShareRing.tsx'
-
 export function isNoPrice(cost: number, unpriced: boolean): boolean {
   return unpriced && cost === 0
 }
@@ -31,7 +29,6 @@ export function ModelRows({ byModel, totalTokens, money, unpriced, showMoney }: 
         return (
           <div className="dtpl-row" key={`${m.provider}/${m.model}`} title={modelDetail(m, totalTokens, money, noPrice, showMoney)}>
             <div className="dtpl-model">
-              <ShareRing value={tokens} total={totalTokens} denom="本窗口" />
               <div className="dtpl-model-txt">
                 <span className="dtpl-model-name">{m.model}</span>
                 {m.provider !== '' && (
@@ -93,7 +90,6 @@ export function WorkspaceRows({ rows, totalTokens, money, showMoney }: {
             title={workspaceDetail(row, money, showMoney)}
           >
             <div className="dtpl-model">
-              <ShareRing value={row.tokens} total={totalTokens} denom="本窗口" />
               <div className="dtpl-model-txt">
                 <span className="dtpl-model-name">{row.title}</span>
                 <span className="dtpl-ws-meta">

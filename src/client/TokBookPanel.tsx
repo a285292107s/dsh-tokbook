@@ -10,7 +10,7 @@ import { ProviderPanel } from './ProviderPanel.tsx'
 import { MethodDoc } from './MethodDoc.tsx'
 import { UsageGlyph } from './icons.tsx'
 import { RescanButton } from './RescanButton.tsx'
-import { formatDateTime, formatRelative, formatShare, localDayKey, shiftDayKey } from './format.ts'
+import { formatDateTime, formatRelative } from './format.ts'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
 
 export interface TokBookPanelProps {
@@ -189,19 +189,9 @@ export function TokBookPanel({ view }: TokBookPanelProps) {
   )
 }
 function LedgerHeadMeta({ overview }: { overview: TokBookOverview }) {
-  const earliest = shiftDayKey(localDayKey(), -13)
-  const recent = overview.byDay.filter(row => row.day >= earliest)
-  const cacheRead = recent.reduce((sum, row) => sum + row.totals.cacheReadTokens, 0)
-  const input = recent.reduce((sum, row) => sum + row.totals.inputTokens, 0)
   return (
     <div className="dtpl-head-meta">
       <span>账本 <b>{overview.records}</b> 条</span>
-      {recent.length > 0 && (
-        <>
-          <i aria-hidden="true">·</i>
-          <span>近 {recent.length} 天缓存命中 <b>{cacheRead + input > 0 ? formatShare(cacheRead, cacheRead + input) : '—'}</b></span>
-        </>
-      )}
     </div>
   )
 }
@@ -317,7 +307,7 @@ function TokBookPage({ tab, overview, error, busy, syncFailure, scanResult, scan
       >
         {tab === 'method'
           ? (
-            <div className="dtpl-grid">
+            <div className="dtpl-grid dtpl-grid-doc">
               <MethodDoc overview={overview} />
             </div>
           )

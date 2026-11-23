@@ -1,24 +1,25 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-11-22 · supersedes: —
+> **Doc meta** · role: entry · language: zh-CN · status: current · last-reviewed: 2026-11-23 · supersedes: —
 
 > 英文门面见 [`README.md`](README.md);本文件是**维护者的那一份**,多带 `src/` 布局树与开发细节。
 
 DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把每次通道计费模型调用折成
 一行、写入按本地日持久化的 JSONL 账本,再对外提供**带成本**的聚合;browser 半区在**侧边栏面板列表**
 里放一行入口(`sidebar.panellist`,和「插件」「看板」同一个列表),点开在**主栏**打开账本页(`main`)——
-页内三个 tab(按界面上方从左到右):**用量总览**(响应式网格卡片:今日读数 / 近 14 天「词元柱 + 支出线」/
-今日词元构成叠 14 天累计 / **用量明细**——窗口 × 按模型 / 按工作区 / 按通道;宽主栏一屏四块,
-窄了竖排;金额只在近 30 天及更短的窗口里给;下方一排**订阅额度**卡,用你的 key 向通道查账户级
-官方用量)、**价格表**(卡片网格:选择带 / 价格详情 / 节假日年历;选一个通道 + 模型填**当前价**,
-峰谷时段、汇率也在这里)、**统计口径**(卡片网格:导言 / 四桶 / 调用判定表 / 差额 / 核对;
+页内三个 tab(按界面上方从左到右):**用量总览**(四块全宽卡片,从上到下:今日读数——大字词元 + 四桶构成条 +
+实际支出/订阅价值/近 7 天支出三行金额 + 数据健康脚注;下方**订阅额度**——两家订阅卡并排,每个窗口只报已用百分比与重置时间;
+再往下近 14 天「词元柱 + 支出线」,构成折成一行脚注;最后**用量明细**——窗口 × 按模型 / 按工作区 / 按通道。
+金额只在近 30 天及更短的窗口里给;额度卡用你的 key 向通道查账户级官方用量)、
+**价格表**(选择带 + 一张满行的价格工作台:左侧改基准价与峰谷时段,右侧「此刻计费」只在时段生效时列四档价,
+节假日年历在下方;汇率也在这里)、**统计口径**(卡片网格:导言 / 四桶 / 调用判定表 / 差额 / 核对;
 不估算的口径、漏项与对账)。
 另有一处不在账本页里:插件在**会话头部**的 utilities 槽位放了**词元**与**耗时**两颗按钮,各自点开一个贴着按钮的浮层,
 一轮一张卡片:词元浮层用切分圆环报这一轮的四桶构成,耗时浮层用切分圆环报这一轮的用时与相位构成。
 见下文「[会话词元浮层](#会话词元浮层)」与「[会话耗时浮层](#会话耗时浮层)」。
 > **用量明细不是第四个 tab,订阅额度也不再单列 tab。** 两者都在**用量总览**这一页里:明细是
-> `ProviderPanel`(`section[aria-label="用量明细"]`),额度是总览下方那排卡。tab 条上只有三个,
-> 三个 tab 的内容都挂在**同一张 12 栏响应式网格**上,各块是独立卡片。tablist 的唯一真源是
+> `ProviderPanel`(`section[aria-label="用量明细"]`),额度是今日与趋势之间的那一段卡。tab 条上只有三个,
+> 三个 tab 的内容都挂在**同一张卡片网格**上,各块是独立卡片(总览的四块各自满行)。tablist 的唯一真源是
 > `src/client/TokBookPanel.tsx`。
 
 | 浅色 | 深色 |
@@ -296,7 +297,7 @@ src/
     styles/           CSS 分片,按拼接顺序列出(重排即改级联):
       tokens.ts       全插件唯一的取值登记处(宿主变量 + 兜底 + 自有常量)
       page.ts         账本页外壳(页头 / tab 条 / 滚动主体 / 页脚)与侧栏面板行图标
-      grid.ts         响应式网格系统(12 栏 + 卡片基元 + 容器查询断点)
+      grid.ts         卡片网格与卡片基元(满行 span;空态与列宽)
       ledger.ts       用量总览
       method.ts       统计口径
       provider.ts     用量明细
@@ -310,7 +311,7 @@ src/
       shared.ts       跨面共用原语(面板材质 / 只读文本 / 选中态 / 窄屏与动效分支)
     TokBookPanelIcon.tsx sidebar.panellist 面板行图标(额度告急时多一个点)
     TokBookPanel.tsx  main 账本页(三 tab + 取数 / 跟账本刷新)
-    LedgerView.tsx    用量总览的四块卡片(今日 / 趋势 / 构成 / 空态与骨架)
+    LedgerView.tsx    用量总览的今日卡(含四桶构成与金额)/ 14 天趋势 / 空态与骨架
     ProviderPanel.tsx 用量明细卡外壳(窗口 + 三种切法)
     Breakdowns.tsx    用量明细的两种行清单:按模型 / 按工作区
     MethodDoc.tsx     统计口径 tab
@@ -321,7 +322,7 @@ src/
     dial.tsx          两个浮层共用的切分圆环与圆心数字字形
     session-timing.tsx 耗时浮层的用时语言:切分环 / 相位读数表 / stepSegments / sumSegments
     session-wire.ts   会话视图的 wire → 视图反序列化(readSessionView:缺字段填中性值、坏字段不炸)
-    ShareRing.tsx     用量明细一行的占比环(与额度表盘 / 价格表盘同族)
+    ShareRing.tsx     按通道卡里模型行的占比环(与额度表盘同族)
     pricing/
       currency.ts     报价币种纯逻辑:悬停的折算读数 / 切换币种时整条通道的换算(无 React,进 smoke)
       draft.ts        价格表纯逻辑:草稿 ↔ wire body、校验、脏签名(年历 / 汇率 / 报价币种)
@@ -330,7 +331,7 @@ src/
     quota/
       metrics.ts      订阅额度纯规则:占比/语气/口径/文案(无 React)
       QuotaCard.tsx   订阅额度卡:卡壳 + ok 主体 + 余额/无订阅面板 + gauge/骨架
-      QuotaSection.tsx 订阅额度区:取数 + 刷新策略 + 卡片排序(嵌在总览下方)
+      QuotaSection.tsx 订阅额度区:取数 + 刷新策略 + 卡片排序(嵌在今日与趋势之间)
 scripts/
   build-client.mjs         构建 lib/index.js + lib/client.js(懒加载 CJS),并校验 bundle 接线契约
   preview-overlay.ts       账本页预览台(fixture 数据)与独立查看器(--ledger,读真账本)

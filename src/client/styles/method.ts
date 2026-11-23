@@ -1,5 +1,5 @@
 export const CSS_METHOD = `
-[data-plugin="dsh-tokbook"].dtpl-page[data-tab="method"]{--dtpl-page-col:1000px;}
+[data-plugin="dsh-tokbook"] .dtpl-grid-doc{max-width:1000px;margin-inline:auto;}
 [data-plugin="dsh-tokbook"] .dtpl-doc{gap:0;max-width:none;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-doc.dtpl-card-pad{padding:20px 22px;}
 [data-plugin="dsh-tokbook"] .dtpl-doc code{

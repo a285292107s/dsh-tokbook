@@ -4,7 +4,7 @@ import type { QuotaCard, QuotaWindowView } from '../../types.ts'
 import { formatTokens } from '../format.ts'
 import { RefreshGlyph } from '../icons.tsx'
 import {
-  balanceUsd, extraCreditsUsd, formatClock, headStateWord, money, monthlyAllowanceWindow, planContext, resetLabel,
+  balanceUsd, extraCreditsUsd, formatClock, money, monthlyAllowanceWindow, planContext, resetLabel,
   ringPressure, toneOf, type QuotaTone,
 } from './metrics.ts'
 
@@ -19,7 +19,6 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
   const ok = card !== null && card.state === 'ok'
   const ctx = ok && card !== null ? planContext(card) : ''
   const ring = ok && card !== null ? ringPressure(card) : undefined
-  const idle = headStateWord(card)
   const [popTick, setPopTick] = useState(0)
 
   const handleRefresh = () => {
@@ -31,10 +30,8 @@ export function QuotaCardView({ provider, card, error, loading, onRefresh }: {
     <article className="dtpl-quota-card">
       <header className="dtpl-quota-head">
         <div className="dtpl-quota-id">
-          {card !== null && ring !== undefined ? (
+          {card !== null && ring !== undefined && (
             <QuotaGauge pct={ring.pct} tone={ring.tone} cap={ring.cap} />
-          ) : (
-            <QuotaIdleRing word={idle.word} alert={idle.alert} />
           )}
           <span className="dtpl-quota-id-text">
             <span className="dtpl-quota-name">{title}</span>
@@ -168,14 +165,14 @@ function QuotaWindowRow({ window }: { window: QuotaWindowView }) {
   const metric = hasAmounts
     ? `已用 ${money(window.usedUsd!)} / ${money(window.capUsd!)}`
     : `已用 ${pct}%`
-  const remaining = hasAmounts
-    ? `剩余 ${money(Math.max(0, (window.capUsd ?? 0) - (window.usedUsd ?? 0)))}`
-    : `剩余 ${Math.max(0, Math.round(100 - pct))}%`
   return (
     <div className="dtpl-quota-window" data-tone={tone}>
       <div className="dtpl-quota-window-line1">
         <span className="dtpl-quota-window-label">{window.label}</span>
         <span className="dtpl-quota-window-metric">{metric}</span>
+        <span className={`dtpl-quota-reset${window.exceeded ? ' dtpl-quota-reset-limited' : ''}`}>
+          {window.exceeded ? '已超限' : resetLabel(window)}
+        </span>
       </div>
       <div
         className="dtpl-quota-bar"
@@ -186,14 +183,6 @@ function QuotaWindowRow({ window }: { window: QuotaWindowView }) {
         aria-label={`${window.label} 已用 ${Math.round(pct)}%`}
       >
         <span className={`dtpl-quota-bar-fill dtpl-quota-tone-${tone}`} style={{ width: `${pct}%` }} />
-      </div>
-      <div className="dtpl-quota-window-line2">
-        <span className="dtpl-quota-remaining">{remaining}</span>
-        <span className={`dtpl-quota-reset${window.exceeded ? ' dtpl-quota-reset-limited' : ''}`}>
-          {window.exceeded
-            ? '已超限'
-            : resetLabel(window)}
-        </span>
       </div>
     </div>
   )
@@ -254,16 +243,6 @@ function GaugeRing({ arc }: { arc?: number }) {
   )
 }
 
-function QuotaIdleRing({ word, alert }: { word: string; alert: boolean }) {
-  return (
-    <span className={`dtpl-quota-gauge dtpl-quota-gauge-idle${alert ? ' dtpl-quota-tone-danger' : ''}`}>
-      <GaugeRing />
-      <span className="dtpl-quota-gauge-n">
-        <span className="dtpl-quota-gauge-word">{word}</span>
-      </span>
-    </span>
-  )
-}
 
 function QuotaGauge({ pct, tone, cap }: { pct: number; tone: QuotaTone; cap: string }) {
   const p = Math.max(0, Math.min(100, pct))

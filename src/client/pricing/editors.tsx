@@ -522,7 +522,7 @@ function RateCell({ id, label, value, state, context, placeholder, note, onEdit,
   )
 }
 
-function LiveRates({ live, records, view }: { live: InForceRates | null; records: number; view: MoneyView }) {
+function LiveRates({ live, records, view, hasSlots }: { live: InForceRates | null; records: number; view: MoneyView; hasSlots: boolean }) {
   const shown = (field: RateField): string => {
     if (live === null) return ''
     const own = live.values[field].trim()
@@ -540,7 +540,7 @@ function LiveRates({ live, records, view }: { live: InForceRates | null; records
         <p className="dtpl-price-live-none">
           {records > 0 ? '还没有价：这些记录按 ¥0 计（价格未知）' : '还没有价：它还没有被调用过'}
         </p>
-      ) : (
+      ) : live.slot !== null ? (
         <>
           <div className="dtpl-price-live-cells">
             {CELLS.map(({ field, label }) => {
@@ -554,9 +554,16 @@ function LiveRates({ live, records, view }: { live: InForceRates | null; records
               )
             })}
           </div>
-          {live.slot !== null && (
-            <p className="dtpl-price-live-note">正在按峰谷时段「{dayLabel(live.slot)}」计</p>
-          )}
+          <p className="dtpl-price-live-note">正在按峰谷时段「{dayLabel(live.slot)}」计</p>
+        </>
+      ) : (
+        <>
+          <p className="dtpl-price-live-status">此刻按基准价计</p>
+          <p className="dtpl-price-live-hint">
+            {hasSlots
+              ? '现在不在任何峰谷时段内；时段生效时，这里报实际计费的四档价。'
+              : '全周 · 全天；加峰谷时段后，时段内的实际价会显示在这里。'}
+          </p>
         </>
       )}
     </div>
@@ -567,7 +574,7 @@ function DayBand({ price }: { price: ModelDraft }) {
   const slots = effectiveSlots(price).map(slot => {
     const { start, end } = slotRange(slot)
     const ok = isHourRange({ start, end })
-    return { id: slot.id, label: dayLabel(slot), start: ok ? start : 0, end: ok ? end : 0 }
+    return { id: slot.id, label: DAY_SET_LABELS[slot.days], start: ok ? start : 0, end: ok ? end : 0 }
   })
   const drawn = slots.filter(row => row.end > row.start)
   return (
@@ -812,13 +819,15 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
   const issue = priceIssue(row)
   const live = ratesInForce(row, holidays)
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
+  const hasSlots = effectiveSlots(row).length > 0
   const countText = row.records > 0 ? `${String(row.records)} 次请求` : '没记过'
   const unpriced = row.unpriced !== undefined && row.unpriced > 0 && live !== null ? row.unpriced : 0
 
   return (
     <section className="dtpl-price-detail" data-dirty={dirty} aria-label={`${row.model} 的价格`}>
       <div className="dtpl-price-detail-head">
-        <span className="dtpl-price-detail-id">
+        <div className="dtpl-price-detail-main">
+          <span className="dtpl-price-detail-id">
           <span className="dtpl-price-name" data-exact={!named}>{named ? row.name : row.model}</span>
           {named && <span className="dtpl-price-exact" title={row.model}>{row.model}</span>}
         </span>
@@ -831,6 +840,7 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
             其中 {String(unpriced)} 条按 ¥0 计
           </span>
         )}
+        </div>
         <span className="dtpl-price-route-facts">
           <span className="dtpl-price-head-k">这条通道</span>
           <span className="dtpl-price-currency">
@@ -878,12 +888,12 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
         </span>
       </div>
       <div className="dtpl-price-console">
-        <div className="dtpl-price-console-live">
-          <LiveRates live={live} records={row.records} view={view} />
-          {effectiveSlots(row).length > 0 && <DayBand price={row} />}
-        </div>
         <div className="dtpl-price-console-edit">
           <PriceTable price={row} view={view} onChange={(next) => onRowChange(route, row.model, next)} />
+        </div>
+        <div className="dtpl-price-console-live">
+          <LiveRates live={live} records={row.records} view={view} hasSlots={hasSlots} />
+          {hasSlots && <DayBand price={row} />}
         </div>
       </div>
       {live === null && (

@@ -73,19 +73,6 @@ export function ringPressure(card: QuotaCard): { pct: number; tone: QuotaTone; c
   return { pct: worst.usagePercent, tone: toneOf(worst.usagePercent), cap: worst.label }
 }
 
-export function headStateWord(card: QuotaCard | null): { word: string; alert: boolean } {
-  if (card === null) return { word: '—', alert: false }
-  if (card.state === 'error') return { word: '失败', alert: true }
-  if (card.state === 'unconfigured') return { word: '未配置', alert: false }
-  if (card.gate !== undefined && card.gate !== 'subscription') {
-    const ended = card.planInfo?.periodEnd
-    return ended !== undefined && ended !== null && ended <= Date.now()
-      ? { word: '过期', alert: false }
-      : { word: '无订阅', alert: false }
-  }
-  return { word: '无读数', alert: false }
-}
-
 export function resetLabel(window: QuotaWindowView): string {
   if (window.resetAt === null) return '—'
   const ms = window.resetAt - Date.now()
