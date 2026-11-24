@@ -4,7 +4,7 @@ import type { RefObject } from 'react'
 const HIDE_AFTER_MS = 900
 const MIN_THUMB_PX = 28
 
-export function ScrollRail({ targetRef, resetKey }: { targetRef: RefObject<HTMLDivElement | null>; resetKey: string }) {
+export function ScrollRail({ targetRef, resetKey, className = 'dtpl-scroll-rail' }: { targetRef: RefObject<HTMLDivElement | null>; resetKey: string; className?: string }) {
   const [visible, setVisible] = useState(false)
   const [thumb, setThumb] = useState({ height: 0, top: 0 })
 
@@ -45,7 +45,7 @@ export function ScrollRail({ targetRef, resetKey }: { targetRef: RefObject<HTMLD
   }, [targetRef, resetKey])
 
   return (
-    <div className="dtpl-scroll-rail" aria-hidden="true" data-visible={visible && thumb.height > 0 ? 'true' : undefined}>
+    <div className={className} aria-hidden="true" data-visible={visible && thumb.height > 0 ? 'true' : undefined}>
       <div
         className="dtpl-scroll-thumb"
         style={{ height: `${String(thumb.height)}px`, transform: `translateY(${String(thumb.top)}px)` }}

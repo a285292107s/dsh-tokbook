@@ -7,6 +7,7 @@ import { PROVIDER_RANGES, rangeCarriesMoney } from '../types.ts'
 import { QUERY_RANGE, ROUTE_USAGE } from '../route-paths.ts'
 import { UsageGlyph } from './icons.tsx'
 import { ShareRing } from './ShareRing.tsx'
+import { ScrollRail } from './ScrollRail.tsx'
 import { isNoPrice, ModelRows, WorkspaceRows } from './Breakdowns.tsx'
 import { formatMoney, formatTokens } from './format.ts'
 import { subscribeLedgerChanges } from './ledger-clock.ts'
@@ -339,6 +340,7 @@ export function ProviderPanel() {
         </div>
       ) : null}
 
+      <div className="dtpl-usage-body-wrap">
       <div
         ref={panelRef}
         role="tabpanel"
@@ -353,6 +355,8 @@ export function ProviderPanel() {
             : active === 'workspace'
               ? <WorkspaceRows rows={view.byWorkspace} totalTokens={view.totalTokens} money={moneyOf} showMoney={showMoney} />
               : <ProviderCards cards={view.providers} labels={view.providerLabels ?? {}} money={moneyOf} showMoney={showMoney} />}
+      </div>
+        <ScrollRail targetRef={panelRef} resetKey={active} className="dtpl-usage-rail" />
       </div>
     </section>
   )

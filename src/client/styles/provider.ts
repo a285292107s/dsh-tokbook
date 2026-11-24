@@ -44,19 +44,19 @@ export const CSS_PROVIDER = `
   content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-usage-cuts-sk{width:192px;height:29px;}
-[data-plugin="dsh-tokbook"] .dtpl-usage-section > [role="tabpanel"]{
-  display:block;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-gutter:stable;
-  scrollbar-color:color-mix(in srgb,var(--dtpl-fg) 35%,transparent) transparent;
+[data-plugin="dsh-tokbook"] .dtpl-usage-body-wrap{
+  position:relative;display:flex;flex-direction:column;flex:1;min-height:0;
 }
-[data-plugin="dsh-tokbook"] .dtpl-usage-section > [role="tabpanel"]::-webkit-scrollbar{
-  width:8px;
+[data-plugin="dsh-tokbook"] .dtpl-usage-body-wrap > [role="tabpanel"]{
+  display:block;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:none;
 }
-[data-plugin="dsh-tokbook"] .dtpl-usage-section > [role="tabpanel"]::-webkit-scrollbar-track{
-  background:color-mix(in srgb,var(--dtpl-fg) 5%,transparent);
+[data-plugin="dsh-tokbook"] .dtpl-usage-body-wrap > [role="tabpanel"]::-webkit-scrollbar{width:0;height:0;}
+[data-plugin="dsh-tokbook"] .dtpl-usage-rail{
+  position:absolute;top:0;right:0;bottom:0;width:10px;z-index:1;
+  opacity:0;pointer-events:none;
+  transition:opacity var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
-[data-plugin="dsh-tokbook"] .dtpl-usage-section > [role="tabpanel"]::-webkit-scrollbar-thumb{
-  background-color:color-mix(in srgb,var(--dtpl-fg) 35%,transparent);
-}
+[data-plugin="dsh-tokbook"] .dtpl-usage-rail[data-visible="true"]{opacity:1;}
 [data-plugin="dsh-tokbook"] .dtpl-bd-head{
   display:flex;align-items:flex-end;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;
   padding:8px 14px 0;
