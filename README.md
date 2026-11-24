@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-23 · supersedes: —
+> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-24 · supersedes: —
 
 A **cross-session token-usage ledger for DeepSeek Harness (DSH)**. The host half folds every billed model
 call into one row of a local, per-day JSONL ledger and aggregates it with costs; the browser half shows it
@@ -74,11 +74,11 @@ view reports tokens only. Tokens are facts, prices are not.
    Usage detail** as a full-width table. Money appears only in windows of 30 days or less. The cards keep
    their full-row width; their internal grids collapse (today: three zones → two → one, quota: two cards
    → one) as the container narrows.
-2. **价格表 / Pricing** — a selector strip, then one full-width workbench containing the **price detail**
-   and the **statutory-holiday calendar**. Pick a route and a model, then write its current price (four
-   tiers plus optional peak/off-peak slots); the editable table sits on the left and a compact live rail on
-   the right reports the four rates in force now (or just "base price" when no slot is active). The FX rate
-   lives in the selector strip.
+2. **价格表 / Pricing** — a selector card (route, model, FX rate), then a full-width workbench: the editable
+   price table on the left holds the four tiers plus optional peak/off-peak slots, and a compact live rail on
+   the right reports the four rates in force now (or just "base price" when no slot is active). A full-width
+   **statutory-holiday calendar** card sits below it, one calendar per year: click a start and end day to mark
+   a stretch of holidays, and edit or delete any stretch (deletions, and edits, are undoable).
 3. **统计口径 / Method** — a centered reading column of full-width document cards: intro and quick facts,
    the four token buckets, the call-classification table, reconciliation gaps, field mapping, and the data
    footer. What is not estimated, what is missing, and how the numbers reconcile.
