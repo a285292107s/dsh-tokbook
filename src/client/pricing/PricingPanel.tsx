@@ -6,13 +6,14 @@ import { inverseHint } from './currency.ts'
 import {
   baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxSignature, fxValue, modelDirty,
   modelOptionLabel,
+  effectiveSlots, newSlot,
   routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency,
   type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
 import { CalendarEditor, ModelDetail } from './editors.tsx'
 import { formatRelative } from '../format.ts'
 import { subscribeLedgerChanges } from '../ledger-clock.ts'
-import { applyTemplate, makeTemplate, MAX_TEMPLATES, readTemplates, writeTemplates, type PriceTemplate } from './templates.ts'
+import { applyTemplate, makeTemplate, MAX_TEMPLATES, readTemplates, writeTemplates, type PriceTemplate, type TemplateSlot } from './templates.ts'
 import { TemplateBar } from './TemplateBar.tsx'
 
 export interface PricingPanelProps {
@@ -481,8 +482,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
 
   const applyTemplateToRow = (template: PriceTemplate): { ok: boolean; error?: string } => {
     if (card === undefined || row === undefined) return { ok: false, error: '先选一条通道和模型，再套用模板' }
-    const rates = applyTemplate(template, card.currency, rate)
-    if (rates === null) {
+    const applied = applyTemplate(template, card.currency, rate)
+    if (applied === null) {
       if (template.currency !== card.currency && rate === null) {
         const from = template.currency === 'USD' ? '美元' : '人民币'
         const to = card.currency === 'USD' ? '美元' : '人民币'
@@ -490,18 +491,28 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       }
       return { ok: false, error: `「${template.name}」里有档不是有效的非负数字，套用会把它写成无效价，已拒绝。` }
     }
-    updateModel(card.route, row.model, { ...row, ...rates })
+    const slots = applied.slots.map(slot => newSlot({ days: slot.days, start: slot.start, end: slot.end, input: slot.input, output: slot.output, cacheRead: slot.cacheRead, cacheWrite: slot.cacheWrite }))
+    updateModel(card.route, row.model, { ...row, ...applied.rates, slots })
     return { ok: true }
   }
 
   const saveTemplateFromRow = (name: string): void => {
     if (card === undefined || row === undefined) return
+    const slots: TemplateSlot[] = effectiveSlots(row).map(slot => ({
+      days: slot.days,
+      start: slot.start,
+      end: slot.end,
+      input: slot.input,
+      output: slot.output,
+      cacheRead: slot.cacheRead,
+      cacheWrite: slot.cacheWrite,
+    }))
     const template = makeTemplate(name, {
       input: row.input,
       output: row.output,
       cacheRead: row.cacheRead,
       cacheWrite: row.cacheWrite,
-    }, card.currency)
+    }, slots, card.currency)
     if (template.name === '') return
     const next = [...readTemplates(), template].slice(-MAX_TEMPLATES)
     writeTemplates(next)

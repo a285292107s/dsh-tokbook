@@ -82,7 +82,7 @@ export function TemplateBar({ templates, currency, canSave, onApply, onDelete, o
           className="dtpl-price-ghost"
           disabled={!canSave || name.trim() === ''}
           title={canSave
-            ? '把当前模型的四档价（按这条通道的币种）存成一个可复用的模板'
+            ? '把当前模型的四档价与峰谷时段（按这条通道的币种）存成一个可复用的模板'
             : '先把这一行的输入价、输出价填上，才能存成模板'}
           onClick={save}
         >
@@ -100,7 +100,8 @@ function describeTemplate(template: PriceTemplate, currency: PriceCurrency): str
   if (template.cacheRead.trim() !== '') parts.push(`读 ${show(template.cacheRead)}`)
   if (template.cacheWrite.trim() !== '') parts.push(`写 ${show(template.cacheWrite)}`)
   const convert = template.currency !== currency ? '；套用时按汇率换算到这条通道的币种' : ''
-  return `套用「${template.name}」：${parts.join(' / ')}（${unit}）${convert}`
+  const slots = template.slots.length > 0 ? `，另带 ${String(template.slots.length)} 个峰谷时段` : ''
+  return `套用「${template.name}」：${parts.join(' / ')}（${unit}）${slots}${convert}`
 }
 
 function show(value: string): string {

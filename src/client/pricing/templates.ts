@@ -1,15 +1,6 @@
-import type { PriceCurrency } from '../../types.ts'
+import type { DaySet, PriceCurrency } from '../../types.ts'
+import { DAY_SETS } from '../../price-format.ts'
 import { convertText, type MoneyView } from './currency.ts'
-
-export interface PriceTemplate {
-  id: string
-  name: string
-  input: string
-  output: string
-  cacheRead: string
-  cacheWrite: string
-  currency: PriceCurrency
-}
 
 export interface TemplateRates {
   input: string
@@ -18,9 +9,24 @@ export interface TemplateRates {
   cacheWrite: string
 }
 
-export const TEMPLATES_KEY = 'dsh-tokbook.price-templates'
+export interface TemplateSlot extends TemplateRates {
+  days: DaySet
+  start: string
+  end: string
+}
+
+export interface PriceTemplate extends TemplateRates {
+  id: string
+  name: string
+  currency: PriceCurrency
+  slots: TemplateSlot[]
+}
+
+export const TEMPLATES_KEY = 'dsh-tookbook.price-templates'
 
 export const MAX_TEMPLATES = 50
+
+const MAX_TEMPLATE_SLOTS = 50
 
 const MAX_NAME_LENGTH = 40
 
@@ -44,6 +50,41 @@ function cleanCurrency(value: unknown): PriceCurrency {
   return value === 'USD' ? 'USD' : 'CNY'
 }
 
+function cleanHour(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value !== 'string') return ''
+  return value.trim()
+}
+
+function cleanSlot(raw: unknown): TemplateSlot | null {
+  if (!isRecord(raw)) return null
+  const days = DAY_SETS.includes(raw.days as DaySet) ? raw.days as DaySet : null
+  const start = cleanHour(raw.start)
+  const end = cleanHour(raw.end)
+  if (days === null || start === '' || end === '') return null
+  return {
+    days,
+    start,
+    end,
+    input: cleanRate(raw.input),
+    output: cleanRate(raw.output),
+    cacheRead: cleanRate(raw.cacheRead),
+    cacheWrite: cleanRate(raw.cacheWrite),
+  }
+}
+
+function cleanSlots(raw: unknown): TemplateSlot[] {
+  if (!Array.isArray(raw)) return []
+  const slots: TemplateSlot[] = []
+  for (const item of raw) {
+    const slot = cleanSlot(item)
+    if (slot === null) continue
+    slots.push(slot)
+    if (slots.length >= MAX_TEMPLATE_SLOTS) break
+  }
+  return slots
+}
+
 function makeId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -61,6 +102,7 @@ function normalizeTemplate(raw: unknown): PriceTemplate | null {
     cacheRead: cleanRate(raw.cacheRead),
     cacheWrite: cleanRate(raw.cacheWrite),
     currency: cleanCurrency(raw.currency),
+    slots: cleanSlots(raw.slots),
   }
 }
 
@@ -95,7 +137,12 @@ export function writeTemplates(templates: readonly PriceTemplate[]): void {
   }
 }
 
-export function makeTemplate(name: string, rates: TemplateRates, currency: PriceCurrency): PriceTemplate {
+export function makeTemplate(
+  name: string,
+  rates: TemplateRates,
+  slots: readonly TemplateSlot[],
+  currency: PriceCurrency,
+): PriceTemplate {
   return {
     id: makeId(),
     name: cleanName(name),
@@ -104,19 +151,32 @@ export function makeTemplate(name: string, rates: TemplateRates, currency: Price
     cacheRead: cleanRate(rates.cacheRead),
     cacheWrite: cleanRate(rates.cacheWrite),
     currency,
+    slots: cleanSlots(slots),
   }
+}
+
+function convertRateSet(view: MoneyView, holder: TemplateRates, to: PriceCurrency): TemplateRates | null {
+  const input = convertText(view, holder.input, to)
+  const output = convertText(view, holder.output, to)
+  const cacheRead = convertText(view, holder.cacheRead, to)
+  const cacheWrite = convertText(view, holder.cacheWrite, to)
+  if (input === null || output === null || cacheRead === null || cacheWrite === null) return null
+  return { input, output, cacheRead, cacheWrite }
 }
 
 export function applyTemplate(
   template: PriceTemplate,
   targetCurrency: PriceCurrency,
   cnyPerUsd: number | null,
-): TemplateRates | null {
+): { rates: TemplateRates; slots: TemplateSlot[] } | null {
   const view: MoneyView = { route: template.currency, cnyPerUsd }
-  const input = convertText(view, template.input, targetCurrency)
-  const output = convertText(view, template.output, targetCurrency)
-  const cacheRead = convertText(view, template.cacheRead, targetCurrency)
-  const cacheWrite = convertText(view, template.cacheWrite, targetCurrency)
-  if (input === null || output === null || cacheRead === null || cacheWrite === null) return null
-  return { input, output, cacheRead, cacheWrite }
+  const rates = convertRateSet(view, template, targetCurrency)
+  if (rates === null) return null
+  const slots: TemplateSlot[] = []
+  for (const slot of template.slots) {
+    const slotRates = convertRateSet(view, slot, targetCurrency)
+    if (slotRates === null) return null
+    slots.push({ days: slot.days, start: slot.start, end: slot.end, ...slotRates })
+  }
+  return { rates, slots }
 }
