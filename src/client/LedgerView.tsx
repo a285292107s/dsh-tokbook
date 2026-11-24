@@ -148,17 +148,19 @@ function TodayModule({ hero, today, showCacheWrite }: {
               <span>词元构成</span>
               <span className="dtpl-today-hit">缓存命中率 <b>{hit}</b></span>
             </div>
-            <MixBar cells={cells} total={hero.tokens} />
-            <div className="dtpl-mix-list">
+            <div className="dtpl-compose" role="list" aria-label="今日词元构成">
               {cells.map(cell => (
-                <div className="dtpl-mix-cell" key={cell.key}>
-                  <span className="dtpl-mix-cell-k">
-                    <i className={`dtpl-mix-key${cell.value > 0 ? '' : ' is-empty'}`} data-k={cell.key} />
+                <div className="dtpl-compose-row" role="listitem" key={cell.key}>
+                  <span className="dtpl-compose-k">
+                    <i className={`dtpl-compose-key${cell.value > 0 ? '' : ' is-empty'}`} data-k={cell.key} />
                     {cell.label}
                   </span>
-                  <span className="dtpl-mix-cell-v">
+                  <span className="dtpl-compose-track" aria-hidden="true">
+                    <i className="dtpl-compose-fill" data-k={cell.key} style={{ width: cell.value > 0 ? `max(2px, ${share(cell.value, hero.tokens)}%)` : '0%' }} />
+                  </span>
+                  <span className="dtpl-compose-n">
                     {formatTokens(cell.value)}
-                    <em className="dtpl-mix-cell-p">{formatShare(cell.value, hero.tokens)}</em>
+                    <em className="dtpl-compose-p">{formatShare(cell.value, hero.tokens)}</em>
                   </span>
                 </div>
               ))}
@@ -320,12 +322,17 @@ function TrendModule({ days }: { days: readonly UsageDayRow[] }) {
         </svg>
       </div>
       <div className="dtpl-chart-foot">
-        <span className="dtpl-chart-mix">
-          近 {TREND_DAYS} 天构成
+        <div className="dtpl-chart-mix-h">近 {TREND_DAYS} 天构成</div>
+        <div className="dtpl-chart-mix" role="list" aria-label={`近 ${TREND_DAYS} 天词元构成`}>
           {recentCells.map(cell => (
-            <span key={cell.key}>{cell.label} <b>{formatTokens(cell.value)}</b> {formatShare(cell.value, recentTokens)}</span>
+            <span className="dtpl-chart-mix-item" role="listitem" key={cell.key}>
+              <i className={`dtpl-compose-key${cell.value > 0 ? '' : ' is-empty'}`} data-k={cell.key} />
+              <span className="dtpl-chart-mix-k">{cell.label}</span>
+              <b className="dtpl-chart-mix-v">{formatTokens(cell.value)}</b>
+              <em className="dtpl-chart-mix-p">{formatShare(cell.value, recentTokens)}</em>
+            </span>
           ))}
-        </span>
+        </div>
       </div>
     </section>
   )
@@ -344,21 +351,6 @@ function mixCells(totals: UsageTotals, showCacheWrite: boolean): MixCell[] {
     ...(showCacheWrite ? [{ key: 'cache-write', label: '缓存写入', value: totals.cacheWriteTokens }] : []),
     { key: 'output', label: '输出', value: totals.outputTokens },
   ]
-}
-
-function MixBar({ cells, total }: { cells: readonly MixCell[]; total: number }) {
-  return (
-    <div className="dtpl-mix">
-      {cells.map(cell => (
-        <i
-          key={cell.key}
-          className="dtpl-mix-seg"
-          data-k={cell.key}
-          style={{ width: `${share(cell.value, total)}%` }}
-        />
-      ))}
-    </div>
-  )
 }
 
 function windowTotals(days: readonly UsageDayRow[]): UsageTotals {
