@@ -1,6 +1,6 @@
 # dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-11-23 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-11-24 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。本文只留**从代码推不出来**的东西：外部
 > 系统的机制与事实、为什么是现在这个形状、每条选择的代价。权威来源只有两个——官方文档站点
@@ -222,7 +222,7 @@ rename 报 ENOENT 又被 catch 吞掉，结果是磁盘上**一份快照都没�
 
 **价表 tab 的状态行说的是「要操心的东西有没有、上次成没成、还新不新」，不是内部状态机。** 所以
 models.dev 的「一次都没试过」不能报 `ok`——那会让界面说「已由 models.dev 自动补着」，而实际一次都没
-试过；年历那边同理，要的年份一个都没有才劝用户手动填，手写已经覆盖全部年份时什么都不说。
+试过；年历那边同理，要的年份一个都没有才把它报成「待补」，已经全覆盖时什么都不说。年历在价表里是只读的：放假安排由 holiday-cn 自动同步，也可写进 pricing.json；用户不在界面上增删改假期。`$calendar` 的手写值由 client 在每次价表保存时原样并入，即使界面不编辑也绝不会因保存被抹掉。
 
 ## 6. UI 设计（外置插件即可落地，无需改 DSH 仓库）
 

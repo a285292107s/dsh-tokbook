@@ -20,6 +20,10 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-brand:#c99a2e;
   --dtpl-on-brand:#24211e;
 
+  --dtpl-holiday:color-mix(in srgb,var(--dtpl-err) 80%,#8f3a22);
+  --dtpl-paper-bg:color-mix(in srgb,var(--dtpl-brand) 5%,var(--dtpl-card));
+  --dtpl-serif:"Iowan Old Style","Palatino Linotype","Songti SC","Noto Serif SC","Source Han Serif SC",Georgia,serif;
+
   --dtpl-metal:
     inset 0 1px 0 0 color-mix(in srgb,#fff 7%,transparent),
     inset 0 -1px 0 0 color-mix(in srgb,#000 12%,transparent);

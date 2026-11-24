@@ -147,7 +147,7 @@ export function readHolidays(year: string, rows: readonly CalendarHolidayDraft[]
       const peer = spans[other]!
       if (peer.kind !== 'ok') continue
       if (peer.span.start <= span.span.end && span.span.start <= peer.span.end) {
-        return { kind: 'bad', error: `与第 ${String(other + 1)} 段假期重叠：同一年里两段假期不能共享一天` }
+        return { kind: 'bad', error: `与第 ${String(other + 1)} 段假期重叠：同一年里两段假期不能重叠` }
       }
     }
     return { kind: 'ok', days: span.days }

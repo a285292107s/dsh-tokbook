@@ -6,12 +6,14 @@ import { inverseHint } from './currency.ts'
 import {
   baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxSignature, fxValue, modelDirty,
   modelOptionLabel,
-  routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency, adoptYear,
-  type CalendarDraft, type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
+  routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency,
+  type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
 import { CalendarEditor, ModelDetail } from './editors.tsx'
 import { formatRelative } from '../format.ts'
 import { subscribeLedgerChanges } from '../ledger-clock.ts'
+import { applyTemplate, makeTemplate, MAX_TEMPLATES, readTemplates, writeTemplates, type PriceTemplate } from './templates.ts'
+import { TemplateBar } from './TemplateBar.tsx'
 
 export interface PricingPanelProps {
   onChanged: () => void
@@ -165,6 +167,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   }>({ open: false, keyword: '', loading: false, result: null, error: null })
   const [holiday, setHoliday] = useState<{ running: boolean; result: HolidayRefreshResult | null; error: string | null }>({ running: false, result: null, error: null })
   const [picked, setPicked] = useState<Picked | null>(readPicked)
+  const [templates, setTemplates] = useState<PriceTemplate[]>(readTemplates)
   const searchButtonRef = useRef<HTMLButtonElement>(null)
   const restoreLookupFocusRef = useRef(false)
 
@@ -412,15 +415,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
     })
   }, [])
 
-  const updateCalendar = useCallback((year: string, next: CalendarDraft | null) => {
-    setState((current) => {
-      const calendar: CalendarEntries = new Map(current.calendar)
-      if (next === null) calendar.delete(year)
-      else calendar.set(year, next)
-      return withCalendar(adoptYear(current, year), calendar)
-    })
-  }, [])
-
   const runHolidaySync = useCallback(async (force: boolean, extraYears: readonly string[] = []): Promise<void> => {
     setHoliday({ running: true, result: null, error: null })
     try {
@@ -485,6 +479,41 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   const rate = fxValue(state.fx)
   const fxProblem = fxIssue(state.fx)
 
+  const applyTemplateToRow = (template: PriceTemplate): { ok: boolean; error?: string } => {
+    if (card === undefined || row === undefined) return { ok: false, error: '先选一条通道和模型，再套用模板' }
+    const rates = applyTemplate(template, card.currency, rate)
+    if (rates === null) {
+      if (template.currency !== card.currency && rate === null) {
+        const from = template.currency === 'USD' ? '美元' : '人民币'
+        const to = card.currency === 'USD' ? '美元' : '人民币'
+        return { ok: false, error: `「${template.name}」按${from}记，这条通道按${to}记，套用要先换算：先在汇率格填 1 美元等于多少元。` }
+      }
+      return { ok: false, error: `「${template.name}」里有档不是有效的非负数字，套用会把它写成无效价，已拒绝。` }
+    }
+    updateModel(card.route, row.model, { ...row, ...rates })
+    return { ok: true }
+  }
+
+  const saveTemplateFromRow = (name: string): void => {
+    if (card === undefined || row === undefined) return
+    const template = makeTemplate(name, {
+      input: row.input,
+      output: row.output,
+      cacheRead: row.cacheRead,
+      cacheWrite: row.cacheWrite,
+    }, card.currency)
+    if (template.name === '') return
+    const next = [...readTemplates(), template].slice(-MAX_TEMPLATES)
+    writeTemplates(next)
+    setTemplates(next)
+  }
+
+  const deleteTemplate = (id: string): void => {
+    const next = readTemplates().filter(template => template.id !== id)
+    writeTemplates(next)
+    setTemplates(next)
+  }
+
   const openLookup = useCallback(() => {
     if (card === undefined || row === undefined) return
     restoreLookupFocusRef.current = false
@@ -521,6 +550,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       }}
     >
       {state.routes.size > 0 && card !== undefined && (
+        <>
         <div className="dtpl-price-pick">
           <div className="dtpl-price-pick-row">
             <span className="dtpl-price-pick-k">通道</span>
@@ -597,6 +627,17 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
             </span>
           </div>
         </div>
+        {row !== undefined && (
+          <TemplateBar
+            templates={templates}
+            currency={card.currency}
+            canSave={row.input.trim() !== '' && row.output.trim() !== ''}
+            onApply={applyTemplateToRow}
+            onDelete={deleteTemplate}
+            onSave={saveTemplateFromRow}
+          />
+        )}
+        </>
       )}
 
       {view !== null && view.calendarMissing.length > 0 && (() => {
@@ -606,8 +647,8 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         return (
           <div className="dtpl-price-calarm">
             <span className="dtpl-price-calarm-text" role="status">
-              缺 {missing.join('、')} 年的法定节假日安排：「法定工作日」时段会把那几年的节假日按高峰多算。
-              {autoFailed && '自动拉取没成功；可以用「补上」把缺的年份加进年历，再自己填。'}
+              缺 {missing.join('、')} 年的法定节假日安排：「法定工作日」时段会把那几年的节假日当成工作日，照高峰价多算。
+              {autoFailed && '自动拉取没成功；点「补上」把缺的年份加进年历，再自己填放假日子。'}
               {holiday.error !== null && <b>（自动拉取失败：{holiday.error}）</b>}
             </span>
             <button
@@ -615,7 +656,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
               className="dtpl-price-calarm-act"
               aria-controls="price-calendar"
               disabled={holiday.running}
-              title="从 holiday-cn 拉这几年的法定节假日安排（它每日抓国务院公告，按年一份 JSON）。手写过的年份不受影响。"
+              title="从 holiday-cn 拉取这几年的法定节假日安排（它每天抓取国务院公告，每年一份 JSON）。你手写过的年份不受影响。"
               onClick={() => {
                 void runHolidaySync(true, missing)
                 document.getElementById('price-calendar')?.scrollIntoView({ block: 'nearest' })
@@ -737,8 +778,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
         missingYears={view.calendarMissing}
           autoYears={[...state.autoYears].sort((left, right) => left.localeCompare(right))}
           sync={view.holidaySync}
-          dirty={calendarDirty(state, baseline)}
-          onChange={updateCalendar}
           syncing={holiday.running}
         />
     )}

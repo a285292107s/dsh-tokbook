@@ -3,11 +3,11 @@ import { DAY_SET_HINTS, DAY_SET_LABELS, DAY_SETS, clockLabel, holidayDates, isHo
 import type { BillingNature, DaySet, HolidaySyncView, PriceCurrency } from '../../types.ts'
 import { counterpartOf, unitOf, type MoneyView } from './currency.ts'
 import {
-  calendarYearTally, duplicateSlot, effectiveSlots, fieldState,
-  inheritedCell, isBlankSlot, dayLabel, missingYearDrafts, modelDirty, newHoliday, newSlot,
+  duplicateSlot, effectiveSlots, fieldState,
+  inheritedCell, isBlankSlot, dayLabel, modelDirty, newSlot,
   priceIssue, ratesInForce,
   readHolidays, slotRange, withSlotEnd, withSlotStart,
-  type CalendarDraft, type CalendarEntries, type CalendarHolidayDraft, type HolidayRead, type InForceRates, type ModelDraft,
+  type CalendarEntries, type InForceRates, type ModelDraft,
   type RateField, type SlotDraft,
 } from './draft.ts'
 
@@ -26,72 +26,137 @@ const HOUR_TICKS: readonly number[] = [0, 6, 12, 18, 24]
 
 const WEEK_LABELS: readonly string[] = ['一', '二', '三', '四', '五', '六', '日']
 
+const MONTH_NAMES: readonly string[] = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月']
+
+const MONTH_EN: readonly string[] = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
+const HOLIDAY_NAMES: Readonly<Record<string, readonly string[]>> = {
+  2025: ['春节', '国庆'],
+  2026: ['元旦', '春节', '清明', '劳动节', '端午', '中秋', '国庆'],
+}
+
 interface CalendarDay {
   key: string
   day: number
   weekend: boolean
   holiday: boolean
+  today: boolean
   blank: boolean
 }
 
-function monthDays(year: number, month: number, holidays: ReadonlySet<string>): CalendarDay[] {
+const WEEKDAY_CN: readonly string[] = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+type DayKind = 'work' | 'weekend' | 'holiday'
+
+interface TodayStatus {
+  weekday: string
+  dateLabel: string
+  kind: DayKind
+  typeLabel: string
+  priceTone: 'peak' | 'rest'
+  priceLabel: string
+  unknown: boolean
+}
+
+function dayKeyOf(date: Date): string {
+  return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function dayKeyToDate(key: string): Date {
+  const [year, month, day] = key.split('-').map(Number)
+  return new Date(year ?? 2000, (month ?? 1) - 1, day ?? 1)
+}
+
+function holidayDaySet(entries: CalendarEntries): ReadonlySet<string> {
+  const days = new Set<string>()
+  for (const year of entries.keys()) {
+    for (const span of spansOf(entries, year)) {
+      for (const day of holidayDates({ start: span.start, end: span.end })) days.add(day)
+    }
+  }
+  return days
+}
+
+function todayStatus(days: ReadonlySet<string>, now: Date, covered: boolean): TodayStatus {
+  const weekday = WEEKDAY_CN[now.getDay()] ?? ''
+  const dateLabel = `${now.getMonth() + 1}/${now.getDate()}`
+  if (days.has(dayKeyOf(now))) {
+    return { weekday, dateLabel, kind: 'holiday', typeLabel: '法定节假日', priceTone: 'rest', priceLabel: '闲时', unknown: false }
+  }
+  if (now.getDay() === 0 || now.getDay() === 6) {
+    return { weekday, dateLabel, kind: 'weekend', typeLabel: '周末', priceTone: 'rest', priceLabel: '闲时', unknown: false }
+  }
+  return { weekday, dateLabel, kind: 'work', typeLabel: '法定工作日', priceTone: 'peak', priceLabel: '高峰', unknown: !covered }
+}
+
+function nextHoliday(entries: CalendarEntries, now: Date): { label: string; gap: number } | null {
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const fromKey = dayKeyOf(from)
+  let best: { start: string; year: string; index: number } | null = null
+  for (const year of [...entries.keys()].sort((left, right) => left.localeCompare(right))) {
+    const spans = spansOf(entries, year)
+    for (let index = 0; index < spans.length; index += 1) {
+      const span = spans[index]!
+      if (span.start <= fromKey) continue
+      if (best === null || span.start < best.start) best = { start: span.start, year, index }
+    }
+  }
+  if (best === null) return null
+  const picked = best
+  const gap = Math.round((dayKeyToDate(picked.start).getTime() - from.getTime()) / 86_400_000)
+  if (gap <= 0) return null
+  const label = HOLIDAY_NAMES[picked.year]?.[picked.index] ?? '假期'
+  return { label, gap }
+}
+
+function monthDays(year: number, month: number, holidays: ReadonlySet<string>, today: string): CalendarDay[] {
   const offset = (new Date(year, month - 1, 1).getDay() + 6) % 7
   const total = new Date(year, month, 0).getDate()
   const cells: CalendarDay[] = []
   for (let index = 0; index < offset; index += 1) {
-    cells.push({ key: `b-${month}-${index}`, day: 0, weekend: false, holiday: false, blank: true })
+    cells.push({ key: `b-${month}-${index}`, day: 0, weekend: false, holiday: false, today: false, blank: true })
   }
   for (let day = 1; day <= total; day += 1) {
     const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     const weekday = (new Date(year, month - 1, day).getDay() + 6) % 7
-    cells.push({ key, day, weekend: weekday >= 5, holiday: holidays.has(key), blank: false })
+    cells.push({ key, day, weekend: weekday >= 5, holiday: holidays.has(key), today: key === today, blank: false })
   }
   return cells
 }
 
-function HolidayCalendar({ year, holidays, pickStart, hoverDate, onPick, onHover }: {
-  year: string
-  holidays: ReadonlySet<string>
-  pickStart: string | null
-  hoverDate: string | null
-  onPick: (date: string) => void
-  onHover: (date: string | null) => void
-}) {
+function shortDate(key: string): string {
+  return key.slice(5).replace('-', '/')
+}
+
+function HolidayCalendar({ year, holidays }: { year: string; holidays: ReadonlySet<string> }) {
   const yearNum = Number(year)
   const months = Array.from({ length: 12 }, (_, index) => index + 1)
-  const previewFrom = pickStart === null || hoverDate === null ? null : pickStart <= hoverDate ? pickStart : hoverDate
-  const previewTo = previewFrom === null ? null : pickStart! <= hoverDate! ? hoverDate : pickStart
   return (
-    <div className="dtpl-cal-grid" role="group" aria-label={`${year} 年节假日日历：点一天选开始，再点一天选结束`} onMouseLeave={() => onHover(null)}>
+    <div className="dtpl-price-calmons" role="group" aria-label={`${year} 年节假日日历（只读）`}>
       {months.map(month => (
-        <div className="dtpl-cal-month" key={month}>
-          <div className="dtpl-cal-month-name">{month} 月</div>
-          <div className="dtpl-cal-weekheads" aria-hidden="true">
+        <div className="dtpl-price-calmon" key={month}>
+          <div className="dtpl-price-calmon-head">
+            <span className="dtpl-price-calmon-cn">{MONTH_NAMES[month - 1]}</span>
+            <span className="dtpl-price-calmon-en" aria-hidden="true">{MONTH_EN[month - 1]}</span>
+          </div>
+          <div className="dtpl-price-calmon-week" aria-hidden="true">
             {WEEK_LABELS.map((label, index) => <span key={label} data-weekend={index >= 5 || undefined}>{label}</span>)}
           </div>
-          <div className="dtpl-cal-days">
-            {monthDays(yearNum, month, holidays).map(cell => cell.blank
-              ? <span className="dtpl-cal-day is-blank" key={cell.key} aria-hidden="true" />
+          <div className="dtpl-price-calmon-days">
+            {monthDays(yearNum, month, holidays, '').map(cell => cell.blank
+              ? <span className="dtpl-price-calday is-blank" key={cell.key} aria-hidden="true" />
               : (
-                <button
-                  type="button"
-                  className="dtpl-cal-day"
+                <span
+                  className="dtpl-price-calday"
                   key={cell.key}
                   data-holiday={cell.holiday || undefined}
                   data-weekend={!cell.holiday && cell.weekend || undefined}
-                  data-preview={previewFrom !== null && cell.key >= previewFrom && cell.key <= previewTo! || undefined}
-                  data-pick={pickStart === cell.key || undefined}
-                  aria-label={`${cell.key}${cell.holiday ? ' 法定节假日' : cell.weekend ? ' 周末' : ''}${pickStart === cell.key ? '，已选为开始' : ''}`}
+                  data-today={cell.today || undefined}
                   title={`${cell.key}${cell.holiday ? ' 法定节假日' : cell.weekend ? ' 周末' : ''}`}
-                  onClick={() => onPick(cell.key)}
-                  onMouseEnter={() => onHover(cell.key)}
-                  onFocus={() => onHover(cell.key)}
                 >
-                  <span className="dtpl-cal-day-num">{cell.day}</span>
-                  <span className="dtpl-cal-day-mark" aria-hidden="true">{cell.holiday ? '假' : cell.weekend ? '休' : ''}</span>
-                </button>
-              )
-            )}
+                  <span className="dtpl-price-calday-num">{cell.day}</span>
+                </span>
+              ))}
           </div>
         </div>
       ))}
@@ -99,302 +164,154 @@ function HolidayCalendar({ year, holidays, pickStart, hoverDate, onPick, onHover
   )
 }
 
-
-export function CalendarEditor({ entries, missingYears, autoYears, dirty, sync, syncing, onChange, className }: {
+export function CalendarEditor({ entries, missingYears, autoYears, sync, syncing, className }: {
   entries: CalendarEntries
   missingYears: readonly string[]
   autoYears?: readonly string[]
-  dirty: boolean
-  onChange: (year: string, next: CalendarDraft | null) => void
   sync?: HolidaySyncView
   syncing?: boolean
   className?: string
 }) {
-  const entryOf = (year: string): CalendarDraft => entries.get(year) ?? { year, holidays: [] }
+  const [expanded, setExpanded] = useState(false)
+  const now = new Date()
+  const nowYear = String(now.getFullYear())
   const years = entries.size > 0
-    ? [...entries.keys()].sort((left, right) => left.localeCompare(right))
-    : [String(new Date().getFullYear())]
-  const reads = new Map(years.map(year => [year, readHolidays(year, entryOf(year).holidays)]))
-  const kept = years.filter(year => reads.get(year)!.some(read => read.kind === 'ok'))
-  const broken = years.filter(year => reads.get(year)!.some(read => read.kind === 'bad'))
+    ? [...entries.keys()].sort((left, right) => right.localeCompare(left))
+    : [nowYear]
+  const kept = years.filter(year => (entries.get(year)?.holidays.length ?? 0) > 0)
   const gaps = missingYears.filter(year => !entries.has(year))
-
-  const fillGaps = (): void => {
-    const drafts = missingYearDrafts(entries, gaps)
-    for (const draft of drafts) onChange(draft.year, draft)
-  }
-
+  const totalDays = kept.reduce((sum, year) => sum + spansOf(entries, year).reduce((acc, span) => acc + span.days, 0), 0)
   const autoLine = describeAutoSync(sync, syncing === true)
+  const status = todayStatus(holidayDaySet(entries), now, gaps.length === 0)
+  const next = nextHoliday(entries, now)
+  const panelId = 'price-calendar-body'
 
   return (
-    <section className={`dtpl-price-cal ${className ?? ''}`} id="price-calendar" data-dirty={dirty} aria-label="法定节假日年历">
-      <div className="dtpl-price-cal-head-row">
-        <span className="dtpl-price-cal-title">法定节假日年历</span>
-        <span className="dtpl-price-cal-sum">{summarizeCalendar(kept)}</span>
-        {autoYears !== undefined && autoYears.length > 0 && (
-          <span
-            className="dtpl-price-cal-auto"
-            title="这些年份没写在 pricing.json 里，是从 holiday-cn 自动拉来并缓存到本机的；手写有那一年时以手写的为准。"
-          >
-            {autoYears.join('、')} 自动
-          </span>
+    <section className={`dtpl-price-cal ${className ?? ''}`} id="price-calendar" data-expanded={expanded || undefined} aria-label="法定节假日年历">
+      <div className="dtpl-price-calbar">
+        <span className="dtpl-price-calbar-mark" data-kind={status.kind} aria-hidden="true" />
+        <span className="dtpl-price-calbar-date">今天 · {status.weekday} {status.dateLabel}</span>
+        <span className="dtpl-price-calbar-sep" aria-hidden="true" />
+        <span className="dtpl-price-calbar-type" data-kind={status.kind}>{status.typeLabel}</span>
+        <span className="dtpl-price-calbar-price" data-tone={status.priceTone}>{status.priceLabel}</span>
+        {status.unknown && <span className="dtpl-price-calbar-note">{nowYear} 年放假安排未收录，暂按工作日高峰价</span>}
+        <span className="dtpl-price-calbar-spacer" aria-hidden="true" />
+        {next !== null && (
+          <span className="dtpl-price-calbar-next">{next.label} · {String(next.gap)} 天后</span>
         )}
-        {broken.length > 0 && (
-          <span className="dtpl-price-cal-warn">{broken.join('、')} 年写不出来</span>
-        )}
-        {missingYears.length > 0 && gaps.length > 0 && (
-          <button type="button" className="dtpl-price-cal-fix" onClick={fillGaps}
-            title="这些年的「法定工作日」时段会按周一至周五全额计，落在法定节假日的工作日被多算高峰价。点这里把那几年加进年历，再用日历圈出假期。">
-            <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>
-            {gaps.length > 2 ? `补上缺的 ${String(gaps.length)} 年` : `补上 ${gaps.join('、')} 年`}
-          </button>
-        )}
+        <button
+          type="button"
+          className="dtpl-price-calbar-toggle"
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded(value => !value)}
+        >
+          {expanded ? '收起' : '展开年历'}
+          <span className="dtpl-price-calbar-chev" aria-hidden="true">{expanded ? '▴' : '▾'}</span>
+        </button>
       </div>
-      {autoLine !== null && (
-        <p className="dtpl-price-cal-auto-line" data-tone={autoLine.tone}>{autoLine.text}</p>
+      {expanded && (
+        <div className="dtpl-price-calbody" id={panelId}>
+          <header className="dtpl-price-calmast">
+            <div className="dtpl-price-calmast-main">
+              <span className="dtpl-price-calkicker">法定节假日年历</span>
+              <span className="dtpl-price-caltitle">节假日年鉴</span>
+            </div>
+            <div className="dtpl-price-calfacts">
+              {kept.length > 0
+                ? (
+                  <span className="dtpl-price-calfact">
+                    <span className="dtpl-price-calfact-k">已收录</span>
+                    <span className="dtpl-price-calfact-v">{kept.join(' · ')}</span>
+                  </span>
+                )
+                : <span className="dtpl-price-calfact"><span className="dtpl-price-calfact-v">未收录</span></span>}
+              {kept.length > 0 && (
+                <span className="dtpl-price-calfact">
+                  <span className="dtpl-price-calfact-k">合计</span>
+                  <span className="dtpl-price-calfact-v">{String(totalDays)} 天</span>
+                </span>
+              )}
+              {gaps.length > 0 && (
+                <span className="dtpl-price-calfact" data-tone="warn">
+                  <span className="dtpl-price-calfact-k">待补</span>
+                  <span className="dtpl-price-calfact-v">{gaps.join('、')}</span>
+                </span>
+              )}
+            </div>
+          </header>
+          <p className="dtpl-price-calauto" data-tone={autoLine?.tone ?? 'ok'}>
+            <i aria-hidden="true" />
+            {autoLine !== null ? autoLine.text : '放假安排由 holiday-cn 自动同步，也可写进 pricing.json；此处只读。'}
+          </p>
+          <p className="dtpl-price-calpurpose">决定「法定工作日」时段在哪几天生效——缺了哪一年，那一年的假期会被当成工作日，按高峰价多算。只记放假日：调休上班日多落在周末，周末本来按闲时算。</p>
+          <div className="dtpl-price-calyears">
+            {years.map(year => (
+              <CalendarYearView
+                key={year}
+                year={year}
+                auto={autoYears?.includes(year) ?? false}
+                spans={spansOf(entries, year)}
+              />
+            ))}
+          </div>
+        </div>
       )}
-      <div className="dtpl-price-cal-body">
-        <p className="dtpl-price-cal-note">
-          一年一组，一段假期一行。点日历上的开始日和结束日就能加一段假期——年份由这一组决定，不用填。
-          只收录放假日（调休上班日落在周末，而周末本来就是闲时）；天数要能对上通知里「共 N 天」。
-          标着<b>「自动」</b>的年份是从 holiday-cn 拉来缓存的，你手写过哪一年，哪一年就以你的为准。
-        </p>
-        {years.map(year => (
-          <CalendarYearGroup
-            key={year}
-            entry={entryOf(year)}
-            reads={reads.get(year)!}
-            onChange={(next) => onChange(year, next)}
-          />
-        ))}
-      </div>
     </section>
   )
 }
 
-function sortRows(rows: readonly CalendarHolidayDraft[]): CalendarHolidayDraft[] {
-  return [...rows].sort((left, right) => {
-    if (left.start === '' && right.start === '') return 0
-    if (left.start === '') return 1
-    if (right.start === '') return -1
-    return left.start.localeCompare(right.start)
+function spansOf(entries: CalendarEntries, year: string): readonly { start: string; end: string; days: number }[] {
+  const entry = entries.get(year)
+  if (entry === undefined) return []
+  return readHolidays(year, entry.holidays).flatMap((read, index) => {
+    const row = entry.holidays[index]
+    return read.kind === 'ok' && row !== undefined ? [{ start: row.start, end: row.end, days: read.days }] : []
   })
 }
 
-function CalendarYearGroup({ entry, reads, onChange }: {
-  entry: CalendarDraft
-  reads: readonly HolidayRead[]
-  onChange: (next: CalendarDraft) => void
+function CalendarYearView({ year, auto, spans }: {
+  year: string
+  auto: boolean
+  spans: readonly { start: string; end: string; days: number }[]
 }) {
-  const [pickStart, setPickStart] = useState<string | null>(null)
-  const [hoverDate, setHoverDate] = useState<string | null>(null)
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'err' | 'hint' } | null>(null)
-  const [undoRows, setUndoRows] = useState<CalendarHolidayDraft[] | null>(null)
-  const tally = calendarYearTally(entry.year, entry.holidays)
   const marked = new Set<string>()
-  for (const row of entry.holidays) {
-    if (row.id === editingId) continue
-    for (const date of holidayDates({ start: row.start, end: row.end })) marked.add(date)
-  }
-
-  const busy = pickStart !== null || editingId !== null
-
-  useEffect(() => {
-    if (!busy) return
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      setPickStart(null)
-      setHoverDate(null)
-      setEditingId(null)
-      setNotice(null)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [busy])
-
-  const resetPick = (): void => {
-    setPickStart(null)
-    setHoverDate(null)
-    setEditingId(null)
-  }
-
-  const apply = (rows: CalendarHolidayDraft[], text: string): void => {
-    setUndoRows(entry.holidays)
-    setNotice({ text, tone: 'ok' })
-    onChange({ ...entry, holidays: sortRows(rows) })
-    resetPick()
-  }
-
-  const undo = (): void => {
-    if (undoRows === null) return
-    onChange({ ...entry, holidays: undoRows })
-    setUndoRows(null)
-    setNotice(null)
-    resetPick()
-  }
-
-  const rangeAt = (date: string): CalendarHolidayDraft | undefined =>
-    entry.holidays.find(row => row.id !== editingId && row.start !== '' && row.end !== '' && row.start <= date && date <= row.end)
-
-  const commit = (start: string, end: string): void => {
-    const days = String(holidayDates({ start, end }).length)
-    if (editingId === null) {
-      apply([...entry.holidays, newHoliday({ start, end })], `已加入 ${start} ~ ${end}（${days} 天）`)
-      return
-    }
-    apply(
-      entry.holidays.map(row => (row.id === editingId ? { ...row, start, end } : row)),
-      `已改成 ${start} ~ ${end}（${days} 天）`,
-    )
-  }
-
-  const removeRange = (id: number, label: string): void => {
-    apply(entry.holidays.filter(row => row.id !== id), `已删掉 ${label}`)
-  }
-
-  const onPick = (date: string): void => {
-    setNotice(current => (current !== null && current.tone === 'ok' ? current : null))
-    if (pickStart === null) {
-      const hit = rangeAt(date)
-      if (hit !== undefined) {
-        setNotice({ text: `这一天已经在「${hit.start} ~ ${hit.end}」里了：点那一行的「改」重选，或用「删除」去掉。`, tone: 'hint' })
-        return
-      }
-      setPickStart(date)
-      return
-    }
-    const start = pickStart <= date ? pickStart : date
-    const end = pickStart <= date ? date : pickStart
-    const taken = entry.holidays.find(row => row.id !== editingId
-      && row.start !== '' && row.end !== ''
-      && row.start <= end && start <= row.end)
-    if (taken !== undefined) {
-      setNotice({ text: `和「${taken.start} ~ ${taken.end}」重叠了：同一年里两段假期不能共享一天。`, tone: 'err' })
-      return
-    }
-    commit(start, end)
-  }
-
-  const beginEdit = (id: number): void => {
-    setEditingId(id)
-    setPickStart(null)
-    setHoverDate(null)
-    setNotice(null)
-  }
-
+  for (const span of spans) for (const day of holidayDates({ start: span.start, end: span.end })) marked.add(day)
+  const totalDays = spans.reduce((sum, span) => sum + span.days, 0)
+  const names = HOLIDAY_NAMES[year] ?? []
   return (
-    <div className="dtpl-price-cal-year">
-      <div className="dtpl-price-cal-year-head">
-        <span className="dtpl-price-cal-year-num">{entry.year}</span>
-        <span className="dtpl-price-cal-year-sum">
-          {tally.ranges === 0
-            ? '还没写（这一年仍未收录）'
-            : `${String(tally.ranges)} 段假期 · 共 ${String(tally.days)} 天`}
+    <div className="dtpl-price-calyear">
+      <div className="dtpl-price-calspine">
+        <span className="dtpl-price-calyearnum">{year}</span>
+        <span className="dtpl-price-calyearsum">
+          {spans.length === 0
+            ? '尚未收录'
+            : <><b>{String(spans.length)}</b> 段假期 · 共 <b>{String(totalDays)}</b> 天</>}
+        </span>
+        {auto && (
+          <span className="dtpl-price-calchip" title="从 holiday-cn 自动拉取并缓存；这一年的放假安排来自上游。">holiday-cn 同步</span>
+        )}
+        {spans.length > 0 && (
+          <ol className="dtpl-price-calspans" aria-label={`${year} 年假期清单`}>
+            {spans.map((span, index) => (
+              <li className="dtpl-price-calspan" key={`${span.start}-${String(index)}`}>
+                <span className="dtpl-price-calspan-name">{names[index] ?? `假期 ${String(index + 1)}`}</span>
+                <span className="dtpl-price-calspan-days">{String(span.days)} 天</span>
+                <span className="dtpl-price-calspan-range">{shortDate(span.start)} — {shortDate(span.end)}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+        <span className="dtpl-price-callegend">
+          <span className="dtpl-price-callegend-item" data-kind="holiday"><i aria-hidden="true" />法定节假日</span>
+          <span className="dtpl-price-callegend-item" data-kind="weekend"><i aria-hidden="true" />周末</span>
         </span>
       </div>
-      <p className="dtpl-price-cal-pick" data-active={busy || undefined}>
-        <span role="status">
-          {editingId !== null
-            ? pickStart === null
-              ? '正在改这一段：点一天重新选开始'
-              : `正在改这一段：已选开始 ${pickStart}，再点一天选结束`
-            : pickStart === null
-              ? '点一天选开始。想删假期就点它那一行右侧的「删除」'
-              : `已选开始 ${pickStart}，再点一天选结束`}
-        </span>
-        {busy && (
-          <button type="button" className="dtpl-price-ghost" onClick={resetPick}>取消</button>
-        )}
-      </p>
-      <div className="dtpl-cal-panel">
-        {notice !== null && (
-          <p
-            className="dtpl-price-cal-notice"
-            data-tone={notice.tone}
-            role={notice.tone === 'err' ? 'alert' : 'status'}
-          >
-            <span className="dtpl-price-cal-notice-mark" aria-hidden="true">
-              {notice.tone === 'ok' ? '✓' : notice.tone === 'err' ? '!' : 'i'}
-            </span>
-            <span className="dtpl-price-cal-notice-text">{notice.text}</span>
-            {notice.tone === 'ok' && undoRows !== null && (
-              <button type="button" className="dtpl-price-cal-notice-act" onClick={undo}>撤销</button>
-            )}
-          </p>
-        )}
-        <div className="dtpl-cal-toolbar">
-          <span className="dtpl-cal-legend">
-            <span className="dtpl-cal-legend-item" data-kind="holiday"><i aria-hidden="true">假</i>法定节假日</span>
-            <span className="dtpl-cal-legend-item" data-kind="weekend"><i aria-hidden="true">休</i>周末</span>
-          </span>
-        </div>
-        <HolidayCalendar year={entry.year} holidays={marked} pickStart={pickStart} hoverDate={hoverDate} onPick={onPick} onHover={setHoverDate} />
-      </div>
-      {entry.holidays.length > 0 && (
-        <div className="dtpl-price-cal-holidays">
-          {entry.holidays.map((holiday, index) => (
-            <HolidayRow
-              key={holiday.id}
-              index={index}
-              row={holiday}
-              read={reads[index]!}
-              editing={editingId === holiday.id}
-              onEdit={() => beginEdit(holiday.id)}
-              onRemove={() => removeRange(holiday.id, holiday.start === '' && holiday.end === '' ? '这一段空白假期' : `${holiday.start} ~ ${holiday.end}`)}
-            />
-          ))}
-        </div>
-      )}
+      <HolidayCalendar year={year} holidays={marked} />
     </div>
   )
 }
 
-
-function HolidayRow({ index, row, read, editing, onEdit, onRemove }: {
-  index: number
-  row: CalendarHolidayDraft
-  read: HolidayRead
-  editing: boolean
-  onEdit: () => void
-  onRemove: () => void
-}) {
-  const where = `第 ${String(index + 1)} 段假期`
-  return (
-    <div className="dtpl-price-cal-holiday" data-bad={read.kind === 'bad'} data-editing={editing || undefined}>
-      <span className="dtpl-price-cal-range">{row.start === '' && row.end === '' ? '还没选' : `${row.start} ~ ${row.end}`}</span>
-      <span className="dtpl-price-cal-holiday-tail">
-        <span className="dtpl-price-cal-days" data-kind={read.kind}>
-          {read.kind === 'ok' ? `${String(read.days)} 天` : read.kind === 'partial' ? '还没填完' : ''}
-        </span>
-        <button
-          type="button"
-          className="dtpl-price-ghost"
-          aria-label={`改（${where}）`}
-          title="重新选这一段的开始与结束"
-          onClick={onEdit}
-        >
-          {editing ? '正在改' : '改'}
-        </button>
-        <button
-          type="button"
-          className="dtpl-price-ghost dtpl-price-ghost-danger"
-          aria-label={`删除（${where}）`}
-          title="删掉这一段假期（可以撤销）"
-          onClick={onRemove}
-        >
-          删除
-        </button>
-      </span>
-      {read.kind === 'bad' && <span className="dtpl-price-cell-err" role="alert">{read.error}</span>}
-    </div>
-  )
-}
-
-function summarizeCalendar(years: readonly string[]): string {
-  if (years.length === 0) return '未收录：法定工作日按周一至周五全额算'
-  return `${years.join('、')} 已收录`
-}
 
 function describeAutoSync(
   sync: HolidaySyncView | undefined,
@@ -404,15 +321,15 @@ function describeAutoSync(
   if (running) return { text: '正在拉取节假日安排…', tone: 'ok' }
   if (sync.state === 'failed') {
     return {
-      text: `上次没拉到${sync.lastError === null ? '' : `（${sync.lastError}）`}，现在用的还是上次的数据；已有的年份可以自己填，手写的永远优先。`,
+      text: `上次没拉到${sync.lastError === null ? '' : `（${sync.lastError}）`}，现在用的还是上一次的数据；缺的年份可以写进 pricing.json，或等下次拉取补上。`,
       tone: 'err',
     }
   }
   if (sync.state === 'missing') {
     return {
       text: sync.uncovered.length > 0
-        ? `${sync.uncovered.join('、')} 年还没有节假日数据（上游可能还没公布）；写进 pricing.json 或拉取成功后再填。`
-        : '还没有节假日数据；写进 pricing.json 或拉取成功后再填。',
+        ? `${sync.uncovered.join('、')} 年还没有节假日数据（上游可能还没公布）；可以先写进 pricing.json，或等拉取成功后自动补上。`
+        : '还没有节假日数据；可以先写进 pricing.json，或等拉取成功后自动补上。',
       tone: 'err',
     }
   }
