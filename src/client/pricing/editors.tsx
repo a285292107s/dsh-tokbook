@@ -3,7 +3,7 @@ import { DAY_SET_HINTS, DAY_SET_LABELS, DAY_SETS, clockLabel, holidayDates, isHo
 import type { BillingNature, DaySet, HolidaySyncView, PriceCurrency } from '../../types.ts'
 import { counterpartOf, unitOf, type MoneyView } from './currency.ts'
 import {
-  calendarYearTally, defaultCalendarYear, duplicateSlot, effectiveSlots, fieldState,
+  calendarYearTally, duplicateSlot, effectiveSlots, fieldState,
   inheritedCell, isBlankSlot, dayLabel, missingYearDrafts, modelDirty, newHoliday, newSlot,
   priceIssue, ratesInForce,
   readHolidays, slotRange, withSlotEnd, withSlotStart,
@@ -49,11 +49,20 @@ function monthDays(year: number, month: number, holidays: ReadonlySet<string>): 
   return cells
 }
 
-function HolidayCalendar({ year, holidays }: { year: string; holidays: ReadonlySet<string> }) {
+function HolidayCalendar({ year, holidays, pickStart, hoverDate, onPick, onHover }: {
+  year: string
+  holidays: ReadonlySet<string>
+  pickStart: string | null
+  hoverDate: string | null
+  onPick: (date: string) => void
+  onHover: (date: string | null) => void
+}) {
   const yearNum = Number(year)
   const months = Array.from({ length: 12 }, (_, index) => index + 1)
+  const previewFrom = pickStart === null || hoverDate === null ? null : pickStart <= hoverDate ? pickStart : hoverDate
+  const previewTo = previewFrom === null ? null : pickStart! <= hoverDate! ? hoverDate : pickStart
   return (
-    <div className="dtpl-cal-grid" role="group" aria-label={`${year} 年节假日日历：标假的是法定节假日，标休的是周末`}>
+    <div className="dtpl-cal-grid" role="group" aria-label={`${year} 年节假日日历：点一天选开始，再点一天选结束`} onMouseLeave={() => onHover(null)}>
       {months.map(month => (
         <div className="dtpl-cal-month" key={month}>
           <div className="dtpl-cal-month-name">{month} 月</div>
@@ -64,16 +73,23 @@ function HolidayCalendar({ year, holidays }: { year: string; holidays: ReadonlyS
             {monthDays(yearNum, month, holidays).map(cell => cell.blank
               ? <span className="dtpl-cal-day is-blank" key={cell.key} aria-hidden="true" />
               : (
-                <span
+                <button
+                  type="button"
                   className="dtpl-cal-day"
                   key={cell.key}
                   data-holiday={cell.holiday || undefined}
                   data-weekend={!cell.holiday && cell.weekend || undefined}
-                  title={`${year}-${String(month).padStart(2, '0')}-${String(cell.day).padStart(2, '0')} ${cell.holiday ? '法定节假日' : cell.weekend ? '周末' : '工作日'}`}
+                  data-preview={previewFrom !== null && cell.key >= previewFrom && cell.key <= previewTo! || undefined}
+                  data-pick={pickStart === cell.key || undefined}
+                  aria-label={`${cell.key}${cell.holiday ? ' 法定节假日' : cell.weekend ? ' 周末' : ''}${pickStart === cell.key ? '，已选为开始' : ''}`}
+                  title={`${cell.key}${cell.holiday ? ' 法定节假日' : cell.weekend ? ' 周末' : ''}`}
+                  onClick={() => onPick(cell.key)}
+                  onMouseEnter={() => onHover(cell.key)}
+                  onFocus={() => onHover(cell.key)}
                 >
                   <span className="dtpl-cal-day-num">{cell.day}</span>
                   <span className="dtpl-cal-day-mark" aria-hidden="true">{cell.holiday ? '假' : cell.weekend ? '休' : ''}</span>
-                </span>
+                </button>
               )
             )}
           </div>
@@ -82,249 +98,191 @@ function HolidayCalendar({ year, holidays }: { year: string; holidays: ReadonlyS
     </div>
   )
 }
-export function CalendarEditor({ entries, missingYears, autoYears, dirty, expanded, sync, onAutoRefresh, syncing, onExpandedChange, onChange, className }: {
+
+
+export function CalendarEditor({ entries, missingYears, autoYears, dirty, sync, syncing, onChange, className }: {
   entries: CalendarEntries
   missingYears: readonly string[]
   autoYears?: readonly string[]
   dirty: boolean
-  expanded: boolean
-  onExpandedChange: (expanded: boolean) => void
   onChange: (year: string, next: CalendarDraft | null) => void
   sync?: HolidaySyncView
-  onAutoRefresh?: () => void
   syncing?: boolean
   className?: string
 }) {
-  const [addingTouched, setAddingTouched] = useState(false)
-  const [focusId, setFocusId] = useState<string | null>(null)
-  const [typed, setTyped] = useState<string | null>(null)
-  const [viewYear, setViewYear] = useState<string | null>(null)
-  const holidayDateSet = new Set<string>()
-  for (const entry of entries.values()) {
-    for (const row of entry.holidays) {
-      for (const date of holidayDates({ start: row.start, end: row.end })) holidayDateSet.add(date)
-    }
-  }
-  const years = [...entries.keys()].sort((left, right) => left.localeCompare(right))
-  const reads = new Map(years.map(year => [year, readHolidays(year, entries.get(year)!.holidays)]))
-  const defaultYear = defaultCalendarYear(entries)
-  const yearText = typed ?? defaultYear
+  const entryOf = (year: string): CalendarDraft => entries.get(year) ?? { year, holidays: [] }
+  const years = entries.size > 0
+    ? [...entries.keys()].sort((left, right) => left.localeCompare(right))
+    : [String(new Date().getFullYear())]
+  const reads = new Map(years.map(year => [year, readHolidays(year, entryOf(year).holidays)]))
   const kept = years.filter(year => reads.get(year)!.some(read => read.kind === 'ok'))
   const broken = years.filter(year => reads.get(year)!.some(read => read.kind === 'bad'))
   const gaps = missingYears.filter(year => !entries.has(year))
 
-  useEffect(() => {
-    if (focusId === null) return
-    document.getElementById(focusId)?.focus()
-    setFocusId(null)
-  }, [focusId])
-
-  const addingProblem = ((): string | null => {
-    const year = yearText.trim()
-    if (year === '') return null
-    if (!/^\d{4}$/u.test(year)) return '年份要写四位数字，例如 2027'
-    if (entries.has(year)) return `${year} 年已经在上面了`
-    return null
-  })()
-
-  const leaveYear = (): void => {
-    setAddingTouched(true)
-    setTyped(current => (current !== null && current.trim() === '' ? null : current))
-  }
-
-  const submitAdding = (): void => {
-    setAddingTouched(true)
-    if (addingProblem !== null) return
-    const year = yearText.trim() === '' ? defaultYear : yearText.trim()
-    const holiday = newHoliday()
-    onChange(year, { year, holidays: [holiday] })
-    setFocusId(dateFieldId(holiday, 'start'))
-    setTyped(null)
-    setAddingTouched(false)
-  }
-
   const fillGaps = (): void => {
     const drafts = missingYearDrafts(entries, gaps)
     for (const draft of drafts) onChange(draft.year, draft)
-    onExpandedChange(true)
-    const first = drafts[0]?.holidays[0]
-    setFocusId(first === undefined ? null : dateFieldId(first, 'start'))
   }
 
-  const calendarYear = viewYear !== null && /^\d{4}$/u.test(viewYear)
-    ? viewYear
-    : years.includes(defaultYear) ? defaultYear : years[0] ?? defaultYear
-  const calendarOptions = [...new Set([...years, ...(viewYear !== null && /^\d{4}$/u.test(viewYear) ? [viewYear] : [])])].sort((a, b) => a.localeCompare(b))
-
   const autoLine = describeAutoSync(sync, syncing === true)
-  const needsManual = sync !== undefined && (sync.state === 'failed' || sync.state === 'missing')
 
   return (
-    <section className={`dtpl-price-cal ${className ?? ''}`} id="price-calendar" data-dirty={dirty} data-open={expanded} aria-label="法定节假日年历">
-      <div className="dtpl-price-cal-head">
-        <button
-          type="button"
-          className="dtpl-price-cal-toggle"
-          aria-expanded={expanded}
-          onClick={() => onExpandedChange(!expanded)}
-        >
-          <span className="dtpl-price-cal-caret" aria-hidden="true" />
-          <span className="dtpl-price-cal-title">法定节假日年历</span>
-          <span className="dtpl-price-cal-sum">{summarizeCalendar(kept)}</span>
-          {autoYears !== undefined && autoYears.length > 0 && (
-            <span
-              className="dtpl-price-cal-auto"
-              title="这些年份没写在 pricing.json 里，是从 holiday-cn 自动拉来并缓存到本机的；手写有那一年时以手写的为准。"
-            >
-              {autoYears.join('、')} 自动
-            </span>
-          )}
-          {broken.length > 0 && (
-            <span className="dtpl-price-cal-warn">{broken.join('、')} 年写不出来</span>
-          )}
-          <span className="dtpl-price-cal-hint" aria-hidden="true">{expanded ? '收起' : '展开'}</span>
-        </button>
+    <section className={`dtpl-price-cal ${className ?? ''}`} id="price-calendar" data-dirty={dirty} aria-label="法定节假日年历">
+      <div className="dtpl-price-cal-head-row">
+        <span className="dtpl-price-cal-title">法定节假日年历</span>
+        <span className="dtpl-price-cal-sum">{summarizeCalendar(kept)}</span>
+        {autoYears !== undefined && autoYears.length > 0 && (
+          <span
+            className="dtpl-price-cal-auto"
+            title="这些年份没写在 pricing.json 里，是从 holiday-cn 自动拉来并缓存到本机的；手写有那一年时以手写的为准。"
+          >
+            {autoYears.join('、')} 自动
+          </span>
+        )}
+        {broken.length > 0 && (
+          <span className="dtpl-price-cal-warn">{broken.join('、')} 年写不出来</span>
+        )}
         {missingYears.length > 0 && gaps.length > 0 && (
-          onAutoRefresh === undefined
-            ? (
-              <button type="button" className="dtpl-price-cal-fix" onClick={fillGaps}
-                title="这些年的「法定工作日」时段会按周一至周五全额计，落在法定节假日的工作日被多算高峰价。补上那一年，或展开年历手动加一年。">
-                <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>
-                {gaps.length > 2 ? `补上缺的 ${String(gaps.length)} 年` : `补上 ${gaps.join('、')} 年`}
-              </button>
-            )
-            : (
-              <button
-                type="button"
-                className="dtpl-price-cal-fix"
-                disabled={syncing === true}
-                onClick={onAutoRefresh}
-                title="从 holiday-cn 拉这几年的法定节假日安排（它每日抓国务院公告）。手写过的年份不受影响。"
-              >
-                <span className="dtpl-price-add-plus" aria-hidden="true">↻</span>
-                {syncing === true ? '拉取中…' : `自动拉取 ${gaps.join('、')} 年`}
-              </button>
-            )
+          <button type="button" className="dtpl-price-cal-fix" onClick={fillGaps}
+            title="这些年的「法定工作日」时段会按周一至周五全额计，落在法定节假日的工作日被多算高峰价。点这里把那几年加进年历，再用日历圈出假期。">
+            <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>
+            {gaps.length > 2 ? `补上缺的 ${String(gaps.length)} 年` : `补上 ${gaps.join('、')} 年`}
+          </button>
         )}
       </div>
       {autoLine !== null && (
-        <p className="dtpl-price-cal-auto-line" data-tone={autoLine.tone}>
-          {autoLine.text}
-          {needsManual && onAutoRefresh !== undefined && (
-            <button type="button" className="dtpl-price-ghost" onClick={onAutoRefresh} disabled={syncing === true}>
-              {syncing === true ? '重试中…' : '重试'}
-            </button>
-          )}
+        <p className="dtpl-price-cal-auto-line" data-tone={autoLine.tone}>{autoLine.text}</p>
+      )}
+      <div className="dtpl-price-cal-body">
+        <p className="dtpl-price-cal-note">
+          一年一组，一段假期一行。点日历上的开始日和结束日就能加一段假期——年份由这一组决定，不用填。
+          只收录放假日（调休上班日落在周末，而周末本来就是闲时）；天数要能对上通知里「共 N 天」。
+          标着<b>「自动」</b>的年份是从 holiday-cn 拉来缓存的，你手写过哪一年，哪一年就以你的为准。
         </p>
-      )}
-      {expanded && (
-        <div className="dtpl-price-cal-body">
-          <p className="dtpl-price-cal-note">
-            一年一组，一段假期一行：填开始与结束日期，含两端。只收录放假日——调休上班日落在周末，
-            而周末本来就是闲时。每行后面的天数是拿来对通知里「共 N 天」的：对不上就是抄错了。
-            标着<b>「自动」</b>的年份没写在这里，是启动时从 holiday-cn 拉来并缓存的；你手写过哪一年，
-            哪一年就以你的为准。
-          </p>
-          <div className="dtpl-cal-panel">
-            <div className="dtpl-cal-toolbar">
-              <label className="dtpl-cal-year-label" htmlFor="cal-view-year">查看年份</label>
-              <select
-                id="cal-view-year"
-                className="dtpl-price-select dtpl-cal-year-select"
-                value={calendarYear}
-                onChange={(event) => setViewYear(event.target.value)}
-              >
-                {calendarOptions.map(option => <option key={option} value={option}>{option} 年</option>)}
-              </select>
-              <span className="dtpl-cal-legend">
-                <span className="dtpl-cal-legend-item" data-kind="holiday"><i aria-hidden="true">假</i>法定节假日</span>
-                <span className="dtpl-cal-legend-item" data-kind="weekend"><i aria-hidden="true">休</i>周末</span>
-              </span>
-            </div>
-            <HolidayCalendar year={calendarYear} holidays={holidayDateSet} />
-          </div>
-          {years.map(year => (
-            <CalendarYearGroup
-              key={year}
-              entry={entries.get(year)!}
-              reads={reads.get(year)!}
-              onChange={(next) => onChange(year, next)}
-              onRemove={() => {
-                onChange(year, null)
-                setFocusId('cal-newyear')
-              }}
-            />
-          ))}
-          <div className="dtpl-price-cal-add">
-            <label className="dtpl-price-cal-year-k" htmlFor="cal-newyear">年份</label>
-            <input
-              id="cal-newyear"
-              className="dtpl-price-input dtpl-price-cal-newyear"
-              type="text"
-              inputMode="numeric"
-              maxLength={4}
-              autoComplete="off"
-              value={yearText}
-              aria-label="要加入的年份"
-              aria-invalid={(addingTouched && addingProblem !== null) || undefined}
-              aria-describedby={addingTouched && addingProblem !== null ? 'cal-add-err' : undefined}
-              onChange={(event) => {
-                setTyped(event.target.value)
-                setAddingTouched(false)
-              }}
-              onBlur={leaveYear}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') submitAdding()
-              }}
-            />
-            <button
-              type="button"
-              className="dtpl-price-add-ghost"
-              disabled={addingProblem !== null}
-              onClick={submitAdding}
-            >
-              <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>加一年
-            </button>
-            {addingTouched && addingProblem !== null && (
-              <span id="cal-add-err" className="dtpl-price-cal-newyear-err" role="alert">{addingProblem}</span>
-            )}
-          </div>
-        </div>
-      )}
+        {years.map(year => (
+          <CalendarYearGroup
+            key={year}
+            entry={entryOf(year)}
+            reads={reads.get(year)!}
+            onChange={(next) => onChange(year, next)}
+          />
+        ))}
+      </div>
     </section>
   )
 }
 
-function dateFieldId(holiday: CalendarHolidayDraft, side: 'start' | 'end'): string {
-  return `cal-${String(holiday.id)}-${side}`
+function sortRows(rows: readonly CalendarHolidayDraft[]): CalendarHolidayDraft[] {
+  return [...rows].sort((left, right) => {
+    if (left.start === '' && right.start === '') return 0
+    if (left.start === '') return 1
+    if (right.start === '') return -1
+    return left.start.localeCompare(right.start)
+  })
 }
 
-function CalendarYearGroup({ entry, reads, onChange, onRemove }: {
+function CalendarYearGroup({ entry, reads, onChange }: {
   entry: CalendarDraft
   reads: readonly HolidayRead[]
   onChange: (next: CalendarDraft) => void
-  onRemove: () => void
 }) {
-  const [confirming, setConfirming] = useState(false)
+  const [pickStart, setPickStart] = useState<string | null>(null)
+  const [hoverDate, setHoverDate] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'err' | 'hint' } | null>(null)
+  const [undoRows, setUndoRows] = useState<CalendarHolidayDraft[] | null>(null)
   const tally = calendarYearTally(entry.year, entry.holidays)
-  const [pendingFocus, setPendingFocus] = useState<string | null>(null)
+  const marked = new Set<string>()
+  for (const row of entry.holidays) {
+    if (row.id === editingId) continue
+    for (const date of holidayDates({ start: row.start, end: row.end })) marked.add(date)
+  }
+
+  const busy = pickStart !== null || editingId !== null
+
   useEffect(() => {
-    if (pendingFocus === null) return
-    document.getElementById(pendingFocus)?.focus()
-    setPendingFocus(null)
-  }, [pendingFocus])
-  const addHoliday = (): void => {
-    const holiday = newHoliday()
-    onChange({ ...entry, holidays: [...entry.holidays, holiday] })
-    setPendingFocus(dateFieldId(holiday, 'start'))
+    if (!busy) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      setPickStart(null)
+      setHoverDate(null)
+      setEditingId(null)
+      setNotice(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [busy])
+
+  const resetPick = (): void => {
+    setPickStart(null)
+    setHoverDate(null)
+    setEditingId(null)
   }
-  const removeHoliday = (index: number): void => {
-    const holiday = entry.holidays[index]
-    if (holiday === undefined) return
-    onChange({ ...entry, holidays: entry.holidays.filter(item => item.id !== holiday.id) })
-    const next = entry.holidays[index + 1] ?? entry.holidays[index - 1]
-    setPendingFocus(next === undefined ? `cal-${entry.year}-add` : dateFieldId(next, 'start'))
+
+  const apply = (rows: CalendarHolidayDraft[], text: string): void => {
+    setUndoRows(entry.holidays)
+    setNotice({ text, tone: 'ok' })
+    onChange({ ...entry, holidays: sortRows(rows) })
+    resetPick()
   }
+
+  const undo = (): void => {
+    if (undoRows === null) return
+    onChange({ ...entry, holidays: undoRows })
+    setUndoRows(null)
+    setNotice(null)
+    resetPick()
+  }
+
+  const rangeAt = (date: string): CalendarHolidayDraft | undefined =>
+    entry.holidays.find(row => row.id !== editingId && row.start !== '' && row.end !== '' && row.start <= date && date <= row.end)
+
+  const commit = (start: string, end: string): void => {
+    const days = String(holidayDates({ start, end }).length)
+    if (editingId === null) {
+      apply([...entry.holidays, newHoliday({ start, end })], `已加入 ${start} ~ ${end}（${days} 天）`)
+      return
+    }
+    apply(
+      entry.holidays.map(row => (row.id === editingId ? { ...row, start, end } : row)),
+      `已改成 ${start} ~ ${end}（${days} 天）`,
+    )
+  }
+
+  const removeRange = (id: number, label: string): void => {
+    apply(entry.holidays.filter(row => row.id !== id), `已删掉 ${label}`)
+  }
+
+  const onPick = (date: string): void => {
+    setNotice(current => (current !== null && current.tone === 'ok' ? current : null))
+    if (pickStart === null) {
+      const hit = rangeAt(date)
+      if (hit !== undefined) {
+        setNotice({ text: `这一天已经在「${hit.start} ~ ${hit.end}」里了：点那一行的「改」重选，或用「删除」去掉。`, tone: 'hint' })
+        return
+      }
+      setPickStart(date)
+      return
+    }
+    const start = pickStart <= date ? pickStart : date
+    const end = pickStart <= date ? date : pickStart
+    const taken = entry.holidays.find(row => row.id !== editingId
+      && row.start !== '' && row.end !== ''
+      && row.start <= end && start <= row.end)
+    if (taken !== undefined) {
+      setNotice({ text: `和「${taken.start} ~ ${taken.end}」重叠了：同一年里两段假期不能共享一天。`, tone: 'err' })
+      return
+    }
+    commit(start, end)
+  }
+
+  const beginEdit = (id: number): void => {
+    setEditingId(id)
+    setPickStart(null)
+    setHoverDate(null)
+    setNotice(null)
+  }
+
   return (
     <div className="dtpl-price-cal-year">
       <div className="dtpl-price-cal-year-head">
@@ -334,109 +292,98 @@ function CalendarYearGroup({ entry, reads, onChange, onRemove }: {
             ? '还没写（这一年仍未收录）'
             : `${String(tally.ranges)} 段假期 · 共 ${String(tally.days)} 天`}
         </span>
-        <button
-          type="button"
-          className="dtpl-price-ghost dtpl-price-ghost-danger"
-          aria-label={`${confirming ? '确认删除' : '删除'}这一年（${entry.year}）`}
-          data-confirm={confirming}
-          onClick={() => {
-            if (!confirming) {
-              setConfirming(true)
-              return
-            }
-            setConfirming(false)
-            onRemove()
-          }}
-          onBlur={() => setConfirming(false)}
-          title={confirming
-            ? `再点一次：${entry.year} 年的放假安排会被删掉，那一年退回按周一至周五全额算高峰`
-            : `删掉 ${entry.year} 年（需再点一次确认）`}
-        >
-          {confirming ? '确认删除' : '删除这一年'}
-        </button>
       </div>
-      {entry.holidays.map((holiday, index) => (
-        <HolidayRow
-          key={holiday.id}
-          year={entry.year}
-          index={index}
-          row={holiday}
-          read={reads[index]!}
-          onEdit={(next) => onChange({
-            ...entry,
-            holidays: entry.holidays.map(item => (item.id === holiday.id ? next : item)),
-          })}
-          onRemove={() => removeHoliday(index)}
-        />
-      ))}
-      <button type="button" id={`cal-${entry.year}-add`} className="dtpl-price-add-ghost" onClick={addHoliday}>
-        <span className="dtpl-price-add-plus" aria-hidden="true">＋</span>加一段假期
-      </button>
+      <p className="dtpl-price-cal-pick" data-active={busy || undefined}>
+        <span role="status">
+          {editingId !== null
+            ? pickStart === null
+              ? '正在改这一段：点一天重新选开始'
+              : `正在改这一段：已选开始 ${pickStart}，再点一天选结束`
+            : pickStart === null
+              ? '点一天选开始。想删假期就点它那一行右侧的「删除」'
+              : `已选开始 ${pickStart}，再点一天选结束`}
+        </span>
+        {busy && (
+          <button type="button" className="dtpl-price-ghost" onClick={resetPick}>取消</button>
+        )}
+      </p>
+      <div className="dtpl-cal-panel">
+        {notice !== null && (
+          <p
+            className="dtpl-price-cal-notice"
+            data-tone={notice.tone}
+            role={notice.tone === 'err' ? 'alert' : 'status'}
+          >
+            <span className="dtpl-price-cal-notice-mark" aria-hidden="true">
+              {notice.tone === 'ok' ? '✓' : notice.tone === 'err' ? '!' : 'i'}
+            </span>
+            <span className="dtpl-price-cal-notice-text">{notice.text}</span>
+            {notice.tone === 'ok' && undoRows !== null && (
+              <button type="button" className="dtpl-price-cal-notice-act" onClick={undo}>撤销</button>
+            )}
+          </p>
+        )}
+        <div className="dtpl-cal-toolbar">
+          <span className="dtpl-cal-legend">
+            <span className="dtpl-cal-legend-item" data-kind="holiday"><i aria-hidden="true">假</i>法定节假日</span>
+            <span className="dtpl-cal-legend-item" data-kind="weekend"><i aria-hidden="true">休</i>周末</span>
+          </span>
+        </div>
+        <HolidayCalendar year={entry.year} holidays={marked} pickStart={pickStart} hoverDate={hoverDate} onPick={onPick} onHover={setHoverDate} />
+      </div>
+      {entry.holidays.length > 0 && (
+        <div className="dtpl-price-cal-holidays">
+          {entry.holidays.map((holiday, index) => (
+            <HolidayRow
+              key={holiday.id}
+              index={index}
+              row={holiday}
+              read={reads[index]!}
+              editing={editingId === holiday.id}
+              onEdit={() => beginEdit(holiday.id)}
+              onRemove={() => removeRange(holiday.id, holiday.start === '' && holiday.end === '' ? '这一段空白假期' : `${holiday.start} ~ ${holiday.end}`)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-function HolidayRow({ year, index, row, read, onEdit, onRemove }: {
-  year: string
+
+function HolidayRow({ index, row, read, editing, onEdit, onRemove }: {
   index: number
   row: CalendarHolidayDraft
   read: HolidayRead
-  onEdit: (next: CalendarHolidayDraft) => void
+  editing: boolean
+  onEdit: () => void
   onRemove: () => void
 }) {
-  const [confirming, setConfirming] = useState(false)
-  const where = `${year} 年第 ${String(index + 1)} 段假期`
-  const startId = dateFieldId(row, 'start')
-  const endId = dateFieldId(row, 'end')
+  const where = `第 ${String(index + 1)} 段假期`
   return (
-    <div className="dtpl-price-cal-holiday" data-bad={read.kind === 'bad'}>
-      <input
-        id={startId}
-        className="dtpl-price-input dtpl-price-cal-date"
-        type="date"
-        min={`${year}-01-01`}
-        max={`${year}-12-31`}
-        value={row.start}
-        aria-label={`${where}的开始日期`}
-        aria-invalid={read.kind === 'bad' || undefined}
-        title="点进年 / 月 / 日任一段直接键入，方向键逐步增减；日期只能落在这一年里"
-        onChange={(event) => onEdit({ ...row, start: event.target.value })}
-      />
-      <span className="dtpl-price-cal-tilde" aria-hidden="true">~</span>
-      <input
-        id={endId}
-        className="dtpl-price-input dtpl-price-cal-date"
-        type="date"
-        min={`${year}-01-01`}
-        max={`${year}-12-31`}
-        value={row.end}
-        aria-label={`${where}的结束日期`}
-        aria-invalid={read.kind === 'bad' || undefined}
-        title="点进年 / 月 / 日任一段直接键入，方向键逐步增减；日期只能落在这一年里"
-        onChange={(event) => onEdit({ ...row, end: event.target.value })}
-      />
+    <div className="dtpl-price-cal-holiday" data-bad={read.kind === 'bad'} data-editing={editing || undefined}>
+      <span className="dtpl-price-cal-range">{row.start === '' && row.end === '' ? '还没选' : `${row.start} ~ ${row.end}`}</span>
       <span className="dtpl-price-cal-holiday-tail">
         <span className="dtpl-price-cal-days" data-kind={read.kind}>
           {read.kind === 'ok' ? `${String(read.days)} 天` : read.kind === 'partial' ? '还没填完' : ''}
         </span>
         <button
           type="button"
-          id={`cal-${String(row.id)}-remove`}
-          className="dtpl-price-ghost dtpl-price-ghost-danger"
-          aria-label={`${confirming ? '确认删除' : '删除'}（${where}）`}
-          data-confirm={confirming}
-          onClick={() => {
-            if (!confirming) {
-              setConfirming(true)
-              return
-            }
-            setConfirming(false)
-            onRemove()
-          }}
-          onBlur={() => setConfirming(false)}
-          title={confirming ? '再点一次：这一段假期会被删掉' : '删掉这一段假期（需再点一次确认）'}
+          className="dtpl-price-ghost"
+          aria-label={`改（${where}）`}
+          title="重新选这一段的开始与结束"
+          onClick={onEdit}
         >
-          {confirming ? '确认删除' : '删除'}
+          {editing ? '正在改' : '改'}
+        </button>
+        <button
+          type="button"
+          className="dtpl-price-ghost dtpl-price-ghost-danger"
+          aria-label={`删除（${where}）`}
+          title="删掉这一段假期（可以撤销）"
+          onClick={onRemove}
+        >
+          删除
         </button>
       </span>
       {read.kind === 'bad' && <span className="dtpl-price-cell-err" role="alert">{read.error}</span>}
@@ -457,15 +404,15 @@ function describeAutoSync(
   if (running) return { text: '正在拉取节假日安排…', tone: 'ok' }
   if (sync.state === 'failed') {
     return {
-      text: `上次没拉到${sync.lastError === null ? '' : `（${sync.lastError}）`}，现在用的还是上次的数据；展开年历可以自己填，手写的永远优先。`,
+      text: `上次没拉到${sync.lastError === null ? '' : `（${sync.lastError}）`}，现在用的还是上次的数据；已有的年份可以自己填，手写的永远优先。`,
       tone: 'err',
     }
   }
   if (sync.state === 'missing') {
     return {
       text: sync.uncovered.length > 0
-        ? `${sync.uncovered.join('、')} 年还没有节假日数据（上游可能还没公布）。展开可以手动填。`
-        : '还没有节假日数据。展开可以手动填。',
+        ? `${sync.uncovered.join('、')} 年还没有节假日数据（上游可能还没公布）；写进 pricing.json 或拉取成功后再填。`
+        : '还没有节假日数据；写进 pricing.json 或拉取成功后再填。',
       tone: 'err',
     }
   }

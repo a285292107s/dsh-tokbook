@@ -66,7 +66,6 @@ export const CSS_SHARED = `
     text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-day-row{grid-template-columns:minmax(0,88px) minmax(0,1fr);column-gap:8px;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-cal .dtpl-price-cal-date{width:100px;font-size:var(--dtpl-fs-body);}
   [data-plugin="dsh-tokbook"] .dtpl-price-cal-days{min-width:40px;}
 }
 
@@ -99,6 +98,7 @@ export const CSS_SHARED = `
   [data-plugin="dsh-tokbook"] .dtpl-price-add-ghost,
   [data-plugin="dsh-tokbook"] .dtpl-quota-bar-fill,
   [data-plugin="dsh-tokbook"] .dtpl-quota-gauge-fill,
+  [data-plugin="dsh-tokbook"] .dtpl-scroll-rail,
   [data-plugin="dsh-tokbook"] .dtpl-quota-refresh-anim.dtpl-quota-refresh-pop{animation:none;transition:none;}
 }
 

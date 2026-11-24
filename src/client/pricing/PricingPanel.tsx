@@ -165,7 +165,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
   }>({ open: false, keyword: '', loading: false, result: null, error: null })
   const [holiday, setHoliday] = useState<{ running: boolean; result: HolidayRefreshResult | null; error: string | null }>({ running: false, result: null, error: null })
   const [picked, setPicked] = useState<Picked | null>(readPicked)
-  const [calendarOpen, setCalendarOpen] = useState(false)
   const searchButtonRef = useRef<HTMLButtonElement>(null)
   const restoreLookupFocusRef = useRef(false)
 
@@ -608,7 +607,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           <div className="dtpl-price-calarm">
             <span className="dtpl-price-calarm-text" role="status">
               缺 {missing.join('、')} 年的法定节假日安排：「法定工作日」时段会把那几年的节假日按高峰多算。
-              {autoFailed && '自动拉取没成功，可以展开年历手动填（手写永远优先）。'}
+              {autoFailed && '自动拉取没成功；可以用「补上」把缺的年份加进年历，再自己填。'}
               {holiday.error !== null && <b>（自动拉取失败：{holiday.error}）</b>}
             </span>
             <button
@@ -619,7 +618,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
               title="从 holiday-cn 拉这几年的法定节假日安排（它每日抓国务院公告，按年一份 JSON）。手写过的年份不受影响。"
               onClick={() => {
                 void runHolidaySync(true, missing)
-                setCalendarOpen(true)
                 document.getElementById('price-calendar')?.scrollIntoView({ block: 'nearest' })
               }}
             >
@@ -740,10 +738,7 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
           autoYears={[...state.autoYears].sort((left, right) => left.localeCompare(right))}
           sync={view.holidaySync}
           dirty={calendarDirty(state, baseline)}
-          expanded={calendarOpen}
-          onExpandedChange={setCalendarOpen}
           onChange={updateCalendar}
-          onAutoRefresh={() => void runHolidaySync(true, view.calendarMissing)}
           syncing={holiday.running}
         />
     )}

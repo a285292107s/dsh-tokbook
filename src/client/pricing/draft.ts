@@ -109,7 +109,7 @@ export function missingYearDrafts(calendar: CalendarEntries, missingYears: reado
   const drafts: CalendarDraft[] = []
   for (const year of missingYears) {
     if (calendar.has(year)) continue
-    drafts.push({ year, holidays: [newHoliday()] })
+    drafts.push({ year, holidays: [] })
   }
   return drafts
 }

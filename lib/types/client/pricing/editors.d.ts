@@ -1,15 +1,12 @@
 import type { BillingNature, HolidaySyncView, PriceCurrency } from '../../types.ts';
 import { type CalendarDraft, type CalendarEntries, type ModelDraft } from './draft.ts';
-export declare function CalendarEditor({ entries, missingYears, autoYears, dirty, expanded, sync, onAutoRefresh, syncing, onExpandedChange, onChange, className }: {
+export declare function CalendarEditor({ entries, missingYears, autoYears, dirty, sync, syncing, onChange, className }: {
     entries: CalendarEntries;
     missingYears: readonly string[];
     autoYears?: readonly string[];
     dirty: boolean;
-    expanded: boolean;
-    onExpandedChange: (expanded: boolean) => void;
     onChange: (year: string, next: CalendarDraft | null) => void;
     sync?: HolidaySyncView;
-    onAutoRefresh?: () => void;
     syncing?: boolean;
     className?: string;
 }): import("react").JSX.Element;

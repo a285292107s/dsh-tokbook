@@ -96,9 +96,10 @@ html[data-platform="darwin"] [data-plugin="dsh-tokbook"] .dtpl-head{
 [data-plugin="dsh-tokbook"] .dtpl-scroll-rail{
   position:absolute;top:0;right:0;bottom:0;width:10px;z-index:1;
   opacity:0;pointer-events:none;
-  transition:opacity var(--dtpl-dur-quick) var(--dtpl-ease-tint);
+  transform:translateX(5px);
+  transition:opacity var(--dtpl-dur-move) var(--dtpl-ease-tint), transform var(--dtpl-dur-move) var(--dtpl-ease-move);
 }
-[data-plugin="dsh-tokbook"] .dtpl-scroll-rail[data-visible="true"]{opacity:1;}
+[data-plugin="dsh-tokbook"] .dtpl-scroll-rail[data-visible="true"]{opacity:1;transform:translateX(0);transition-duration:var(--dtpl-dur-enter);}
 [data-plugin="dsh-tokbook"] .dtpl-scroll-thumb{
   position:absolute;left:2px;width:5px;
   background:color-mix(in srgb,var(--dtpl-fg) 30%,transparent);
