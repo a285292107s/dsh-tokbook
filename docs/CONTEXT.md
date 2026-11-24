@@ -1,6 +1,6 @@
 # 领域词汇 — dsh-tokbook
 
-> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-11-22 · supersedes: —
+> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-11-25 · supersedes: —
 
 本文件只收**新引入、且会被反复用错**的词。既有词汇**不在这里重复**，它们各有单一真源：
 
@@ -95,6 +95,9 @@
   它标的是「身份/所在」：标题徽记、当前 tab 的 5px 下缘、节标题标记、统计口径 1–4 编号、价表「此刻计费」、
   今日词元；峰值牌与草稿点已改走墨。压深卡 5.79:1；块上的字走 on-brand（`#24211e`，压铜 6.21:1）。
   选区是唯一一处铜的淡洗（22%），只给选中文字一个底：浅 12.42:1、深 9.75:1。
+- **价格仪表台的底色是材料，不是状态。** 浅色取 5% 铜纸底；深色（宿主 `body[data-ds-dark-theme]`）换成
+  4% 前墨的中性洗色，避免铜淡在深灰卡面上把台面推成褐灰。台面与「现在」游标的 3px 垫底共用
+  `--dtpl-price-sheet`，改一处两处一起变；顶部 3px 条、标题标记与游标铜方仍是铜的身份标记。
 - **focus 是系统信号，不是强调色。** 全局那条焦点环走 `--dtpl-focus`（取宿主 brand、不取
   `--dtpl-brand` 的铜）；DSH 默认皮肤里这档等于墨色，拿它做分类或状态是空操作，
   换皮肤又会变蓝。兜底取墨色而不是某个蓝——端出 DSH 里不存在的强调色更糟。

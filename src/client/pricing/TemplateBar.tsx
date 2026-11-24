@@ -18,12 +18,18 @@ export function TemplateBar({ templates, currency, canSave, onApply, onDelete, o
   onSave: (name: string) => void
 }) {
   const [name, setName] = useState('')
+  const [composing, setComposing] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'err'; text: string } | null>(null)
+
+  const close = (): void => {
+    setComposing(false)
+    setName('')
+  }
 
   const save = (): void => {
     if (!canSave || name.trim() === '') return
     onSave(name.trim())
-    setName('')
+    close()
     setNotice(null)
   }
 
@@ -32,7 +38,7 @@ export function TemplateBar({ templates, currency, canSave, onApply, onDelete, o
       <span className="dtpl-price-tpl-k">价格模板</span>
       <div className="dtpl-price-tpl-chips">
         {templates.length === 0
-          ? <span className="dtpl-price-tpl-empty">还没有模板：把当前这组四档价起个名存成模板，以后一键套到别的模型上。</span>
+          ? <span className="dtpl-price-tpl-empty">还没有模板。存下当前这组价，换模型时一键套用。</span>
           : templates.map((template) => (
             <span className="dtpl-price-tpl-chip" key={template.id}>
               <button
@@ -60,34 +66,61 @@ export function TemplateBar({ templates, currency, canSave, onApply, onDelete, o
           ))}
       </div>
       <div className="dtpl-price-tpl-save">
-        <input
-          className="dtpl-price-input dtpl-price-tpl-input"
-          type="text"
-          value={name}
-          placeholder="给这组价起个名"
-          aria-label="新模板名称"
-          autoComplete="off"
-          spellCheck={false}
-          maxLength={40}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              save()
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="dtpl-price-ghost"
-          disabled={!canSave || name.trim() === ''}
-          title={canSave
-            ? '把当前模型的四档价与峰谷时段（按这条通道的币种）存成一个可复用的模板'
-            : '先把这一行的输入价、输出价填上，才能存成模板'}
-          onClick={save}
-        >
-          存为模板
-        </button>
+        {composing
+          ? (
+            <>
+              <input
+                className="dtpl-price-input dtpl-price-tpl-input"
+                type="text"
+                value={name}
+                placeholder="给这组价起个名"
+                aria-label="新模板名称"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={40}
+                autoFocus
+                onChange={(event) => setName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    save()
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    close()
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="dtpl-price-tool"
+                disabled={!canSave || name.trim() === ''}
+                title={canSave
+                  ? '把当前模型的四档价与峰谷时段（按这条通道的币种）存成一个可复用的模板'
+                  : '先把这一行的输入价、输出价填上，才能存成模板'}
+                onClick={save}
+              >
+                存
+              </button>
+              <button type="button" className="dtpl-price-ghost" onClick={close}>取消</button>
+            </>
+          )
+          : (
+            <button
+              type="button"
+              className="dtpl-price-tool"
+              disabled={!canSave}
+              title={canSave
+                ? '把当前模型的四档价与峰谷时段（按这条通道的币种）存成一个可复用的模板'
+                : '先把这一行的输入价、输出价填上，才能存成模板'}
+              onClick={() => {
+                setNotice(null)
+                setComposing(true)
+              }}
+            >
+              ＋ 存为模板
+            </button>
+          )}
       </div>
       {notice !== null && <span className="dtpl-price-tpl-err" role="alert">{notice.text}</span>}
     </div>

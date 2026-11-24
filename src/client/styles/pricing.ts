@@ -127,42 +127,94 @@ export const CSS_PRICING = `
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-price-controls{
-  padding-block:10px 12px;
+  padding-block:12px 14px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-controls .dtpl-price-pick{
   border-bottom:0;padding-bottom:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-pick{
-  max-width:none;
-  display:grid;grid-template-columns:1.3fr 1.3fr 1.2fr 1fr;
-  column-gap:16px;row-gap:8px;align-items:end;
-  border-bottom:1px solid var(--dtpl-border);padding-bottom:10px;
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,360px);
+  align-items:start;column-gap:28px;row-gap:8px;min-width:0;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-pick-row{
-  display:flex;flex-direction:column;gap:3px;min-width:0;
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-main{grid-column:1;}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-tools{
+  display:flex;align-items:center;justify-content:flex-end;gap:6px 20px;flex-wrap:wrap;
+  min-width:0;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-pick-k{font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);color:var(--dtpl-fg-2);}
-[data-plugin="dsh-tokbook"] .dtpl-price-pick .dtpl-price-pick-sel{
-  width:100%;height:36px;font-size:var(--dtpl-fs-lead);font-weight:500;
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-rate{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;
 }
+@container (max-width:980px){
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick-tools{grid-column:1;justify-content:flex-start;}
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-main{
+  display:grid;grid-template-columns:fit-content(42%) 34px minmax(0,1fr);
+  align-items:stretch;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-cell{
+  position:relative;display:flex;flex-direction:column;justify-content:center;gap:2px;
+  min-width:0;padding:4px 20px 4px 0;
+  transition:background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-cell:hover{background:var(--dtpl-wash-hover);}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-cell:focus-within{
+  background:var(--dtpl-wash-on);outline:2px solid var(--dtpl-focus);outline-offset:-2px;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-name{
+  display:inline-flex;align-items:center;gap:9px;align-self:flex-start;
+  max-width:100%;min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-caret{
+  flex:none;width:0;height:0;margin-top:1px;
+  border-left:4px solid transparent;border-right:4px solid transparent;
+  border-top:5px solid var(--dtpl-fg-3);
+  transition:border-top-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-cell:hover .dtpl-price-pick-caret{border-top-color:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-sel{
+  position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;
+  appearance:none;background:transparent;opacity:0;cursor:pointer;font:inherit;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-k{
+  font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);letter-spacing:.16em;
+  font-weight:600;color:var(--dtpl-fg-3);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-v{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:20px;line-height:26px;font-weight:600;letter-spacing:.01em;color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-cell[data-kind="model"] .dtpl-price-pick-v{
+  font-family:var(--dtpl-mono);font-size:20px;font-weight:500;letter-spacing:-.015em;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-meta{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+  font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-arrow{
+  align-self:center;margin-top:-2px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;line-height:1;color:var(--dtpl-fg-3);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-pick-state{display:flex;justify-content:flex-end;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-board > *{align-self:start;}
 [data-plugin="dsh-tokbook"] .dtpl-price-board{row-gap:12px;}
-@container (max-width:1050px){
-  [data-plugin="dsh-tokbook"] .dtpl-price-pick{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;}
-}
 [data-plugin="dsh-tokbook"] .dtpl-price-state-row{
-  display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0;min-height:24px;
+  display:flex;align-items:center;justify-content:flex-end;gap:4px;flex-wrap:wrap;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-fx{
-  display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;
+  display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-fx-eq,
-[data-plugin="dsh-tokbook"] .dtpl-price-fx-unit{font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-fx-unit{
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in{
-  width:80px;flex:none;text-align:center;
-  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);padding:0 6px;
-  font-size:var(--dtpl-fs-lead);
-  transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
+  width:62px;height:26px;flex:none;padding:0 5px;text-align:right;
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-body);
+  transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint),background-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in:hover{
   border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
@@ -170,7 +222,7 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in:focus{border-color:var(--dtpl-fg);}
 [data-plugin="dsh-tokbook"] .dtpl-price-fx .dtpl-price-fx-in[aria-invalid="true"]{border-color:var(--dtpl-err);}
 [data-plugin="dsh-tokbook"] .dtpl-price-fx-note{
-  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+  font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-3);
   font-variant-numeric:tabular-nums;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-fx-err{
@@ -184,81 +236,101 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-detail[data-dirty="true"]{
   box-shadow:inset 2px 0 0 var(--dtpl-fg),var(--dtpl-metal);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-console{
-  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,280px);
-  gap:20px;align-items:start;
+
+[data-plugin="dsh-tokbook"] .dtpl-price-meter{
+  position:relative;overflow:hidden;min-width:0;
+  display:flex;flex-direction:column;gap:18px;
+  padding:18px 22px 20px;
+  background:var(--dtpl-price-sheet);
+  box-shadow:inset 0 0 0 1px var(--dtpl-hairline),inset 0 3px 0 var(--dtpl-brand),var(--dtpl-sheen);
+  container-type:inline-size;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-console-live{
-  display:flex;flex-direction:column;gap:12px;min-width:0;
-  padding:16px;
-  background:color-mix(in srgb,var(--dtpl-brand) 8%,var(--dtpl-card));
-  box-shadow:inset 0 4px 0 var(--dtpl-brand);
+[data-plugin="dsh-tokbook"] .dtpl-price-meter .dtpl-price-day{
+  padding-top:12px;border-top:1px solid color-mix(in srgb,var(--dtpl-fg) 12%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-console{
+  display:flex;flex-direction:column;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-console-edit{min-width:0;overflow-x:auto;padding-top:2px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-console-edit .dtpl-price-cols,
 [data-plugin="dsh-tokbook"] .dtpl-price-console-edit .dtpl-price-row{
-  grid-template-columns:minmax(180px,320px) repeat(4,minmax(80px,1fr));
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-console-live .dtpl-price-day-row{
-  grid-template-columns:minmax(0,80px) minmax(0,1fr);column-gap:8px;
-}
-@container (max-width:1180px){
-  [data-plugin="dsh-tokbook"] .dtpl-price-console{grid-template-columns:minmax(0,1fr);gap:16px;}
+  grid-template-columns:minmax(200px,360px) repeat(4,minmax(96px,1fr));
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-stage{padding-block:18px 20px;}
 
 [data-plugin="dsh-tokbook"] .dtpl-price-live{
-  display:flex;flex-direction:column;gap:10px;min-width:0;
-  padding:0;
+  display:flex;flex-direction:column;gap:14px;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-head{
-  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-k{
-  display:inline-flex;align-items:center;gap:8px;
-  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);
+  display:inline-flex;align-items:center;gap:8px;flex:none;
+  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;letter-spacing:.01em;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-k::before{
-  content:"";flex:none;width:7px;height:13px;
+  content:"";flex:none;width:7px;height:15px;
   background:var(--dtpl-brand);
   box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-live-unit{font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);}
-[data-plugin="dsh-tokbook"] .dtpl-price-live-cells{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px 18px;min-width:0;
+[data-plugin="dsh-tokbook"] .dtpl-price-live-mode{
+  display:inline-flex;align-items:center;flex:none;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);font-weight:600;
+  padding:1px 7px;border-radius:var(--dtpl-radius);
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
+  color:var(--dtpl-fg-2);white-space:nowrap;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-live-cell{display:flex;flex-direction:column;gap:1px;min-width:0;}
-[data-plugin="dsh-tokbook"] .dtpl-price-live-label{font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-mode[data-mode="slot"]{
+  color:var(--dtpl-card);background:var(--dtpl-fg);
+  border-color:var(--dtpl-fg);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-why{
+  flex:0 1 auto;min-width:0;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-unit{
+  margin-left:auto;flex:none;
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-cells{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-cell{
+  display:flex;flex-direction:column;gap:6px;min-width:0;
+  padding:2px 18px 0;border-left:1px solid color-mix(in srgb,var(--dtpl-fg) 14%,transparent);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-cell:first-child{padding-left:0;border-left:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-live-label{
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);letter-spacing:.02em;
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-live-v{
-  font-family:var(--dtpl-mono);font-size:clamp(22px,2vw,30px);line-height:1.08;font-weight:600;color:var(--dtpl-fg);
-  font-variant-numeric:tabular-nums;letter-spacing:-.03em;
+  font-family:var(--dtpl-mono);font-size:clamp(34px,6.4cqi,64px);line-height:.98;font-weight:600;color:var(--dtpl-fg);
+  font-variant-numeric:tabular-nums;letter-spacing:-.035em;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-live-cell[data-bad="true"] .dtpl-price-live-v{color:var(--dtpl-err);}
 [data-plugin="dsh-tokbook"] .dtpl-price-live-none{
-  margin:0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+  margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg-2);
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-live-note{
-  margin:0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
+@container (max-width:640px){
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-cells{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 0;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-cell:nth-child(3){border-left:0;padding-left:0;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-v{font-size:clamp(30px,11cqi,48px);}
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-live-status{
-  margin:0;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);color:var(--dtpl-fg);font-weight:500;
-}
-[data-plugin="dsh-tokbook"] .dtpl-price-live-hint{
-  margin:0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
-}
+
 [data-plugin="dsh-tokbook"] .dtpl-price-detail-head{
-  display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:0;
+  display:flex;align-items:flex-end;justify-content:space-between;gap:10px 28px;flex-wrap:wrap;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-detail-main{
-  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;min-width:0;
+  display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px;min-width:0;flex:1 1 auto;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-detail-main .dtpl-price-detail-id{flex:0 1 auto;}
 [data-plugin="dsh-tokbook"] .dtpl-price-detail-id{
-  display:flex;align-items:baseline;gap:8px;flex:1 1 auto;min-width:0;
+  display:flex;align-items:baseline;gap:10px;flex:1 1 auto;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-name{
   flex:0 1 auto;min-width:0;
-  font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:600;color:var(--dtpl-fg);
+  font-size:var(--dtpl-fs-figure);line-height:var(--dtpl-lh-figure);font-weight:600;letter-spacing:.01em;color:var(--dtpl-fg);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-name[data-exact="true"]{
@@ -461,30 +533,76 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-add-slot{grid-column:1;min-width:0;justify-self:start;}
 
 [data-plugin="dsh-tokbook"] .dtpl-price-day{
-  display:flex;flex-direction:column;gap:3px;min-width:0;
+  display:flex;flex-direction:column;gap:6px;min-width:0;
+  --dtpl-day-k:132px;
+  --dtpl-day-gap:14px;
   padding-top:8px;border-top:1px solid var(--dtpl-hairline);
 }
+[data-plugin="dsh-tokbook"] .dtpl-price-day-tracks{
+  position:relative;display:flex;flex-direction:column;gap:6px;min-width:0;
+  padding-top:18px;
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-day-row{
-  display:grid;grid-template-columns:minmax(0,168px) minmax(0,1fr);
-  align-items:center;column-gap:12px;min-width:0;
+  display:grid;grid-template-columns:var(--dtpl-day-k) minmax(0,1fr);
+  align-items:center;column-gap:var(--dtpl-day-gap);min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-day-k{
+  display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0;
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-k-name{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-k-range{
+  flex:none;font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);
+  letter-spacing:.02em;color:var(--dtpl-fg-2);font-variant-numeric:tabular-nums;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-row[data-active="true"] .dtpl-price-day-k{
+  color:var(--dtpl-fg);font-weight:600;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-day-cells{
-  display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:1px;
+  display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:2px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-day-cell{
-  height:9px;
-  background:color-mix(in srgb,var(--dtpl-fg) 12%,transparent);
+  height:14px;
+  background:color-mix(in srgb,var(--dtpl-fg) 8%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-day-cell[data-on="base"]{
-  background:color-mix(in srgb,var(--dtpl-fg) 28%,transparent);
+  background:color-mix(in srgb,var(--dtpl-fg) 24%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-day-cell[data-on="slot"]{background:var(--dtpl-fg);}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-now-layer{
+  position:absolute;top:0;bottom:0;right:0;
+  left:calc(var(--dtpl-day-k) + var(--dtpl-day-gap));
+  pointer-events:none;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-now{position:absolute;top:0;bottom:0;width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-now-tag{
+  position:absolute;top:0;left:0;transform:translateX(-50%);
+  font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-micro);font-weight:600;
+  letter-spacing:.08em;color:var(--dtpl-fg-2);white-space:nowrap;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-now[data-edge="start"] .dtpl-price-day-now-tag{transform:none;}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-now[data-edge="end"] .dtpl-price-day-now-tag{transform:translateX(-100%);}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-now-flag{
+  position:absolute;top:15px;left:0;transform:translateX(-50%);
+  width:8px;height:8px;background:var(--dtpl-brand);
+  box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-now-line{
+  position:absolute;top:20px;bottom:0;left:0;width:3px;transform:translateX(-50%);
+  background:var(--dtpl-price-sheet);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-now-line::after{
+  content:"";position:absolute;top:0;bottom:0;left:1px;width:1px;
+  background:var(--dtpl-fg);transform-origin:top;
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-day-axis{
-  display:flex;justify-content:space-between;
+  display:grid;grid-template-columns:var(--dtpl-day-k) minmax(0,1fr);
+  column-gap:var(--dtpl-day-gap);min-width:0;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-day-axis-ticks{
+  grid-column:2;display:flex;justify-content:space-between;
   font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-fg-3);
   font-variant-numeric:tabular-nums;
 }
@@ -545,8 +663,12 @@ export const CSS_PRICING = `
 [data-plugin="dsh-tokbook"] .dtpl-price-note{margin:0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);}
 
 [data-plugin="dsh-tokbook"] .dtpl-price-state{
+  display:inline-flex;align-items:center;gap:6px;
   max-width:100%;
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);overflow-wrap:anywhere;
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-state-led{
+  flex:none;width:5px;height:5px;background:currentColor;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-saved{color:var(--dtpl-ok);}
 [data-plugin="dsh-tokbook"] .dtpl-price-state.is-saving{color:var(--dtpl-fg-2);}
@@ -662,10 +784,17 @@ export const CSS_PRICING = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl{
   display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;
-  padding-top:10px;min-width:0;
+  margin-top:10px;padding-top:10px;min-width:0;
+  border-top:1px solid color-mix(in srgb,var(--dtpl-fg) 12%,transparent);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-k{
-  flex:none;font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);color:var(--dtpl-fg-2);
+  display:inline-flex;align-items:center;gap:8px;flex:none;
+  font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);letter-spacing:.16em;
+  font-weight:600;color:var(--dtpl-fg-2);
+}
+[data-plugin="dsh-tokbook"] .dtpl-price-tpl-k::before{
+  content:"";flex:none;width:3px;height:12px;
+  background:var(--dtpl-brand);box-shadow:inset 0 0 0 1px var(--dtpl-on-brand);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-chips{
   display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;flex:1 1 auto;
@@ -674,45 +803,54 @@ export const CSS_PRICING = `
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-chip{
-  display:inline-flex;align-items:center;max-width:220px;overflow:hidden;
-  border:1px solid color-mix(in srgb,var(--dtpl-fg) 22%,transparent);
+  display:inline-flex;align-items:center;max-width:240px;overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--dtpl-fg) 20%,transparent);
   border-radius:var(--dtpl-radius);
   transition:border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint),background var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-chip:hover{
-  border-color:color-mix(in srgb,var(--dtpl-fg) 45%,transparent);
+  border-color:color-mix(in srgb,var(--dtpl-fg) 40%,transparent);
   background:var(--dtpl-wash-hover);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-apply{
   appearance:none;border:0;background:transparent;
-  display:inline-flex;align-items:center;gap:5px;min-width:0;
-  height:26px;padding:0 8px;
+  display:inline-flex;align-items:center;min-width:0;
+  height:28px;padding:0 8px 0 0;
   color:var(--dtpl-fg);font:inherit;font-size:var(--dtpl-fs-label);cursor:pointer;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-tpl-mark{flex:none;font-family:var(--dtpl-mono);color:var(--dtpl-fg-2);}
+[data-plugin="dsh-tokbook"] .dtpl-price-tpl-mark{
+  display:inline-flex;align-items:center;justify-content:center;
+  align-self:stretch;flex:none;width:22px;margin-right:7px;
+  background:color-mix(in srgb,var(--dtpl-fg) 9%,transparent);
+  font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-label);color:var(--dtpl-fg-2);
+}
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-del{
   appearance:none;border:0;border-left:1px solid color-mix(in srgb,var(--dtpl-fg) 16%,transparent);
-  background:transparent;width:22px;height:26px;
-  color:var(--dtpl-fg-2);font:inherit;font-size:var(--dtpl-fs-lead);line-height:1;cursor:pointer;
+  background:transparent;width:22px;height:28px;
+  color:var(--dtpl-fg-3);font:inherit;font-size:var(--dtpl-fs-lead);line-height:1;cursor:pointer;
   transition:color var(--dtpl-dur-quick) var(--dtpl-ease-tint),background var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-del:hover{color:var(--dtpl-err);background:color-mix(in srgb,var(--dtpl-err) 12%,transparent);}
-[data-plugin="dsh-tokbook"] .dtpl-price-tpl-save{display:inline-flex;align-items:center;gap:6px;flex:none;}
-[data-plugin="dsh-tokbook"] .dtpl-price-tpl-input{width:150px;height:26px;text-align:left;}
+[data-plugin="dsh-tokbook"] .dtpl-price-tpl-save{display:inline-flex;align-items:center;gap:6px;flex:none;margin-left:auto;}
+[data-plugin="dsh-tokbook"] .dtpl-price-tpl-input{width:168px;height:28px;text-align:left;font-size:var(--dtpl-fs-body);}
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-err{
   flex:1 1 100%;font-size:var(--dtpl-fs-micro);line-height:var(--dtpl-lh-micro);color:var(--dtpl-err);
 }
 
 @media (prefers-reduced-motion:no-preference){
-  [data-plugin="dsh-tokbook"] .dtpl-price-console-live{animation:dtpl-price-wipe 720ms var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-meter{animation:dtpl-price-wipe 720ms var(--dtpl-ease-move) both;}
   [data-plugin="dsh-tokbook"] .dtpl-price-live-v{animation:dtpl-price-settle 640ms var(--dtpl-ease-move) both;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-live-v:nth-child(1){animation-delay:80ms;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-live-v:nth-child(2){animation-delay:130ms;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-live-v:nth-child(3){animation-delay:180ms;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-live-v:nth-child(4){animation-delay:230ms;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-cell:nth-child(1) .dtpl-price-live-v{animation-delay:80ms;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-cell:nth-child(2) .dtpl-price-live-v{animation-delay:130ms;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-cell:nth-child(3) .dtpl-price-live-v{animation-delay:180ms;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-live-cell:nth-child(4) .dtpl-price-live-v{animation-delay:230ms;}
   [data-plugin="dsh-tokbook"] .dtpl-price-day-cell[data-on="slot"]{animation:dtpl-price-light 520ms var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-day-now-line::after{animation:dtpl-price-now 560ms var(--dtpl-ease-move) 240ms both;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-day-now-flag{animation:dtpl-price-fade 420ms var(--dtpl-ease-move) 260ms both;}
 }
+@keyframes dtpl-price-now{from{transform:scaleY(0);}}
+@keyframes dtpl-price-fade{from{opacity:0;}}
 @keyframes dtpl-price-wipe{from{clip-path:inset(0 100% 0 0);}}
 @keyframes dtpl-price-settle{from{opacity:0;transform:translateY(10px);}}
 @keyframes dtpl-price-light{from{opacity:.2;}}

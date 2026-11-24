@@ -47,9 +47,11 @@ export const CSS_SHARED = `
   [data-plugin="dsh-tokbook"] .dtpl-provider-nums{align-items:flex-start;}
   [data-plugin="dsh-tokbook"] .dtpl-provider-cost{align-items:flex-start;}
 
-  [data-plugin="dsh-tokbook"] .dtpl-price-pick{grid-template-columns:minmax(0,1fr);column-gap:0;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-pick > .dtpl-price-pick-fxrow,
-  [data-plugin="dsh-tokbook"] .dtpl-price-pick-state{grid-column:1;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick-tools{justify-content:flex-start;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick-main{grid-template-columns:minmax(0,1fr);}
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick-arrow{display:none;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick-cell{padding:4px 20px 4px 0;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-pick-cell + .dtpl-price-pick-cell{margin-top:6px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-pick-state[data-quiet="true"]{display:none;}
   [data-plugin="dsh-tokbook"] .dtpl-price-input{text-align:left;}
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cols,
@@ -65,7 +67,9 @@ export const CSS_SHARED = `
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cell-k{
     text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
   }
-  [data-plugin="dsh-tokbook"] .dtpl-price-day-row{grid-template-columns:minmax(0,88px) minmax(0,1fr);column-gap:8px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-day{--dtpl-day-k:64px;--dtpl-day-gap:8px;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-day-k-range{display:none;}
+  [data-plugin="dsh-tokbook"] .dtpl-price-meter{padding:18px 16px 20px;}
 }
 
 @media (prefers-reduced-motion:no-preference){

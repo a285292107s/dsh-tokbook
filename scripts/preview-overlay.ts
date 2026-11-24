@@ -1147,7 +1147,7 @@ const server = createServer((req, res) => {
 <script src="/baseline.js"></script>
 <script src="/client.js"></script>
 </head>
-<body class="${url.searchParams.has('dark') ? 'dark' : ''}">
+<body class="${url.searchParams.has('dark') ? 'dark' : ''}"${url.searchParams.has('dark') ? ' data-ds-dark-theme' : ''}>
   <div id="root"></div>
 
   <div class="dsh-session-host" id="session-host" hidden>

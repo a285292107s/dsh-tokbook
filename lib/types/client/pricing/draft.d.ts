@@ -149,5 +149,7 @@ export declare function baselineOfDraft(state: PriceState): PriceBaseline;
 export declare function stagedChanges(state: PriceState, baseline: PriceBaseline): number;
 export declare function calendarDirty(state: PriceState, baseline: PriceBaseline): boolean;
 export declare function modelDirty(route: string, row: ModelDraft, baseline: ReadonlyMap<string, string>): boolean;
+export declare function routeMeta(card: RouteDraft): string;
 export declare function routeOptionLabel(card: RouteDraft): string;
+export declare function modelMeta(row: ModelDraft, dirty: boolean): string;
 export declare function modelOptionLabel(row: ModelDraft, dirty: boolean): string;

@@ -748,19 +748,27 @@ export function modelDirty(route: string, row: ModelDraft, baseline: ReadonlyMap
   return (baseline.get(rowKey(route, row.model)) ?? '') !== modelSignature(row)
 }
 
-export function routeOptionLabel(card: RouteDraft): string {
+export function routeMeta(card: RouteDraft): string {
   const models = [...card.models.values()]
   const unknown = models.filter(priceUnknown).length
-  const parts = [card.route]
+  const parts: string[] = []
   if (card.records > 0) parts.push(`${String(card.records)} 次`)
   parts.push(unknown === 0 ? `${String(models.length)} 个模型` : `${String(unknown)} 个模型未知`)
   return parts.join(' · ')
 }
 
-export function modelOptionLabel(row: ModelDraft, dirty: boolean): string {
-  const parts = [row.model]
+export function routeOptionLabel(card: RouteDraft): string {
+  return [card.route, routeMeta(card)].join(' · ')
+}
+
+export function modelMeta(row: ModelDraft, dirty: boolean): string {
+  const parts: string[] = []
   if (row.records > 0) parts.push(`${String(row.records)} 次`)
   if (priceUnknown(row)) parts.push('价格未知')
   if (dirty) parts.push('未保存')
   return parts.join(' · ')
+}
+
+export function modelOptionLabel(row: ModelDraft, dirty: boolean): string {
+  return [row.model, modelMeta(row, dirty)].join(' · ')
 }

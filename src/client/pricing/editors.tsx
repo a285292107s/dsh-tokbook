@@ -394,79 +394,107 @@ function LiveRates({ live, records, view, hasSlots }: { live: InForceRates | nul
     if (field === 'cacheRead' || field === 'cacheWrite') return live.values.input.trim()
     return ''
   }
+  const mode = live === null ? 'none' : live.slot !== null ? 'slot' : 'base'
+  const modeName = live === null ? '' : live.slot !== null ? '峰谷时段' : '基准价'
+  const modeNote = live === null
+    ? ''
+    : live.slot !== null
+      ? dayLabel(live.slot)
+      : hasSlots ? '现在不在时段内' : '全天'
   return (
-    <div className="dtpl-price-live" role="group" aria-label="此刻计费的价" data-ui>
+    <div className="dtpl-price-live" data-mode={mode} role="group" aria-label="此刻计费的价" data-ui>
       <div className="dtpl-price-live-head">
         <span className="dtpl-price-live-k">此刻计费</span>
+        {live !== null && (
+          <>
+            <span className="dtpl-price-live-mode" data-mode={mode}>{modeName}</span>
+            <span className="dtpl-price-live-why">{modeNote}</span>
+          </>
+        )}
         <span className="dtpl-price-live-unit">{unitOf(view)}</span>
       </div>
       {live === null ? (
         <p className="dtpl-price-live-none">
           {records > 0 ? '还没有价：这些记录按 ¥0 计（价格未知）' : '还没有价：它还没有被调用过'}
         </p>
-      ) : live.slot !== null ? (
-        <>
-          <div className="dtpl-price-live-cells">
-            {CELLS.map(({ field, label }) => {
-              const text = shown(field)
-              const bad = fieldState(live.values, field) === 'bad'
-              return (
-                <span className="dtpl-price-live-cell" key={field} data-bad={bad || undefined}>
-                  <span className="dtpl-price-live-label">{label}</span>
-                  <span className="dtpl-price-live-v">{text === '' ? '—' : text}</span>
-                </span>
-              )
-            })}
-          </div>
-          <p className="dtpl-price-live-note">正在按峰谷时段「{dayLabel(live.slot)}」计</p>
-        </>
       ) : (
-        <>
-          <p className="dtpl-price-live-status">此刻按基准价计</p>
-          <p className="dtpl-price-live-hint">
-            {hasSlots
-              ? '现在不在任何峰谷时段内；时段生效时，这里报实际计费的四档价。'
-              : '全周 · 全天；加峰谷时段后，时段内的实际价会显示在这里。'}
-          </p>
-        </>
+        <div className="dtpl-price-live-cells">
+          {CELLS.map(({ field, label }) => {
+            const text = shown(field)
+            const bad = fieldState(live.values, field) === 'bad'
+            return (
+              <span className="dtpl-price-live-cell" key={field} data-bad={bad || undefined}>
+                <span className="dtpl-price-live-label">{label}</span>
+                <span className="dtpl-price-live-v">{text === '' ? '—' : text}</span>
+              </span>
+            )
+          })}
+        </div>
       )}
     </div>
   )
 }
 
-function DayBand({ price }: { price: ModelDraft }) {
+function DayBand({ price, active, now }: { price: ModelDraft; active: SlotDraft | null | undefined; now: number }) {
   const slots = effectiveSlots(price).map(slot => {
-    const { start, end } = slotRange(slot)
-    const ok = isHourRange({ start, end })
-    return { id: slot.id, label: DAY_SET_LABELS[slot.days], start: ok ? start : 0, end: ok ? end : 0 }
+    const range = slotRange(slot)
+    const ok = isHourRange(range)
+    return {
+      id: slot.id,
+      label: DAY_SET_LABELS[slot.days],
+      range: ok ? `${String(range.start).padStart(2, '0')}–${String(range.end).padStart(2, '0')}` : '',
+      start: ok ? range.start : 0,
+      end: ok ? range.end : 0,
+    }
   })
   const drawn = slots.filter(row => row.end > row.start)
+  const at = new Date(now)
+  const nowPercent = (at.getHours() + at.getMinutes() / 60) / 24 * 100
+  const coverage = drawn.map(row => `${row.label} 覆盖 ${String(row.start)}–${String(row.end)} 点`).join('；')
   return (
     <div
       className="dtpl-price-day"
       role="img"
-      aria-label={`24 小时生效范围：基准价铺满全天${drawn.length === 0 ? '' : `；${drawn.map(row => `${row.label} 覆盖 ${String(row.start)}–${String(row.end)} 点`).join('；')}`}`}
+      aria-label={`24 小时生效范围：基准价铺满全天${drawn.length === 0 ? '' : `；${coverage}`}${active === undefined ? '' : `；${active === null ? '现在按基准价' : `现在按 ${dayLabel(active)} 的价`}`}`}
       data-ui
     >
-      <div className="dtpl-price-day-row" aria-hidden="true">
-        <span className="dtpl-price-day-k">基准价</span>
-        <span className="dtpl-price-day-cells" aria-hidden="true">
-          {HOURS.map(hour => <span className="dtpl-price-day-cell" key={hour} data-on="base" />)}
-        </span>
-      </div>
-      {drawn.map(row => (
-        <div className="dtpl-price-day-row" key={row.id} aria-hidden="true">
-          <span className="dtpl-price-day-k">{row.label}</span>
+      <div className="dtpl-price-day-tracks">
+        <div className="dtpl-price-day-row" data-active={active === null || undefined}>
+          <span className="dtpl-price-day-k">
+            <span className="dtpl-price-day-k-name">基准价</span>
+            <span className="dtpl-price-day-k-range">全天</span>
+          </span>
           <span className="dtpl-price-day-cells" aria-hidden="true">
-            {HOURS.map(hour => (
-              <span className="dtpl-price-day-cell" key={hour} data-on={hour >= row.start && hour < row.end ? 'slot' : undefined} />
-            ))}
+            {HOURS.map(hour => <span className="dtpl-price-day-cell" key={hour} data-on="base" />)}
           </span>
         </div>
-      ))}
-      <div className="dtpl-price-day-row" aria-hidden="true">
-        <span className="dtpl-price-day-k" />
-        <span className="dtpl-price-day-axis">
+        {drawn.map(row => (
+          <div className="dtpl-price-day-row" key={row.id} data-active={active?.id === row.id || undefined}>
+            <span className="dtpl-price-day-k">
+              <span className="dtpl-price-day-k-name">{row.label}</span>
+              <span className="dtpl-price-day-k-range">{row.range}</span>
+            </span>
+            <span className="dtpl-price-day-cells" aria-hidden="true">
+              {HOURS.map(hour => (
+                <span className="dtpl-price-day-cell" key={hour} data-on={hour >= row.start && hour < row.end ? 'slot' : undefined} />
+              ))}
+            </span>
+          </div>
+        ))}
+        <span className="dtpl-price-day-now-layer" aria-hidden="true">
+          <span
+            className="dtpl-price-day-now"
+            style={{ left: `${String(nowPercent)}%` }}
+            data-edge={nowPercent < 4 ? 'start' : nowPercent > 88 ? 'end' : undefined}
+          >
+            <span className="dtpl-price-day-now-tag">现在</span>
+            <i className="dtpl-price-day-now-flag" />
+            <i className="dtpl-price-day-now-line" />
+          </span>
+        </span>
+      </div>
+      <div className="dtpl-price-day-axis">
+        <span className="dtpl-price-day-axis-ticks">
           {HOUR_TICKS.map(hour => <span key={hour}>{String(hour).padStart(2, '0')}</span>)}
         </span>
       </div>
@@ -681,7 +709,8 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
   const view: MoneyView = { route: currency, cnyPerUsd: rate }
   const dirty = modelDirty(route, row, baseline)
   const issue = priceIssue(row)
-  const live = ratesInForce(row, holidays)
+  const now = Date.now()
+  const live = ratesInForce(row, holidays, now)
   const named = row.name !== undefined && row.name !== '' && row.name !== row.model
   const hasSlots = effectiveSlots(row).length > 0
   const countText = row.records > 0 ? `${String(row.records)} 次请求` : '没记过'
@@ -751,13 +780,13 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
           </span>
         </span>
       </div>
+      <div className="dtpl-price-meter">
+        <LiveRates live={live} records={row.records} view={view} hasSlots={hasSlots} />
+        {hasSlots && <DayBand price={row} active={live === null ? undefined : live.slot} now={now} />}
+      </div>
       <div className="dtpl-price-console">
         <div className="dtpl-price-console-edit">
           <PriceTable price={row} view={view} onChange={(next) => onRowChange(route, row.model, next)} />
-        </div>
-        <div className="dtpl-price-console-live">
-          <LiveRates live={live} records={row.records} view={view} hasSlots={hasSlots} />
-          {hasSlots && <DayBand price={row} />}
         </div>
       </div>
       {live === null && (

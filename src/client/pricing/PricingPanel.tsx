@@ -5,9 +5,9 @@ import { QUERY_FORCE, QUERY_MODEL, QUERY_YEAR, ROUTE_HOLIDAY_SYNC, ROUTE_PRICING
 import { inverseHint } from './currency.ts'
 import {
   baselineOfDraft, baselinesOf, calendarDirty, composePriceBody, draftFromView, fxIssue, fxSignature, fxValue, modelDirty,
-  modelOptionLabel,
+  modelMeta, modelOptionLabel,
   effectiveSlots, newSlot,
-  routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency,
+  routeMeta, routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency,
   type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
 import { CalendarEditor, ModelDetail } from './editors.tsx'
@@ -563,78 +563,103 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
       {state.routes.size > 0 && card !== undefined && (
         <>
         <div className="dtpl-price-pick">
-          <div className="dtpl-price-pick-row">
-            <span className="dtpl-price-pick-k">通道</span>
-            <select
-              className="dtpl-price-select dtpl-price-pick-sel"
-              value={card.route}
-              aria-label="通道"
-              onChange={(event) => {
-                choosePicked({ route: event.target.value, model: '' })
-              }}
-            >
-              {routeChoices.map(item => (
-                <option key={item.route} value={item.route}>{routeOptionLabel(item)}</option>
-              ))}
-            </select>
-          </div>
-          <div className="dtpl-price-pick-row">
-            <span className="dtpl-price-pick-k">模型</span>
-            <select
-              className="dtpl-price-select dtpl-price-pick-sel"
-              value={row === undefined ? '' : row.model}
-              disabled={models.length === 0}
-              aria-label={`${card.label} 的模型`}
-              onChange={(event) => {
-                choosePicked({ route: card.route, model: event.target.value })
-              }}
-            >
-              {models.map(item => (
-                <option key={item.model} value={item.model}>
-                  {modelOptionLabel(item, modelDirty(card.route, item, baseline.models))}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="dtpl-price-pick-row dtpl-price-pick-fxrow">
-            <span className="dtpl-price-pick-k">汇率</span>
-            <span className="dtpl-price-fx">
-              <span className="dtpl-price-fx-eq">1 美元 =</span>
-              <input
-                className="dtpl-price-input dtpl-price-fx-in"
-                type="text"
-                inputMode="decimal"
-                autoComplete="off"
-                spellCheck={false}
-                value={state.fx}
-                placeholder="—"
-                aria-label="汇率：1 美元等于多少元"
-                aria-invalid={fxProblem !== null || undefined}
-                title="1 美元等于多少元。它不动价文件里已写的数，但会重算按美元报价的通道的金额——那些价是美元记的，人民币数字本来就是汇率的函数。人民币通道一分不动。"
-                onChange={(event) => updateFx(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') event.currentTarget.blur()
+          <div className="dtpl-price-pick-main">
+            <div className="dtpl-price-pick-cell" data-kind="route">
+              <span className="dtpl-price-pick-k">通道</span>
+              <span className="dtpl-price-pick-name">
+                <span className="dtpl-price-pick-v" aria-hidden="true" title={card.route}>{card.route}</span>
+                <i className="dtpl-price-pick-caret" aria-hidden="true" />
+              </span>
+              <span className="dtpl-price-pick-meta" aria-hidden="true">{routeMeta(card)}</span>
+              <select
+                className="dtpl-price-pick-sel"
+                value={card.route}
+                aria-label="通道"
+                onChange={(event) => {
+                  choosePicked({ route: event.target.value, model: '' })
                 }}
-              />
-              <span className="dtpl-price-fx-unit">元</span>
-              <span className="dtpl-price-fx-note">
-                {inverseHint(rate) ?? '填了才能按美元报价'}
+              >
+                {routeChoices.map(item => (
+                  <option key={item.route} value={item.route}>{routeOptionLabel(item)}</option>
+                ))}
+              </select>
+            </div>
+            <span className="dtpl-price-pick-arrow" aria-hidden="true">›</span>
+            <div className="dtpl-price-pick-cell" data-kind="model">
+              <span className="dtpl-price-pick-k">模型</span>
+              <span className="dtpl-price-pick-name">
+                <span
+                  className="dtpl-price-pick-v"
+                  aria-hidden="true"
+                  title={row === undefined ? undefined : row.model}
+                >
+                  {row === undefined ? '—' : row.model}
+                </span>
+                <i className="dtpl-price-pick-caret" aria-hidden="true" />
               </span>
-            </span>
-            {fxProblem !== null && <span className="dtpl-price-fx-err" role="alert">{fxProblem}</span>}
+              <span className="dtpl-price-pick-meta" aria-hidden="true">
+                {row === undefined
+                  ? '这条通道还没有模型'
+                  : modelMeta(row, modelDirty(card.route, row, baseline.models))}
+              </span>
+              <select
+                className="dtpl-price-pick-sel"
+                value={row === undefined ? '' : row.model}
+                disabled={models.length === 0}
+                aria-label={`${card.label} 的模型`}
+                onChange={(event) => {
+                  choosePicked({ route: card.route, model: event.target.value })
+                }}
+              >
+                {models.map(item => (
+                  <option key={item.model} value={item.model}>
+                    {modelOptionLabel(item, modelDirty(card.route, item, baseline.models))}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div
-            className="dtpl-price-pick-row dtpl-price-pick-state"
-            data-quiet={save.kind === 'clean' && changes === 0 ? 'true' : undefined}
-          >
-            <span className="dtpl-price-pick-k">状态</span>
-            <span className="dtpl-price-state-row">
-              <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
-                {stateText === '' ? '与磁盘一致' : stateText}
+          <div className="dtpl-price-pick-tools">
+            <span className="dtpl-price-pick-rate">
+              <span className="dtpl-price-pick-k">汇率</span>
+              <span className="dtpl-price-fx">
+                <span className="dtpl-price-fx-eq">1 美元 =</span>
+                <input
+                  className="dtpl-price-input dtpl-price-fx-in"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={state.fx}
+                  placeholder="—"
+                  aria-label="汇率：1 美元等于多少元"
+                  aria-invalid={fxProblem !== null || undefined}
+                  title="1 美元等于多少元。它不动价文件里已写的数，但会重算按美元报价的通道的金额——那些价是美元记的，人民币数字本来就是汇率的函数。人民币通道一分不动。"
+                  onChange={(event) => updateFx(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                  }}
+                />
+                <span className="dtpl-price-fx-unit">元</span>
+                <span className="dtpl-price-fx-note">
+                  {inverseHint(rate) ?? '填了才能按美元报价'}
+                </span>
               </span>
-              {save.kind === 'error' && (
-                <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
-              )}
+              {fxProblem !== null && <span className="dtpl-price-fx-err" role="alert">{fxProblem}</span>}
+            </span>
+            <span
+              className="dtpl-price-pick-state"
+              data-quiet={save.kind === 'clean' && changes === 0 ? 'true' : undefined}
+            >
+              <span className="dtpl-price-state-row">
+                <span className={`dtpl-price-state is-${save.kind}`} role="status" aria-live="polite">
+                  <i className="dtpl-price-state-led" aria-hidden="true" />
+                  {stateText === '' ? '与磁盘一致' : stateText}
+                </span>
+                {save.kind === 'error' && (
+                  <button type="button" className="dtpl-price-ghost" onClick={() => void writeNow()}>重试</button>
+                )}
+              </span>
             </span>
           </div>
         </div>

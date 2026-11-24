@@ -22,6 +22,7 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
 
   --dtpl-holiday:color-mix(in srgb,var(--dtpl-err) 80%,#8f3a22);
   --dtpl-paper-bg:color-mix(in srgb,var(--dtpl-brand) 5%,var(--dtpl-card));
+  --dtpl-price-sheet:var(--dtpl-paper-bg);
   --dtpl-serif:"Iowan Old Style","Palatino Linotype","Songti SC","Noto Serif SC","Source Han Serif SC",Georgia,serif;
 
   --dtpl-metal:
@@ -67,5 +68,8 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-lh-read:1.6;
   --dtpl-row-nums-w:224px;
   --dtpl-grid-gap:12px;
+}
+body[data-ds-dark-theme] [data-plugin="dsh-tokbook"]{
+  --dtpl-price-sheet:color-mix(in srgb,var(--dtpl-fg) 4%,var(--dtpl-card));
 }
 `
