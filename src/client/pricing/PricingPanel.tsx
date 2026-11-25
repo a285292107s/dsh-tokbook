@@ -14,7 +14,6 @@ import { CalendarEditor, ModelDetail } from './editors.tsx'
 import { formatRelative } from '../format.ts'
 import { subscribeLedgerChanges } from '../ledger-clock.ts'
 import { applyTemplate, makeTemplate, MAX_TEMPLATES, readTemplates, writeTemplates, type PriceTemplate, type TemplateSlot } from './templates.ts'
-import { TemplateBar } from './TemplateBar.tsx'
 
 export interface PricingPanelProps {
   onChanged: () => void
@@ -663,16 +662,6 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
             </span>
           </div>
         </div>
-        {row !== undefined && (
-          <TemplateBar
-            templates={templates}
-            currency={card.currency}
-            canSave={row.input.trim() !== '' && row.output.trim() !== ''}
-            onApply={applyTemplateToRow}
-            onDelete={deleteTemplate}
-            onSave={saveTemplateFromRow}
-          />
-        )}
         </>
       )}
 
@@ -763,6 +752,10 @@ export function PricingPanel({ onChanged, onDirtyChange }: PricingPanelProps) {
                 onCurrency={(next) => changeCurrency(card.route, next)}
                 onRowChange={updateModel}
                 onBilling={updateBilling}
+                templates={templates}
+                onApplyTemplate={applyTemplateToRow}
+                onSaveTemplate={saveTemplateFromRow}
+                onDeleteTemplate={deleteTemplate}
               />
             )}
       {state.routes.size > 0 && view !== null && (

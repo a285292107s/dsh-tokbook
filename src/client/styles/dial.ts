@@ -9,7 +9,7 @@ export const CSS_DIAL = `
   fill:none;
   stroke:color-mix(in srgb,var(--dtpl-fg) 10%,transparent);
 }
-[data-plugin="dsh-tokbook"] .dtpl-dial-ring-seg{fill:none;}
+[data-plugin="dsh-tokbook"] .dtpl-dial-ring-seg{fill:none;stroke-linecap:butt;}
 [data-plugin="dsh-tokbook"] .dtpl-dial-val{
   position:absolute;inset:0;
   display:flex;align-items:center;justify-content:center;
@@ -19,7 +19,7 @@ export const CSS_DIAL = `
   font-family:var(--dtpl-mono);font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 [data-plugin="dsh-tokbook"] .dtpl-dial-figure b{
-  font-size:var(--dtpl-fs-figure);line-height:1;font-weight:700;letter-spacing:-.03em;color:var(--dtpl-fg);
+  font-size:var(--dtpl-fs-figure);line-height:1;font-weight:700;letter-spacing:-.04em;color:var(--dtpl-fg);
 }
 [data-plugin="dsh-tokbook"] .dtpl-dial-figure span{
   font-size:var(--dtpl-fs-label);line-height:1;font-weight:600;color:var(--dtpl-fg-2);

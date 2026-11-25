@@ -2,7 +2,7 @@ export const CSS_TIMING = `
 [data-plugin="dsh-tokbook"] .dtpl-dur-phases{display:flex;flex-direction:column;gap:2px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-dur-phase{
   display:grid;grid-template-columns:9px minmax(0,1fr) auto 34px;
-  align-items:center;column-gap:8px;min-width:0;
+  align-items:center;column-gap:8px;min-width:0;padding:2px 0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-dur-phase-name{
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;

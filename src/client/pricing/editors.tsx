@@ -10,6 +10,8 @@ import {
   type CalendarEntries, type InForceRates, type ModelDraft,
   type RateField, type SlotDraft,
 } from './draft.ts'
+import { TemplateBar, type ApplyResult } from './TemplateBar.tsx'
+import type { PriceTemplate } from './templates.ts'
 
 const CELLS: ReadonlyArray<{ field: RateField; label: string }> = [
   { field: 'input', label: '输入' },
@@ -694,7 +696,7 @@ function PriceTable({ price, view, onChange }: {
   )
 }
 
-export const ModelDetail = memo(function ModelDetail({ route, row, billing, baseline, holidays, currency, rate, onCurrency, onRowChange, onBilling }: {
+export const ModelDetail = memo(function ModelDetail({ route, row, billing, baseline, holidays, currency, rate, onCurrency, onRowChange, onBilling, templates, onApplyTemplate, onSaveTemplate, onDeleteTemplate }: {
   route: string
   row: ModelDraft
   billing: BillingNature
@@ -705,6 +707,10 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
   onCurrency: (currency: PriceCurrency) => void
   onRowChange: (route: string, model: string, next: ModelDraft) => void
   onBilling: (route: string, billing: BillingNature) => void
+  templates: readonly PriceTemplate[]
+  onApplyTemplate: (template: PriceTemplate) => ApplyResult
+  onSaveTemplate: (name: string) => void
+  onDeleteTemplate: (id: string) => void
 }) {
   const view: MoneyView = { route: currency, cnyPerUsd: rate }
   const dirty = modelDirty(route, row, baseline)
@@ -785,6 +791,14 @@ export const ModelDetail = memo(function ModelDetail({ route, row, billing, base
         {hasSlots && <DayBand price={row} active={live === null ? undefined : live.slot} now={now} />}
       </div>
       <div className="dtpl-price-console">
+        <TemplateBar
+          templates={templates}
+          currency={currency}
+          canSave={row.input.trim() !== '' && row.output.trim() !== ''}
+          onApply={onApplyTemplate}
+          onDelete={onDeleteTemplate}
+          onSave={onSaveTemplate}
+        />
         <div className="dtpl-price-console-edit">
           <PriceTable price={row} view={view} onChange={(next) => onRowChange(route, row.model, next)} />
         </div>

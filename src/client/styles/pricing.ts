@@ -783,9 +783,8 @@ export const CSS_PRICING = `
   margin:6px 0 0;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-warn-ink);
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl{
-  display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;
-  margin-top:10px;padding-top:10px;min-width:0;
-  border-top:1px solid color-mix(in srgb,var(--dtpl-fg) 12%,transparent);
+  display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;
+  min-width:0;padding:0 0 10px;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-tpl-k{
   display:inline-flex;align-items:center;gap:8px;flex:none;

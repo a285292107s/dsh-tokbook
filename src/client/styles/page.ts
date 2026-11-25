@@ -7,6 +7,7 @@ export const CSS_PAGE = `
   background-color:var(--dtpl-card);
   background-size:var(--dtpl-paper-size);
   color:var(--dtpl-fg);
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
   overflow:hidden;
   --dtpl-page-pad:clamp(20px,3.6vw,40px);
   --dtpl-page-col:1280px;
@@ -67,7 +68,10 @@ html[data-platform="darwin"] [data-plugin="dsh-tokbook"] .dtpl-head{
   color:var(--dtpl-fg-2);white-space:nowrap;cursor:pointer;
   transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
-[data-plugin="dsh-tokbook"] .dtpl-tab + .dtpl-tab{border-left:.5px solid var(--dtpl-hairline);}
+[data-plugin="dsh-tokbook"] .dtpl-tab:not([aria-selected="true"]):hover::after{
+  content:"";position:absolute;left:12px;right:12px;bottom:-1px;height:2px;
+  background:var(--dtpl-fg-dim);
+}
 [data-plugin="dsh-tokbook"] .dtpl-tab:hover{color:var(--dtpl-fg);background:var(--dtpl-wash-hover);}
 [data-plugin="dsh-tokbook"] .dtpl-tab[aria-selected="true"]{
   color:var(--dtpl-fg);font-weight:600;

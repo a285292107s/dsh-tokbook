@@ -13,6 +13,7 @@ export const CSS_OVERLAY = `
   color:var(--dtpl-fg);
   font:inherit;font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);
   text-align:left;
+  transform-origin:top center;
 }
 [data-plugin="dsh-tokbook"] .dtpl-ov-panel:focus{outline:none;}
 
@@ -23,7 +24,15 @@ export const CSS_OVERLAY = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-ov-title{
   font-size:var(--dtpl-fs-lead);line-height:var(--dtpl-lh-lead);font-weight:700;color:var(--dtpl-fg);white-space:nowrap;
+  letter-spacing:.02em;
 }
+@media (prefers-reduced-motion:no-preference){
+  [data-plugin="dsh-tokbook"] .dtpl-ov-panel{animation:dtpl-pop var(--dtpl-dur-enter) var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-ov-card{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-ov-card:nth-child(2){animation-delay:.05s;}
+  [data-plugin="dsh-tokbook"] .dtpl-ov-card:nth-child(n+3){animation-delay:.1s;}
+}
+@keyframes dtpl-pop{from{opacity:0;transform:translateY(-4px) scale(.98)}}
 [data-plugin="dsh-tokbook"] .dtpl-ov-sum{
   margin-left:auto;min-width:0;
   font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
@@ -45,7 +54,9 @@ export const CSS_OVERLAY = `
   background:var(--dtpl-card);
   padding:12px;
   min-width:0;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
+[data-plugin="dsh-tokbook"] .dtpl-ov-card:hover{border-color:var(--dtpl-border);background:color-mix(in srgb,var(--dtpl-fg) 2%,var(--dtpl-card));}
 [data-plugin="dsh-tokbook"] .dtpl-ov-body{display:flex;flex-direction:column;gap:9px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-ov-card-head{display:flex;align-items:baseline;gap:8px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-ov-card-k{

@@ -77,6 +77,9 @@ export const CSS_SHARED = `
   [data-plugin="dsh-tokbook"] .dtpl-grid > *,
   [data-plugin="dsh-tokbook"] .dtpl-price-board > *{animation:dtpl-rise var(--dtpl-dur-enter) var(--dtpl-ease-move) both;animation-delay:.06s;}
   [data-plugin="dsh-tokbook"] .dtpl-share-ring-arc{animation:dtpl-draw var(--dtpl-dur-draw) var(--dtpl-ease-move) both;}
+  [data-plugin="dsh-tokbook"] .dtpl-grid > :nth-child(2){animation-delay:.11s;}
+  [data-plugin="dsh-tokbook"] .dtpl-grid > :nth-child(3){animation-delay:.16s;}
+  [data-plugin="dsh-tokbook"] .dtpl-grid > :nth-child(n+4){animation-delay:.21s;}
 }
 @keyframes dtpl-rise{from{opacity:0;transform:translateY(6px)}}
 @keyframes dtpl-draw{from{stroke-dashoffset:var(--dtpl-arc,0)}}

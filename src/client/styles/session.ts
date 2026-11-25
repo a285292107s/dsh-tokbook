@@ -6,6 +6,7 @@ export const CSS_SESSION = `
   border:1px solid var(--dtpl-border);background:transparent;
   font:inherit;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);
   color:var(--dtpl-fg-2);white-space:nowrap;
+  transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint),color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"].dtpl-tok-entry:hover{
   color:var(--dtpl-fg);border-color:var(--dtpl-fg-3);background:var(--dtpl-wash-hover);
