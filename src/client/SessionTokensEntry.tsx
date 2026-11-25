@@ -86,7 +86,6 @@ function tokenCards(view: SessionUsageView): OverlayCard[] {
   const labels = view.providerLabels ?? {}
   const cards: OverlayCard[] = []
   for (const group of view.turns) {
-    if (group.turn === null) continue
     const totals = group.totals
     const unknown = totals.usageUnknown ?? 0
     const failed = totals.failures ?? 0

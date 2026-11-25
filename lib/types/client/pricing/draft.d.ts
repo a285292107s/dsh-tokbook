@@ -54,7 +54,6 @@ export interface PriceState {
 }
 export declare function newHoliday(seed?: Partial<Omit<CalendarHolidayDraft, 'id'>>): CalendarHolidayDraft;
 export declare function defaultCalendarYear(entries: CalendarEntries, now?: Date): string;
-export declare function missingYearDrafts(calendar: CalendarEntries, missingYears: readonly string[]): CalendarDraft[];
 export type HolidayRead = {
     kind: 'empty';
 } | {

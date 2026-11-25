@@ -375,41 +375,19 @@ export interface StepTimingTotals {
 }
 export declare function settleTiming(rows: readonly SessionStepRow[]): StepTimingTotals;
 export interface SessionStepRow {
-    requestId: string;
-    time: number;
     model: string;
     provider: string;
-    kind?: UsageRecordKind;
-    failureCode?: string;
     usage?: UsageFields;
-    tokens: number;
-    step?: number;
     timing?: StepTiming;
-    bucket: 'spend' | 'subscription' | 'unpriced';
-    cost: number;
 }
 export interface SessionUsageGroup {
-    turn: number | null;
+    turn: number;
     totals: UsageTotals;
-    tokens: number;
-    spend: number;
-    subscriptionValue: number;
     rows: SessionStepRow[];
 }
 export interface SessionUsageView {
     sessionId: string;
-    updatedAt: number;
-    firstAt: number;
-    lastAt: number;
-    total: UsageTotals;
-    totalTokens: number;
-    spend: number;
-    subscriptionValue: number;
-    unpriced: string[];
     turns: SessionUsageGroup[];
-    betweenTurns: SessionUsageGroup | null;
-    unattributed: SessionStepRow[];
-    todaySpend: number;
     providerLabels?: Record<string, string>;
 }
 export declare function totalsTokens(totals: UsageTotals): number;

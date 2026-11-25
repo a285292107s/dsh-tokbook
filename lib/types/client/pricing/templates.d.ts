@@ -16,7 +16,7 @@ export interface PriceTemplate extends TemplateRates {
     currency: PriceCurrency;
     slots: TemplateSlot[];
 }
-export declare const TEMPLATES_KEY = "dsh-tookbook.price-templates";
+export declare const TEMPLATES_KEY = "dsh-tokbook.price-templates";
 export declare const MAX_TEMPLATES = 50;
 export declare function parseTemplates(raw: unknown): PriceTemplate[];
 export declare function readTemplates(): PriceTemplate[];

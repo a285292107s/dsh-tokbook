@@ -1,6 +1,6 @@
 # 领域词汇 — dsh-tokbook
 
-> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-11-25 · supersedes: —
+> **Doc meta** · role: reference · language: zh-CN · status: current · last-reviewed: 2026-11-26 · supersedes: —
 
 本文件只收**新引入、且会被反复用错**的词。既有词汇**不在这里重复**，它们各有单一真源：
 
@@ -139,10 +139,9 @@
 - **满圈也画轨道。** 构成环不认识「长度」，轨道只做两件事：给 2px 的断开一个看得见的槽，给「未计时」一张
   成形的空环。轨道底取 10% 洗色（压面板约 1.6:1，一眼看得出是条凹槽），不能更浅——5% 压 3% 的面板只差两个
   百分点，实机里读成一片空白。
-- **片段拼接顺序是契约。** `styles.ts` 把 tokens、hero 图、各页片段、shared、device 拼成一张表：
+- **片段拼接顺序是契约。** `styles.ts` 把 tokens、各页片段与 shared 拼成一张表：
   tokens 在最前（其余片段全在引用它），shared 必须排在各页之后（它的窄屏与动效配方要压住各页自己的
-  默认值），device 压轴（它整段只在 `[data-dtpl-device]` 根上生效，宿主里静默）。顺序打乱不会报错，
-  只是某几页的窄屏或动效悄悄不再生效。
+  默认值）。顺序打乱不会报错，只是某几页的窄屏或动效悄悄不再生效。
 - **转场与状态回洗各有刻度，别在规则里写裸值。** 时长四档 `--dtpl-dur-quick|enter|move|draw`
   （100/200/300/450ms）、缓动两条 `--dtpl-ease-tint`（颜色、边框、背景，取宿主 `--ds-ease-in-out`）
   与 `--dtpl-ease-move`（位移、尺寸、描画）。选缓动按「动的是什么」而不是按组件：同一元素上背景的

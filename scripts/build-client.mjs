@@ -34,7 +34,6 @@ async function main() {
     target: 'es2022',
     charset: 'utf8',
     external: BASELINE_EXTERNALS,
-    loader: { '.jpg': 'dataurl' },
     write: false,
   })
   const bundled = client.outputFiles[0].text

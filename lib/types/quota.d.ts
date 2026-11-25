@@ -1,5 +1,4 @@
 import type { QuotaCard, QuotaGate, QuotaPlanInfo, QuotaWindowView } from './types.ts';
-export type { QuotaCard, QuotaView, QuotaWindowView } from './types.ts';
 export declare const OPENCODE_GO_PROVIDER = "opencode-go";
 export declare const COMMAND_CODE_PROVIDER = "commandcode";
 export declare const BUILTIN_PLAN_TITLES: Readonly<Record<string, string>>;

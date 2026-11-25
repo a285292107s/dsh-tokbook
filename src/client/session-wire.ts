@@ -15,20 +15,7 @@ export function readSessionView(raw: unknown): SessionUsageView | null {
   const source = raw as Partial<SessionUsageView>
   return {
     sessionId: typeof source.sessionId === 'string' ? source.sessionId : '',
-    updatedAt: num(source.updatedAt),
-    firstAt: num(source.firstAt),
-    lastAt: num(source.lastAt),
-    total: readTotals(source.total),
-    totalTokens: num(source.totalTokens),
-    spend: num(source.spend),
-    subscriptionValue: num(source.subscriptionValue),
-    unpriced: Array.isArray(source.unpriced)
-      ? source.unpriced.filter((key): key is string => typeof key === 'string')
-      : [],
-    turns: readGroups(source.turns).filter((group) => group.turn !== null),
-    betweenTurns: readGroup(source.betweenTurns),
-    unattributed: readRows(source.unattributed),
-    todaySpend: num(source.todaySpend),
+    turns: readGroups(source.turns),
     providerLabels: readLabels(source.providerLabels),
   }
 }
@@ -70,12 +57,10 @@ function readGroups(raw: unknown): SessionUsageGroup[] {
 function readGroup(raw: unknown): SessionUsageGroup | null {
   if (typeof raw !== 'object' || raw === null) return null
   const source = raw as Partial<SessionUsageGroup>
+  if (typeof source.turn !== 'number') return null
   return {
-    turn: typeof source.turn === 'number' ? source.turn : null,
+    turn: source.turn,
     totals: readTotals(source.totals),
-    tokens: num(source.tokens),
-    spend: num(source.spend),
-    subscriptionValue: num(source.subscriptionValue),
     rows: readRows(source.rows),
   }
 }
@@ -86,21 +71,12 @@ function readRows(raw: unknown): SessionStepRow[] {
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) continue
     const source = item as Partial<SessionStepRow>
-    if (typeof source.requestId !== 'string') continue
-    const bucket = source.bucket === 'subscription' || source.bucket === 'unpriced' ? source.bucket : 'spend'
+    const timing = readTiming(source.timing)
     rows.push({
-      requestId: source.requestId,
-      time: num(source.time),
       model: typeof source.model === 'string' ? source.model : '',
       provider: typeof source.provider === 'string' ? source.provider : '',
-      kind: source.kind,
-      failureCode: source.failureCode,
-      usage: source.usage,
-      tokens: num(source.tokens),
-      step: typeof source.step === 'number' ? source.step : undefined,
-      timing: readTiming(source.timing),
-      bucket,
-      cost: num(source.cost),
+      ...(source.usage !== undefined ? { usage: source.usage } : {}),
+      ...(timing !== undefined ? { timing } : {}),
     })
   }
   return rows

@@ -7,13 +7,13 @@ import {
 } from '../src/stats.ts'
 import { aggregateWindow, pathKey } from '../src/window-usage.ts'
 import {
-  billingOf, cnyTable, coercePriceFile, costOf, dayKeyOf, dayStartMs,
+  billingOf, cnyTable, coercePriceFile, costOf,
   entryAt, mergeUncoveredUsdCells, parsePriceInput, priceOfKey, PRICING_BACKUP_GENERATIONS,
-  PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY,
-  PRICING_FILE, PRICING_FX_KEY, PRICING_LOCK_FILE,
+  PRICING_FILE, PRICING_LOCK_FILE,
   rateKeyAt, ratesAt,
   readPriceFile, slotAt, withPricingFileLock, writePriceFile, type PriceFile, type PricingTable,
 } from '../src/pricing.ts'
+import { dayKeyOf, dayStartMs, PRICING_BILLING_KEY, PRICING_CALENDAR_KEY, PRICING_CURRENCY_KEY, PRICING_FX_KEY } from '../src/price-format.ts'
 import { ledgerUsageOf, readPricingView } from '../src/pricing-view.ts'
 import { normalizeModelId, parseCatalog, searchCatalog } from '../src/models-dev.ts'
 import { mergeCatalogIntoTable } from '../src/pricing-sync.ts'
@@ -1792,7 +1792,7 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
     .filter((record): record is UsageRecord => record !== null)
   const view = buildSessionUsageView({
     sessionId: 'sess-t', records, join: joinOf(events),
-    pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+    resolve: () => UNPRICED_KEY,
   })
   const rows = view.turns[0]?.rows ?? []
   const [one, two, three] = rows
@@ -1818,10 +1818,9 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
 
   const blind = buildSessionUsageView({
     sessionId: 'sess-t', records, join: joinOf(null),
-    pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+    resolve: () => UNPRICED_KEY,
   })
-  check('日志读不到:行仍进 unattributed,用时整段缺席(不报 0——那是「量不到」)',
-    blind.unattributed.every((row) => row.timing === undefined))
+  check('日志读不到:整段不归属任何轮次,视图里没有卡片', blind.turns.length === 0)
 
   const compBase = dayMillis('2026-03-02', 9)
   const compEvents: SessionEventLike[] = [
@@ -1832,11 +1831,9 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
   const compView = buildSessionUsageView({
     sessionId: 'sess-c',
     records: [{ requestId: 'compaction:sess-c:c1', time: compBase + 20_000, sessionId: 'sess-c', model: 'deepseek-chat', kind: 'compaction', usage: { inputTokens: 9, outputTokens: 3 } }],
-    join: joinOf(compEvents, 'sess-c'), pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: compBase,
+    join: joinOf(compEvents, 'sess-c'), resolve: () => UNPRICED_KEY,
   })
-  const compRow = compView.betweenTurns?.rows[0]
-  check('压缩归轮间,用时是 start → summary 那 20s(报成模型用时,不另记墙钟)',
-    compView.betweenTurns !== null && compRow?.timing?.llmMs === 20_000 && compRow.timing.wallMs === undefined)
+  check('压缩行不折进任何一轮:视图里没有卡片', compView.turns.length === 0)
 
   const retryEvents: SessionEventLike[] = [
     { type: 'turn/start', time: base, seq: 0, data: { turn: 1 } },
@@ -1851,7 +1848,7 @@ if (section('会话用时:一步的墙钟就是模型 + 工具,量不到不算 0
       { requestId: recordFromRetry(retryEvents[2]!, 'sess-r', '').requestId, time: base + 2_000, sessionId: 'sess-r', model: 'deepseek-chat', kind: 'failure', failureCode: 'TRANSPORT' },
       { requestId: 'm9', time: base + 8_000, sessionId: 'sess-r', model: 'deepseek-chat', provider: 'deepseek', usage: { inputTokens: 10, outputTokens: 5 } },
     ],
-    join: joinOf(retryEvents, 'sess-r'), pricing: {}, billing: {}, resolve: () => UNPRICED_KEY, todaySpend: 0, updatedAt: base,
+    join: joinOf(retryEvents, 'sess-r'), resolve: () => UNPRICED_KEY,
   })
   const retryRows = retryView.turns[0]?.rows ?? []
   check('同一步的两行只报一次用时(报在有产出的那行),另行为「未计时」',

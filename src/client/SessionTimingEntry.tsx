@@ -18,7 +18,6 @@ function timingCards(view: SessionUsageView): OverlayCard[] {
   const labels = view.providerLabels ?? {}
   const cards: OverlayCard[] = []
   for (const group of view.turns) {
-    if (group.turn === null) continue
     const untimed = group.rows.filter((row) => row.timing?.llmMs === undefined).length
     const workMs = workOf(group.rows)
     const phases = sumSegments(group.rows)

@@ -1,7 +1,5 @@
 import type { QuotaCard, QuotaGate, QuotaPlanInfo, QuotaWindowView } from './types.ts'
 
-export type { QuotaCard, QuotaView, QuotaWindowView } from './types.ts'
-
 export const OPENCODE_GO_PROVIDER = 'opencode-go'
 
 export const COMMAND_CODE_PROVIDER = 'commandcode'

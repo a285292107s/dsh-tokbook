@@ -105,15 +105,6 @@ export function defaultCalendarYear(entries: CalendarEntries, now: Date = new Da
   return String(year)
 }
 
-export function missingYearDrafts(calendar: CalendarEntries, missingYears: readonly string[]): CalendarDraft[] {
-  const drafts: CalendarDraft[] = []
-  for (const year of missingYears) {
-    if (calendar.has(year)) continue
-    drafts.push({ year, holidays: [] })
-  }
-  return drafts
-}
-
 export type HolidayRead =
   | { kind: 'empty' }
   | { kind: 'partial' }

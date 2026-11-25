@@ -22,7 +22,9 @@ export interface PriceTemplate extends TemplateRates {
   slots: TemplateSlot[]
 }
 
-export const TEMPLATES_KEY = 'dsh-tookbook.price-templates'
+export const TEMPLATES_KEY = 'dsh-tokbook.price-templates'
+
+const LEGACY_TEMPLATES_KEY = 'dsh-tookbook.price-templates'
 
 export const MAX_TEMPLATES = 50
 
@@ -122,7 +124,7 @@ export function parseTemplates(raw: unknown): PriceTemplate[] {
 
 export function readTemplates(): PriceTemplate[] {
   try {
-    const saved = localStorage.getItem(TEMPLATES_KEY)
+    const saved = localStorage.getItem(TEMPLATES_KEY) ?? localStorage.getItem(LEGACY_TEMPLATES_KEY)
     if (saved === null) return []
     return parseTemplates(JSON.parse(saved) as unknown)
   } catch {

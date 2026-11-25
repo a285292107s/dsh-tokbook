@@ -5,8 +5,6 @@ import type { UsageRecord } from './types.ts'
 
 const DAY_FILE = /^usage-(\d{4}-\d{2}-\d{2})\.jsonl$/u
 
-export { DAY_FILE }
-
 export function dayOfFileName(name: string): string | null {
   return DAY_FILE.exec(name)?.[1] ?? null
 }

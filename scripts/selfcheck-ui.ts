@@ -38,7 +38,6 @@ const DTPL_NAME = /\b(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)/g
 
 const cssText = fragments.map((f) => f.code).join('\n')
 const cssClasses = new Set([...cssText.matchAll(/\.(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)(?![\w-])/g)].map((m) => m[1]))
-const cssPrefixes = [...cssText.matchAll(/\.(dtpl-[a-z0-9]+(?:-[a-z0-9]+)*)-/g)].map((m) => m[1])
 
 const tsFiles = (await collect('src/client'))
   .filter((rel) => /\.tsx?$/.test(rel) && !rel.startsWith('src/client/styles/') && rel !== 'src/client/styles.ts')

@@ -1,4 +1,4 @@
-import type { UsageFields, UsageRecord, UsageRecordKind } from './types.ts'
+import type { UsageFields, UsageRecord } from './types.ts'
 
 export interface TokenUsageLike {
   inputTokens?: number
@@ -241,5 +241,3 @@ export function parseRecord(line: string): UsageRecord | null {
 export function serializeRecord(record: UsageRecord): string {
   return JSON.stringify(record)
 }
-
-export type { UsageRecordKind }

@@ -63,9 +63,8 @@ export const CSS_SHARED = `
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-scope{grid-column:1 / -1;padding-right:0;}
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-addrow{grid-template-columns:minmax(0,1fr);}
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-add-slot{grid-column:1 / -1;justify-self:stretch;}
-  [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cell-k{display:block;}
   [data-plugin="dsh-tokbook"] .dtpl-price-detail .dtpl-price-cell-k{
-    text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
+    display:block;text-align:left;padding-left:var(--dtpl-cell-pad-x);padding-right:var(--dtpl-cell-pad-x);
   }
   [data-plugin="dsh-tokbook"] .dtpl-price-day{--dtpl-day-k:64px;--dtpl-day-gap:8px;}
   [data-plugin="dsh-tokbook"] .dtpl-price-day-k-range{display:none;}

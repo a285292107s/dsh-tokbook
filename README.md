@@ -1,6 +1,6 @@
 # dsh-tokbook
 
-> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-24 · supersedes: —
+> **Doc meta** · role: entry · language: en · status: current · last-reviewed: 2026-11-26 · supersedes: —
 
 A **cross-session token-usage ledger for DeepSeek Harness (DSH)**. The host half folds every billed model
 call into one row of a local, per-day JSONL ledger and aggregates it with costs; the browser half shows it
@@ -74,11 +74,12 @@ view reports tokens only. Tokens are facts, prices are not.
    Usage detail** as a full-width table. Money appears only in windows of 30 days or less. The cards keep
    their full-row width; their internal grids collapse (today: three zones → two → one, quota: two cards
    → one) as the container narrows.
-2. **价格表 / Pricing** — a selector card (route, model, FX rate), then a full-width workbench: the editable
-   price table on the left holds the four tiers plus optional peak/off-peak slots, and a compact live rail on
-   the right reports the four rates in force now (or just "base price" when no slot is active). A full-width
-   **statutory-holiday calendar** card sits below it, one calendar per year: click a start and end day to mark
-   a stretch of holidays, and edit or delete any stretch (deletions, and edits, are undoable).
+2. **价格表 / Pricing** — a selector card (route › model, FX rate, save state), then a full-width workbench:
+   the **此刻计费 / rates in force now** meter on top (four big rates, plus a 24-hour band when peak/off-peak
+   slots exist), a template strip that saves the current row's four tiers and slots for reuse, and the
+   full-width editable price table below (four tiers plus optional peak/off-peak slots). A full-width
+   **statutory-holiday calendar** card follows, one calendar per year, **read-only**: it lists the public
+   holidays the "workday" slot uses.
 3. **统计口径 / Method** — a centered reading column of full-width document cards: intro and quick facts,
    the four token buckets, the call-classification table, reconciliation gaps, field mapping, and the data
    footer. What is not estimated, what is missing, and how the numbers reconcile.
@@ -91,10 +92,10 @@ view reports tokens only. Tokens are facts, prices are not.
 | --- | --- |
 | ![The pricing tab](docs/assets/panel-pricing.png) | ![The method tab](docs/assets/panel-method.png) |
 
-Prices can also come from [models.dev](https://models.dev/api.json), a public USD catalogue: **查价 /
-lookup** fuzzy-searches the selected model name for a candidate to fill, and **从 models.dev 补价 / sync**
-fills gaps on USD routes the ledger has billed. Only first-party entries are trusted, and a hand-written
-price is never overwritten.
+Prices can also come from [models.dev](https://models.dev/api.json), a public USD catalogue: **搜索价 /
+lookup** fuzzy-searches the selected model name for a candidate to fill, and the sync button (**现在取价**,
+**现在取一次**, **重新取** or **重试**, depending on state) fills gaps on USD routes the ledger has billed.
+Only first-party entries are trusted, and a hand-written price is never overwritten.
 
 ## The session tokens popover
 

@@ -1,6 +1,6 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  BillingMap, HolidayCalendar, HolidayRefreshResult, HolidaySyncView, PlanConfig, PricingLookupResult, PricingSyncResult, PricingSyncView, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SessionUsageView, SyncResultView, SyncStatusView, TokBookConfig, TokBookOverview, UsageRecord, WorkspaceUsageRow,
+  BillingMap, HolidayCalendar, HolidayRefreshResult, HolidaySyncView, PlanConfig, PricingLookupResult, PricingSyncResult, PricingSyncView, PricingTable, PricingView, ProviderRange, ProviderUsageView, QuotaCard, QuotaView, SessionUsageView, SyncResultView, SyncStatusView, TokBookConfig, TokBookOverview,
 } from './types.ts'
 import { totalsTokens } from './types.ts'
 import { coercePlansConfig, validateConfig } from './config.ts'
@@ -11,7 +11,7 @@ import { autoSyncIfNeeded, listPersistenceSnapshots, syncHistory, type SyncDeps,
 import { readSyncProgress, writeSyncProgress } from './sync-state.ts'
 import {
   attachCosts, buildSummary, listDayFiles, rangeDayWindow, readCachedRecords,
-  readRecordsByDayRange, snapshotBaseline, staleSessionIds, summarizeRecords, warmRecordCache,
+  readRecordsByDayRange, snapshotBaseline, staleSessionIds, warmRecordCache,
   type AttemptedRevision, type PersistenceSnapshotLike, type RateResolver,
 } from './stats.ts'
 import { aggregateWindow, type WorkspaceRef } from './window-usage.ts'
@@ -399,37 +399,16 @@ export class TokenUsageBook extends Service {
 
   async sessionUsage(sessionId: string): Promise<SessionUsageView> {
     await this.ensureFresh()
-    const { table, billing, resolve } = await this.rateContext()
+    const { resolve } = await this.rateContext()
     const records = await readCachedRecords(this.dir, this.logger)
     const join = await sessionJoin(this.persistence, sessionId, this.logger)
-    const now = Date.now()
     return buildSessionUsageView({
       sessionId,
       records,
       join,
-      pricing: table,
-      billing,
       resolve,
-      todaySpend: this.todaySpendOf(records, now, table, billing, resolve),
-      updatedAt: now,
       providerLabels: routeLabels(this.settings(), this.llm(), this.logger),
     })
-  }
-
-  private todaySpendOf(
-    records: readonly UsageRecord[],
-    now: number,
-    table: PricingTable,
-    billing: BillingMap,
-    resolve: RateResolver,
-  ): number {
-    const today = dayKeyOf(now)
-    const costed = attachCosts(
-      { ...summarizeRecords(records.filter(record => dayKeyOf(record.time) === today), resolve), dataDir: this.dir },
-      table,
-      billing,
-    )
-    return costed.byDay.find(row => row.day === today)?.spend ?? 0
   }
 
   private settings(): SettingsLike | undefined {
@@ -580,7 +559,7 @@ export class TokenUsageBook extends Service {
       holidays = {
         calendar,
         autoOnly: Object.keys(autoOnly(manual, auto)).sort(),
-        sync: await this.holidaySyncView(manual, auto),
+        sync: await this.holidaySyncView(manual),
       }
     } catch (error) {
       this.logger.warn?.('[tokbook] cannot read ledger usage for pricing view:', error)
@@ -589,7 +568,7 @@ export class TokenUsageBook extends Service {
     return readPricingView(this.dir, catalog, ledger, this.logger, holidays, await this.pricingSyncView())
   }
 
-  private async holidaySyncView(manual: HolidayCalendar, auto: HolidayCalendar): Promise<HolidaySyncView> {
+  private async holidaySyncView(manual: HolidayCalendar): Promise<HolidaySyncView> {
     const cache = await readHolidayCache(this.dir)
     const now = Date.now()
     const currentYear = new Date(now).getFullYear()

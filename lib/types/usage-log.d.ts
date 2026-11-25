@@ -1,6 +1,4 @@
 import type { UsageRecord } from './types.ts';
-declare const DAY_FILE: RegExp;
-export { DAY_FILE };
 export declare function dayOfFileName(name: string): string | null;
 export declare function dayFileName(date: Date): string;
 export declare function dayFileNameOf(time: number): string;

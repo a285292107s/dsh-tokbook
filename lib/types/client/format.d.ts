@@ -3,7 +3,6 @@ export declare function localDayKey(): string;
 export declare function shortDay(day: string): string;
 export declare function share(value: number, total: number): number;
 export declare function formatShare(value: number, total: number): string;
-export declare function formatRatio(part: number, whole: number): string | null;
 export declare function formatTokens(value: number): string;
 export declare function formatMoney(value: number): string;
 export declare function formatDuration(ms: number): string;

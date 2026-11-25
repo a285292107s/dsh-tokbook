@@ -8,10 +8,9 @@ import {
   modelMeta, modelOptionLabel,
   effectiveSlots, newSlot,
   routeMeta, routeOptionLabel, rowKey, stagedChanges, withCalendar, withFx, withRouteCurrency,
-  type CalendarEntries, type ModelDraft, type PriceBaseline, type PriceState,
+  type ModelDraft, type PriceBaseline, type PriceState,
 } from './draft.ts'
 import { CalendarEditor, ModelDetail } from './editors.tsx'
-import { formatRelative } from '../format.ts'
 import { subscribeLedgerChanges } from '../ledger-clock.ts'
 import { applyTemplate, makeTemplate, MAX_TEMPLATES, readTemplates, writeTemplates, type PriceTemplate, type TemplateSlot } from './templates.ts'
 

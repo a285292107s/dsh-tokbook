@@ -596,38 +596,13 @@ function emptyUsageView(range) {
 
 const SESSION_SCENARIO = process.env.TOKBOOK_SESSION_SCENARIO ?? 'rich'
 
-const t0 = Date.now()
-const minute = 60_000
 
-function step(turn, step, model, provider, ageMinutes, usage, extra = {}) {
-  const { timing, ...rest } = extra
-  const base = {
-    requestId: `m${String(turn)}-${String(step)}-${model}`,
-    time: t0 - ageMinutes * minute,
+function step(seed, model, provider, usage, timing) {
+  return {
     model,
     provider,
-    step,
-    ...rest,
-  }
-  const seed = turn * 10 + step
-  if (usage === null) {
-    return {
-      ...base,
-      usage: undefined,
-      tokens: 0,
-      bucket: extra.bucket ?? 'spend',
-      cost: 0,
-      timing: timing !== undefined ? timing : fixtureTiming(300, seed),
-    }
-  }
-  const tokens = usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) + usage.outputTokens
-  return {
-    ...base,
-    usage,
-    tokens,
-    bucket: extra.bucket ?? 'spend',
-    cost: extra.cost ?? Math.round(tokens / 3_000_000 * 100) / 100,
-    timing: timing !== undefined ? timing : fixtureTiming(usage.outputTokens, seed),
+    ...(usage !== null ? { usage } : {}),
+    timing: timing !== undefined ? timing : fixtureTiming(usage?.outputTokens ?? 0, seed),
   }
 }
 
@@ -655,46 +630,19 @@ function fixtureTiming(outputTokens, seed) {
 
 const M_FAST = 'deepseek-v4-flash'
 const M_DEEP = 'deepseek-v4.1-flash'
-const M_SPEEULESS = 'z-ai/glm-5.3-flash'
 
 const SESSIONS = {
   empty: {
     sessionId: 'sess-empty',
-    updatedAt: t0,
-    firstAt: 0,
-    lastAt: 0,
-    total: { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 0, failures: 0, usageUnknown: 0 },
-    totalTokens: 0,
-    spend: 0,
-    subscriptionValue: 0,
-    unpriced: [],
     turns: [],
-    betweenTurns: null,
-    unattributed: [],
-    todaySpend: 4.99,
   },
-  one: (() => {
-    const rows = [
-      step(1, 1, M_FAST, 'deepseek', 6, { inputTokens: 2_100, outputTokens: 480, cacheReadTokens: 8_400 }, { cost: 0.04 }),
-      step(1, 2, M_FAST, 'deepseek', 5, { inputTokens: 1_400, outputTokens: 520, cacheReadTokens: 12_600 }, { cost: 0.03 }),
-    ]
-    const total = { requests: 2, inputTokens: 3_500, outputTokens: 1_000, cacheReadTokens: 21_000, cacheWriteTokens: 0, compactions: 0, failures: 0, usageUnknown: 0 }
-    return {
-      sessionId: 'sess-one',
-      updatedAt: t0,
-      firstAt: t0 - 6 * minute,
-      lastAt: t0 - 5 * minute,
-      total,
-      totalTokens: 25_500,
-      spend: 0.07,
-      subscriptionValue: 0,
-      unpriced: [],
-      turns: [groupOf(1, rows)],
-      betweenTurns: null,
-      unattributed: [],
-      todaySpend: 4.99,
-    }
-  })(),
+  one: {
+    sessionId: 'sess-one',
+    turns: [groupOf(1, [
+      step(11, M_FAST, 'deepseek', { inputTokens: 2_100, outputTokens: 480, cacheReadTokens: 8_400 }),
+      step(12, M_FAST, 'deepseek', { inputTokens: 1_400, outputTokens: 520, cacheReadTokens: 12_600 }),
+    ])],
+  },
   rich: (() => {
     const turns = []
     const shape = [
@@ -712,88 +660,42 @@ const SESSIONS = {
       { n: 12, cache: 61_000, fresh: 2_200 },
     ]
     for (const turn of shape) {
-      const age = (13 - turn.n) * 11 + 3
       const rows = [
-        step(turn.n, 1, M_FAST, 'deepseek', age, {
+        step(turn.n * 10 + 1, M_FAST, 'deepseek', {
           inputTokens: Math.round(turn.fresh * 0.32),
           outputTokens: Math.round(turn.fresh * 0.24),
           cacheReadTokens: Math.round(turn.cache * 0.62),
         }),
-        step(turn.n, 2, M_FAST, 'deepseek', age - 1, {
+        step(turn.n * 10 + 2, M_FAST, 'deepseek', {
           inputTokens: Math.round(turn.fresh * 0.18),
           outputTokens: Math.round(turn.fresh * 0.16),
           cacheReadTokens: Math.round(turn.cache * 0.38),
         }),
       ]
       if (turn.n === 4) {
-        rows.push(step(4, 3, M_DEEP, 'deepseek', age - 2, { inputTokens: 1_200, outputTokens: 2_900, cacheReadTokens: 40_000 }, { cost: 0.12 }))
+        rows.push(step(43, M_DEEP, 'deepseek', { inputTokens: 1_200, outputTokens: 2_900, cacheReadTokens: 40_000 }))
       }
-      if (turn.n === 3) {
-        rows.push(step(3, 3, M_FAST, 'deepseek', age - 2, null, {
-          kind: 'failure', failureCode: 'rate_limited', usage: undefined, timing: { wallMs: 42_000 },
-        }))
+      const failures = turn.n === 3 ? 1 : 0
+      if (failures > 0) {
+        rows.push(step(33, M_FAST, 'deepseek', null, { wallMs: 42_000 }))
       }
-      const group = groupOf(turn.n, rows)
-      turns.push(group)
+      turns.push(groupOf(turn.n, rows, { failures }))
     }
-    const betweenRows = [step(0, 0, M_FAST, 'deepseek', 6, { inputTokens: 34_000, outputTokens: 1_800, cacheReadTokens: 120_000 }, { kind: 'compaction', cost: 0.08, bucket: 'spend', timing: { llmMs: 20_600 } })]
-    const betweenTurns = groupOf(null, betweenRows)
-    const unattributed = [step(0, 0, M_SPEEULESS, 'opencode-go', 20, { inputTokens: 1_200, outputTokens: 300, cacheReadTokens: 0 }, { bucket: 'unpriced', cost: 0, timing: null })]
-    const total = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 1, failures: 1, usageUnknown: 0 }
-    for (const g of [...turns, betweenTurns]) {
-      total.requests += g.totals.requests
-      total.inputTokens += g.totals.inputTokens
-      total.outputTokens += g.totals.outputTokens
-      total.cacheReadTokens += g.totals.cacheReadTokens
-      total.cacheWriteTokens += g.totals.cacheWriteTokens
-    }
-    total.inputTokens += 1_200
-    total.outputTokens += 300
-    total.requests += 1
-    const times = [...turns.flatMap((g) => g.rows), ...betweenRows, ...unattributed].map((row) => row.time)
-    return {
-      sessionId: 'sess-rich',
-      updatedAt: t0,
-      firstAt: Math.min(...times),
-      lastAt: Math.max(...times),
-      total,
-      totalTokens: total.inputTokens + total.outputTokens + total.cacheReadTokens + total.cacheWriteTokens,
-      spend: 1.42,
-      subscriptionValue: 0.86,
-      unpriced: ['opencode-go|z-ai/glm-5.3-flash'],
-      turns,
-      betweenTurns,
-      unattributed,
-      todaySpend: 4.99,
-      providerLabels: USAGE_LABELS,
-    }
+    return { sessionId: 'sess-rich', turns, providerLabels: USAGE_LABELS }
   })(),
 }
 
-function groupOf(turn, rows) {
-  const totals = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 0, failures: 0, usageUnknown: 0 }
-  let tokens = 0
-  let spend = 0
-  let subscriptionValue = 0
+function groupOf(turn, rows, { failures = 0 } = {}) {
+  const totals = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, compactions: 0, failures, usageUnknown: 0 }
   for (const row of rows) {
-    if (row.kind === 'failure') {
-      totals.failures += 1
-    } else {
-      totals.requests += 1
-      if (row.kind === 'compaction') totals.compactions += 1
-      if (row.usage === undefined) totals.usageUnknown += 1
-      else {
-        totals.inputTokens += row.usage.inputTokens
-        totals.outputTokens += row.usage.outputTokens
-        totals.cacheReadTokens += row.usage.cacheReadTokens ?? 0
-        totals.cacheWriteTokens += row.usage.cacheWriteTokens ?? 0
-      }
-    }
-    tokens += row.tokens
-    if (row.bucket === 'subscription') subscriptionValue += row.cost
-    else if (row.bucket !== 'unpriced') spend += row.cost
+    if (row.usage === undefined) continue
+    totals.requests += 1
+    totals.inputTokens += row.usage.inputTokens
+    totals.outputTokens += row.usage.outputTokens
+    totals.cacheReadTokens += row.usage.cacheReadTokens ?? 0
+    totals.cacheWriteTokens += row.usage.cacheWriteTokens ?? 0
   }
-  return { turn, totals, tokens, spend, subscriptionValue, rows }
+  return { turn, totals, rows }
 }
 
 const server = createServer((req, res) => {

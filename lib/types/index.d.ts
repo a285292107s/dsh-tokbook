@@ -41,7 +41,6 @@ export declare class TokenUsageBook extends Service {
     private workspaceRefs;
     usageByRange(range: ProviderRange): Promise<ProviderUsageView>;
     sessionUsage(sessionId: string): Promise<SessionUsageView>;
-    private todaySpendOf;
     private settings;
     private llm;
     private workspaceRegistry;

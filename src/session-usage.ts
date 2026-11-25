@@ -1,22 +1,17 @@
-import { billingOf, costOf, priceOfKey } from './pricing.ts'
 import { countOf, timingIndexOf, type SessionTimingIndex } from './session-timing.ts'
 import { summarizeRecords, type RateResolver, type StatsLogger } from './stats.ts'
 import { recordFromRetry, type SessionEventLike } from './usage-record.ts'
 import type { SyncPersistence } from './sync.ts'
 import {
-  totalsTokens, type BillingMap, type PricingTable, type SessionStepRow, type SessionUsageGroup,
-  type SessionUsageView, type StepTiming, type UsageFields, type UsageRecord, type UsageTotals,
+  type SessionStepRow, type SessionUsageGroup, type SessionUsageView, type StepTiming,
+  type UsageRecord,
 } from './types.ts'
 
 export interface SessionUsageInput {
   sessionId: string
   records: readonly UsageRecord[]
   join: SessionJoin
-  pricing: PricingTable
-  billing: BillingMap
   resolve: RateResolver
-  todaySpend: number
-  updatedAt: number
   providerLabels?: Record<string, string>
 }
 
@@ -79,63 +74,18 @@ function locate(
   return index?.get(record.requestId)
 }
 
-function totalsOfUsage(usage: UsageFields | undefined): UsageTotals {
-  return {
-    requests: 0,
-    inputTokens: usage?.inputTokens ?? 0,
-    outputTokens: usage?.outputTokens ?? 0,
-    cacheReadTokens: usage?.cacheReadTokens ?? 0,
-    cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
-  }
-}
-
-function tokensOf(usage: UsageFields | undefined): number {
-  if (usage === undefined) return 0
-  return usage.inputTokens + usage.outputTokens
-    + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
-}
-
-function priceOfRecord(
-  record: UsageRecord,
-  pricing: PricingTable,
-  billing: BillingMap,
-  resolve: RateResolver,
-  unpriced: Set<string>,
-): { bucket: SessionStepRow['bucket']; cost: number } {
-  const prices = priceOfKey(pricing, record.provider, record.model, resolve(record))
-  if (prices === null) {
-    if (record.model !== '') unpriced.add(`${record.provider ?? ''}|${record.model}`)
-    return { bucket: 'unpriced', cost: 0 }
-  }
-  return {
-    bucket: billingOf(billing, record.provider) === 'subscription' ? 'subscription' : 'spend',
-    cost: costOf(totalsOfUsage(record.usage), prices),
-  }
-}
-
 function stepRowOf(
   record: UsageRecord,
-  input: SessionUsageInput,
-  unpriced: Set<string>,
   at: Attribution | undefined,
   timing: SessionTimingIndex | null,
   owners: ReadonlyMap<string, string>,
 ): SessionStepRow {
-  const priced = priceOfRecord(record, input.pricing, input.billing, input.resolve, unpriced)
   const own = timingOfRow(record, at, timing, owners)
   return {
-    requestId: record.requestId,
-    time: record.time,
     model: record.model,
     provider: record.provider ?? '',
-    ...(record.kind !== undefined ? { kind: record.kind } : {}),
-    ...(record.failureCode !== undefined ? { failureCode: record.failureCode } : {}),
     ...(record.usage !== undefined ? { usage: record.usage } : {}),
-    tokens: tokensOf(record.usage),
-    ...(at?.step !== undefined ? { step: at.step } : {}),
     ...(own !== undefined ? { timing: own } : {}),
-    bucket: priced.bucket,
-    cost: priced.cost,
   }
 }
 
@@ -145,17 +95,11 @@ function sortEntries(entries: readonly Entry[]): Entry[] {
       : left.record.requestId > right.record.requestId ? 1 : 0))
 }
 
-function groupOf(turn: number | null, entries: readonly Entry[], resolve: RateResolver): SessionUsageGroup {
+function groupOf(turn: number, entries: readonly Entry[], resolve: RateResolver): SessionUsageGroup {
   const ordered = sortEntries(entries)
   const totals = summarizeRecords(ordered.map(entry => entry.record), resolve).total
-  let spend = 0
-  let subscriptionValue = 0
-  for (const entry of ordered) {
-    if (entry.row.bucket === 'spend') spend += entry.row.cost
-    else if (entry.row.bucket === 'subscription') subscriptionValue += entry.row.cost
-  }
   return {
-    turn, totals, tokens: totalsTokens(totals), spend, subscriptionValue,
+    turn, totals,
     rows: ordered.map(entry => entry.row),
   }
 }
@@ -245,68 +189,25 @@ export async function readSessionJoinEvents(
 export function buildSessionUsageView(input: SessionUsageInput): SessionUsageView {
   const { turn: index, timing } = input.join
   const owners = index === null ? new Map<string, string>() : timingOwners(input.records, index, input.sessionId)
-  const all: Entry[] = []
   const turns = new Map<number, Entry[]>()
-  const between: Entry[] = []
-  const unattributed: Entry[] = []
-  const unpriced = new Set<string>()
-
-  const place = (record: UsageRecord, at: Attribution | undefined, bucket: Entry[]): void => {
-    const entry: Entry = { record, row: stepRowOf(record, input, unpriced, at, timing, owners) }
-    all.push(entry)
-    bucket.push(entry)
-  }
 
   for (const record of input.records) {
-    if (record.sessionId !== input.sessionId) continue
-    if (record.kind === 'compaction') {
-      place(record, undefined, between)
-      continue
-    }
+    if (record.sessionId !== input.sessionId || record.kind === 'compaction') continue
     const at = locate(record, index, input.sessionId)
-    if (at === undefined) {
-      place(record, undefined, unattributed)
-      continue
-    }
+    if (at === undefined) continue
     let entries = turns.get(at.turn)
     if (entries === undefined) {
       entries = []
       turns.set(at.turn, entries)
     }
-    place(record, at, entries)
+    entries.push({ record, row: stepRowOf(record, at, timing, owners) })
   }
-
-  const total = summarizeRecords(all.map(entry => entry.record), input.resolve).total
-  let firstAt = Number.POSITIVE_INFINITY
-  let lastAt = 0
-  let spend = 0
-  let subscriptionValue = 0
-  for (const entry of all) {
-    const time = entry.record.time
-    if (time < firstAt) firstAt = time
-    if (time > lastAt) lastAt = time
-    if (entry.row.bucket === 'spend') spend += entry.row.cost
-    else if (entry.row.bucket === 'subscription') subscriptionValue += entry.row.cost
-  }
-  const groups = [...turns.entries()]
-    .sort((left, right) => left[0] - right[0])
-    .map(([turn, entries]) => groupOf(turn, entries, input.resolve))
-  const tail = between.length === 0 ? null : groupOf(null, between, input.resolve)
 
   return {
     sessionId: input.sessionId,
-    updatedAt: input.updatedAt,
-    firstAt: Number.isFinite(firstAt) ? firstAt : 0,
-    lastAt,
-    total,
-    totalTokens: totalsTokens(total),
-    spend,
-    subscriptionValue,
-    unpriced: [...unpriced].sort(),
-    turns: groups,
-    betweenTurns: tail,
-    unattributed: sortEntries(unattributed).map(entry => entry.row),
-    todaySpend: input.todaySpend,
+    turns: [...turns.entries()]
+      .sort((left, right) => left[0] - right[0])
+      .map(([turn, entries]) => groupOf(turn, entries, input.resolve)),
     ...(input.providerLabels === undefined ? {} : { providerLabels: input.providerLabels }),
   }
 }

@@ -1,4 +1,4 @@
-import type { UsageFields, UsageRecord, UsageRecordKind } from './types.ts';
+import type { UsageFields, UsageRecord } from './types.ts';
 export interface TokenUsageLike {
     inputTokens?: number;
     outputTokens?: number;
@@ -57,4 +57,3 @@ export declare function providerOfEvent(event: SessionEventLike): string | undef
 export declare function coerceRecord(value: unknown): UsageRecord | null;
 export declare function parseRecord(line: string): UsageRecord | null;
 export declare function serializeRecord(record: UsageRecord): string;
-export type { UsageRecordKind };

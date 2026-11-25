@@ -1,6 +1,6 @@
 # dsh-tokbook · DSH 热重载（HMR）机制与本项目实况
 
-> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-10-17 · supersedes: —
+> **Doc meta** · role: lessons · language: zh-CN · status: current · last-reviewed: 2026-11-26 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）插件热重载机制的**官方语义 + 本项目实际接线与实测**。
 > 官方依据：<https://deepseek-harness.github.io/deepseek-harness/develop/framework/#hmr-热模块替换>（“插件与生命周期”页）。
@@ -141,17 +141,17 @@ dsh: [...\cordis.patch.yml] patch: name mismatch for "hmr"
 
 ```sh
 dsh --profile web --dump-config | grep -A8 'id: hmr'
-# 期望：name 是 @deepseek-ai/dsh-hmr，且 config.root 是 ['.']；出现 "name mismatch" 即没吃到
+# 期望：name 是 @deepseek-ai/dsh-hmr，且 config.root 是 ['dsh-connect-zcode/dsh-connect-zcode', 'dsh-tokbook']；出现 "name mismatch" 即没吃到
 ```
 
 为什么必须这样配（机制见 §2.1）：
 
-- **base 指向本仓库**（`file:///…` URL，HMR 会 `new URL()` 再 `fileURLToPath()`）。
-- **为什么 root 要 `['.']` 而 ignored 排除 `node_modules`**：`dsh-tokbook` 是经
-  `dsh plugin --profile web add` 以 **junction** 装进 profile（`…\profiles\web\node_modules\dsh-tokbook`
-  → `C:\Users\28529\Desktop\dsh-tokbook`）。HMR 默认 ignored 会忽略 `node_modules` 路径；插件实体
-  “名义上”在 profile 的 node_modules 里，若不把 base 指向仓库并把仓库树纳入 watch，重建的
-  `lib/index.js` 不会被看见。`ignored` 里的 `cache` / `data` 是本仓库不存在的顶层名，保留默认防御即可。
+- **base 指向这些仓库的公共父目录**（`file:///…` URL，HMR 会 `new URL()` 再 `fileURLToPath()`）：
+  base 只能指一个目录，指向某一个仓库会让另一个仓库不再热更。
+- **root 逐个列出仓库**：`dsh-tokbook` 是经 `dsh plugin --profile web add` 以 **junction** 装进
+  profile（`…\profiles\web\node_modules\dsh-tokbook` → `C:\Users\28529\Desktop\dsh-tokbook`）；HMR
+  默认 ignored 会忽略 `node_modules` 路径，插件实体“名义上”在 profile 的 node_modules 里，若不把
+  仓库树纳入 watch，重建的 `lib/index.js` 不会被看见。
 
 **启用边界（2026-09-23 实测修正）**：base 行在 `web` profile 里**始终挂载**（`root: []`），而
 profile patch / manifest 的 watch 与 patch 行本身走 HMR 的同一条重组队列（§2.1）。所以**改这一行不需要

@@ -136,7 +136,6 @@ export const CSS_PRICING = `
   display:grid;grid-template-columns:minmax(0,1fr) minmax(0,360px);
   align-items:start;column-gap:28px;row-gap:8px;min-width:0;
 }
-[data-plugin="dsh-tokbook"] .dtpl-price-pick-main{grid-column:1;}
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-tools{
   display:flex;align-items:center;justify-content:flex-end;gap:6px 20px;flex-wrap:wrap;
   min-width:0;
@@ -150,7 +149,7 @@ export const CSS_PRICING = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-main{
   display:grid;grid-template-columns:fit-content(42%) 34px minmax(0,1fr);
-  align-items:stretch;min-width:0;
+  grid-column:1;align-items:stretch;min-width:0;
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-cell{
   position:relative;display:flex;flex-direction:column;justify-content:center;gap:2px;
@@ -199,7 +198,6 @@ export const CSS_PRICING = `
 }
 [data-plugin="dsh-tokbook"] .dtpl-price-pick-state{display:flex;justify-content:flex-end;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-price-board > *{align-self:start;}
-[data-plugin="dsh-tokbook"] .dtpl-price-board{row-gap:12px;}
 [data-plugin="dsh-tokbook"] .dtpl-price-state-row{
   display:flex;align-items:center;justify-content:flex-end;gap:4px;flex-wrap:wrap;min-width:0;
 }

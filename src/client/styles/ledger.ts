@@ -141,9 +141,8 @@ export const CSS_LEDGER = `
   font-size:var(--dtpl-fs-micro);fill:var(--dtpl-fg);font-weight:600;font-variant-numeric:tabular-nums;
   paint-order:stroke;stroke:var(--dtpl-card);stroke-width:3px;stroke-linejoin:round;
 }
-[data-plugin="dsh-tokbook"] .dtpl-chart-bar{fill:color-mix(in srgb,var(--dtpl-fg) 18%,transparent);}
+[data-plugin="dsh-tokbook"] .dtpl-chart-bar{fill:color-mix(in srgb,var(--dtpl-fg) 18%,transparent);transition:fill var(--dtpl-dur-quick) var(--dtpl-ease-tint);}
 [data-plugin="dsh-tokbook"] .dtpl-chart-bar.is-today{fill:var(--dtpl-brand);stroke:var(--dtpl-on-brand);stroke-width:1;}
-[data-plugin="dsh-tokbook"] .dtpl-chart-bar{transition:fill var(--dtpl-dur-quick) var(--dtpl-ease-tint);}
 [data-plugin="dsh-tokbook"] .dtpl-chart-bar:not(.is-today):hover{fill:color-mix(in srgb,var(--dtpl-fg) 32%,transparent);}
 [data-plugin="dsh-tokbook"] .dtpl-chart-line{fill:none;stroke:var(--dtpl-fg);stroke-width:1.5;}
 [data-plugin="dsh-tokbook"] .dtpl-chart-dot{fill:var(--dtpl-card);stroke:var(--dtpl-fg);stroke-width:1.5;}
@@ -242,7 +241,7 @@ export const CSS_LEDGER = `
   font-style:normal;
   font-family:var(--dtpl-mono);color:var(--dtpl-fg-3);font-weight:400;font-variant-numeric:tabular-nums;
 }
-[data-plugin="dsh-tokbook"] .dtpl-cost-k{font-style:normal;font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);margin-left:3px;}
+[data-plugin="dsh-tokbook"] .dtpl-cost-k{font-style:normal;font-size:var(--dtpl-fs-label);color:var(--dtpl-fg-2);}
 
 [data-plugin="dsh-tokbook"] .dtpl-bd-tabs{display:inline-flex;gap:0;align-self:stretch;align-items:flex-end;}
 [data-plugin="dsh-tokbook"] .dtpl-bd-tab{

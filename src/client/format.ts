@@ -32,12 +32,6 @@ export function formatShare(value: number, total: number): string {
   return `${rounded}%`
 }
 
-export function formatRatio(part: number, whole: number): string | null {
-  if (whole <= 0) return null
-  const percent = Math.min(100, (part / whole) * 100)
-  return (Math.floor(percent * 10) / 10).toFixed(1)
-}
-
 export function formatTokens(value: number): string {
   if (value < 1_000) return String(value)
   if (value < 1_000_000) return `${Math.round((value / 1_000) * 10) / 10}K`

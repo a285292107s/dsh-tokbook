@@ -1,6 +1,6 @@
 # dsh-tokbook —— 技术选型与插件框架设计（一期→二期演进）
 
-> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-11-25 · supersedes: —
+> **Doc meta** · role: reason · language: zh-CN · status: current · last-reviewed: 2026-11-26 · supersedes: —
 
 > 面向 DeepSeek Harness（DSH）的跨会话 Token 用量账本插件。本文只留**从代码推不出来**的东西：外部
 > 系统的机制与事实、为什么是现在这个形状、每条选择的代价。权威来源只有两个——官方文档站点
@@ -205,7 +205,7 @@ rename 报 ENOENT 又被 catch 吞掉，结果是磁盘上**一份快照都没�
 [`CONTRACTS.md`](CONTRACTS.md) §2——这里只留那句代价：宁可价格未知，也不把转售价冒充通道成本。
 
 **目录里的模型串和账本里的不是同一个写法**（`deepseek/deepseek-v4-flash` 对 `deepseek-v4-flash`，
-还带 `:variant` 与 `[1m]` 长上下文标记），所以两边共用一套归一化再比。「查价」的模糊搜索也走同一套：
+还带 `:variant` 与 `[1m]` 长上下文标记），所以两边共用一套归一化再比。「搜索价」的模糊搜索也走同一套：
 多词关键词要求**每个词**都命中，否则 `gpt-x` 会搜回一屏 gpt。搜索是用户自己判断的那条路，候选池
 已经是采信集，所以排序只看名字、不看价格——池子里根本没有便宜的转售价可比。
 
