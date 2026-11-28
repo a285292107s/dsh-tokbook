@@ -30,8 +30,7 @@ function tokenSegments(totals: UsageTotals): TokenBucket[] {
 function TokenDial({ tokens, totals }: { tokens?: number; totals: UsageTotals }) {
   const fillKey = `dtpl-ttk-${useId().replaceAll(':', '')}`
   const segments = tokens === undefined ? [] : tokenSegments(totals)
-  const breakdown = BUCKETS
-    .map((bucket) => `${bucket.label} ${formatTokens(totals[bucket.key])}`)
+  const breakdown = tokenSegments(totals)
     .join(' · ')
   return (
     <Dial
@@ -70,7 +69,7 @@ function TokenLedger({ totals }: { totals: UsageTotals }) {
   const total = totalsTokens(totals)
   return (
     <div className="dtpl-ttk-buckets">
-      {BUCKETS.map((bucket) => (
+      {tokenSegments(totals).map((bucket) => (
         <div className="dtpl-ttk-bucket" key={bucket.key}>
           <span className="dtpl-tok-read-mark" data-kind={bucket.kind} aria-hidden="true" />
           <span className="dtpl-ttk-bucket-name">{bucket.label}</span>

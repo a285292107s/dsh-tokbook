@@ -9,7 +9,8 @@ DeepSeek Harness(DSH)的**跨会话 token 用量账本**插件。host 半区把�
 里放一行入口(`sidebar.panellist`,和「插件」「看板」同一个列表),点开在**主栏**打开账本页(`main`)——
 页内三个 tab(按界面上方从左到右):**用量总览**(四块全宽卡片,从上到下:今日读数——大字词元 + 四桶构成条 +
 实际支出/订阅价值/近 7 天支出三行金额 + 数据健康脚注;下方**订阅额度**——两家订阅卡并排,每个窗口只报已用百分比与重置时间;
-再往下近 14 天「词元柱 + 支出线」,构成折成一行脚注;最后**用量明细**——窗口 × 按模型 / 按工作区 / 按通道。
+再往下近 14 天「词元柱 + 支出线」,构成折成一行脚注;最后**用量明细**——窗口 × 按通道(默认,每个通道一行小计,
+点开才展开模型)/ 按模型 / 按工作区。
 金额只在近 30 天及更短的窗口里给;额度卡用你的 key 向通道查账户级官方用量)、
 **价格表**(选择带 + 一张满行的价格工作台:上段是满宽「此刻计费」仪表台——标题与状态徽记 + 四档当前价大字 +
 有峰谷时段时下面再挂一条满宽 24 小时生效带;中间是价格模板带,下段是满宽价目表改基准价与峰谷时段,「此刻计费」报的是时段生效时的实际四档价;
@@ -282,7 +283,7 @@ src/
   pricing-sync-state.ts 日节流状态(models-dev-sync.json,不进 pricing.json)
   holiday-cn.ts       法定节假日年历的公共源(holiday-cn):按年拉 JSON + 磁盘缓存 + 自动年历合并与新鲜度判定
   route-catalog.ts    路由目录:本机设置文档(settings)× 运行时适配器注册表(ctx.llm)
-  window-usage.ts     用量明细三种切法(按通道的卡 / 按工作区 / 按模型)的**一趟**聚合
+  window-usage.ts     用量明细三种切法(按通道 / 按模型 / 按工作区)的**一趟**聚合
   quota.ts            官方额度归一化 + 内置计划身份
   quota-official.ts   key 解析 + 各通道官方用量抓取器
   quota-cache.ts      额度快照的磁盘缓存(stale-while-revalidate 的持久一侧)
@@ -316,8 +317,7 @@ src/
     RescanButton.tsx   「重新扫描」按钮(页脚与空态共用;忙碌 / 重试两态)
     ScrollRail.tsx     账本页与用量明细的自绘滚动条(滚动时短暂出现,随内容尺寸重测)
     LedgerView.tsx    用量总览的今日卡(含四桶构成与金额)/ 14 天趋势 / 空态与骨架
-    ProviderPanel.tsx 用量明细卡外壳(窗口 + 三种切法)
-    Breakdowns.tsx    用量明细的两种行清单:按模型 / 按工作区
+    ProviderPanel.tsx 用量明细卡外壳:窗口 + 三种切法;按通道分组,每行小计可点开看模型
     MethodDoc.tsx     统计口径 tab
     SessionHeaderEntries.tsx 会话头部的组入口:一个 slot 条目里按词元、耗时排两颗按钮
     SessionOverlay.tsx 两个会话浮层共用的壳:取数 / 原生 popover 定位 / 打开才拉 / 卡片头与错误骨架
@@ -326,7 +326,6 @@ src/
     dial.tsx          两个浮层共用的切分圆环与圆心数字字形
     session-timing.tsx 耗时浮层的用时语言:切分环 / 相位读数表 / stepSegments / sumSegments
     session-wire.ts   会话视图的 wire → 视图反序列化(readSessionView:缺字段填中性值、坏字段不炸)
-    ShareRing.tsx     按通道卡里模型行的占比环(与额度表盘同族)
     pricing/
       currency.ts     报价币种纯逻辑:悬停的折算读数 / 切换币种时整条通道的换算(无 React,进 smoke)
       draft.ts        价格表纯逻辑:草稿 ↔ wire body、校验、脏签名(年历 / 汇率 / 报价币种)

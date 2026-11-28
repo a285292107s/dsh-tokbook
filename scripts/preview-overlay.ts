@@ -570,10 +570,13 @@ function modelRows(cards) {
 
 function usageView(range) {
   const providers = USAGE_CARDS[range] ?? []
+  const back = range === 'yesterday' ? 1 : range === 'last7' ? 6 : range === 'last30' ? 29 : 0
+  const from = new Date()
+  from.setDate(from.getDate() - back)
   return {
     range,
-    fromDay: range === 'all' ? '' : '2026-08-16',
-    toDay: '2026-09-14',
+    fromDay: range === 'all' ? '' : localDay(from),
+    toDay: localDay(new Date()),
     updatedAt: Date.now(),
     providerLabels: USAGE_LABELS,
     totalTokens: providers.reduce((sum, card) => sum + card.tokens, 0),

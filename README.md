@@ -71,9 +71,11 @@ view reports tokens only. Tokens are facts, prices are not.
    your key (so it includes every tool and device on that subscription; covers Command Code and
    OpenCode Go); each window reports used share and reset time only. Then the **14-day trend** (tokens as
    bars, spend as a line, with the window's four-bucket split as a one-line footnote) and **用量明细 /
-   Usage detail** as a full-width table. Money appears only in windows of 30 days or less. The cards keep
-   their full-row width; their internal grids collapse (today: three zones → two → one, quota: two cards
-   → one) as the container narrows.
+   Usage detail** as a full-width statement: the date range and four large figures, then one subtotal line per
+   channel — requests, share, tokens, money, metered vs subscription — with that channel's models folded
+   underneath until you click (or press Enter on) it. Money appears only in windows of 30 days or less. The
+   cards keep their full-row width; their internal grids collapse (today: three zones → two → one, quota:
+   two cards → one) as the container narrows.
 2. **价格表 / Pricing** — a selector card (route › model, FX rate, save state), then a full-width workbench:
    the **此刻计费 / rates in force now** meter on top (four big rates, plus a 24-hour band when peak/off-peak
    slots exist), a template strip that saves the current row's four tiers and slots for reuse, and the

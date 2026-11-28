@@ -250,8 +250,7 @@ export function SessionOverlay({
                 <div className="dtpl-ov-list">
                   {list.map((card) => (
                     <article className="dtpl-ov-card" key={card.key}>
-                      {card.leading}
-                      <div className="dtpl-ov-body">
+                      <div className="dtpl-ov-card-top">
                         <div className="dtpl-ov-card-head">
                           <span className="dtpl-ov-card-k">第 {String(card.turn)} 轮</span>
                           <span className="dtpl-ov-card-meta" title={card.meta}>{card.meta}</span>
@@ -260,7 +259,10 @@ export function SessionOverlay({
                           {card.model.text}
                           {card.model.count > 1 && <span className="dtpl-sr">；全部：{card.model.title}</span>}
                         </span>
-                        {card.body}
+                      </div>
+                      <div className="dtpl-ov-card-main">
+                        {card.leading}
+                        <div className="dtpl-ov-body">{card.body}</div>
                       </div>
                     </article>
                   ))}

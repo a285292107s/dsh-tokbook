@@ -66,7 +66,6 @@ export const CSS_TOKENS = `[data-plugin="dsh-tokbook"]{
   --dtpl-lh-figure:26px;
   --dtpl-lh-hero:44px;
   --dtpl-lh-read:1.6;
-  --dtpl-row-nums-w:224px;
   --dtpl-grid-gap:12px;
 }
 body[data-ds-dark-theme] [data-plugin="dsh-tokbook"]{

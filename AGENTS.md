@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Doc meta** · role: identity · language: zh-CN · status: current · last-reviewed: 2026-11-26 · supersedes: —
+> **Doc meta** · role: identity · language: zh-CN · status: current · last-reviewed: 2026-11-28 · supersedes: —
 
 dsh-tokbook 是面向 DeepSeek Harness(DSH)的**跨会话 Token 用量账本**插件:host 半区把每次通道计费
 模型调用记成一行、写入按日 JSONL 账本并给出带成本的聚合,browser 半区把它做成主栏里的三 tab 账本页,入口是侧边栏面板列表的一行。
@@ -21,6 +21,11 @@ dsh-tokbook 是面向 DeepSeek Harness(DSH)的**跨会话 Token 用量账本**�
    真因存在的不变量(账本单写者与去重)保留。
 4. **接到任务先完成功能,再验证。** 别在功能没做完时反复验证;功能落地后再统一验证,验证什么、
    到什么程度按第 3 条与任务本身定。
+5. **把能合并的执行并进更少的轮次。** 目标是减少无效轮次、把上下文留给真正的工作:只读请求
+   (多个文件、多个关键词、多个状态)一次并行发出,不「读一个等一个」;目录遍历、批量搜索、日志
+   筛选用一条复合命令或短脚本一次取回,别逐层翻找、逐行翻看;写操作先收齐上下文,集中改完一个
+   完整逻辑单元再统一构建或测试,别「改一行跑一次」(验证时机见第 4 条);陌生模块的大范围排查、
+   依赖追踪、长日志定位交给子代理,主会话只收定位结论与文件行号。执行中不写过渡性复述,直接推进。
 
 ## 写作风格
 

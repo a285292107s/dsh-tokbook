@@ -35,7 +35,8 @@ export function formatShare(value: number, total: number): string {
 export function formatTokens(value: number): string {
   if (value < 1_000) return String(value)
   if (value < 1_000_000) return `${Math.round((value / 1_000) * 10) / 10}K`
-  return `${Math.round((value / 1_000_000) * 10) / 10}M`
+  if (value < 1_000_000_000) return `${Math.round((value / 1_000_000) * 10) / 10}M`
+  return `${Math.round((value / 1_000_000_000) * 100) / 100}B`
 }
 
 export function formatMoney(value: number): string {

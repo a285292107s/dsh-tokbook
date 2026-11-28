@@ -47,9 +47,7 @@ export const CSS_OVERLAY = `
 }
 
 [data-plugin="dsh-tokbook"] .dtpl-ov-card{
-  display:grid;
-  grid-template-columns:108px minmax(0,1fr);
-  align-items:center;column-gap:14px;
+  display:flex;flex-direction:column;gap:10px;
   border:1px solid var(--dtpl-hairline);
   background:var(--dtpl-card);
   padding:12px;
@@ -57,8 +55,10 @@ export const CSS_OVERLAY = `
   transition:background var(--dtpl-dur-quick) var(--dtpl-ease-tint),border-color var(--dtpl-dur-quick) var(--dtpl-ease-tint);
 }
 [data-plugin="dsh-tokbook"] .dtpl-ov-card:hover{border-color:var(--dtpl-border);background:color-mix(in srgb,var(--dtpl-fg) 2%,var(--dtpl-card));}
-[data-plugin="dsh-tokbook"] .dtpl-ov-body{display:flex;flex-direction:column;gap:9px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-ov-card-top{display:flex;flex-direction:column;gap:2px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-ov-card-main{display:flex;align-items:center;gap:14px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-ov-card-head{display:flex;align-items:baseline;gap:8px;min-width:0;}
+[data-plugin="dsh-tokbook"] .dtpl-ov-body{display:flex;flex-direction:column;gap:9px;min-width:0;}
 [data-plugin="dsh-tokbook"] .dtpl-ov-card-k{
   font-size:var(--dtpl-fs-body);line-height:var(--dtpl-lh-body);font-weight:700;color:var(--dtpl-fg);white-space:nowrap;
 }
@@ -68,7 +68,7 @@ export const CSS_OVERLAY = `
   overflow:hidden;text-overflow:ellipsis;
 }
 [data-plugin="dsh-tokbook"] .dtpl-ov-card-route{
-  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  min-width:0;white-space:normal;overflow-wrap:anywhere;
   font-family:var(--dtpl-mono);font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);color:var(--dtpl-fg-2);
 }
 [data-plugin="dsh-tokbook"] .dtpl-ov-gap{
@@ -117,7 +117,8 @@ export const CSS_OVERLAY = `
   [data-plugin="dsh-tokbook"] .dtpl-ov-sk{animation:none;}
 }
 @media (max-width:380px){
-  [data-plugin="dsh-tokbook"] .dtpl-ov-card{grid-template-columns:92px minmax(0,1fr);column-gap:12px;padding:10px;}
+  [data-plugin="dsh-tokbook"] .dtpl-ov-card{padding:10px;}
+  [data-plugin="dsh-tokbook"] .dtpl-ov-card-main{gap:10px;}
   [data-plugin="dsh-tokbook"] .dtpl-ov-card-k{font-size:var(--dtpl-fs-label);line-height:var(--dtpl-lh-label);}
 }
 `
