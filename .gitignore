@@ -7,5 +7,6 @@ lib/tsconfig.tsbuildinfo
 shots/
 output/
 .taste-skill/
+design-explore/
 docs/design/
 docs/assets/design-today-hero-dark-*.png
